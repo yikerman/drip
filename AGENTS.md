@@ -4,7 +4,7 @@
 - docs/comments are complementry to code. if a piece of code is not self-explaintory, especially for some dense kernel code, comment. also explain motivation when needed. do not write obvious/trivial things.
 - cite when needed in IEEE format, such as algorithm borrowed from another paper or software.
 - do not add any agentic coding system or model into co-authored-by.
-- commits are self-contained, do one thing right, and has the format of "{submodule}/chore: {summary} \n {explanation (follow same guidelines as docs/comments)}"
+- commits are self-contained, do one thing right, and has the format of "{submodule} or chore: {summary} \n {explanation (follow same guidelines as docs/comments)}"
 - when some ideas are incomplete, conflicting or inheritly difficult to implement or require hackish methods, stop and talk to the user
 - maintain a TODO.md, in which a table tracks ideas not implemented
 
@@ -35,4 +35,3 @@ Treat it as a second opinion, not an authority: adopt what is right, briefly exp
 - `crates/drip-gui`: interactive frontend (binary `drip-gui`), placeholder until the toolkit is chosen.
 - `docs/DESIGN.md`: decisions, status, rationale. `docs/PROGRESS.md`: session log.
 - `TODO.md`: ideas not implemented.
-

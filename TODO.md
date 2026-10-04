@@ -12,8 +12,8 @@ Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
 | Soft-proofing | handoff | deferred | extra transform in the display path |
 | Windows/macOS display color paths | handoff | deferred | |
 | X-Trans and other non-Bayer CFAs | design | deferred | general CFA representation (P5) |
-| Graph inputs (templates as functions) | design | idea | for multi-reader graphs (F4) |
-| Detect input files changing on disk | design | idea | stamps cover params only (E2) |
+| Resource revisions and manual reload | design | M2 | stamps must cover external files (E2) |
+| Detect input files changing on disk | design | idea | beyond manual reload (E2) |
 | Static LibRaw build with only the features we need | user | planned | vendored source, built with `cc`, unused decoders and demosaics and the DNG SDK/RawSpeed glue disabled; replaces linking system `libraw_r` (L3) |
 | App-side display transform | design | deferred | for compositors without color management (D3) |
 | Arbitrary deflate levels 1-9 | user | blocked | `tiff` 0.11 only offers fast/balanced/best (C5) |
