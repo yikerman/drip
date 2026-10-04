@@ -5,26 +5,32 @@ use std::io::Cursor;
 use std::path::Path;
 
 use lcms2::{
-    CIExyY, CIExyYTRIPLE, ColorSpaceSignature, Flags, Intent, PixelFormat, Profile,
-    ProfileClassSignature, ToneCurve, Transform,
+    ColorSpaceSignature, Flags, Intent, PixelFormat, Profile, ProfileClassSignature, Transform,
 };
 use tiff::encoder::colortype::{ColorType, RGB16, RGB32Float};
 use tiff::encoder::compression::DeflateLevel;
 use tiff::encoder::{Compression, TiffEncoder, TiffValue};
 use tiff::tags::{Tag, Type};
 
-use crate::color::{D65, REC2020};
 use crate::node::{Action, Evaluated, InputSpec, NodeKind};
 use crate::param::{ParamKind, ParamSpec, Params};
+use crate::profile;
 use crate::value::{PortType, Rgb, Value};
 
 const INTENTS: &[&str] = &["perceptual", "relative", "saturation", "absolute"];
+
+/// The built-in profiles (`profile::BUILT_IN`), or `file` for `profile_file`.
+const PROFILES: &[&str] = &["srgb", "display_p3", "rec2020", "file"];
 
 pub static TIFF: NodeKind = NodeKind {
     name: "export.tiff",
     params: &[
         ParamSpec { name: "path", kind: ParamKind::Path { output: true } },
-        ParamSpec { name: "profile", kind: ParamKind::Path { output: false } },
+        ParamSpec {
+            name: "profile",
+            kind: ParamKind::Choice { options: PROFILES, default: "srgb" },
+        },
+        ParamSpec { name: "profile_file", kind: ParamKind::Path { output: false } },
         ParamSpec {
             name: "intent",
             kind: ParamKind::Choice { options: INTENTS, default: "relative" },
@@ -51,10 +57,19 @@ pub static TIFF: NodeKind = NodeKind {
 
 fn export(p: Params, inputs: &[Value]) -> Result<(), String> {
     let path = p.path("path").ok_or("no output file chosen")?;
-    let profile_path = p.path("profile").ok_or("no output profile chosen")?;
     let in_file = |e: &dyn std::fmt::Display, path: &Path| format!("{}: {e}", path.display());
-    let icc = std::fs::read(profile_path).map_err(|e| in_file(&e, profile_path))?;
-    let output = output_profile(&icc).map_err(|e| in_file(&e, profile_path))?;
+    let (output, icc) = match p.choice("profile") {
+        "file" => {
+            let file = p.path("profile_file").ok_or("no output profile file chosen")?;
+            let icc = std::fs::read(file).map_err(|e| in_file(&e, file))?;
+            (output_profile(&icc).map_err(|e| in_file(&e, file))?, icc)
+        }
+        name => {
+            let built_in = profile::built_in(name);
+            let icc = built_in.icc().map_err(|e| e.to_string())?;
+            (built_in, icc)
+        }
+    };
 
     let intent = match p.choice("intent") {
         "perceptual" => Intent::Perceptual,
@@ -75,7 +90,7 @@ fn export(p: Params, inputs: &[Value]) -> Result<(), String> {
     };
     let image = inputs[0].rgb();
     let convert = |format| Conversion {
-        source: rec2020_linear(),
+        source: profile::rec2020_linear(),
         output: &output,
         format,
         intent,
@@ -176,13 +191,4 @@ fn output_profile(icc: &[u8]) -> Result<Profile, String> {
         return Err(format!("not an RGB output profile ({:?}, {class:?})", profile.color_space()));
     }
     Ok(profile)
-}
-
-/// The working space: Rec.2020 primaries, D65, linear.
-pub fn rec2020_linear() -> Profile {
-    let xy = |[x, y]: [f64; 2]| CIExyY { x, y, Y: 1.0 };
-    let primaries =
-        CIExyYTRIPLE { Red: xy(REC2020[0]), Green: xy(REC2020[1]), Blue: xy(REC2020[2]) };
-    let linear = ToneCurve::new(1.0);
-    Profile::new_rgb(&xy(D65), &primaries, &[&linear; 3]).expect("valid built-in profile")
 }

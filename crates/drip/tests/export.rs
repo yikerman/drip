@@ -3,13 +3,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use drip::color::{self, D65, P3, REC2020};
 use drip::eval::{NodeError, run_action};
 use drip::graph::{NodeId, Port};
 use drip::node::{Evaluated, NodeKind, OutputSpec, Registry};
 use drip::nodes;
+use drip::profile;
 use drip::project::Project;
 use drip::value::{PortType, Rgb, Value};
-use lcms2::{CIExyY, Profile, ToneCurve};
+use lcms2::{CIExyY, InfoType, Locale, Profile, ToneCurve};
 use serde_json::json;
 use tiff::decoder::{Decoder, DecodingResult};
 use tiff::tags::Tag;
@@ -56,12 +58,12 @@ impl Drop for Scratch {
     }
 }
 
-fn export(out: &Path, profile: &Path, params: serde_json::Value) -> Result<(), NodeError> {
+fn export(out: &Path, params: serde_json::Value) -> Result<(), NodeError> {
     let reg = registry();
     let mut p = Project::default();
     let (src, tiff) = (p.graph.add_node(&DISPLAY), p.graph.add_node(&nodes::TIFF));
     p.graph.connect(&reg, Port(src, "image".into()), Port(tiff, "image".into())).unwrap();
-    set(&mut p, tiff, json!({ "path": out, "profile": profile }));
+    set(&mut p, tiff, json!({ "path": out }));
     set(&mut p, tiff, params);
     run_action(&p, &reg, tiff, "export")
 }
@@ -84,39 +86,72 @@ fn srgb_encode(v: f64) -> f64 {
     if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
 }
 
-#[test]
-fn rec2020_output_is_an_identity_and_embeds_the_profile() {
-    let s = Scratch::new("rec2020");
-    let (profile, out) = (s.profile("rec2020.icc", &nodes::rec2020_linear()), s.0.join("out.tif"));
-    export(&out, &profile, json!({ "compression": "none" })).unwrap();
-    let (DecodingResult::U16(data), icc, compression) = read(&out) else { panic!("not 16 bit") };
-    assert_eq!(icc, std::fs::read(&profile).unwrap());
-    assert_eq!(compression, 1);
-    for (got, want) in data.iter().zip(PIXELS.as_flattened()) {
-        assert!((f64::from(*got) - f64::from(*want) * 65535.0).abs() <= 1.0, "{data:?}");
+/// Checks 16-bit output against `expected` (0 to 1) within `tolerance` codes.
+fn assert_u16(data: &[u16], expected: [[f64; 3]; 4], tolerance: f64) {
+    for (got, want) in data.iter().zip(expected.as_flattened()) {
+        assert!((f64::from(*got) - want * 65535.0).abs() <= tolerance, "{data:?} vs {expected:?}");
     }
 }
 
+fn description(icc: &[u8]) -> String {
+    Profile::new_icc(icc).unwrap().info(InfoType::Description, Locale::none()).unwrap()
+}
+
 #[test]
-fn srgb_output_encodes_and_clips_out_of_gamut_colors() {
+fn a_linear_rec2020_profile_file_is_an_identity_and_is_embedded() {
+    let s = Scratch::new("rec2020");
+    let (profile, out) = (s.profile("linear.icc", &profile::rec2020_linear()), s.0.join("out.tif"));
+    export(&out, json!({ "profile": "file", "profile_file": profile, "compression": "none" }))
+        .unwrap();
+    let (DecodingResult::U16(data), icc, compression) = read(&out) else { panic!("not 16 bit") };
+    assert_eq!(icc, std::fs::read(&profile).unwrap());
+    assert_eq!(compression, 1);
+    assert_u16(&data, PIXELS.map(|p| p.map(f64::from)), 1.0);
+}
+
+#[test]
+fn built_in_srgb_encodes_and_clips_out_of_gamut_colors() {
     let s = Scratch::new("srgb");
-    let (profile, out) = (s.profile("srgb.icc", &Profile::new_srgb()), s.0.join("out.tif"));
-    export(&out, &profile, json!({})).unwrap();
-    let (DecodingResult::U16(data), _, compression) = read(&out) else { panic!("not 16 bit") };
-    assert_eq!(compression, 8, "deflate by default");
-    let grey = srgb_encode(0.18) * 65535.0;
-    let expected = [[65535.0; 3], [grey; 3], [0.0, 65535.0, 0.0], [0.0; 3]];
-    for (got, want) in data.iter().zip(expected.as_flattened()) {
-        // LittleCMS evaluates the sRGB curve through 16-bit tables.
-        assert!((f64::from(*got) - want).abs() <= 40.0, "{data:?}");
-    }
+    let out = s.0.join("out.tif");
+    export(&out, json!({})).unwrap();
+    let (DecodingResult::U16(data), icc, compression) = read(&out) else { panic!("not 16 bit") };
+    assert_eq!((compression, description(&icc).as_str()), (8, "sRGB"), "deflated sRGB by default");
+    let grey = srgb_encode(0.18);
+    // LittleCMS evaluates curves through 16-bit tables.
+    assert_u16(&data, [[1.0; 3], [grey; 3], [0.0, 1.0, 0.0], [0.0; 3]], 40.0);
+}
+
+#[test]
+fn built_in_display_p3_matches_its_primaries() {
+    let s = Scratch::new("p3");
+    let out = s.0.join("out.tif");
+    export(&out, json!({ "profile": "display_p3" })).unwrap();
+    let (DecodingResult::U16(data), icc, _) = read(&out) else { panic!("not 16 bit") };
+    assert_eq!(description(&icc), "Display P3");
+    // Rec.2020 green in P3 coordinates, clipped to the P3 gamut.
+    let to_p3 =
+        color::mul(&color::inverse(&color::rgb_to_xyz(P3, D65)), &color::rgb_to_xyz(REC2020, D65));
+    let green = color::apply(&to_p3, [0.0, 1.0, 0.0]).map(|v| srgb_encode(v.clamp(0.0, 1.0)));
+    assert_u16(&data, [[1.0; 3], [srgb_encode(0.18); 3], green, [0.0; 3]], 40.0);
+}
+
+#[test]
+fn built_in_rec2020_uses_the_bt2020_curve() {
+    let s = Scratch::new("bt2020");
+    let out = s.0.join("out.tif");
+    export(&out, json!({ "profile": "rec2020" })).unwrap();
+    let (DecodingResult::U16(data), icc, _) = read(&out) else { panic!("not 16 bit") };
+    assert_eq!(description(&icc), "Rec. 2020");
+    let grey = 1.099 * 0.18f64.powf(0.45) - 0.099;
+    assert_u16(&data, [[1.0; 3], [grey; 3], [0.0, 1.0, 0.0], [0.0; 3]], 40.0);
 }
 
 #[test]
 fn float_output_keeps_full_precision() {
     let s = Scratch::new("float");
-    let (profile, out) = (s.profile("rec2020.icc", &nodes::rec2020_linear()), s.0.join("out.tif"));
-    export(&out, &profile, json!({ "depth": "f32", "deflate_level": "best" })).unwrap();
+    let (profile, out) = (s.profile("linear.icc", &profile::rec2020_linear()), s.0.join("out.tif"));
+    let params = json!({ "profile": "file", "profile_file": profile, "depth": "f32", "deflate_level": "best" });
+    export(&out, params).unwrap();
     let (DecodingResult::F32(data), _, compression) = read(&out) else { panic!("not float") };
     assert_eq!(compression, 8);
     for (got, want) in data.iter().zip(PIXELS.as_flattened()) {
@@ -130,13 +165,16 @@ fn unusable_profiles_are_rejected() {
     let gray =
         Profile::new_gray(&CIExyY { x: 0.3127, y: 0.3290, Y: 1.0 }, &ToneCurve::new(2.2)).unwrap();
     let (gray, out) = (s.profile("gray.icc", &gray), s.0.join("out.tif"));
-    let NodeError::Failed(message) = export(&out, &gray, json!({})).unwrap_err() else { panic!() };
+    let failure = |params| match export(&out, params).unwrap_err() {
+        NodeError::Failed(message) => message,
+        e => panic!("{e}"),
+    };
+    let message = failure(json!({ "profile": "file", "profile_file": gray }));
     assert!(message.contains("not an RGB output profile"), "{message}");
     let garbage = s.0.join("garbage.icc");
     std::fs::write(&garbage, b"not a profile").unwrap();
-    let NodeError::Failed(message) = export(&out, &garbage, json!({})).unwrap_err() else {
-        panic!()
-    };
+    let message = failure(json!({ "profile": "file", "profile_file": garbage }));
     assert!(message.contains("not an ICC profile"), "{message}");
+    assert_eq!(failure(json!({ "profile": "file" })), "no output profile file chosen");
     assert!(!out.exists(), "nothing written on failure");
 }

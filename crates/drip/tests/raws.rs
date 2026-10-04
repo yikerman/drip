@@ -86,7 +86,8 @@ fn exports_a_tiff_from_a_raw() {
     let export = *ids.last().unwrap();
     p.bind(&reg, export, "path", "out").unwrap();
     p.set_argument(&reg, "out", json!(out)).unwrap();
-    p.graph.set_param(&reg, export, "profile", json!(profile)).unwrap();
+    p.graph.set_param(&reg, export, "profile", json!("file")).unwrap();
+    p.graph.set_param(&reg, export, "profile_file", json!(profile)).unwrap();
     run_action(&p, &reg, export, "export").unwrap();
 
     let raw = drip_libraw::decode(&fixture()).unwrap();

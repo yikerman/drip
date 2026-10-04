@@ -7,7 +7,7 @@ mod tone;
 mod view;
 
 pub use color::{BIN_2X2, CAMERA_TO_REC2020, WHITE_BALANCE};
-pub use export::{TIFF, rec2020_linear};
+pub use export::TIFF;
 pub use raw::{READ, normalize};
 pub use tone::SIGMOID;
 pub use view::{HISTOGRAM, PREVIEW};
