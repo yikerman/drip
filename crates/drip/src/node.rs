@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use crate::param::{ParamMap, ParamSpec, Params};
+use crate::resource::Resources;
 use crate::value::{PortType, Value, View};
 
 pub struct NodeKind {
@@ -66,23 +67,22 @@ pub struct Evaluated {
     pub view: Option<View>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct EvalContext {
-    level: u8,
+/// What a node's evaluation may depend on besides its params and inputs.
+pub struct EvalContext<'a> {
+    /// Downscaled by `2^level` along each axis; frontends keep it below 32.
+    pub(crate) level: u8,
+    pub(crate) resources: &'a Resources,
 }
 
-impl EvalContext {
-    pub const FULL: EvalContext = EvalContext { level: 0 };
-
-    /// Downscaled by `2^level` along each axis; `level` must be below 32.
-    pub const fn downscaled(level: u8) -> Self {
-        EvalContext { level }
-    }
-
+impl EvalContext<'_> {
     /// Sensor pixels per image pixel along each axis; 1 is full resolution.
     /// Sources downsample by it, everything downstream inherits it.
     pub fn scale(&self) -> u32 {
         1 << self.level
+    }
+
+    pub fn resources(&self) -> &Resources {
+        self.resources
     }
 }
 

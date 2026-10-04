@@ -2,7 +2,6 @@ mod common;
 
 use common::*;
 use drip::eval::{Evaluator, NodeError, run_action};
-use drip::node::EvalContext;
 use drip::project::Project;
 use drip::value::View;
 use serde_json::json;
@@ -60,7 +59,7 @@ fn scale_change_recomputes_everything() {
     let (p, [c1, c2, add, _, _]) = diamond();
     let mut ev = Evaluator::default();
     ev.evaluate(&p, &registry(), PREVIEW, &[add]);
-    assert_eq!(ev.evaluate(&p, &registry(), EvalContext::FULL, &[add]), [c1, c2, add]);
+    assert_eq!(ev.evaluate(&p, &registry(), 0, &[add]), [c1, c2, add]);
     assert_eq!(output(ev.result(add).unwrap()), [3.0, 2.0, 0.0]);
 }
 
@@ -160,6 +159,29 @@ fn errors_name_the_current_upstream() {
     assert_eq!(eval(&mut ev, &p, v), &Err(NodeError::Upstream(f1)));
     p.graph.connect(&reg, port(f2, "image"), port(v, "image")).unwrap();
     assert_eq!(eval(&mut ev, &p, v), &Err(NodeError::Upstream(f2)));
+}
+
+#[test]
+fn files_are_reread_only_on_reload() {
+    let path = std::env::temp_dir().join(format!("drip-resource-{}", std::process::id()));
+    std::fs::write(&path, "abc").unwrap();
+    let mut p = Project::default();
+    let f = p.graph.add_node(&FILE);
+    p.graph.set_param(&registry(), f, "path", json!(path)).unwrap();
+    let mut ev = Evaluator::default();
+    assert_eq!(output(eval(&mut ev, &p, f))[0], 3.0);
+
+    std::fs::write(&path, "abcdef").unwrap();
+    assert!(
+        ev.evaluate(&p, &registry(), PREVIEW, &[f]).is_empty(),
+        "changes on disk are not watched"
+    );
+    assert_eq!(ev.evaluate(&p, &registry(), 0, &[f]), [f]);
+    assert_eq!(output(ev.result(f).unwrap())[0], 3.0, "a new scale reuses what was loaded");
+
+    ev.reload(&path);
+    assert_eq!(output(eval(&mut ev, &p, f))[0], 6.0);
+    std::fs::remove_file(&path).unwrap();
 }
 
 mod release {

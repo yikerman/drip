@@ -7,4 +7,5 @@ pub mod graph;
 pub mod node;
 pub mod param;
 pub mod project;
+pub mod resource;
 pub mod value;

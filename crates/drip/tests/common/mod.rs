@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use drip::eval::{Evaluator, NodeResult};
 use drip::graph::{NodeId, Port};
-use drip::node::{Action, EvalContext, Evaluated, InputSpec, NodeKind, OutputSpec, Registry};
+use drip::node::{Action, Evaluated, InputSpec, NodeKind, OutputSpec, Registry};
 use drip::param::{ParamKind, ParamSpec};
 use drip::project::Project;
 use drip::value::{PortType, Rgb, Value, View};
@@ -138,8 +138,25 @@ pub static GAIN: NodeKind = NodeKind {
     }),
 };
 
+/// Outputs the length of the file at `path`, read through the resource store.
+pub static FILE: NodeKind = NodeKind {
+    name: "test.file",
+    version: 1,
+    params: &[ParamSpec { name: "path", kind: ParamKind::Path }],
+    inputs: &[],
+    outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
+    eval: |p, _, ctx| {
+        let len = ctx.resources().load(p.path("path").ok_or("no path set")?, |path| {
+            std::fs::read(path).map(|bytes| bytes.len()).map_err(|e| e.to_string())
+        })?;
+        Ok(Evaluated { outputs: vec![scene([*len as f32, 0.0, 0.0])], view: None })
+    },
+    actions: &[],
+    migrate: None,
+};
+
 pub fn registry() -> Registry {
-    [&CONST, &ADD, &TONEMAP, &FAIL, &VIEW, &WRITE, &GAIN]
+    [&CONST, &ADD, &TONEMAP, &FAIL, &VIEW, &WRITE, &GAIN, &FILE]
         .into_iter()
         .fold(Registry::default(), Registry::with)
 }
@@ -148,7 +165,8 @@ pub fn port(id: NodeId, name: &str) -> Port {
     Port(id, name.into())
 }
 
-pub const PREVIEW: EvalContext = EvalContext::downscaled(2);
+/// Downscale level for interactive-style evaluation: a quarter of full size.
+pub const PREVIEW: u8 = 2;
 
 /// Evaluates `id` at preview scale and returns its result.
 pub fn eval<'a>(evaluator: &'a mut Evaluator, project: &Project, id: NodeId) -> &'a NodeResult {

@@ -1,15 +1,17 @@
 //! Pull-based evaluation (DESIGN E1-E3, E6, U2). Frontends request target
 //! nodes; only those and their ancestors are evaluated, in dependency order.
 //! A node is recomputed only when its dependency stamp changes: a hash of
-//! everything its result depends on, including the stamps of its sources.
+//! everything its result depends on, including the stamps of its sources and
+//! the revisions of the files it reads.
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::graph::{NodeId, Port};
 use crate::node::{EvalContext, Evaluated, NodeKind, Registry};
-use crate::param::{ParamMap, Params};
+use crate::param::{ParamKind, ParamMap, Params};
 use crate::project::Project;
+use crate::resource::Resources;
 use crate::value::Value;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -32,11 +34,16 @@ pub enum NodeError {
 
 pub type NodeResult = Result<Evaluated, NodeError>;
 
-/// Keeps one result per node between evaluations.
+/// Keeps one result per node, and the files nodes have loaded, between
+/// evaluations.
 #[derive(Default)]
 pub struct Evaluator {
-    cache: HashMap<NodeId, Entry>,
+    cache: Cache,
+    resources: Resources,
 }
+
+#[derive(Default)]
+struct Cache(HashMap<NodeId, Entry>);
 
 struct Entry {
     stamp: u64,
@@ -49,15 +56,21 @@ impl Evaluator {
         &mut self,
         project: &Project,
         registry: &Registry,
-        ctx: EvalContext,
+        level: u8,
         targets: &[NodeId],
     ) -> Vec<NodeId> {
-        self.cache.retain(|id, _| project.graph.node(*id).is_some());
-        self.run(project, registry, ctx, targets, false)
+        self.cache.0.retain(|id, _| project.graph.node(*id).is_some());
+        self.run(project, registry, level, targets, false)
     }
 
     pub fn result(&self, id: NodeId) -> Option<&NodeResult> {
-        self.cache.get(&id).map(|entry| &entry.result)
+        self.cache.0.get(&id).map(|entry| &entry.result)
+    }
+
+    /// Forgets what was loaded from `path`; results depending on it are
+    /// recomputed on the next evaluation.
+    pub fn reload(&mut self, path: &std::path::Path) {
+        self.resources.reload(path);
     }
 
     /// With `release`, a result is dropped once its last consumer in this run
@@ -67,10 +80,11 @@ impl Evaluator {
         &mut self,
         project: &Project,
         registry: &Registry,
-        ctx: EvalContext,
+        level: u8,
         targets: &[NodeId],
         release: bool,
     ) -> Vec<NodeId> {
+        let ctx = EvalContext { level, resources: &self.resources };
         let graph = &project.graph;
         let order = graph.upstream_order(targets);
         let mut pending: HashMap<NodeId, usize> = HashMap::new();
@@ -83,10 +97,10 @@ impl Evaluator {
         }
         let mut computed = Vec::new();
         for &id in &order {
-            let stamp = self.stamp(project, registry, ctx, id);
-            if self.cache.get(&id).is_none_or(|entry| entry.stamp != stamp) {
-                let result = self.compute(project, registry, &ctx, id);
-                self.cache.insert(id, Entry { stamp, result });
+            let stamp = self.cache.stamp(project, registry, &ctx, id);
+            if self.cache.0.get(&id).is_none_or(|entry| entry.stamp != stamp) {
+                let result = self.cache.compute(project, registry, &ctx, id);
+                self.cache.0.insert(id, Entry { stamp, result });
                 computed.push(id);
             }
             if release {
@@ -94,25 +108,36 @@ impl Evaluator {
                     let left = pending.get_mut(&source).expect("counted above");
                     *left -= 1;
                     if *left == 0 && !targets.contains(&source) {
-                        self.cache.remove(&source);
+                        self.cache.0.remove(&source);
                     }
                 }
             }
         }
         computed
     }
+}
 
-    fn stamp(&self, project: &Project, registry: &Registry, ctx: EvalContext, id: NodeId) -> u64 {
+impl Cache {
+    fn stamp(&self, project: &Project, registry: &Registry, ctx: &EvalContext, id: NodeId) -> u64 {
         let node = project.graph.node(id).expect("in graph");
         let mut h = DefaultHasher::new();
         let kind = registry.get(&node.kind);
-        (&node.kind, node.kind_version, kind.map(|kind| kind.version), ctx).hash(&mut h);
+        (&node.kind, node.kind_version, kind.map(|kind| kind.version), ctx.level).hash(&mut h);
+        let params = project.effective_params(id);
         // Debug output is canonical here: `ParamMap` is ordered by key.
-        format!("{:?}", project.effective_params(id)).hash(&mut h);
+        format!("{params:?}").hash(&mut h);
+        if let (Some(kind), Ok(params)) = (kind, &params) {
+            for spec in kind.params.iter().filter(|spec| spec.kind == ParamKind::Path) {
+                Params(params)
+                    .path(spec.name)
+                    .map(|path| ctx.resources.revision(path))
+                    .hash(&mut h);
+            }
+        }
         for spec in kind.map_or(&[][..], |kind| kind.inputs) {
             spec.name.hash(&mut h);
             if let Some(source) = project.graph.source(&Port(id, spec.name.into())) {
-                (source, self.cache.get(&source.0).map(|entry| entry.stamp)).hash(&mut h);
+                (source, self.0.get(&source.0).map(|entry| entry.stamp)).hash(&mut h);
             }
         }
         h.finish()
@@ -155,7 +180,7 @@ impl Evaluator {
                     .graph
                     .source(&Port(id, spec.name.into()))
                     .ok_or(NodeError::MissingInput(spec.name))?;
-                let Ok(evaluated) = &self.cache[&source.0].result else {
+                let Ok(evaluated) = &self.0[&source.0].result else {
                     return Err(NodeError::Upstream(source.0));
                 };
                 let source_kind = registry
@@ -186,7 +211,7 @@ pub fn run_action(
     let action = action.ok_or_else(|| NodeError::UnknownAction(name.into()))?;
     let mut evaluator = Evaluator::default();
     let targets: Vec<_> = sources(project, id).collect();
-    evaluator.run(project, registry, EvalContext::FULL, &targets, true);
-    let (_, params, inputs) = evaluator.prepare(project, registry, id)?;
+    evaluator.run(project, registry, 0, &targets, true);
+    let (_, params, inputs) = evaluator.cache.prepare(project, registry, id)?;
     (action.run)(Params(&params), &inputs).map_err(NodeError::Failed)
 }
