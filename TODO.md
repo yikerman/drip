@@ -22,3 +22,5 @@ Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
 | Test raws from more cameras | user | postponed | e.g. CC0 samples from raw.pixls.us; one Sony fixture for now |
 | Better tone mapper | user | postponed | hue-preserving and gamut-aware, beyond the per-channel sigmoid (C4) |
 | Color calibration | user | postponed | beyond the camera's built-in matrix and as-shot white balance (C3) |
+| Undo/redo in the GUI | user | postponed | G4 |
+| Colorimeter check of the wide-gamut display path | user | postponed | screenshots only verify up to sRGB (D5) |

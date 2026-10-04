@@ -87,6 +87,8 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 | D1 | The library produces linear Rec.2020 views. Turning them into display output is the frontend's job, using library helpers (LittleCMS) where an app-side transform is needed. | decided | This keeps the library independent of any GUI. |
 | D2 | **The compositor does the display transform.** The GUI presents an scRGB (`ExtendedSrgbLinear`, `Rgba16Float`) swapchain, which the Vulkan WSI tags for the compositor. Rec.2020 content is converted into it with one 3×3 matrix and scaled so that SDR reference white is 203/80 = 2.5375. Drip has no app-side display transform for now. | decided (user, 2026-10-04) | Spike on the dev machine (KWin 6.7.5, NVIDIA 615): the WSI sends `set_primaries_named(srgb)`, `set_tf_named(ext_linear)`, `set_luminances(0, 80, 203)`. The user asked about simply declaring the surface as Rec.2020. That works on KWin, but only if Drip tags the `wl_surface` itself through a second Wayland connection on winit's display and relies on the WSI leaving sRGB swapchains untagged. That behavior is undocumented, and wgpu deliberately drops `BT2020_LINEAR`/`PASS_THROUGH`. scRGB carries Rec.2020 exactly (negative values) and is also the native path on Windows and macOS. Either way, egui's sRGB UI and the images need converting into one space, so declaring Rec.2020 saves nothing. |
 | D3 | App-side display transform (compositors without color management): deferred, see TODO. | decided | It follows from D2. |
+| D5 | Display verification, 2026-10-04: six synthetic Rec.2020 patches, captured from KWin screenshots (8-bit sRGB). scRGB with the 203/80 scale gave the same pixels as tagging the surface `bt2020`/`ext_linear`, and matched the plain sRGB route within rounding for in-gamut colors. | decided | Screenshots clip to sRGB, so correct display beyond sRGB still needs a colorimeter measurement. The user has one; the measurement is postponed (TODO). |
+| D6 | If the surface offers no scRGB, the GUI falls back to an sRGB swapchain. Previews are then clipped to sRGB, and a warning is logged and shown in the window. | decided (user, 2026-10-04) | The app keeps working on compositors or drivers without wide-gamut support, and the user knows. |
 | D4 | GUI toolkit: winit + wgpu + egui (`egui-winit` and `egui-wgpu`, not eframe). | decided (user, 2026-10-04) | See section 6. |
 
 ## 5. Persistence
@@ -115,6 +117,15 @@ Caveat: blending *inside* egui stays in gamma space. "Composites everything in l
 Details from Codex's review that the plan must cover: convert Rec.2020 into linear-sRGB coordinates while keeping negative and above-one values. Choose a reference-white scale, since Windows-scRGB defines 1.0 as 80 cd/m² and SDR white is commonly 203 cd/m². egui's offscreen target is a gamma-encoded UNORM texture with premultiplied alpha, so it has to be unpremultiplied, decoded and premultiplied again when composited. The driver's WSI owns surface tagging when it presents in scRGB, so Drip must not attach its own color-management surface as well.
 
 Spike done (protocol level, see D2). Still to do in M3: verify what is actually displayed, with saturated and neutral patches, alpha edges and a numeric check of the presented values. egui renders into an offscreen gamma-encoded `Rgba16Float` target, where image views are drawn sign-preserving and extended-sRGB-encoded, so z-order stays egui's. A final pass decodes into the scRGB swapchain.
+
+### 6.1 GUI design (M3)
+
+| ID | Decision | Status | Rationale |
+|----|----------|--------|-----------|
+| G1 | Custom node editor that draws straight from `Project.graph`. Node positions live in each node's opaque `ui` field. Every edit goes through the graph's validated operations. | decided (user, 2026-10-04) | One source of truth. egui-snarl would need a second graph model kept in sync. |
+| G2 | Interactive evaluation runs synchronously on the UI thread, for the visible view nodes only. The preview level is chosen so the previewed image is at least as wide as its panel. Export runs on a worker thread over a clone of the project. | decided (user, 2026-10-04) | Preview scales keep interactive evaluation cheap. A full-resolution export would freeze the UI for seconds. |
+| G3 | Logging uses the `log` facade in the library and `env_logger` in the frontends. Frontends also show warnings and errors in the window. | decided (user, 2026-10-04) | The standard, minimal choice. |
+| G4 | Undo/redo is postponed. | decided (user, 2026-10-04) | Not needed for the prototype (TODO). |
 
 ## 7. Milestones (proposed)
 
