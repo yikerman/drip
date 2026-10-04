@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/drip", "crates/drip-cli", "crates/drip-gui"]
+members = ["crates/drip", "crates/drip-cli", "crates/drip-gui", "crates/drip-libraw"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +10,7 @@ license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 drip = { path = "crates/drip" }
+drip-libraw = { path = "crates/drip-libraw" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

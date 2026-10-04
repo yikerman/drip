@@ -1,0 +1,22 @@
+[package]
+name = "drip-libraw"
+description = "Minimal sound binding to LibRaw for Drip: decode a Bayer raw into owned Rust data"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+links = "raw_r"
+
+[features]
+# LibRaw's own half-size processing, for cross-checking Drip's pipeline in tests.
+reference = []
+
+[build-dependencies]
+cc = "1"
+pkg-config = "0.3"
+
+[target.'cfg(windows)'.build-dependencies]
+vcpkg = "0.2"
+
+[lints]
+workspace = true
