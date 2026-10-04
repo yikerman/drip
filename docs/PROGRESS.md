@@ -2,6 +2,15 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: M1 (graph engine and persistence)
+
+- The user approved the design. Their decisions: JSON; templates as functions (F5); no WB state in types (P6); "no CAT step" reading (C3); export as u16/f32 with no compression or deflate (C5); toolkit winit + wgpu + egui (D4). Commit format: `{submodule}: …` or `chore: …`. The three scaffold commits were reworded to match.
+- Display spike: scRGB through the Vulkan WSI is tagged correctly on KWin. Self-tagging as Rec.2020 also works but relies on undocumented WSI behavior, so we use scRGB and the compositor does the display transform (D2).
+- Implemented M1 in `crates/drip`: `value` (semantic port types), `param` (schemas, JSON values), `node` (kinds, registry, actions, migration), `graph` (validated editing), `eval` (pull evaluation, dependency stamps, per-node errors, full-resolution actions that release intermediates), `project` (graph inputs and arguments, JSON format, migration, opaque nodes).
+- Codex reviewed M1 and found 11 issues. Fixed 10. Resource revisions (E2) are deferred to M2.
+- Verified: 30 integration tests with toy node kinds. A mutation check confirmed the memory-release test catches regressions. clippy and fmt are clean.
+- Next: M2. LibRaw C shim, raw.read with resource revisions, the prototype nodes, LittleCMS TIFF export.
+
 ## 2026-10-04: session 1
 
 - Set up the workspace (`drip`, `drip-cli`, `drip-gui`), CI (Linux fmt/clippy/test; Windows and macOS build), AGENTS.md, DESIGN.md and TODO.md. License AGPL-3.0-or-later. git initialized, nothing committed yet.
