@@ -101,3 +101,22 @@ fn exports_a_tiff_from_a_raw() {
     assert!((0.02..0.98).contains(&mean), "mean {mean}: blank or saturated");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn built_in_template_is_a_function_of_raw_and_out() {
+    let reg = nodes::registry();
+    let template = nodes::raw_to_tiff();
+    assert_eq!(template.graph.inputs().into_iter().collect::<Vec<_>>(), ["out", "raw"]);
+    let (loaded, warnings) = Project::from_json(&template.to_json(), &reg).unwrap();
+    assert!(warnings.is_empty());
+    assert_eq!(loaded, template);
+
+    let mut p = template;
+    p.set_argument(&reg, "raw", json!(fixture())).unwrap();
+    let preview = p.graph.find("view.preview").unwrap();
+    let mut ev = Evaluator::default();
+    ev.evaluate(&p, &reg, 3, &[preview]);
+    let view = ev.result(preview).unwrap().as_ref().unwrap().view.clone();
+    let Some(drip::value::View::Image(image)) = view else { panic!("no preview") };
+    assert_eq!(image.rgb().scale, 16, "level 3 and the 2x2 debayer");
+}

@@ -130,4 +130,9 @@ impl Registry {
     pub fn get(&self, name: &str) -> Option<&'static NodeKind> {
         self.kinds.get(name).copied()
     }
+
+    /// All kinds, ordered by name.
+    pub fn kinds(&self) -> impl Iterator<Item = &'static NodeKind> + '_ {
+        self.kinds.values().copied()
+    }
 }

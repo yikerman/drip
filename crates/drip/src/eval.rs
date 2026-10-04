@@ -99,7 +99,10 @@ impl Evaluator {
         for &id in &order {
             let stamp = self.cache.stamp(project, registry, &ctx, id);
             if self.cache.0.get(&id).is_none_or(|entry| entry.stamp != stamp) {
+                let start = std::time::Instant::now();
                 let result = self.cache.compute(project, registry, &ctx, id);
+                let kind = &graph.node(id).expect("in graph").kind;
+                log::debug!("evaluated {kind} {id:?} at level {level} in {:.1?}", start.elapsed());
                 self.cache.0.insert(id, Entry { stamp, result });
                 computed.push(id);
             }
