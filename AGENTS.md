@@ -32,7 +32,8 @@ Treat it as a second opinion, not an authority: adopt what is right, briefly exp
 
 - `crates/drip`: library. processing, node graph, color management, persistence. must never depend on a GUI.
 - `crates/drip-cli`: batch frontend (binary `drip`), scaffold only.
-- `crates/drip-gui`: interactive frontend (binary `drip-gui`), placeholder until the toolkit is chosen.
+- `crates/drip-gui`: interactive frontend (binary `drip-gui`) on winit + wgpu + egui: `display` (scRGB output), `preview` (wide-gamut image drawing), `editor` (node graph), `inspector` (parameters, inputs, histogram), `theme`.
+- `crates/drip-libraw`: minimal LibRaw binding (C shim + safe `decode`).
 - `docs/DESIGN.md`: decisions, status, rationale. `docs/PROGRESS.md`: session log.
 - `TODO.md`: ideas not implemented.
 - `fixtures/`: test data; raws are stored with Git LFS.

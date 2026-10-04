@@ -126,6 +126,8 @@ Spike done (protocol level, see D2). Still to do in M3: verify what is actually 
 | G2 | Interactive evaluation runs synchronously on the UI thread, for the visible view nodes only. The preview level is chosen so the previewed image is at least as wide as its panel. Export runs on a worker thread over a clone of the project. | decided (user, 2026-10-04) | Preview scales keep interactive evaluation cheap. A full-resolution export would freeze the UI for seconds. |
 | G3 | Logging uses the `log` facade in the library and `env_logger` in the frontends. Frontends also show warnings and errors in the window. | decided (user, 2026-10-04) | The standard, minimal choice. |
 | G4 | Undo/redo is postponed. | decided (user, 2026-10-04) | Not needed for the prototype (TODO). |
+| G5 | One minimal UI style in `theme.rs`: everything on middle grey (sRGB 118, 18% linear), dark text, no shadows, rounding or borders. Fills distinguish elements; color is reserved for errors and histogram channels. | decided (user, 2026-10-04) | A neutral surround is standard for judging color. Decoration distracts from the image. |
+| G6 | The GUI is tested headlessly with `egui_kittest`: opening, previewing, starting a new project, error reporting, the gamut warning and the inspector. Rendering is verified by the screenshot comparison (D5). | decided | Exercises the app's wiring without a GPU. |
 
 ## 7. Milestones (proposed)
 
