@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::param::{ParamSpec, Params};
+use crate::param::{ParamMap, ParamSpec, Params};
 use crate::value::{PortType, Value, View};
 
 pub struct NodeKind {
@@ -19,6 +19,8 @@ pub struct NodeKind {
     pub eval: fn(Params, &[Value], &EvalContext) -> Result<Evaluated, String>,
     /// Side effects, run only on explicit request (DESIGN U2).
     pub actions: &'static [Action],
+    /// Upgrades a node saved by an older `version` to the current one.
+    pub migrate: Option<fn(from: u32, &mut Migration)>,
 }
 
 impl NodeKind {
@@ -81,6 +83,34 @@ impl EvalContext {
     /// Sources downsample by it, everything downstream inherits it.
     pub fn scale(&self) -> u32 {
         1 << self.level
+    }
+}
+
+/// What `NodeKind::migrate` edits: the saved params, bindings and port names.
+pub struct Migration<'a> {
+    pub params: &'a mut ParamMap,
+    pub(crate) bindings: &'a mut BTreeMap<String, String>,
+    pub(crate) renamed_inputs: Vec<(String, String)>,
+    pub(crate) renamed_outputs: Vec<(String, String)>,
+}
+
+impl Migration<'_> {
+    /// Renames a parameter, whether it holds a literal or is bound to an input.
+    pub fn rename_param(&mut self, old: &str, new: &str) {
+        if let Some(value) = self.params.remove(old) {
+            self.params.insert(new.into(), value);
+        }
+        if let Some(input) = self.bindings.remove(old) {
+            self.bindings.insert(new.into(), input);
+        }
+    }
+
+    pub fn rename_input(&mut self, old: &str, new: &str) {
+        self.renamed_inputs.push((old.into(), new.into()));
+    }
+
+    pub fn rename_output(&mut self, old: &str, new: &str) {
+        self.renamed_outputs.push((old.into(), new.into()));
     }
 }
 

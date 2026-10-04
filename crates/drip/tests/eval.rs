@@ -185,6 +185,7 @@ mod release {
             Ok(Evaluated { outputs: vec![Value::SceneRec2020(image)], view: None })
         },
         actions: &[],
+        migrate: None,
     };
 
     /// Records, while its action runs, whether the probe's output is alive.
@@ -203,6 +204,7 @@ mod release {
                 Ok(())
             },
         }],
+        migrate: None,
     };
 
     /// Runs `check` on `probe → middle… → tonemap → check`.
