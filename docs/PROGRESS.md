@@ -2,6 +2,14 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: M2 (prototype pipeline)
+
+- `drip-libraw`: our own binding, a C shim with one safe `decode()`, linked to the system `libraw_r`. A `reference` feature exposes LibRaw's half-size pipeline for cross-checks. CI installs LibRaw per platform (Windows/macOS unverified, no remote yet).
+- `drip`: file resources with explicit reload (stamps include path revisions); the node kinds `raw.read`, `color.white_balance`, `demosaic.bin2x2`, `color.camera_to_rec2020`, `tone.sigmoid`, `view.preview`, `view.histogram`, `export.tiff`; `examples/raw_to_tiff`.
+- Verified: 53 tests. On two Sony ARWs (61 MP), Drip's scene-referred output matches LibRaw's independent pipeline with median relative error 1.3e-4 and p99 1.3e-3 over 14 M pixels; the global scale matches the predicted value. Export round-trips are checked against independently computed values. exiftool confirms the embedded ICC profile is byte-identical and typed UNDEFINED.
+- Codex reviewed M2 and found 7 issues, all fixed with tests: an unsound buffer read in `reference()`, the black denominator for small patterns, the second green's multiplier, non-finite/singular metadata, a silently dropped final write in export, a concurrent double load, and sigmoid overflow.
+- Open for the user: confirm the tone curve (C4). Next milestone: M3, the GUI (winit + wgpu + egui), starting with measured verification of the scRGB display path.
+
 ## 2026-10-04: M1 (graph engine and persistence)
 
 - The user approved the design. Their decisions: JSON; templates as functions (F5); no WB state in types (P6); "no CAT step" reading (C3); export as u16/f32 with no compression or deflate (C5); toolkit winit + wgpu + egui (D4). Commit format: `{submodule}: …` or `chore: …`. The three scaffold commits were reworded to match.
