@@ -216,4 +216,25 @@ impl Graph {
         }
         false
     }
+
+    /// `targets` and all their ancestors, each after its sources.
+    pub(crate) fn upstream_order(&self, targets: &[NodeId]) -> Vec<NodeId> {
+        fn visit(graph: &Graph, id: NodeId, seen: &mut BTreeSet<NodeId>, order: &mut Vec<NodeId>) {
+            if seen.insert(id) {
+                for (_, output) in graph
+                    .edges
+                    .range(Port(id, String::new())..)
+                    .take_while(|(input, _)| input.0 == id)
+                {
+                    visit(graph, output.0, seen, order);
+                }
+                order.push(id);
+            }
+        }
+        let (mut seen, mut order) = (BTreeSet::new(), Vec::new());
+        for &id in targets {
+            visit(self, id, &mut seen, &mut order);
+        }
+        order
+    }
 }

@@ -3,9 +3,11 @@
 
 use std::sync::Arc;
 
+use drip::eval::{Evaluator, NodeResult};
 use drip::graph::{NodeId, Port};
-use drip::node::{Action, Evaluated, InputSpec, NodeKind, OutputSpec, Registry};
+use drip::node::{Action, EvalContext, Evaluated, InputSpec, NodeKind, OutputSpec, Registry};
 use drip::param::{ParamKind, ParamSpec};
+use drip::project::Project;
 use drip::value::{PortType, Rgb, Value, View};
 
 const SCENE: &[PortType] = &[PortType::SceneRec2020];
@@ -107,12 +109,40 @@ pub static WRITE: NodeKind = NodeKind {
     }],
 };
 
+pub static GAIN: NodeKind = NodeKind {
+    name: "test.gain",
+    version: 1,
+    params: &[ParamSpec {
+        name: "gain",
+        kind: ParamKind::Float { min: 0.0, max: 10.0, default: 1.0 },
+    }],
+    inputs: &[InputSpec { name: "image", accepts: SCENE }],
+    outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
+    eval: |p, inputs, _| {
+        let g = p.float("gain") as f32;
+        Ok(Evaluated { outputs: vec![scene(pixel(&inputs[0]).map(|c| c * g))], view: None })
+    },
+    actions: &[],
+};
+
 pub fn registry() -> Registry {
-    [&CONST, &ADD, &TONEMAP, &FAIL, &VIEW, &WRITE]
+    [&CONST, &ADD, &TONEMAP, &FAIL, &VIEW, &WRITE, &GAIN]
         .into_iter()
         .fold(Registry::default(), Registry::with)
 }
 
 pub fn port(id: NodeId, name: &str) -> Port {
     Port(id, name.into())
+}
+
+pub const PREVIEW: EvalContext = EvalContext::downscaled(2);
+
+/// Evaluates `id` at preview scale and returns its result.
+pub fn eval<'a>(evaluator: &'a mut Evaluator, project: &Project, id: NodeId) -> &'a NodeResult {
+    evaluator.evaluate(project, &registry(), PREVIEW, &[id]);
+    evaluator.result(id).unwrap()
+}
+
+pub fn output(result: &NodeResult) -> [f32; 3] {
+    pixel(&result.as_ref().unwrap().outputs[0])
 }
