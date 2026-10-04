@@ -11,7 +11,6 @@ use crate::value::{Camera, Cfa, Mosaic, PortType, Value};
 
 pub static READ: NodeKind = NodeKind {
     name: "raw.read",
-    version: 1,
     params: &[ParamSpec { name: "path", kind: ParamKind::Path { output: false } }],
     inputs: &[],
     outputs: &[
@@ -20,7 +19,6 @@ pub static READ: NodeKind = NodeKind {
     ],
     eval: read,
     actions: &[],
-    migrate: None,
 };
 
 fn read(p: Params, _: &[Value], ctx: &EvalContext) -> Result<Evaluated, String> {

@@ -22,7 +22,6 @@ const INTENTS: &[&str] = &["perceptual", "relative", "saturation", "absolute"];
 
 pub static TIFF: NodeKind = NodeKind {
     name: "export.tiff",
-    version: 1,
     params: &[
         ParamSpec { name: "path", kind: ParamKind::Path { output: true } },
         ParamSpec { name: "profile", kind: ParamKind::Path { output: false } },
@@ -48,7 +47,6 @@ pub static TIFF: NodeKind = NodeKind {
     outputs: &[],
     eval: |_, _, _| Ok(Evaluated::default()),
     actions: &[Action { name: "export", run: export }],
-    migrate: None,
 };
 
 fn export(p: Params, inputs: &[Value]) -> Result<(), String> {

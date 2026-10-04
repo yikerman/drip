@@ -209,15 +209,8 @@ impl App {
             .map_err(|e| e.to_string())
             .and_then(|text| Project::from_json(&text, &self.registry).map_err(|e| e.to_string()));
         match loaded {
-            Ok((project, warnings)) => {
-                for warning in &warnings {
-                    log::warn!("{}: {warning}", file.display());
-                }
-                let text = format!(
-                    "opened {}{}",
-                    file.display(),
-                    warnings.first().map_or(String::new(), |w| format!(" ({w})"))
-                );
+            Ok(project) => {
+                let text = format!("opened {}", file.display());
                 self.set_project(project, Some(file));
                 self.report(Ok(text));
             }

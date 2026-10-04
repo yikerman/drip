@@ -17,13 +17,11 @@ fn single(output: Value) -> Result<Evaluated, String> {
 /// Multiplies each site by the camera's as-shot multiplier for its color.
 pub static WHITE_BALANCE: NodeKind = NodeKind {
     name: "color.white_balance",
-    version: 1,
     params: &[],
     inputs: &[InputSpec { name: "mosaic", accepts: MOSAIC }],
     outputs: &[OutputSpec { name: "mosaic", ty: PortType::Mosaic }],
     eval: white_balance,
     actions: &[],
-    migrate: None,
 };
 
 fn white_balance(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {
@@ -45,13 +43,11 @@ fn white_balance(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluat
 /// two greens. Halves the resolution (DESIGN C6).
 pub static BIN_2X2: NodeKind = NodeKind {
     name: "demosaic.bin2x2",
-    version: 1,
     params: &[],
     inputs: &[InputSpec { name: "mosaic", accepts: MOSAIC }],
     outputs: &[OutputSpec { name: "image", ty: PortType::CameraRgb }],
     eval: bin_2x2,
     actions: &[],
-    migrate: None,
 };
 
 fn bin_2x2(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {
@@ -79,13 +75,11 @@ fn bin_2x2(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, St
 
 pub static CAMERA_TO_REC2020: NodeKind = NodeKind {
     name: "color.camera_to_rec2020",
-    version: 1,
     params: &[],
     inputs: &[InputSpec { name: "image", accepts: &[PortType::CameraRgb] }],
     outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
     eval: camera_to_rec2020,
     actions: &[],
-    migrate: None,
 };
 
 fn camera_to_rec2020(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {

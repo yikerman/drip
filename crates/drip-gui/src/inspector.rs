@@ -19,10 +19,7 @@ pub fn node(app: &mut App, ui: &mut Ui, id: NodeId) {
         app.report(Err(e.to_string()));
     }
     ui.weak(&node.kind);
-    let Some(kind) = app.registry.get(&node.kind).filter(|k| k.version == node.kind_version) else {
-        ui.label("This node's kind is unknown to this version of Drip; it is kept as is.");
-        return;
-    };
+    let kind = app.registry.get(&node.kind).expect("graphs hold only registered kinds");
     egui::Grid::new(("params", id)).num_columns(2).show(ui, |ui| {
         for spec in kind.params {
             let name = ui.label(spec.name).interact(Sense::click());
@@ -52,8 +49,13 @@ pub fn node(app: &mut App, ui: &mut Ui, id: NodeId) {
                     }
                     return;
                 }
+                // Only inputs taking this parameter's kind of value, or a new one.
+                let same = |kind: ParamKind| {
+                    std::mem::discriminant(&kind) == std::mem::discriminant(&spec.kind)
+                };
                 let mut inputs: Vec<String> =
                     app.project.graph.inputs().into_iter().map(String::from).collect();
+                inputs.retain(|i| app.project.input_kind(&app.registry, i).is_none_or(same));
                 if !inputs.iter().any(|i| i == spec.name) {
                     inputs.push(spec.name.into());
                 }
@@ -87,11 +89,7 @@ pub fn inputs(app: &mut App, ui: &mut Ui) {
     egui::Grid::new("inputs").num_columns(2).show(ui, |ui| {
         for input in inputs {
             ui.label(&input);
-            // Any parameter bound to the input tells what kind of value it takes.
-            let kind = app.project.graph.nodes().find_map(|(_, node)| {
-                let param = node.bindings.iter().find(|(_, bound)| **bound == input)?.0;
-                Some(app.registry.get(&node.kind)?.param(param)?.kind)
-            });
+            let kind = app.project.input_kind(&app.registry, &input);
             let current = app.project.arguments().get(&input).cloned().unwrap_or(Json::Null);
             if let Some(kind) = kind
                 && let Some(value) =

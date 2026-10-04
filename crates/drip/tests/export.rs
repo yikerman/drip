@@ -20,7 +20,6 @@ const PIXELS: [[f32; 3]; 4] =
 
 static DISPLAY: NodeKind = NodeKind {
     name: "test.display",
-    version: 1,
     params: &[],
     inputs: &[],
     outputs: &[OutputSpec { name: "image", ty: PortType::DisplayRec2020 }],
@@ -29,7 +28,6 @@ static DISPLAY: NodeKind = NodeKind {
         Ok(Evaluated { outputs: vec![Value::DisplayRec2020(Arc::new(image))], view: None })
     },
     actions: &[],
-    migrate: None,
 };
 
 fn registry() -> Registry {

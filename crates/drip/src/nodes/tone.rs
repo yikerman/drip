@@ -19,7 +19,6 @@ const GREY: f32 = 0.18;
 ///     pp. 536-555, 1966.
 pub static SIGMOID: NodeKind = NodeKind {
     name: "tone.sigmoid",
-    version: 1,
     params: &[
         ParamSpec {
             name: "exposure",
@@ -31,7 +30,6 @@ pub static SIGMOID: NodeKind = NodeKind {
     outputs: &[OutputSpec { name: "image", ty: PortType::DisplayRec2020 }],
     eval: sigmoid,
     actions: &[],
-    migrate: None,
 };
 
 fn sigmoid(p: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {

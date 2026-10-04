@@ -1,6 +1,6 @@
 //! The node graph as plain data, with editing operations that keep it valid:
-//! nodes exist, connections are type-compatible and the graph stays acyclic.
-//! Nodes of unknown kinds can be stored and wired as loaded, but not edited.
+//! nodes exist and are of registered kinds, connections are type-compatible
+//! and the graph stays acyclic.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -25,8 +25,7 @@ pub struct Node {
     /// Unique within the graph; how users and the CLI refer to the node.
     pub label: String,
     pub kind: String,
-    pub kind_version: u32,
-    /// Literal parameter values, including any the kind does not know.
+    /// Literal parameter values.
     #[serde(default)]
     pub params: ParamMap,
     /// Parameters taken from graph inputs instead: param name → input name.
@@ -41,7 +40,7 @@ pub struct Node {
 pub enum GraphError {
     #[error("no node {0:?}")]
     UnknownNode(NodeId),
-    #[error("node kind `{0}` is unknown or newer than this build")]
+    #[error("unknown node kind `{0}`")]
     UnknownKind(String),
     #[error("node {0:?} has no {1} port `{2}`")]
     UnknownPort(NodeId, &'static str, String),
@@ -55,6 +54,8 @@ pub enum GraphError {
     InvalidParam { param: String, value: Json },
     #[error("graph has no input `{0}`")]
     UnknownInput(String),
+    #[error("input `{input}` takes a different kind of value than parameter `{param}`")]
+    IncompatibleInput { input: String, param: String },
     #[error("label `{0}` is empty or already used")]
     InvalidLabel(String),
 }
@@ -106,7 +107,6 @@ impl Graph {
         let node = Node {
             label,
             kind: kind.name.into(),
-            kind_version: kind.version,
             params,
             bindings: BTreeMap::new(),
             ui: Json::Null,
@@ -186,15 +186,13 @@ impl Graph {
         self.nodes.get_mut(&id).ok_or(GraphError::UnknownNode(id))
     }
 
-    /// The kind of node `id`, if this build can edit and evaluate it.
     pub(crate) fn kind(
         &self,
         registry: &Registry,
         id: NodeId,
     ) -> Result<&'static NodeKind, GraphError> {
         let node = self.nodes.get(&id).ok_or(GraphError::UnknownNode(id))?;
-        let kind = registry.get(&node.kind).filter(|kind| kind.version == node.kind_version);
-        kind.ok_or_else(|| GraphError::UnknownKind(node.kind.clone()))
+        Ok(registry.get(&node.kind).expect("graphs hold only registered kinds"))
     }
 
     /// Whether `to` is reachable from `from` along edges (or is `from`).

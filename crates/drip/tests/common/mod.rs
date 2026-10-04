@@ -24,7 +24,6 @@ pub fn pixel(value: &Value) -> [f32; 3] {
 /// Outputs `[value, ctx.scale, 0]`, so tests can see the scale it ran at.
 pub static CONST: NodeKind = NodeKind {
     name: "test.const",
-    version: 1,
     params: &[ParamSpec {
         name: "value",
         kind: ParamKind::Float { min: -10.0, max: 10.0, default: 1.0 },
@@ -38,12 +37,10 @@ pub static CONST: NodeKind = NodeKind {
         })
     },
     actions: &[],
-    migrate: None,
 };
 
 pub static ADD: NodeKind = NodeKind {
     name: "test.add",
-    version: 1,
     params: &[],
     inputs: &[InputSpec { name: "a", accepts: SCENE }, InputSpec { name: "b", accepts: SCENE }],
     outputs: &[OutputSpec { name: "sum", ty: PortType::SceneRec2020 }],
@@ -52,13 +49,11 @@ pub static ADD: NodeKind = NodeKind {
         Ok(Evaluated { outputs: vec![scene([a[0] + b[0], a[1] + b[1], a[2] + b[2]])], view: None })
     },
     actions: &[],
-    migrate: None,
 };
 
 /// Identity, but changes the semantic type from scene- to display-referred.
 pub static TONEMAP: NodeKind = NodeKind {
     name: "test.tonemap",
-    version: 1,
     params: &[],
     inputs: &[InputSpec { name: "scene", accepts: SCENE }],
     outputs: &[OutputSpec { name: "display", ty: PortType::DisplayRec2020 }],
@@ -66,24 +61,20 @@ pub static TONEMAP: NodeKind = NodeKind {
         Ok(Evaluated { outputs: vec![Value::DisplayRec2020(inputs[0].rgb().clone())], view: None })
     },
     actions: &[],
-    migrate: None,
 };
 
 pub static FAIL: NodeKind = NodeKind {
     name: "test.fail",
-    version: 1,
     params: &[],
     inputs: &[InputSpec { name: "image", accepts: SCENE }],
     outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
     eval: |_, _, _| Err("boom".into()),
     actions: &[],
-    migrate: None,
 };
 
 /// A UI-only node: no outputs, presents its input.
 pub static VIEW: NodeKind = NodeKind {
     name: "test.view",
-    version: 1,
     params: &[],
     inputs: &[InputSpec {
         name: "image",
@@ -94,13 +85,11 @@ pub static VIEW: NodeKind = NodeKind {
         Ok(Evaluated { outputs: vec![], view: Some(View::Image(inputs[0].clone())) })
     },
     actions: &[],
-    migrate: None,
 };
 
 /// A sink whose `write` action stores its input pixel at `path`.
 pub static WRITE: NodeKind = NodeKind {
     name: "test.write",
-    version: 1,
     params: &[ParamSpec { name: "path", kind: ParamKind::Path { output: true } }],
     inputs: &[InputSpec { name: "image", accepts: DISPLAY }],
     outputs: &[],
@@ -112,13 +101,11 @@ pub static WRITE: NodeKind = NodeKind {
             std::fs::write(path, format!("{:?}", pixel(&inputs[0]))).map_err(|e| e.to_string())
         },
     }],
-    migrate: None,
 };
 
-/// Version 2 renamed param `factor` to `gain` and input `in` to `image`.
+/// Multiplies its input by `gain`.
 pub static GAIN: NodeKind = NodeKind {
     name: "test.gain",
-    version: 2,
     params: &[ParamSpec {
         name: "gain",
         kind: ParamKind::Float { min: 0.0, max: 10.0, default: 1.0 },
@@ -130,18 +117,11 @@ pub static GAIN: NodeKind = NodeKind {
         Ok(Evaluated { outputs: vec![scene(pixel(&inputs[0]).map(|c| c * g))], view: None })
     },
     actions: &[],
-    migrate: Some(|from, m| {
-        if from < 2 {
-            m.rename_param("factor", "gain");
-            m.rename_input("in", "image");
-        }
-    }),
 };
 
 /// Outputs the length of the file at `path`, read through the resource store.
 pub static FILE: NodeKind = NodeKind {
     name: "test.file",
-    version: 1,
     params: &[ParamSpec { name: "path", kind: ParamKind::Path { output: false } }],
     inputs: &[],
     outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
@@ -152,7 +132,6 @@ pub static FILE: NodeKind = NodeKind {
         Ok(Evaluated { outputs: vec![scene([*len as f32, 0.0, 0.0])], view: None })
     },
     actions: &[],
-    migrate: None,
 };
 
 pub fn registry() -> Registry {

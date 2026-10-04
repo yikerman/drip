@@ -137,16 +137,6 @@ fn editing_an_unrelated_node_recomputes_nothing() {
 }
 
 #[test]
-fn registry_changes_invalidate_results() {
-    let mut p = Project::default();
-    let c = p.graph.add_node(&CONST);
-    let mut ev = Evaluator::default();
-    ev.evaluate(&p, &registry(), PREVIEW, &[c]);
-    ev.evaluate(&p, &drip::node::Registry::default(), PREVIEW, &[c]);
-    assert_eq!(ev.result(c), Some(&Err(NodeError::UnknownKind("test.const".into()))));
-}
-
-#[test]
 fn errors_name_the_current_upstream() {
     let (reg, mut p) = (registry(), Project::default());
     let g = &mut p.graph;
@@ -197,7 +187,6 @@ mod release {
     /// Remembers its output allocation so tests can see when it is freed.
     static PROBE: NodeKind = NodeKind {
         name: "test.probe",
-        version: 1,
         params: &[],
         inputs: &[],
         outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
@@ -208,13 +197,11 @@ mod release {
             Ok(Evaluated { outputs: vec![Value::SceneRec2020(image)], view: None })
         },
         actions: &[],
-        migrate: None,
     };
 
     /// Records, while its action runs, whether the probe's output is alive.
     static CHECK: NodeKind = NodeKind {
         name: "test.check",
-        version: 1,
         params: &[],
         inputs: &[InputSpec { name: "image", accepts: &[PortType::DisplayRec2020] }],
         outputs: &[],
@@ -227,7 +214,6 @@ mod release {
                 Ok(())
             },
         }],
-        migrate: None,
     };
 
     /// Runs `check` on `probe → middle… → tonemap → check`.

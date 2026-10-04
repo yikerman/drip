@@ -149,7 +149,6 @@ fn camera_matrix_is_neutral_preserving_and_ignores_channel_gains() {
 /// A source node emitting a fixed 4 × 2 RGGB mosaic.
 static MOSAIC: NodeKind = NodeKind {
     name: "test.mosaic",
-    version: 1,
     params: &[],
     inputs: &[],
     outputs: &[OutputSpec { name: "mosaic", ty: PortType::Mosaic }],
@@ -162,13 +161,11 @@ static MOSAIC: NodeKind = NodeKind {
         Ok(Evaluated { outputs: vec![Value::Mosaic(Arc::new(mosaic))], view: None })
     },
     actions: &[],
-    migrate: None,
 };
 
 /// A source node emitting the scene-referred pixels given as `pixels`.
 static SCENE: NodeKind = NodeKind {
     name: "test.scene",
-    version: 1,
     params: &[],
     inputs: &[],
     outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
@@ -185,7 +182,6 @@ static SCENE: NodeKind = NodeKind {
         })
     },
     actions: &[],
-    migrate: None,
 };
 
 fn registry() -> Registry {

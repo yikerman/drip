@@ -107,9 +107,7 @@ fn built_in_template_is_a_function_of_raw_and_out() {
     let reg = nodes::registry();
     let template = nodes::raw_to_tiff();
     assert_eq!(template.graph.inputs().into_iter().collect::<Vec<_>>(), ["out", "raw"]);
-    let (loaded, warnings) = Project::from_json(&template.to_json(), &reg).unwrap();
-    assert!(warnings.is_empty());
-    assert_eq!(loaded, template);
+    assert_eq!(Project::from_json(&template.to_json(), &reg).unwrap(), template);
 
     let mut p = template;
     p.set_argument(&reg, "raw", json!(fixture())).unwrap();

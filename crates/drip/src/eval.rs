@@ -16,10 +16,6 @@ use crate::value::Value;
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum NodeError {
-    #[error("unknown node kind `{0}`")]
-    UnknownKind(String),
-    #[error("saved by a newer version ({saved}) of `{kind}` than this build knows ({known})")]
-    NewerVersion { kind: String, saved: u32, known: u32 },
     #[error("input `{0}` is not connected")]
     MissingInput(&'static str),
     #[error("no argument given for graph input `{0}`")]
@@ -123,23 +119,23 @@ impl Evaluator {
 impl Cache {
     fn stamp(&self, project: &Project, registry: &Registry, ctx: &EvalContext, id: NodeId) -> u64 {
         let node = project.graph.node(id).expect("in graph");
+        let kind = registry.get(&node.kind).expect("graphs hold only registered kinds");
         let mut h = DefaultHasher::new();
-        let kind = registry.get(&node.kind);
-        (&node.kind, node.kind_version, kind.map(|kind| kind.version), ctx.level).hash(&mut h);
+        (&node.kind, ctx.level).hash(&mut h);
         let params = project.effective_params(id);
         // Debug output is canonical here: `ParamMap` is ordered by key.
         format!("{params:?}").hash(&mut h);
-        if let (Some(kind), Ok(params)) = (kind, &params) {
-            for spec in
-                kind.params.iter().filter(|spec| matches!(spec.kind, ParamKind::Path { .. }))
-            {
+        if let Ok(params) = &params {
+            let paths =
+                kind.params.iter().filter(|spec| matches!(spec.kind, ParamKind::Path { .. }));
+            for spec in paths {
                 Params(params)
                     .path(spec.name)
                     .map(|path| ctx.resources.revision(path))
                     .hash(&mut h);
             }
         }
-        for spec in kind.map_or(&[][..], |kind| kind.inputs) {
+        for spec in kind.inputs {
             spec.name.hash(&mut h);
             if let Some(source) = project.graph.source(&Port(id, spec.name.into())) {
                 (source, self.0.get(&source.0).map(|entry| entry.stamp)).hash(&mut h);
@@ -167,15 +163,7 @@ impl Cache {
         id: NodeId,
     ) -> Result<(&'static NodeKind, ParamMap, Vec<Value>), NodeError> {
         let node = project.graph.node(id).expect("in graph");
-        let kind =
-            registry.get(&node.kind).ok_or_else(|| NodeError::UnknownKind(node.kind.clone()))?;
-        if node.kind_version > kind.version {
-            return Err(NodeError::NewerVersion {
-                kind: node.kind.clone(),
-                saved: node.kind_version,
-                known: kind.version,
-            });
-        }
+        let kind = registry.get(&node.kind).expect("graphs hold only registered kinds");
         let params = project.effective_params(id)?;
         let inputs = kind
             .inputs
