@@ -4,10 +4,11 @@
 
 use std::path::{Path, PathBuf};
 
-use drip::eval::Evaluator;
+use drip::eval::{Evaluator, run_action};
 use drip::graph::{NodeId, Port};
 use drip::nodes;
 use drip::project::Project;
+use lcms2::Profile;
 use serde_json::json;
 
 fn raws() -> Vec<PathBuf> {
@@ -87,5 +88,37 @@ fn pipeline_matches_libraw() {
         let expected =
             65535.0 * f64::from(m[1] / m[..3].iter().copied().fold(f32::INFINITY, f32::min));
         assert!((scale / expected - 1.0).abs() < 1e-3, "scale {scale}, expected {expected}");
+    }
+}
+
+#[test]
+fn exports_a_tiff_from_a_raw() {
+    for path in raws() {
+        let dir = std::env::temp_dir().join(format!("drip-raw-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (profile, out) = (dir.join("srgb.icc"), dir.join("out.tif"));
+        std::fs::write(&profile, Profile::new_srgb().icc().unwrap()).unwrap();
+
+        let reg = nodes::registry();
+        let (mut p, ids) = pipeline(&path, &[&nodes::SIGMOID, &nodes::TIFF]);
+        let export = *ids.last().unwrap();
+        p.bind(&reg, export, "path", "out").unwrap();
+        p.set_argument(&reg, "out", json!(out)).unwrap();
+        p.graph.set_param(&reg, export, "profile", json!(profile)).unwrap();
+        run_action(&p, &reg, export, "export").unwrap();
+
+        let raw = drip_libraw::decode(&path).unwrap();
+        let mut decoder = tiff::decoder::Decoder::new(std::fs::File::open(&out).unwrap()).unwrap();
+        assert_eq!(decoder.dimensions().unwrap(), (raw.width as u32 / 2, raw.height as u32 / 2));
+        assert_eq!(
+            decoder.get_tag_u8_vec(tiff::tags::Tag::IccProfile).unwrap(),
+            std::fs::read(&profile).unwrap()
+        );
+        let tiff::decoder::DecodingResult::U16(data) = decoder.read_image().unwrap() else {
+            panic!("not 16 bit")
+        };
+        let mean = data.iter().map(|&v| f64::from(v)).sum::<f64>() / data.len() as f64 / 65535.0;
+        eprintln!("exported {}x{}, mean value {mean:.3}", raw.width / 2, raw.height / 2);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
