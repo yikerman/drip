@@ -17,3 +17,7 @@ unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "warn"
+
+# Image processing at opt-level 0 is too slow to test or use on real raws.
+[profile.dev]
+opt-level = 1
