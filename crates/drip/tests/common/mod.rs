@@ -14,7 +14,7 @@ const SCENE: &[PortType] = &[PortType::SceneRec2020];
 const DISPLAY: &[PortType] = &[PortType::DisplayRec2020];
 
 pub fn scene(pixel: [f32; 3]) -> Value {
-    Value::SceneRec2020(Arc::new(Rgb { width: 1, height: 1, pixels: vec![pixel] }))
+    Value::SceneRec2020(Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![pixel] }))
 }
 
 pub fn pixel(value: &Value) -> [f32; 3] {

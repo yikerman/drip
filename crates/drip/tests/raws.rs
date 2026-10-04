@@ -1,0 +1,91 @@
+//! The pipeline on real raws, when `DRIP_TEST_RAWS` names a directory of them;
+//! otherwise these tests pass vacuously. Only numbers are reported, never
+//! image content.
+
+use std::path::{Path, PathBuf};
+
+use drip::eval::Evaluator;
+use drip::graph::{NodeId, Port};
+use drip::nodes;
+use drip::project::Project;
+use serde_json::json;
+
+fn raws() -> Vec<PathBuf> {
+    let Some(dir) = std::env::var_os("DRIP_TEST_RAWS") else { return vec![] };
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("arw")))
+        .collect();
+    files.sort();
+    files.truncate(2);
+    files
+}
+
+/// raw.read → white balance → binning → camera to Rec.2020 → kinds…, with
+/// the raw path bound to graph input `raw`.
+fn pipeline(raw: &Path, tail: &[&'static drip::node::NodeKind]) -> (Project, Vec<NodeId>) {
+    let reg = nodes::registry();
+    let mut p = Project::default();
+    let read = p.graph.add_node(&nodes::READ);
+    p.bind(&reg, read, "path", "raw").unwrap();
+    p.set_argument(&reg, "raw", json!(raw)).unwrap();
+    let mut ids = vec![read];
+    for kind in
+        [&nodes::WHITE_BALANCE, &nodes::BIN_2X2, &nodes::CAMERA_TO_REC2020].iter().chain(tail)
+    {
+        let (last, id) = (*ids.last().unwrap(), p.graph.add_node(kind));
+        let output = reg.get(&p.graph.node(last).unwrap().kind).unwrap().outputs[0].name;
+        p.graph
+            .connect(&reg, Port(last, output.into()), Port(id, kind.inputs[0].name.into()))
+            .unwrap();
+        ids.push(id);
+    }
+    (p, ids)
+}
+
+/// Compares Drip's scene-referred Rec.2020 with LibRaw's own half-size
+/// processing, which shares nothing with Drip past the decoded raw.
+#[test]
+fn pipeline_matches_libraw() {
+    for path in raws() {
+        let (p, ids) = pipeline(&path, &[]);
+        let mut ev = Evaluator::default();
+        ev.evaluate(&p, &nodes::registry(), 0, &[ids[3]]);
+        let ours = ev.result(ids[3]).unwrap().as_ref().unwrap().outputs[0].rgb().clone();
+        let (width, _, reference) = drip_libraw::reference(&path).unwrap();
+
+        // LibRaw scales by 65535 and normalizes white balance to its smallest
+        // multiplier rather than green, so compare up to one global factor,
+        // estimated on unclipped mid-tones.
+        let usable = |r: &[u16; 3]| r.iter().all(|&v| (1000..60000).contains(&v));
+        let pairs: Vec<_> = (0..ours.height)
+            .flat_map(|y| (0..ours.width).map(move |x| (y, x)))
+            .map(|(y, x)| (ours.pixels[y * ours.width + x], reference[y * width + x]))
+            .filter(|(_, r)| usable(r))
+            .collect();
+        assert!(pairs.len() > 10_000, "too few usable pixels");
+        let mut ratios: Vec<_> =
+            pairs.iter().map(|(o, r)| f64::from(r[1]) / f64::from(o[1])).collect();
+        ratios.sort_by(f64::total_cmp);
+        let scale = ratios[ratios.len() / 2];
+        let mut errors: Vec<_> = pairs
+            .iter()
+            .flat_map(|(o, r)| {
+                (0..3).map(move |c| (f64::from(o[c]) * scale / f64::from(r[c]) - 1.0).abs())
+            })
+            .collect();
+        errors.sort_by(f64::total_cmp);
+        let (median, p99) = (errors[errors.len() / 2], errors[errors.len() * 99 / 100]);
+        eprintln!(
+            "scale {scale:.1}, relative error median {median:.2e}, p99 {p99:.2e}, n {}",
+            pairs.len()
+        );
+        assert!(median < 2e-3 && p99 < 2e-2, "median {median}, p99 {p99}");
+        // LibRaw divides multipliers by the smallest, Drip by green's.
+        let m = drip_libraw::decode(&path).unwrap().as_shot;
+        let expected =
+            65535.0 * f64::from(m[1] / m[..3].iter().copied().fold(f32::INFINITY, f32::min));
+        assert!((scale / expected - 1.0).abs() < 1e-3, "scale {scale}, expected {expected}");
+    }
+}

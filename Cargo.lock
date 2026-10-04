@@ -16,6 +16,7 @@ dependencies = [
 name = "drip"
 version = "0.1.0"
 dependencies = [
+ "drip-libraw",
  "serde",
  "serde_json",
  "thiserror",

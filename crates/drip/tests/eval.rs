@@ -202,7 +202,8 @@ mod release {
         inputs: &[],
         outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
         eval: |_, _, _| {
-            let image = Arc::new(Rgb { width: 1, height: 1, pixels: vec![[1.0, 2.0, 3.0]] });
+            let image =
+                Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[1.0, 2.0, 3.0]] });
             *PROBED.lock().unwrap() = Some(Arc::downgrade(&image));
             Ok(Evaluated { outputs: vec![Value::SceneRec2020(image)], view: None })
         },
