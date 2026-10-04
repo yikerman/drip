@@ -1,6 +1,4 @@
-//! The pipeline on real raws, when `DRIP_TEST_RAWS` names a directory of them;
-//! otherwise these tests pass vacuously. Only numbers are reported, never
-//! image content.
+//! The pipeline on a real raw.
 
 use std::path::{Path, PathBuf};
 
@@ -11,16 +9,8 @@ use drip::project::Project;
 use lcms2::Profile;
 use serde_json::json;
 
-fn raws() -> Vec<PathBuf> {
-    let Some(dir) = std::env::var_os("DRIP_TEST_RAWS") else { return vec![] };
-    let mut files: Vec<_> = std::fs::read_dir(dir)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("arw")))
-        .collect();
-    files.sort();
-    files.truncate(2);
-    files
+fn fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw/sony-ilce-7rm3.arw")
 }
 
 /// raw.read → white balance → binning → camera to Rec.2020 → kinds…, with
@@ -49,76 +39,65 @@ fn pipeline(raw: &Path, tail: &[&'static drip::node::NodeKind]) -> (Project, Vec
 /// processing, which shares nothing with Drip past the decoded raw.
 #[test]
 fn pipeline_matches_libraw() {
-    for path in raws() {
-        let (p, ids) = pipeline(&path, &[]);
-        let mut ev = Evaluator::default();
-        ev.evaluate(&p, &nodes::registry(), 0, &[ids[3]]);
-        let ours = ev.result(ids[3]).unwrap().as_ref().unwrap().outputs[0].rgb().clone();
-        let (width, _, reference) = drip_libraw::reference(&path).unwrap();
+    let path = fixture();
+    let (p, ids) = pipeline(&path, &[]);
+    let mut ev = Evaluator::default();
+    ev.evaluate(&p, &nodes::registry(), 0, &[ids[3]]);
+    let ours = ev.result(ids[3]).unwrap().as_ref().unwrap().outputs[0].rgb().clone();
+    let (width, _, reference) = drip_libraw::reference(&path).unwrap();
 
-        // LibRaw scales by 65535 and normalizes white balance to its smallest
-        // multiplier rather than green, so compare up to one global factor,
-        // estimated on unclipped mid-tones.
-        let usable = |r: &[u16; 3]| r.iter().all(|&v| (1000..60000).contains(&v));
-        let pairs: Vec<_> = (0..ours.height)
-            .flat_map(|y| (0..ours.width).map(move |x| (y, x)))
-            .map(|(y, x)| (ours.pixels[y * ours.width + x], reference[y * width + x]))
-            .filter(|(_, r)| usable(r))
-            .collect();
-        assert!(pairs.len() > 10_000, "too few usable pixels");
-        let mut ratios: Vec<_> =
-            pairs.iter().map(|(o, r)| f64::from(r[1]) / f64::from(o[1])).collect();
-        ratios.sort_by(f64::total_cmp);
-        let scale = ratios[ratios.len() / 2];
-        let mut errors: Vec<_> = pairs
-            .iter()
-            .flat_map(|(o, r)| {
-                (0..3).map(move |c| (f64::from(o[c]) * scale / f64::from(r[c]) - 1.0).abs())
-            })
-            .collect();
-        errors.sort_by(f64::total_cmp);
-        let (median, p99) = (errors[errors.len() / 2], errors[errors.len() * 99 / 100]);
-        eprintln!(
-            "scale {scale:.1}, relative error median {median:.2e}, p99 {p99:.2e}, n {}",
-            pairs.len()
-        );
-        assert!(median < 2e-3 && p99 < 2e-2, "median {median}, p99 {p99}");
-        // LibRaw divides multipliers by the smallest, Drip by green's.
-        let m = drip_libraw::decode(&path).unwrap().as_shot;
-        let expected =
-            65535.0 * f64::from(m[1] / m[..3].iter().copied().fold(f32::INFINITY, f32::min));
-        assert!((scale / expected - 1.0).abs() < 1e-3, "scale {scale}, expected {expected}");
-    }
+    // LibRaw scales by 65535 and normalizes white balance to its smallest
+    // multiplier rather than green, so compare up to one global factor,
+    // estimated on unclipped mid-tones and checked against its prediction.
+    let usable = |r: &[u16; 3]| r.iter().all(|&v| (1000..60000).contains(&v));
+    let pairs: Vec<_> = (0..ours.height)
+        .flat_map(|y| (0..ours.width).map(move |x| (y, x)))
+        .map(|(y, x)| (ours.pixels[y * ours.width + x], reference[y * width + x]))
+        .filter(|(_, r)| usable(r))
+        .collect();
+    assert!(pairs.len() > 10_000, "too few usable pixels");
+    let mut ratios: Vec<_> = pairs.iter().map(|(o, r)| f64::from(r[1]) / f64::from(o[1])).collect();
+    ratios.sort_by(f64::total_cmp);
+    let scale = ratios[ratios.len() / 2];
+    let m = drip_libraw::decode(&path).unwrap().as_shot;
+    let expected = 65535.0 * f64::from(m[1] / m[..3].iter().copied().fold(f32::INFINITY, f32::min));
+    assert!((scale / expected - 1.0).abs() < 1e-3, "scale {scale}, expected {expected}");
+
+    let mut errors: Vec<_> = pairs
+        .iter()
+        .flat_map(|(o, r)| {
+            (0..3).map(move |c| (f64::from(o[c]) * scale / f64::from(r[c]) - 1.0).abs())
+        })
+        .collect();
+    errors.sort_by(f64::total_cmp);
+    let (median, p99) = (errors[errors.len() / 2], errors[errors.len() * 99 / 100]);
+    assert!(median < 2e-3 && p99 < 2e-2, "relative error median {median}, p99 {p99}");
 }
 
 #[test]
 fn exports_a_tiff_from_a_raw() {
-    for path in raws() {
-        let dir = std::env::temp_dir().join(format!("drip-raw-export-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let (profile, out) = (dir.join("srgb.icc"), dir.join("out.tif"));
-        std::fs::write(&profile, Profile::new_srgb().icc().unwrap()).unwrap();
+    let dir = std::env::temp_dir().join(format!("drip-raw-export-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (profile, out) = (dir.join("srgb.icc"), dir.join("out.tif"));
+    std::fs::write(&profile, Profile::new_srgb().icc().unwrap()).unwrap();
 
-        let reg = nodes::registry();
-        let (mut p, ids) = pipeline(&path, &[&nodes::SIGMOID, &nodes::TIFF]);
-        let export = *ids.last().unwrap();
-        p.bind(&reg, export, "path", "out").unwrap();
-        p.set_argument(&reg, "out", json!(out)).unwrap();
-        p.graph.set_param(&reg, export, "profile", json!(profile)).unwrap();
-        run_action(&p, &reg, export, "export").unwrap();
+    let reg = nodes::registry();
+    let (mut p, ids) = pipeline(&fixture(), &[&nodes::SIGMOID, &nodes::TIFF]);
+    let export = *ids.last().unwrap();
+    p.bind(&reg, export, "path", "out").unwrap();
+    p.set_argument(&reg, "out", json!(out)).unwrap();
+    p.graph.set_param(&reg, export, "profile", json!(profile)).unwrap();
+    run_action(&p, &reg, export, "export").unwrap();
 
-        let raw = drip_libraw::decode(&path).unwrap();
-        let mut decoder = tiff::decoder::Decoder::new(std::fs::File::open(&out).unwrap()).unwrap();
-        assert_eq!(decoder.dimensions().unwrap(), (raw.width as u32 / 2, raw.height as u32 / 2));
-        assert_eq!(
-            decoder.get_tag_u8_vec(tiff::tags::Tag::IccProfile).unwrap(),
-            std::fs::read(&profile).unwrap()
-        );
-        let tiff::decoder::DecodingResult::U16(data) = decoder.read_image().unwrap() else {
-            panic!("not 16 bit")
-        };
-        let mean = data.iter().map(|&v| f64::from(v)).sum::<f64>() / data.len() as f64 / 65535.0;
-        eprintln!("exported {}x{}, mean value {mean:.3}", raw.width / 2, raw.height / 2);
-        std::fs::remove_dir_all(dir).unwrap();
-    }
+    let raw = drip_libraw::decode(&fixture()).unwrap();
+    let mut decoder = tiff::decoder::Decoder::new(std::fs::File::open(&out).unwrap()).unwrap();
+    assert_eq!(decoder.dimensions().unwrap(), (raw.width as u32 / 2, raw.height as u32 / 2));
+    let icc = decoder.get_tag_u8_vec(tiff::tags::Tag::IccProfile).unwrap();
+    assert_eq!(icc, std::fs::read(&profile).unwrap());
+    let tiff::decoder::DecodingResult::U16(data) = decoder.read_image().unwrap() else {
+        panic!("not 16 bit")
+    };
+    let mean = data.iter().map(|&v| f64::from(v)).sum::<f64>() / data.len() as f64 / 65535.0;
+    assert!((0.02..0.98).contains(&mean), "mean {mean}: blank or saturated");
+    std::fs::remove_dir_all(dir).unwrap();
 }

@@ -1,43 +1,20 @@
-//! Runs against real raws when `DRIP_TEST_RAWS` names a directory of them;
-//! otherwise there is nothing to check and the tests pass vacuously.
-
 use std::path::{Path, PathBuf};
 
-fn raws(extension: &str) -> Vec<PathBuf> {
-    let Some(dir) = std::env::var_os("DRIP_TEST_RAWS") else { return vec![] };
-    let mut files: Vec<_> = std::fs::read_dir(dir)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case(extension)))
-        .collect();
-    files.sort();
-    files.truncate(3);
-    files
+fn fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw/sony-ilce-7rm3.arw")
 }
 
 #[test]
-fn decodes_bayer_raws() {
-    for path in raws("arw") {
-        let raw = drip_libraw::decode(&path).unwrap();
-        assert_eq!(raw.data.len(), raw.width * raw.height);
-        let mut colors: Vec<_> = raw.cfa.concat();
-        colors.sort();
-        assert_eq!(colors, [0, 1, 2, 3], "RGBG Bayer");
-        assert!(raw.maximum > raw.black + raw.channel_black.iter().max().unwrap());
-        assert!(raw.as_shot[..3].iter().all(|&m| m > 0.0));
-        eprintln!(
-            "{}x{} cfa {:?} black {} {:?} pattern {}x{} max {} wb {:?}",
-            raw.width,
-            raw.height,
-            raw.cfa,
-            raw.black,
-            raw.channel_black,
-            raw.pattern.height,
-            raw.pattern.width,
-            raw.maximum,
-            raw.as_shot
-        );
-    }
+fn decodes_a_bayer_raw() {
+    let raw = drip_libraw::decode(&fixture()).unwrap();
+    assert_eq!(raw.data.len(), raw.width * raw.height);
+    let mut colors: Vec<_> = raw.cfa.concat();
+    colors.sort();
+    assert_eq!(colors, [0, 1, 2, 3], "RGBG Bayer");
+    assert!(raw.maximum > raw.black + raw.channel_black.iter().max().unwrap());
+    assert!(raw.as_shot[..3].iter().all(|&m| m > 0.0));
+    assert!(raw.xyz_to_cam.iter().flatten().any(|&v| v != 0.0));
+    assert_eq!((raw.metadata.make.as_str(), raw.metadata.model.as_str()), ("Sony", "ILCE-7RM3"));
 }
 
 #[test]
