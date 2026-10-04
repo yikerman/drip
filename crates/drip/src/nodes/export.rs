@@ -24,8 +24,8 @@ pub static TIFF: NodeKind = NodeKind {
     name: "export.tiff",
     version: 1,
     params: &[
-        ParamSpec { name: "path", kind: ParamKind::Path },
-        ParamSpec { name: "profile", kind: ParamKind::Path },
+        ParamSpec { name: "path", kind: ParamKind::Path { output: true } },
+        ParamSpec { name: "profile", kind: ParamKind::Path { output: false } },
         ParamSpec {
             name: "intent",
             kind: ParamKind::Choice { options: INTENTS, default: "relative" },

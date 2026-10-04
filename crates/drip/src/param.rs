@@ -34,8 +34,10 @@ pub enum ParamKind {
         options: &'static [&'static str],
         default: &'static str,
     },
-    /// A file path; unset (`null`) by default.
-    Path,
+    /// A file path, unset (`null`) by default; `output` if the node writes it.
+    Path {
+        output: bool,
+    },
 }
 
 impl ParamKind {
@@ -45,7 +47,7 @@ impl ParamKind {
             ParamKind::Int { default, .. } => default.into(),
             ParamKind::Bool { default } => default.into(),
             ParamKind::Choice { default, .. } => default.into(),
-            ParamKind::Path => Json::Null,
+            ParamKind::Path { .. } => Json::Null,
         }
     }
 
@@ -61,7 +63,7 @@ impl ParamKind {
             ParamKind::Choice { options, .. } => {
                 value.as_str().is_some_and(|v| options.contains(&v))
             }
-            ParamKind::Path => value.is_null() || value.is_string(),
+            ParamKind::Path { .. } => value.is_null() || value.is_string(),
         }
     }
 }

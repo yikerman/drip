@@ -130,7 +130,9 @@ impl Cache {
         // Debug output is canonical here: `ParamMap` is ordered by key.
         format!("{params:?}").hash(&mut h);
         if let (Some(kind), Ok(params)) = (kind, &params) {
-            for spec in kind.params.iter().filter(|spec| spec.kind == ParamKind::Path) {
+            for spec in
+                kind.params.iter().filter(|spec| matches!(spec.kind, ParamKind::Path { .. }))
+            {
                 Params(params)
                     .path(spec.name)
                     .map(|path| ctx.resources.revision(path))

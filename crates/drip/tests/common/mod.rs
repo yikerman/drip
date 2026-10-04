@@ -101,7 +101,7 @@ pub static VIEW: NodeKind = NodeKind {
 pub static WRITE: NodeKind = NodeKind {
     name: "test.write",
     version: 1,
-    params: &[ParamSpec { name: "path", kind: ParamKind::Path }],
+    params: &[ParamSpec { name: "path", kind: ParamKind::Path { output: true } }],
     inputs: &[InputSpec { name: "image", accepts: DISPLAY }],
     outputs: &[],
     eval: |_, _, _| Ok(Evaluated::default()),
@@ -142,7 +142,7 @@ pub static GAIN: NodeKind = NodeKind {
 pub static FILE: NodeKind = NodeKind {
     name: "test.file",
     version: 1,
-    params: &[ParamSpec { name: "path", kind: ParamKind::Path }],
+    params: &[ParamSpec { name: "path", kind: ParamKind::Path { output: false } }],
     inputs: &[],
     outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
     eval: |p, _, ctx| {
