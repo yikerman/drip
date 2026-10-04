@@ -37,9 +37,9 @@ pub fn raw_to_tiff() -> Project {
     };
     let chain = [&READ, &WHITE_BALANCE, &BIN_2X2, &CAMERA_TO_REC2020, &SIGMOID];
     let ids: Vec<_> =
-        chain.iter().enumerate().map(|(i, kind)| add(kind, 220.0 * i as f64, 0.0)).collect();
+        chain.iter().enumerate().map(|(i, kind)| add(kind, 195.0 * i as f64, 0.0)).collect();
     let views = [(&PREVIEW, -120.0), (&HISTOGRAM, 0.0), (&TIFF, 120.0)]
-        .map(|(kind, y)| add(kind, 1100.0, y));
+        .map(|(kind, y)| add(kind, 975.0, y));
     let mut connect = |from, output: &str, to, input: &str| {
         p.graph
             .connect(&reg, Port(from, output.into()), Port(to, input.into()))
