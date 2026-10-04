@@ -35,3 +35,4 @@ Treat it as a second opinion, not an authority: adopt what is right, briefly exp
 - `crates/drip-gui`: interactive frontend (binary `drip-gui`), placeholder until the toolkit is chosen.
 - `docs/DESIGN.md`: decisions, status, rationale. `docs/PROGRESS.md`: session log.
 - `TODO.md`: ideas not implemented.
+- `fixtures/`: test data; raws are stored with Git LFS.

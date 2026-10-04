@@ -20,3 +20,4 @@ Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
 | Relative paths against the project file | design | open | needs the project's location; with the CLI (F2) |
 | Budget and eviction for loaded resources | design | open | decoded raws stay cached until reload (E6, E7) |
 | Choose the tone curve | M2 | open | sigmoid proposed (C4) |
+| Test raws from more cameras | user | postponed | e.g. CC0 samples from raw.pixls.us; one Sony fixture for now |

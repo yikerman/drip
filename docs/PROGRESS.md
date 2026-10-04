@@ -8,6 +8,7 @@ Newest first. Each entry: what happened, what is verified, what is next.
 - `drip`: file resources with explicit reload (stamps include path revisions); the node kinds `raw.read`, `color.white_balance`, `demosaic.bin2x2`, `color.camera_to_rec2020`, `tone.sigmoid`, `view.preview`, `view.histogram`, `export.tiff`; `examples/raw_to_tiff`.
 - Verified: 53 tests. On two Sony ARWs (61 MP), Drip's scene-referred output matches LibRaw's independent pipeline with median relative error 1.3e-4 and p99 1.3e-3 over 14 M pixels; the global scale matches the predicted value. Export round-trips are checked against independently computed values. exiftool confirms the embedded ICC profile is byte-identical and typed UNDEFINED.
 - Codex reviewed M2 and found 7 issues, all fixed with tests: an unsound buffer read in `reference()`, the black denominator for small patterns, the second green's multiplier, non-finite/singular metadata, a silently dropped final write in export, a concurrent double load, and sigmoid overflow.
+- Added `fixtures/raw/sony-ilce-7rm3.arw` (Git LFS); the binding and pipeline tests now always run on it.
 - Open for the user: confirm the tone curve (C4). Next milestone: M3, the GUI (winit + wgpu + egui), starting with measured verification of the scRGB display path.
 
 ## 2026-10-04: M1 (graph engine and persistence)
