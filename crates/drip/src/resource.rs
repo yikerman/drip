@@ -33,12 +33,15 @@ impl Resources {
         path: &Path,
         load: impl FnOnce(&Path) -> Result<T, String>,
     ) -> Result<Arc<T>, String> {
+        // Held across `load`, so concurrent callers see one result per revision
+        // at the cost of serializing loads.
+        let mut loaded = self.loaded.lock().expect("not poisoned");
         let key = (path.to_path_buf(), TypeId::of::<T>());
-        if let Some(value) = self.loaded.lock().expect("not poisoned").get(&key) {
+        if let Some(value) = loaded.get(&key) {
             return Ok(value.clone().downcast().expect("keyed by type"));
         }
         let value = Arc::new(load(path)?);
-        self.loaded.lock().expect("not poisoned").insert(key, value.clone());
+        loaded.insert(key, value.clone());
         Ok(value)
     }
 }
