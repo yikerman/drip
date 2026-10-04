@@ -8,8 +8,9 @@ use drip::graph::{NodeId, Port};
 use drip::node::{Evaluated, NodeKind, OutputSpec, Registry};
 use drip::nodes;
 use drip::project::Project;
-use drip::value::{Camera, Cfa, Mosaic, PortType, Value};
+use drip::value::{Camera, Cfa, Mosaic, PortType, Rgb, Value, View};
 use drip_libraw::{BlackPattern, Raw};
+use serde_json::json;
 
 fn raw(width: usize, height: usize, data: Vec<u16>) -> Raw {
     Raw {
@@ -164,8 +165,31 @@ static MOSAIC: NodeKind = NodeKind {
     migrate: None,
 };
 
+/// A source node emitting the scene-referred pixels given as `pixels`.
+static SCENE: NodeKind = NodeKind {
+    name: "test.scene",
+    version: 1,
+    params: &[],
+    inputs: &[],
+    outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
+    eval: |_, _, _| {
+        let pixels = vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]];
+        Ok(Evaluated {
+            outputs: vec![Value::SceneRec2020(Arc::new(Rgb {
+                width: 2,
+                height: 1,
+                scale: 1,
+                pixels,
+            }))],
+            view: None,
+        })
+    },
+    actions: &[],
+    migrate: None,
+};
+
 fn registry() -> Registry {
-    nodes::registry().with(&MOSAIC)
+    nodes::registry().with(&MOSAIC).with(&SCENE)
 }
 
 /// Builds source → kinds… and returns the project and the last node.
@@ -207,4 +231,43 @@ fn binning_debayer_averages_greens_and_halves_resolution() {
     assert_eq!((image.width, image.height, image.scale), (2, 1, 2));
     // Cells: [0.1 0.2 / 0.5 0.6] and [0.3 0.4 / 0.7 0.8], RGGB.
     assert_eq!(image.pixels, [[0.1, (0.2 + 0.5) / 2.0, 0.6], [0.3, (0.4 + 0.7) / 2.0, 0.8]]);
+}
+
+#[test]
+fn sigmoid_keeps_grey_and_maps_onto_unit_range() {
+    let (mut p, s) = chain(&SCENE, &[&nodes::SIGMOID]);
+    let out = evaluate(&p, s).outputs[0].rgb().pixels.clone();
+    assert!((out[0][0] - 0.18).abs() < 1e-6, "middle grey stays");
+    assert_eq!((out[0][1], out[0][2]), (0.0, 0.0), "black and negatives map to 0");
+    assert!(out[1][1] <= 1.0 && out[1][1] > 0.999, "highlights approach 1");
+    assert!(out[1][0] < 0.18 && out[1][2] > 0.18, "monotonic around grey");
+
+    p.graph.set_param(&registry(), s, "exposure", json!(1.0)).unwrap();
+    let out = evaluate(&p, s).outputs[0].rgb().pixels.clone();
+    assert!((out[1][0] - 0.18).abs() < 1e-6, "+1 EV brings 0.09 to grey");
+
+    p.graph.set_param(&registry(), s, "exposure", json!(10.0)).unwrap();
+    p.graph.set_param(&registry(), s, "contrast", json!(4.0)).unwrap();
+    let out = evaluate(&p, s).outputs[0].rgb().pixels.clone();
+    assert_eq!(out[1][1], 1.0, "overflowing powers saturate instead of becoming NaN");
+}
+
+#[test]
+fn histogram_bins_by_stops() {
+    let (p, h) = chain(&SCENE, &[&nodes::HISTOGRAM]);
+    let Some(View::Histogram(h)) = evaluate(&p, h).view else { panic!("no histogram") };
+    let bin = |v: f32| ((v.log2() - h.min_stop) / (h.max_stop - h.min_stop) * 256.0) as usize;
+    assert_eq!(h.counts.iter().map(|c| c[0] + c[1] + c[2]).sum::<u32>(), 6);
+    assert_eq!(h.counts[0], [0, 1, 1], "zero and negative values");
+    assert_eq!(h.counts[255], [0, 1, 0], "values beyond the range");
+    assert_eq!(h.counts[bin(0.18)][0], 1);
+    assert_eq!(h.counts[bin(0.36)][2], 1);
+}
+
+#[test]
+fn preview_presents_its_input() {
+    let (p, v) = chain(&SCENE, &[&nodes::PREVIEW]);
+    let out = evaluate(&p, v);
+    assert!(out.outputs.is_empty());
+    assert!(matches!(out.view, Some(View::Image(Value::SceneRec2020(_)))));
 }

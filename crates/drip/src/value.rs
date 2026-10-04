@@ -119,4 +119,15 @@ pub struct Camera {
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
     Image(Value),
+    Histogram(Arc<Histogram>),
+}
+
+/// Pixel counts per channel over equal steps of log2 value (stops), which
+/// suits linear data. Values at or below `2^min_stop`, zero and negative
+/// included, fall in the first bin; values at or above `2^max_stop` in the last.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Histogram {
+    pub min_stop: f32,
+    pub max_stop: f32,
+    pub counts: Vec<[u32; 3]>,
 }

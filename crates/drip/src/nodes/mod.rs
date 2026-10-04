@@ -2,14 +2,18 @@
 
 mod color;
 mod raw;
+mod tone;
+mod view;
 
 pub use color::{BIN_2X2, CAMERA_TO_REC2020, WHITE_BALANCE};
 pub use raw::{READ, normalize};
+pub use tone::SIGMOID;
+pub use view::{HISTOGRAM, PREVIEW};
 
 use crate::node::Registry;
 
 pub fn registry() -> Registry {
-    [&READ, &WHITE_BALANCE, &BIN_2X2, &CAMERA_TO_REC2020]
+    [&READ, &WHITE_BALANCE, &BIN_2X2, &CAMERA_TO_REC2020, &SIGMOID, &PREVIEW, &HISTOGRAM]
         .into_iter()
         .fold(Registry::default(), Registry::with)
 }
