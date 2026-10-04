@@ -2,6 +2,15 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: M3 (GUI)
+
+- Display path measured (D5): on KWin/NVIDIA, scRGB gives the same pixels as tagging the surface Rec.2020, and matches sRGB within rounding in gamut. Beyond sRGB still needs the colorimeter check (TODO).
+- `drip-gui`: winit + wgpu + egui with an offscreen gamma canvas and a final scRGB pass (sRGB fallback with a warning), wide-gamut previews via paint callbacks, a custom node editor over the project graph, schema-driven inspector with bindings and graph inputs, histogram, export on a worker thread, open/save project and template. Neutral middle-grey style (G5). Logging through `log`/`env_logger`.
+- Codex reviewed the GUI and found 7 issues, all fixed: a continuous redraw loop, preview-level oscillation, lost label edits, NaN offset on an empty graph, lost surfaces, incompatible bindings (now refused by the library), filename changed by a failed Save As.
+- User decisions: no migration (F6; files carry the major version); built-in output profiles sRGB, Display P3 and Rec.2020 (C7).
+- Verified: 57 tests, including 4 headless UI tests. The GUI runs on the fixture raw: decode 0.39 s once, re-evaluation from the sigmoid about 130 ms at the adapted preview level.
+- Next: the user's review of the GUI; then the CLI, or remaining TODO items.
+
 ## 2026-10-04: M2 (prototype pipeline)
 
 - `drip-libraw`: our own binding, a C shim with one safe `decode()`, linked to the system `libraw_r`. A `reference` feature exposes LibRaw's half-size pipeline for cross-checks. CI installs LibRaw per platform (Windows/macOS unverified, no remote yet).
