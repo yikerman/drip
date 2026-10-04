@@ -101,6 +101,12 @@ int drip_raw_reference(const char *path, int *width, int *height, unsigned short
   if (!err)
     err = libraw_dcraw_process(lr);
   libraw_processed_image_t *img = err ? NULL : libraw_dcraw_make_mem_image(lr, &err);
+  if (img && (img->type != LIBRAW_IMAGE_BITMAP || img->colors != 3 || img->bits != 16 ||
+              img->data_size != (unsigned)img->width * img->height * 3 * 2)) {
+    libraw_dcraw_clear_mem(img);
+    img = NULL;
+    err = DRIP_NOT_BAYER;
+  }
   if (img) {
     *width = img->width;
     *height = img->height;
