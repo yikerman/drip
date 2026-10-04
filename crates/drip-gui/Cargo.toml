@@ -1,0 +1,13 @@
+[package]
+name = "drip-gui"
+description = "Interactive node-graph frontend for Drip"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+drip.workspace = true
+
+[lints]
+workspace = true

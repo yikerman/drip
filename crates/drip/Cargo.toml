@@ -1,0 +1,12 @@
+[package]
+name = "drip"
+description = "Drip processing library: node graph, image processing, color management, persistence"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
