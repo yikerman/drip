@@ -14,7 +14,7 @@ use crate::{inspector, theme};
 
 /// Preview levels never go coarser than 1/256 of the sensor.
 const MAX_LEVEL: u8 = 8;
-const DEFAULT_LEVEL: u8 = 3;
+const DEFAULT_LEVEL: u8 = 1;
 
 pub struct App {
     pub(crate) project: Project,
@@ -364,7 +364,7 @@ mod tests {
             panic!("an image")
         };
         assert_eq!(app.level, DEFAULT_LEVEL);
-        assert_eq!(image.width, 498, "1/8 preview plus 2×2 debayer");
+        assert_eq!(image.width, 1992, "1/2 preview plus 2×2 debayer");
         h.get_by_label("Invalidate cache").click();
         settle(&mut h);
         let Some(View::Image(refreshed)) = h.state().worker.result(id).unwrap().as_ref().unwrap()

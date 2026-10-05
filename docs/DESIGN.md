@@ -70,7 +70,7 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 
 | E15 | Use Rayon for white balance, 2×2 debayering, camera-to-Rec.2020, sigmoid and histogram. Remove CubeCL and postpone GPU computation. | decided (user, 2026-10-04); implemented | Ordinary Rust parallel iterators use one algorithm with one or multiple CPU workers. No JIT, compute device, runtime buffers or host transfers; graph and node contracts remain unchanged. Measured latency is lower than CubeCL on the test machine (3.3.3). |
 
-| E16 | Preview level is one manually selected global setting; exports always evaluate at level 0. | requirement (user, 2026-10-04); implemented | The GUI offers Full through 1/256, defaults to 1/8 and persists the level in project UI state. All visible targets share one level through the unchanged evaluator API; one cached result per node remains sufficient. |
+| E16 | Preview level is one manually selected global setting; exports always evaluate at level 0. | requirement (user, 2026-10-04); implemented | The GUI offers Full through 1/256, defaults to 1/2 and persists the level in project UI state. All visible targets share one level through the unchanged evaluator API; one cached result per node remains sufficient. |
 | E17 | Remove eager RAW pyramid retention when manual levels are introduced. Keep ordinary dependency-stamp caching. | requirement (user, 2026-10-04); not implemented | Rapid level switching no longer justifies retaining every normalized level. The exact resource lifetime proposal is in 3.3.4; the Rayon commit leaves current caches intact. |
 
 | E18 | Use the existing lowercase status style: “evaluating…” for pending preview work, “running export…” for export, then “done” or the error. | requirement (user, 2026-10-04); implemented | Keep the previous preview available while a new result is computed. Current failures replace the old view with an error. |
@@ -171,7 +171,7 @@ and 4 are now implemented; RAW retention changes in step 2 remain pending.
 The resulting worker behavior is recorded in 3.3.6.
 
 **1. Manual global preview level — implemented.** The GUI selector offers
-levels 0–8 (Full through 1/256), default 3 (1/8), saved in `Project::ui` and
+levels 0–8 (Full through 1/256), default 1 (1/2), saved in `Project::ui` and
 validated when loading frontend state. Automatic adaptation and image-size
 feedback have been removed. Zooming or resizing a view only changes its
 presentation. The GUI calls the existing `evaluate(graph, level, targets)`;

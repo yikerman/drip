@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: half-scale preview default
+
+- Changed the default global preview detail to 1/2 as requested. Applies to new projects and projects without a saved level; explicit saved settings still take precedence.
+- Verification: GUI tests and formatting pass, including default preview dimensions and resetting a new project. No new deferred work.
+
 ## 2026-10-04: invalidate the full evaluation cache
 
 - Replaced the button's per-file reload with a fresh evaluator on the worker, clearing every node result and loaded resource. Earlier completions are rejected and pending requests discarded; the UI requests visible targets again while retaining the last presentation. Existing exports retain their snapshots; subsequent exports use the fresh resource store.

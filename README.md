@@ -63,7 +63,7 @@ In the GUI:
 - Right-click the editor background to add a node.
 - Drag from an output port to an input port to connect them; right-click an
   input port to disconnect it.
-- Choose **Preview detail** globally: Full through 1/256, default 1/8. The
+- Choose **Preview detail** globally: Full through 1/256, default 1/2. The
   selection is saved with the project; exports always use full detail.
 - Previews update in the background. The status line shows **evaluating…**
   while the previous completed image remains visible.
