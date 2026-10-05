@@ -7,7 +7,7 @@ use drip_libraw::Raw;
 use crate::color::{self, D65, REC2020};
 use crate::node::{EvalContext, Evaluated, NodeKind, OutputSpec};
 use crate::param::{ParamKind, ParamSpec, Params};
-use crate::value::{Camera, Cfa, Mosaic, PortType, RawMetadata, Value};
+use crate::value::{Camera, Cfa, Mosaic, PortType, Value};
 
 pub static READ: NodeKind = NodeKind {
     name: "raw.read",
@@ -24,34 +24,16 @@ pub static READ: NodeKind = NodeKind {
 
 fn read(p: Params, _: &[Value], ctx: &EvalContext) -> Result<Evaluated, String> {
     let path = p.path("path").ok_or("no raw file chosen")?;
-    let pyramid = ctx.resources().load(path, |path| {
-        let raw = drip_libraw::decode(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        Pyramid::new(raw)
+    let raw = ctx.resources().load(path, |path| {
+        drip_libraw::decode(path).map_err(|e| format!("{}: {e}", path.display()))
     })?;
-    let outputs = vec![
-        Value::Mosaic(pyramid.levels[ctx.level as usize].clone()),
-        Value::RawMetadata(pyramid.metadata.clone()),
-    ];
-    Ok(Evaluated { outputs, view: None })
-}
-
-struct Pyramid {
-    levels: Vec<Arc<Mosaic>>,
-    metadata: Arc<RawMetadata>,
-}
-
-impl Pyramid {
-    fn new(raw: Raw) -> Result<Self, String> {
-        let mut levels = vec![Arc::new(normalize(&raw)?)];
-        let metadata = Arc::new(raw.metadata.clone());
-        drop(raw);
-        // EvalContext supports u32 scales. Beyond the image's dimensions the
-        // remaining levels are empty, but still carry the requested scale.
-        for _ in 1..u32::BITS {
-            levels.push(Arc::new(downsample(levels.last().expect("base level"))));
-        }
-        Ok(Self { levels, metadata })
+    let mut mosaic = normalize(&raw)?;
+    for _ in 0..ctx.level {
+        mosaic = downsample(&mosaic);
     }
+    let outputs =
+        vec![Value::Mosaic(Arc::new(mosaic)), Value::RawMetadata(Arc::new(raw.metadata.clone()))];
+    Ok(Evaluated { outputs, view: None })
 }
 
 /// Subtracts black and scales sensor saturation to 1, cropping partial Bayer

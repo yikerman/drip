@@ -101,7 +101,7 @@ fn binning_keeps_the_bayer_phase_and_crops_partial_cells() {
 }
 
 #[test]
-fn pyramid_matches_direct_averages_with_patterned_black_and_all_bayer_phases() {
+fn repeated_downsampling_matches_direct_averages_with_patterned_black_and_all_bayer_phases() {
     let data = (0..19 * 17).map(|i| (i * 137 % 1500) as u16).collect();
     let mut r = raw(19, 17, data);
     r.channel_black = [4, 8, 12, 16];

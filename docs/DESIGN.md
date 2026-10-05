@@ -59,11 +59,11 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 | E4 | `EvalContext` carries a downscale level `k`, which gives `scale() = 2^k`. Storing the level makes non-power-of-two scales unrepresentable. Later it will also carry a region of interest and a cancellation token. | decided | This leaves room for the deferred items: 1:1 viewing of the visible region (ROI), background evaluation (cancellation) and GPU work. None of them is built now. |
 | E5 | **Preview scale is applied in the raw reader**: after black subtraction, same-color CFA sites are averaged with the CFA phase preserved, and odd edges are cropped, so the reduced image is still a valid Bayer mosaic. Spatial parameters are expressed in full-resolution pixels and divided by `ctx.scale` inside nodes. | decided | Interactive editing must work on a reduced image, but debayering needs a real mosaic. Binning inside the CFA satisfies both. Expressing parameters at full resolution keeps preview and export consistent. |
 | E8 | Dev builds use `opt-level = 1`. | decided (user, 2026-10-04) | At opt-level 0 the real-raw tests took about 105 s, against 11 s at opt-level 1. Image processing has to be usable in development. |
-| E6 | The interactive session keeps one node-result cache at preview scale. Full-resolution export has no persistent node-result cache: within one run each node is evaluated once, and its outputs are held until their last consumer has run. Resources are shared with preview (E11). | decided | A 45 MP 3-channel f32 image takes about 540 MB, so caching every node at full resolution isn't viable. Resource retention is separate from intermediate image lifetimes. |
+| E6 | The interactive session keeps one node-result cache at preview scale. Full-resolution export has no persistent node-result cache: within one run each node is evaluated once, and its outputs are held until their last consumer has run. Resources are shared with preview (E17, E19). | decided | A 45 MP 3-channel f32 image takes about 540 MB, so caching every node at full resolution isn't viable. Resource retention is separate from intermediate image lifetimes. |
 | ~~E7~~ | ~~LibRaw's decode (scale-independent and expensive) is memoized in a session resource cache keyed by path. It is not node state.~~ | superseded by E11 (user, 2026-10-04) | The normalized pyramid replaces the decoded u16 buffer, also removing repeated normalization and binning. |
 | E9 | Prioritize interactive responsiveness, cross-platform support and ease of kernel development over peak throughput. Maintain exactly one source implementation of each computational kernel across CPU and GPU backends. | requirement (user, 2026-10-04) | Preview-level transitions currently interrupt interaction. Backend-specific compilation and dispatch may differ; handwritten copies of the algorithm are excluded. |
 | ~~E10~~ | ~~Use CubeCL 0.11.0-pre.4 for the five computational nodes, selecting hardware GPU or native CPU at runtime.~~ | superseded by E15 (user, 2026-10-04) | The implementation was evaluated, then replaced with Rayon for simpler development and better measured host-to-host latency. See 3.3.2–3.3.3. |
-| E11 | Cache a normalized f32 RAW pyramid and metadata per path and resource revision for the application session, including across project changes. Decode and normalize once, release the u16 buffer, then eagerly derive each coarser level by averaging four same-phase Bayer sites with whole-cell cropping. Preview and export share these immutable levels; export snapshots resource revisions and keeps a separate temporary node cache. Explicit reload replaces a resource without changing existing snapshots. | decided (user, 2026-10-04); implemented | The user accepts about 226 MB per 42 MP pyramid (at most 4/3 of the base mosaic), excluding processing intermediates. A level change clones an Arc instead of scanning the sensor. One implementation each for normalization and downsampling; no RAW-specific evaluator logic. Resources loaded first by an export are shared back to the session. Recursive averages agree with independent direct averages within f32 rounding. No eviction in this prototype; first-load work increases. Snapshots retain cached content, not copies of unread files on disk. |
+| ~~E11~~ | ~~Retain a normalized f32 RAW pyramid across levels and projects.~~ | superseded by E17 and E19 (user, 2026-10-04) | The earlier level-switch benchmarks used this policy. Manual levels no longer justify retaining every normalized level. |
 | E12 | Run interactive evaluation and CPU texture preparation on a persistent frontend worker. Retain the last completed preview and coalesce pending node-target requests at the global level. | decided (user, 2026-10-04); implemented | The existing synchronous library evaluator and its one-result-per-node cache stay on the worker. Monotonic request generations reject stale results across edits and project replacement; completion wakes the window loop. See 3.3.6. |
 | E13 | Acceleration is an implementation detail of selected nodes. Preserve existing host-value inputs/outputs, node contracts, evaluator, graph, caches and renderer; ordinary nodes may coexist with accelerated ones. Maintain one kernel source across its execution backends (E9). | requirement (user, 2026-10-04) | The user requires changes to stay inside some nodes and remain transparent to other infrastructure. Backend selection, runtime reuse and temporary buffers belong behind the node implementation. Include allocation, transfers, synchronization and output materialization in performance comparisons. Cross-node device residency, graph fusion and renderer integration are outside this change. |
 | E14 | Preview latency below 300 ms is acceptable; prioritize straightforward development over further throughput tuning. Linux is the first target; Windows/macOS are lower priority. | requirement (user, 2026-10-04) | A future worker can tolerate longer computations while keeping the UI responsive. Initial RAW loading and full-resolution processing are measured separately. |
@@ -71,7 +71,7 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 | E15 | Use Rayon for white balance, 2×2 debayering, camera-to-Rec.2020, sigmoid and histogram. Remove CubeCL and postpone GPU computation. | decided (user, 2026-10-04); implemented | Ordinary Rust parallel iterators use one algorithm with one or multiple CPU workers. No JIT, compute device, runtime buffers or host transfers; graph and node contracts remain unchanged. Measured latency is lower than CubeCL on the test machine (3.3.3). |
 
 | E16 | Preview level is one manually selected global setting; exports always evaluate at level 0. | requirement (user, 2026-10-04); implemented | The GUI offers Full through 1/256, defaults to 1/2 and persists the level in project UI state. All targets share one level through the unchanged evaluator API; one cached result per node remains sufficient. |
-| E17 | Remove eager RAW pyramid retention when manual levels are introduced. Keep ordinary dependency-stamp caching. | requirement (user, 2026-10-04); not implemented | Rapid level switching no longer justifies retaining every normalized level. The exact resource lifetime proposal is in 3.3.4; the Rayon commit leaves current caches intact. |
+| E17 | Cache decoded RAW data and derive only the requested normalized mosaic. Keep ordinary dependency-stamp caching. | requirement (user, 2026-10-04); implemented | Normalization and repeated same-phase downsampling reuse the existing algorithms, discarding temporary levels. Only the current result per node remains cached. Preview and export share decoded data until project replacement or invalidation (E19); see 3.3.7 for the measured cost. |
 
 | E18 | Use the existing lowercase status style: “evaluating…” for pending preview work, “running export…” for export, then “done” or the error. | requirement (user, 2026-10-04); implemented | Keep the previous preview available while a new result is computed. Current failures replace the old view with an error. |
 
@@ -168,8 +168,8 @@ none is changed by the Rayon replacement.
 
 ### 3.3.4 Preview level and background evaluation plan (2026-10-04)
 
-**Original implementation plan, written after the Rayon commit.** Steps 1, 3
-and 4 are now implemented; RAW retention changes in step 2 remain pending.
+**Original implementation plan, written after the Rayon commit.** All four steps
+are implemented; resource retention now follows E17 and E19.
 The resulting worker behavior is recorded in 3.3.6. The original visibility-based
 target policy below was subsequently removed by G11.
 
@@ -183,14 +183,14 @@ level 0 independently. With the current 2×2 debayer, level 0 still produces
 half the sensor dimensions (C6). The cache and worker changes were kept separate
 from the detail-level implementation.
 
-**2. Simplify RAW retention.** Remove the normalized `Pyramid` and derive only
+**2. Simplify RAW retention — implemented (3.3.7).** Remove the normalized `Pyramid` and derive only
 the requested mosaic from decoded data. Keep one current result per node: that
 cache prevents recomputation on every frame and unrelated edit. Proposed resource
-policy: retain decoded RAW data for the active project, share it with exports,
-and release it on project replacement or explicit reload once existing readers
-finish. This preserves the I/O saving without retaining all f32 levels or all
-previous projects. The generic resource revision/snapshot mechanism can stay;
-it is also what makes an already started export independent of a later reload.
+policy (now implemented): retain decoded RAW data for the active project, share
+it with exports, and release it on project replacement or cache invalidation
+once existing readers finish. This preserves the I/O saving without retaining all f32 levels or all
+previous projects. E19 replaces the original revision/snapshot proposal with a
+shared resource store; existing exports keep their store after invalidation.
 Manual level changes will rescan the decoded sensor; benchmark this separately
 from the Rayon numbers, which used the unchanged pyramid cache. This scope
 removes the added level cache, not every cache in the application.
@@ -364,7 +364,7 @@ after preceding invalidations. The existing separate export thread then runs the
 detail action and reports completion. The GUI still permits one export at a
 time; preview and export computation can run concurrently. Both reuse the same
 Rayon pool. Project replacement starts with a fresh evaluator and resource store
-(E19). RAW pyramid removal remains pending (E17).
+(E19). RAW resources retain decoded data rather than a normalized pyramid (E17).
 
 “Invalidate cache” replaces the worker's entire evaluator with a fresh instance,
 discarding every node result (including errors) and loaded resource. It advances the request generation and discards
@@ -399,12 +399,43 @@ real RAW, TIFF and global-detail tests continue to pass. Driver upload/draw late
 still needs end-to-end measurement; asynchronous CPU work alone does not promise
 a particular frame-time bound.
 
+### 3.3.7 RAW retention cleanup (2026-10-04)
+
+**Decided and implemented.** The resource store caches decoded `Raw` values.
+Each raw-node evaluation normalizes the sensor, repeatedly downsamples to the
+requested global level and drops temporary levels. No pyramid is retained.
+Unchanged raw nodes still reuse their ordinary evaluator result. A project
+replacement or invalidation releases the resource store after existing exports
+finish. Changing paths within one project retains earlier reads until that reset.
+
+On the same Sony fixture and machine as 3.3.3, seven release repetitions of the
+preview/histogram level cycle gave the following medians. These include node
+allocations and cache replacement, excluding GUI preparation/upload/drawing;
+filesystem caches were not controlled. The level-3 transition follows level 0
+and includes retiring its larger intermediates.
+
+| Level | Before: retained pyramid | After: decoded RAW |
+|-------|--------------------------|--------------------|
+| 3 (1/8) | 55.0 ms | 282.1 ms |
+| 2 (1/4) | 12.0 ms | 219.4 ms |
+| 1 (1/2, default) | 45.0 ms | 244.1 ms |
+| 0 (Full) | 189.0 ms | 358.0 ms |
+
+Initial decode plus evaluation was 499.8/485.9 ms before/after. The decoded u16
+resource is about 85 MB instead of the roughly 226 MB f32 pyramid, excluding
+current node results and temporary full-size normalization. Full-detail changes
+exceed the earlier 300 ms preference; computation remains off the UI thread.
+Tests compare LibRaw output, independent CFA averages, regenerated levels and
+export results; a deleted source file proves subsequent levels/forks reuse the
+decoded data, and a weak reference verifies old normalized levels are released.
+
 ### 3.4 UI-only nodes and side effects
 
 | ID | Decision | Status | Rationale |
 |----|----------|--------|-----------|
 | U1 | UI-only nodes are ordinary nodes with zero output ports. What they compute for presentation (histogram bins, the preview image) goes into `Evaluated::view`, which any node may set. The library computes views. Frontends read and draw them; the GUI draws each view inside its node (G7). | decided | Nothing is special-cased. A histogram in the middle of a pipeline is just another target the GUI asks for. Views are plain data, so they can be tested headlessly. |
 | U2 | Side effects are **actions**. A node kind may declare named actions, each with its own evaluation policy; Export declares `export` with policy full scale. A frontend calls `run_action(node, "export")`. The library then evaluates that node's inputs against a snapshot of the graph and resources and runs the action with those inputs, params and an evaluation context. `eval` itself never writes files. The CLI runs `export` on every node that declares it. Still to define: what happens on overwrite, on destination collisions between exports, and when some exports fail. | decided | This meets "side effects on explicit action, not on every re-evaluation" and gives export its full-resolution evaluation. The alternative, treating export as a sink that writes during eval, fails three ways: the cache would skip a repeated export, the preview scale would leak into the export, and a stray GUI request could write files. |
+
 
 ## 4. Color
 

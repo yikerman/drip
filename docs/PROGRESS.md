@@ -2,6 +2,12 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: remove eager RAW pyramids
+
+- Cache decoded RAW once per resource store; derive the requested normalized level using the existing normalization/downsampling algorithms and discard intermediates. Removed E17 from TODO.
+- Verification: workspace tests, formatting and clippy pass. Tests check independent CFA averages, LibRaw agreement, TIFF output, old-level release and level/fork reuse after deleting the source file.
+- Release benchmark: default 1/2 level changes 45.0→244.1 ms; Full 189.0→358.0 ms. Resource storage is about 85 MB instead of 226 MB, excluding node results and temporary buffers. Full measurements and limits are in DESIGN 3.3.7. Export snapshot cleanup follows separately.
+
 ## 2026-10-04: simplify resource invalidation
 
 - Removed per-file reload/revisions and resource-path enumeration. Preview/export share a resource store, including concurrent first reads; invalidation and project replacement create a fresh store while existing exports retain their readers.

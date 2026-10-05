@@ -106,33 +106,38 @@ fn built_in_template_takes_the_raw_and_output_paths() {
     assert_eq!(Project::from_json(&template.to_json(), &nodes::registry()).unwrap(), template);
 
     let mut p = template;
-    p.graph.set_param(raw, "path", json!(fixture())).unwrap();
+    let path = std::env::temp_dir().join(format!("drip-raw-cache-{}.arw", std::process::id()));
+    std::fs::copy(fixture(), &path).unwrap();
+    p.graph.set_param(raw, "path", json!(path)).unwrap();
     let preview = p.graph.find("preview").unwrap();
     let mut ev = Evaluator::default();
     ev.evaluate(&p.graph, 3, &[preview]);
+    // Later levels and export forks must work entirely from decoded data.
+    std::fs::remove_file(&path).unwrap();
     let view = ev.result(preview).unwrap().as_ref().unwrap().view.clone();
     let Some(drip::value::View::Image(image)) = view else { panic!("no preview") };
     assert_eq!(image.rgb().scale, 16, "level 3 and the 2x2 debayer");
 
     let cached = ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic().clone();
+    let previous = Arc::downgrade(&cached);
+    let expected = cached.data.clone();
+    drop(cached);
     ev.evaluate(&p.graph, 2, &[raw]);
+    assert!(previous.upgrade().is_none(), "old normalized levels are not retained");
     ev.evaluate(&p.graph, 3, &[raw]);
-    assert!(Arc::ptr_eq(&cached, ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic()));
+    assert_eq!(expected, ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic().data);
 
     let other = p.graph.add_node(&nodes::READ);
-    p.graph.set_param(other, "path", json!(fixture())).unwrap();
+    p.graph.set_param(other, "path", json!(path)).unwrap();
     let mut fork = ev.fork();
     fork.evaluate(&p.graph, 3, &[other]);
-    assert!(Arc::ptr_eq(
-        &cached,
-        fork.result(other).unwrap().as_ref().unwrap().outputs[0].mosaic()
-    ));
+    assert_eq!(expected, fork.result(other).unwrap().as_ref().unwrap().outputs[0].mosaic().data);
     fork.evaluate(&p.graph, 0, &[other]);
     ev.evaluate(&p.graph, 0, &[raw]);
-    assert!(Arc::ptr_eq(
-        fork.result(other).unwrap().as_ref().unwrap().outputs[0].mosaic(),
-        ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic(),
-    ));
+    assert_eq!(
+        fork.result(other).unwrap().as_ref().unwrap().outputs[0].mosaic().data,
+        ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic().data,
+    );
     ev.evaluate(&p.graph, 31, &[raw]);
     let smallest = ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic();
     assert!(smallest.data.is_empty());
