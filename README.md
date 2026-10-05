@@ -90,4 +90,5 @@ for historical hardware measurements and their limits.
 
 ## License
 
-AGPL-3.0-or-later; see `LICENSE`.
+AGPL-3.0-or-later; see `LICENSE`. Dependencies and adapted algorithms are credited
+in [THIRD_PARTY.md](THIRD_PARTY.md).

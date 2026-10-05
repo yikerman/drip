@@ -4,6 +4,12 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: third-party credits
+
+- Added `THIRD_PARTY.md` for direct dependencies, native libraries and adapted
+  algorithms, with source notices retained beside the ports. Rust licenses were
+  checked against dependency manifests.
+
 ## 2026-10-05: node organization
 
 - Moved kernels beside their backend nodes and split frontend editing from node
