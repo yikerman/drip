@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: cache button wording
+
+- Renamed “Reload files” to “Invalidate cache” as requested; the existing resource invalidation behavior is unchanged.
+- Verification: formatting and diff checks pass. No new unimplemented work.
+
 ## 2026-10-04: background previews and evaluation status
 
 - User approved the worker and requested the existing lowercase message style. Added “evaluating…” while preview work is pending, retaining the previous image; current completion shows “done” or the error. Export retains “running export…” and its separate full-detail execution.

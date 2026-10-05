@@ -181,7 +181,7 @@ impl App {
             if ui.button("Save template…").clicked() {
                 self.save_as(true);
             }
-            if ui.button("Reload files").clicked() {
+            if ui.button("Invalidate cache").clicked() {
                 self.reload();
             }
             ui.separator();
