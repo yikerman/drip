@@ -4,6 +4,12 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: v0.1 direction
+
+- User set the milestone order: proven production algorithms and real-RAW
+  validation, editing UI/UX, SpyderX color verification, then packaging/v0.1.
+  Algorithm selection remains open; CLI expansion is not the next milestone.
+
 ## 2026-10-05: documentation compaction
 
 - Replaced accumulated plans and superseded decisions with current intent and

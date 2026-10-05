@@ -6,6 +6,10 @@ for now. Revisit performance work when measurements or usage justify it.
 
 | Idea | Status | Reason to revisit / scope |
 |------|--------|---------------------------|
+| Production processing pipeline | Next | Select and adapt proven algorithms from darktable, vkdt or Ansel; validate on real RAWs. |
+| Editing UI/UX | Planned | Refine the workflow around the production pipeline. |
+| SpyderX color verification | Planned | Measure display output and check the complete color path before release. |
+| Packaging and v0.1 | Planned | Follow processing, workflow and color verification. |
 | Static minimal LibRaw build | Planned | Vendor the needed decoder features for controlled builds. |
 | CLI batch frontend | Deferred | Apply template inputs; define overwrite, destination collisions and partial-failure behavior. |
 | Project-relative paths | Open | Resolve paths against the project location, alongside CLI work. |
@@ -20,11 +24,12 @@ for now. Revisit performance work when measurements or usage justify it.
 | Cooperative cancellation | Deferred | Only if obsolete evaluations noticeably delay the latest edit. |
 | GPU computation | Deferred | Require a measured whole-node gain and one kernel source across backends. |
 | Full-detail region of interest | Deferred | Efficient 1:1 viewing without processing the whole frame. |
-| Better tone mapping and color calibration | Deferred | Hue/gamut handling and calibration beyond camera matrix/as-shot WB. |
-| More camera fixtures and CFA support | Deferred | Broaden validation beyond the Sony fixture; X-Trans and other non-Bayer inputs. |
+| Tone mapping and camera color improvements | Next | Assess within production algorithm selection; exact algorithms remain open. |
+| Broader real-RAW validation | Next | Exercise production algorithms beyond the current Sony fixture. |
+| Other CFA support | Deferred | X-Trans and other non-Bayer inputs. |
 | EXIF passthrough | Deferred | Carry source metadata into exports. |
 | Soft-proofing | Deferred | Preview the intended output medium. |
-| Display portability and measurement | Deferred | Windows/macOS paths, app-side fallback, monitor changes and colorimeter verification beyond sRGB. |
+| Display portability and measurement | Deferred | Windows/macOS paths, app-side fallback and monitor changes; SpyderX verification is planned separately. |
 | Pop-out behavior on Windows/macOS | Deferred | Parenting above the main window and a pin control where the WM provides none. |
 | Cross-window frame pacing and occlusion | Deferred | Revisit if hidden-window Fifo stalls matter in use; avoid unnecessary hidden draws. |
 | Undo/redo | Deferred | Not needed for current prototype use. |

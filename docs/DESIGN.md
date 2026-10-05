@@ -9,6 +9,22 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
 **tentative** = proposal; **open** = unresolved. Decisions can be reconsidered
 as the prototype develops; they are not permanent architectural constraints.
 
+## Road to v0.1
+
+**Decided (2026-10-05):** Work in this order:
+
+1. Build a production-ready processing pipeline using proven algorithms from
+   darktable, vkdt or Ansel as references. Adapt source where appropriate, retain
+   attribution and license notices, and validate on real RAWs. Algorithm selection
+   is open; the prototype binning and sigmoid are starting points, not constraints.
+2. Refine UI/UX around that pipeline until real editing flows well.
+3. Verify color handling with the user's SpyderX colorimeter, alongside numerical
+   processing and export checks. Instrument measurements validate the display
+   path; they do not alone establish correctness of every processing algorithm.
+4. Package and release v0.1. Development builds use `0.1.0-dev`.
+
+This sequence takes priority over CLI expansion and speculative optimization.
+
 ## Scope and boundaries
 
 - **Requirement:** A reusable processing library with interactive and batch
