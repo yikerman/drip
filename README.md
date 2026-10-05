@@ -120,6 +120,7 @@ cargo run --release -p drip-gui
 Choose a RAW file under **inputs** to start editing. Select a node to adjust it,
 or use its gear button to open the controls in a separate window. The pop-out
 button on previews and scopes opens their views separately.
+The inspector describes the selected node's operation, assumptions and input/output types.
 
 Drag the canvas to pan, scroll to zoom, and right-click to add nodes. Connect
 them by dragging between ports. Right-click an input port to disconnect it.

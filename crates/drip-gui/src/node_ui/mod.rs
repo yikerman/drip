@@ -1,5 +1,6 @@
 //! Optional node-specific presentation; ordinary nodes use schema controls.
 
+mod documentation;
 pub mod help;
 pub mod ports;
 mod sigmoid;

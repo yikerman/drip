@@ -91,3 +91,7 @@ of Prefilters That Make Cameras More Colorimetric,” *Sensors*, vol. 20, no. 23
 Art. no. 6882, Dec. 2020, doi: [10.3390/s20236882](https://doi.org/10.3390/s20236882).
 Luther-condition reference for image capability contracts; no algorithm copied.
 Article licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+[9] darktable contributors, “Module reference,” *darktable user manual*, ver. 5.6.
+[Online]. Available: https://docs.darktable.org/usermanual/5.6/en/module-reference/overview/.
+Accessed Oct. 5, 2026. Structure and writing reference for frontend node help.

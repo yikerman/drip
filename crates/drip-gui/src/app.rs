@@ -730,6 +730,7 @@ mod tests {
         let input = h.get_by_label("scn rec2020 img").rect();
         let output = h.get_by_label("disp rec2020 img").rect();
         let control = h.get_by_label("contrast").rect();
+        assert!(h.query_by_label("darktable: sigmoid").is_some());
         assert!(kind.bottom() <= input.top());
         assert!(input.bottom() <= output.top());
         assert!(output.bottom() <= control.top());
@@ -744,6 +745,22 @@ mod tests {
         assert!(popup.query_by_label("contrast").is_some());
         assert!(popup.query_by_label("scn rec2020 img").is_none());
         assert!(popup.query_by_label("disp rec2020 img").is_none());
+        assert!(popup.query_by_label("darktable: sigmoid").is_none());
+    }
+
+    #[test]
+    fn nodes_without_controls_show_documentation_and_references() {
+        let mut app = App::new(None, true, || {});
+        app.selected = app.project.graph.find("demosaic");
+        let mut h = harness(app);
+        h.run();
+        let kind = h.get_by_label("demosaic.rcd").rect();
+        let input = h.get_by_label("sensor mosaic").rect();
+        let output = h.get_by_label("camera RGB img").rect();
+        let reference = h.get_by_label("RCD algorithm").rect();
+        assert!(kind.bottom() <= input.top());
+        assert!(input.bottom() <= output.top());
+        assert!(output.bottom() <= reference.top());
     }
 
     #[test]

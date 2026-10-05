@@ -1,10 +1,14 @@
 //! Inspector help. Port descriptions follow the kernel's declared contracts.
 
-use super::ports;
+use super::{documentation, ports};
 use drip::node::NodeKind;
 use egui::Ui;
 
 pub fn show(ui: &mut Ui, kind: &NodeKind) {
+    let doc = documentation::of(kind);
+    if let Some(doc) = doc {
+        ui.label(doc.description);
+    }
     egui::Grid::new(("node help", kind.name)).num_columns(2).show(ui, |ui| {
         for input in kind.inputs() {
             ui.weak("input");
@@ -16,6 +20,14 @@ pub fn show(ui: &mut Ui, kind: &NodeKind) {
             ui.label(ports::label(output.ty.name));
             ui.end_row();
         }
+        if let Some((kind, name)) = doc.and_then(|doc| doc.result) {
+            ui.weak(kind);
+            ui.label(name);
+            ui.end_row();
+        }
     });
+    if let Some((name, url)) = doc.and_then(|doc| doc.reference) {
+        ui.hyperlink_to(name, url);
+    }
     ui.add_space(6.0);
 }

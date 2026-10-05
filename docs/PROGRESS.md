@@ -4,6 +4,18 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: node documentation
+
+- Added concise technical help for every built-in node, including exposure math,
+  sigmoid's grey anchor, camera-space assumptions and scope coordinates. Views
+  and TIFF writes are distinguished from graph outputs. References link to the
+  upstream algorithm or relevant colorimetry, with darktable's manual credited
+  as the writing/structure reference.
+- Checked descriptions against the kernels and recorded the user-facing writing
+  guidelines in AGENTS.md. All 22 headless GUI tests passed, including nodes
+  without controls, reference links and pop-out exclusion. GUI clippy, formatting
+  and diff checks passed. Native rendering has not been visually retested.
+
 ## 2026-10-05: node help UI
 
 - Added input/output contracts below the type ID in the main inspector, excluded
