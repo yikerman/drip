@@ -130,4 +130,6 @@ pub struct Histogram {
     pub min_stop: f32,
     pub max_stop: f32,
     pub counts: Vec<[u32; 3]>,
+    /// Whether frontends plot the counts on a log scale rather than linearly.
+    pub log: bool,
 }

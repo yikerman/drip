@@ -56,10 +56,11 @@ pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &PreparedView, fo
     }
 }
 
-/// Each channel's counts per stop, scaled by the square root so that small
-/// populations stay visible; the marked line is 1.0 (0 EV).
+/// Each channel's counts per stop, linearly or on a log scale that keeps small
+/// populations visible; the marked line is 1.0 (0 EV).
 fn histogram(painter: &Painter, rect: Rect, h: &Histogram, font: &FontId) {
-    let peak = h.counts.iter().flatten().map(|&c| (c as f32).sqrt()).fold(1.0, f32::max);
+    let scale = |n: u32| if h.log { (n as f32).ln_1p() } else { n as f32 };
+    let peak = h.counts.iter().flatten().map(|&c| scale(c)).fold(1.0, f32::max);
     let x = |i: usize| rect.left() + rect.width() * i as f32 / (h.counts.len() - 1) as f32;
     let colors = [
         egui::Color32::from_rgb(110, 20, 20),
@@ -67,7 +68,7 @@ fn histogram(painter: &Painter, rect: Rect, h: &Histogram, font: &FontId) {
         egui::Color32::from_rgb(20, 30, 110),
     ];
     for (c, color) in colors.into_iter().enumerate() {
-        let y = |n: &[u32; 3]| rect.bottom() - rect.height() * (n[c] as f32).sqrt() / peak;
+        let y = |n: &[u32; 3]| rect.bottom() - rect.height() * scale(n[c]) / peak;
         let points = h.counts.iter().enumerate().map(|(i, n)| egui::pos2(x(i), y(n))).collect();
         painter.add(egui::Shape::line(points, Stroke::new(1.0, color)));
     }
