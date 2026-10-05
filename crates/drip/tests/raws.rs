@@ -1,6 +1,7 @@
 //! The pipeline on a real raw.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use drip::eval::{Evaluator, run_action};
 use drip::graph::{NodeId, Port};
@@ -112,4 +113,28 @@ fn built_in_template_takes_the_raw_and_output_paths() {
     let view = ev.result(preview).unwrap().as_ref().unwrap().view.clone();
     let Some(drip::value::View::Image(image)) = view else { panic!("no preview") };
     assert_eq!(image.rgb().scale, 16, "level 3 and the 2x2 debayer");
+
+    let cached = ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic().clone();
+    ev.evaluate(&p.graph, 2, &[raw]);
+    ev.evaluate(&p.graph, 3, &[raw]);
+    assert!(Arc::ptr_eq(&cached, ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic()));
+
+    let other = p.graph.add_node(&nodes::READ);
+    p.graph.set_param(other, "path", json!(fixture())).unwrap();
+    let mut fork = ev.fork(&p.graph);
+    fork.evaluate(&p.graph, 3, &[other]);
+    assert!(Arc::ptr_eq(
+        &cached,
+        fork.result(other).unwrap().as_ref().unwrap().outputs[0].mosaic()
+    ));
+    fork.evaluate(&p.graph, 0, &[other]);
+    ev.evaluate(&p.graph, 0, &[raw]);
+    assert!(Arc::ptr_eq(
+        fork.result(other).unwrap().as_ref().unwrap().outputs[0].mosaic(),
+        ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic(),
+    ));
+    ev.evaluate(&p.graph, 31, &[raw]);
+    let smallest = ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic();
+    assert!(smallest.data.is_empty());
+    assert_eq!(smallest.scale, 1 << 31);
 }

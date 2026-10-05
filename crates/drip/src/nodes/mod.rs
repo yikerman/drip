@@ -8,7 +8,7 @@ mod view;
 
 pub use color::{BIN_2X2, CAMERA_TO_REC2020, WHITE_BALANCE};
 pub use export::TIFF;
-pub use raw::{READ, normalize};
+pub use raw::{READ, downsample, normalize};
 pub use tone::SIGMOID;
 pub use view::{HISTOGRAM, PREVIEW};
 

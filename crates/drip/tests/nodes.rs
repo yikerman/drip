@@ -33,7 +33,7 @@ fn normalization_subtracts_every_black_component() {
     let mut r = raw(4, 2, vec![600, 600, 600, 600, 600, 600, 600, 600]);
     r.channel_black = [10, 20, 30, 40];
     r.pattern = BlackPattern { height: 1, width: 2, values: vec![5, 7] };
-    let m = nodes::normalize(&r, 1).unwrap();
+    let m = nodes::normalize(&r).unwrap();
     // Common black = 100 + min(10..40) + min(5, 7) = 115, so 1 ↔ 1100 - 115.
     let site = |black: u32| (600 - 100 - black) as f32 / 985.0;
     let expected =
@@ -56,7 +56,7 @@ fn small_black_patterns_fold_into_channels_before_the_common_part() {
     let mut r = raw(2, 2, vec![650; 4]);
     r.channel_black = [0, 100, 100, 100];
     r.pattern = BlackPattern { height: 2, width: 2, values: vec![100, 0, 0, 0] };
-    assert_eq!(nodes::normalize(&r, 1).unwrap().data, [0.5; 4]);
+    assert_eq!(nodes::normalize(&r).unwrap().data, [0.5; 4]);
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn large_black_patterns_keep_their_own_common_part() {
     let mut r = raw(2, 2, vec![600; 4]);
     r.channel_black = [10, 20, 30, 40];
     r.pattern = BlackPattern { height: 3, width: 3, values: vec![4, 5, 6, 7, 8, 9, 10, 11, 12] };
-    let m = nodes::normalize(&r, 1).unwrap();
+    let m = nodes::normalize(&r).unwrap();
     let denominator = (1100 - (100 + 10 + 4)) as f32;
     assert_eq!(m.data[0], (600 - 100 - 10 - 4) as f32 / denominator);
     assert_eq!(m.data[3], (600 - 100 - 30 - 8) as f32 / denominator);
@@ -75,12 +75,12 @@ fn large_black_patterns_keep_their_own_common_part() {
 fn second_green_keeps_its_own_multiplier() {
     let mut r = raw(2, 2, vec![0; 4]);
     r.as_shot = [2.0, 1.0, 1.5, 2.0];
-    assert_eq!(nodes::normalize(&r, 1).unwrap().camera.white_balance, [2.0, 1.0, 1.5, 2.0]);
+    assert_eq!(nodes::normalize(&r).unwrap().camera.white_balance, [2.0, 1.0, 1.5, 2.0]);
 }
 
 #[test]
 fn values_below_black_and_above_white_are_kept() {
-    let m = nodes::normalize(&raw(2, 2, vec![50, 2100, 100, 1100]), 1).unwrap();
+    let m = nodes::normalize(&raw(2, 2, vec![50, 2100, 100, 1100])).unwrap();
     assert_eq!(m.data, [-0.05, 2.0, 0.0, 1.0]);
 }
 
@@ -89,15 +89,51 @@ fn binning_keeps_the_bayer_phase_and_crops_partial_cells() {
     // 9 × 4 sites at scale 2: one whole 4 × 4 binned cell per 4 columns, the
     // ninth column dropped. Each value encodes its site as row * 10 + col.
     let data = (0..4).flat_map(|r| (0..9).map(move |c| 100 + (r * 10 + c) as u16)).collect();
-    let m = nodes::normalize(&raw(9, 4, data), 2).unwrap();
+    let m = nodes::downsample(&nodes::normalize(&raw(9, 4, data)).unwrap());
     assert_eq!((m.width, m.height, m.scale), (4, 2, 2));
     let mean = |sites: [(u16, u16); 4]| {
         sites.iter().map(|&(r, c)| (r * 10 + c) as f32).sum::<f32>() / 4000.0
     };
     // Output site (0, 1) is green at phase (0, 1): input rows 0, 2, columns 1, 3.
-    assert_eq!(m.data[1], mean([(0, 1), (0, 3), (2, 1), (2, 3)]));
+    assert!((m.data[1] - mean([(0, 1), (0, 3), (2, 1), (2, 3)])).abs() < 1e-7);
     // Output site (1, 2) is red of the second cell: rows 1, 3, columns 4, 6.
-    assert_eq!(m.data[4 + 2], mean([(1, 4), (1, 6), (3, 4), (3, 6)]));
+    assert!((m.data[4 + 2] - mean([(1, 4), (1, 6), (3, 4), (3, 6)])).abs() < 1e-7);
+}
+
+#[test]
+fn pyramid_matches_direct_averages_with_patterned_black_and_all_bayer_phases() {
+    let data = (0..19 * 17).map(|i| (i * 137 % 1500) as u16).collect();
+    let mut r = raw(19, 17, data);
+    r.channel_black = [4, 8, 12, 16];
+    r.pattern = BlackPattern { height: 3, width: 3, values: (1..=9).collect() };
+    for cfa in [[[0, 1], [3, 2]], [[1, 0], [2, 3]], [[3, 2], [0, 1]], [[2, 3], [1, 0]]] {
+        r.cfa = cfa;
+        let mut m = nodes::normalize(&r).unwrap();
+        for level in 0..5 {
+            let scale = 1 << level;
+            assert_eq!((m.width, m.height), (19 / (2 * scale) * 2, 17 / (2 * scale) * 2));
+            assert_eq!(m.scale, scale as u32);
+            assert_eq!(m.cfa.colors, cfa.concat());
+            for row in 0..m.height {
+                for col in 0..m.width {
+                    let mut sum = 0.0f64;
+                    for y in 0..scale {
+                        for x in 0..scale {
+                            let y = row / 2 * 2 * scale + row % 2 + y * 2;
+                            let x = col / 2 * 2 * scale + col % 2 + x * 2;
+                            let black = 100
+                                + r.channel_black[cfa[y % 2][x % 2] as usize]
+                                + r.pattern.at(y, x);
+                            sum += f64::from(r.data[y * 19 + x]) - f64::from(black);
+                        }
+                    }
+                    let expected = sum / (995.0 * (scale * scale) as f64);
+                    assert!((f64::from(m.data[row * m.width + col]) - expected).abs() < 2e-7);
+                }
+            }
+            m = nodes::downsample(&m);
+        }
+    }
 }
 
 #[test]
@@ -107,16 +143,16 @@ fn unusable_raw_metadata_is_an_error() {
     {
         let mut r = raw(2, 2, vec![0; 4]);
         r.as_shot = as_shot;
-        assert!(nodes::normalize(&r, 1).is_err(), "{as_shot:?}");
+        assert!(nodes::normalize(&r).is_err(), "{as_shot:?}");
     }
     for matrix in [[[0.0; 3]; 3], [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]] {
         let mut r = raw(2, 2, vec![0; 4]);
         r.xyz_to_cam = matrix;
-        assert!(nodes::normalize(&r, 1).is_err(), "{matrix:?}");
+        assert!(nodes::normalize(&r).is_err(), "{matrix:?}");
     }
     let mut r = raw(2, 2, vec![0; 4]);
     r.maximum = 100;
-    assert!(nodes::normalize(&r, 1).is_err());
+    assert!(nodes::normalize(&r).is_err());
 }
 
 #[test]

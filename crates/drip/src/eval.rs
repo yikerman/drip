@@ -45,6 +45,18 @@ struct Entry {
 }
 
 impl Evaluator {
+    /// A fresh node cache sharing the graph's current resource revisions.
+    pub fn fork(&self, graph: &Graph) -> Self {
+        let paths = graph.nodes().flat_map(|(_, node)| {
+            node.kind.params.iter().filter_map(|spec| {
+                matches!(spec.kind, ParamKind::Path { .. })
+                    .then(|| Params(&node.params).path(spec.name))
+                    .flatten()
+            })
+        });
+        Self { cache: Cache::default(), resources: self.resources.snapshot(paths) }
+    }
+
     /// Brings `targets` up to date at downscale `level` and returns the nodes
     /// actually recomputed.
     pub fn evaluate(&mut self, graph: &Graph, level: u8, targets: &[NodeId]) -> Vec<NodeId> {
@@ -60,6 +72,19 @@ impl Evaluator {
     /// recomputed on the next evaluation.
     pub fn reload(&mut self, path: &Path) {
         self.resources.reload(path);
+    }
+
+    /// Evaluates an action at full resolution with shared resources and a
+    /// temporary node cache, releasing intermediates after their last consumer.
+    pub fn run_action(&self, graph: &Graph, id: NodeId, name: &str) -> Result<(), NodeError> {
+        let node = graph.node(id).expect("in graph");
+        let action = node.kind.action(name).ok_or_else(|| NodeError::UnknownAction(name.into()))?;
+        let mut evaluator = self.fork(graph);
+        let targets: Vec<_> = sources(graph, id).collect();
+        evaluator.run(graph, 0, &targets, true);
+        let inputs = evaluator.cache.inputs(graph, id)?;
+        let ctx = EvalContext { level: 0, resources: &evaluator.resources };
+        (action.run)(Params(&node.params), &inputs, &ctx).map_err(NodeError::Failed)
     }
 
     /// With `release`, a result is dropped once its last consumer in this run
@@ -150,15 +175,8 @@ fn sources(graph: &Graph, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
     graph.edges().filter(move |(_, input)| input.0 == id).map(|(output, _)| output.0)
 }
 
-/// Runs action `name` of node `id`, evaluating its inputs at full resolution
-/// without touching any interactive cache.
+/// Runs a standalone action with fresh resources. Interactive callers use
+/// `Evaluator::run_action` to reuse their session's loaded files.
 pub fn run_action(graph: &Graph, id: NodeId, name: &str) -> Result<(), NodeError> {
-    let node = graph.node(id).expect("in graph");
-    let action = node.kind.action(name).ok_or_else(|| NodeError::UnknownAction(name.into()))?;
-    let mut evaluator = Evaluator::default();
-    let targets: Vec<_> = sources(graph, id).collect();
-    evaluator.run(graph, 0, &targets, true);
-    let inputs = evaluator.cache.inputs(graph, id)?;
-    let ctx = EvalContext { level: 0, resources: &evaluator.resources };
-    (action.run)(Params(&node.params), &inputs, &ctx).map_err(NodeError::Failed)
+    Evaluator::default().run_action(graph, id, name)
 }

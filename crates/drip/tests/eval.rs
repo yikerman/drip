@@ -171,6 +171,35 @@ fn files_are_reread_only_on_reload() {
     std::fs::remove_file(&path).unwrap();
 }
 
+#[test]
+fn actions_share_resources_with_preview_and_keep_their_revision() {
+    let path = std::env::temp_dir().join(format!("drip-shared-input-{}", std::process::id()));
+    let out = path.with_extension("out");
+    std::fs::write(&path, "abc").unwrap();
+    let mut p = Project::default();
+    let (f, t, w) = (p.graph.add_node(&FILE), p.graph.add_node(&TONEMAP), p.graph.add_node(&WRITE));
+    p.graph.set_param(f, "path", json!(path)).unwrap();
+    p.graph.set_param(w, "path", json!(out)).unwrap();
+    p.graph.connect(port(f, "image"), port(t, "scene")).unwrap();
+    p.graph.connect(port(t, "display"), port(w, "image")).unwrap();
+
+    let mut ev = Evaluator::default();
+    // An export can be the first consumer of a resource, before any preview.
+    let action = ev.fork(&p.graph);
+    action.run_action(&p.graph, w, "write").unwrap();
+    std::fs::write(&path, "abcdef").unwrap();
+    assert_eq!(output(eval(&mut ev, &p, f))[0], 3.0);
+    ev.reload(&path);
+    assert_eq!(output(eval(&mut ev, &p, f))[0], 6.0);
+    action.run_action(&p.graph, w, "write").unwrap();
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "[3.0, 0.0, 0.0]");
+    ev.run_action(&p.graph, w, "write").unwrap();
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "[6.0, 0.0, 0.0]");
+    assert!(ev.evaluate(&p.graph, PREVIEW, &[f]).is_empty(), "actions keep the preview cache");
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_file(out).unwrap();
+}
+
 mod release {
     use std::sync::{Arc, Mutex, Weak};
 

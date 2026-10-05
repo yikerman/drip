@@ -9,6 +9,7 @@
 - maintain a TODO.md, in which a table tracks ideas not implemented
 - record decisions and rationale in `docs/DESIGN.md` with status: requirement, decided, tentative, or open. update `docs/PROGRESS.md` each session and track unimplemented ideas in the `TODO.md` table.
 - style match existing code and/or commit
+- maintain one source implementation of each computational kernel across execution backends; cross-platform support and ease of development take priority over peak performance.
 
 ## Project structure
 

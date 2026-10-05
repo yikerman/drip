@@ -7,7 +7,7 @@ use drip_libraw::Raw;
 use crate::color::{self, D65, REC2020};
 use crate::node::{EvalContext, Evaluated, NodeKind, OutputSpec};
 use crate::param::{ParamKind, ParamSpec, Params};
-use crate::value::{Camera, Cfa, Mosaic, PortType, Value};
+use crate::value::{Camera, Cfa, Mosaic, PortType, RawMetadata, Value};
 
 pub static READ: NodeKind = NodeKind {
     name: "raw.read",
@@ -24,18 +24,38 @@ pub static READ: NodeKind = NodeKind {
 
 fn read(p: Params, _: &[Value], ctx: &EvalContext) -> Result<Evaluated, String> {
     let path = p.path("path").ok_or("no raw file chosen")?;
-    let raw = ctx.resources().load(path, |path| {
-        drip_libraw::decode(path).map_err(|e| format!("{}: {e}", path.display()))
+    let pyramid = ctx.resources().load(path, |path| {
+        let raw = drip_libraw::decode(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        Pyramid::new(raw)
     })?;
-    let mosaic = normalize(&raw, ctx.scale() as usize)?;
-    let outputs =
-        vec![Value::Mosaic(Arc::new(mosaic)), Value::RawMetadata(Arc::new(raw.metadata.clone()))];
+    let outputs = vec![
+        Value::Mosaic(pyramid.levels[ctx.level as usize].clone()),
+        Value::RawMetadata(pyramid.metadata.clone()),
+    ];
     Ok(Evaluated { outputs, view: None })
 }
 
-/// Subtracts black, scales sensor saturation to 1 and bins each `scale` ×
-/// `scale` group of same-color sites, which keeps the Bayer phase. Edges that
-/// do not fill a whole binned 2 × 2 cell are cropped.
+struct Pyramid {
+    levels: Vec<Arc<Mosaic>>,
+    metadata: Arc<RawMetadata>,
+}
+
+impl Pyramid {
+    fn new(raw: Raw) -> Result<Self, String> {
+        let mut levels = vec![Arc::new(normalize(&raw)?)];
+        let metadata = Arc::new(raw.metadata.clone());
+        drop(raw);
+        // EvalContext supports u32 scales. Beyond the image's dimensions the
+        // remaining levels are empty, but still carry the requested scale.
+        for _ in 1..u32::BITS {
+            levels.push(Arc::new(downsample(levels.last().expect("base level"))));
+        }
+        Ok(Self { levels, metadata })
+    }
+}
+
+/// Subtracts black and scales sensor saturation to 1, cropping partial Bayer
+/// cells at the edges.
 ///
 /// Black follows LibRaw's model as it stands right after unpacking: a common
 /// level, a per-color offset and a repeating pattern. As in dcraw, every site
@@ -44,7 +64,7 @@ fn read(p: Params, _: &[Value], ctx: &EvalContext) -> Result<Evaluated, String> 
 /// act as a hidden white balance.
 ///
 /// [1] LibRaw, `adjust_bl()` and `subtract_black_internal()`, LibRaw 0.22.
-pub fn normalize(raw: &Raw, scale: usize) -> Result<Mosaic, String> {
+pub fn normalize(raw: &Raw) -> Result<Mosaic, String> {
     // Like LibRaw, use the first green's multiplier when the second has none.
     let g2 = if raw.as_shot[3] > 0.0 { raw.as_shot[3] } else { raw.as_shot[1] };
     let white_balance =
@@ -77,23 +97,32 @@ pub fn normalize(raw: &Raw, scale: usize) -> Result<Mosaic, String> {
     }
     let gain = 1.0 / (raw.maximum - common) as f32;
 
-    let (width, height) = (raw.width / (2 * scale) * 2, raw.height / (2 * scale) * 2);
+    let (width, height) = (raw.width / 2 * 2, raw.height / 2 * 2);
     let mut data = Vec::with_capacity(width * height);
     for row in 0..height {
         for col in 0..width {
-            // Site (row, col) of the binned mosaic gathers the sites of the same
-            // phase in cell (row / 2, col / 2) scaled up by `scale`.
-            let (top, left) = (row / 2 * 2 * scale + row % 2, col / 2 * 2 * scale + col % 2);
-            let mut sum = 0.0;
-            for r in (top..).step_by(2).take(scale) {
-                for c in (left..).step_by(2).take(scale) {
-                    sum += raw.data[r * raw.width + c] as f32 - black(r, c) as f32;
-                }
-            }
-            data.push(sum * gain / (scale * scale) as f32);
+            data.push((raw.data[row * raw.width + col] as f32 - black(row, col) as f32) * gain);
         }
     }
     let cfa = Cfa { size: 2, colors: raw.cfa.concat() };
     let camera = Arc::new(Camera { xyz_to_cam: raw.xyz_to_cam, white_balance });
-    Ok(Mosaic { width, height, scale: scale as u32, cfa, data, camera })
+    Ok(Mosaic { width, height, scale: 1, cfa, data, camera })
+}
+
+/// Halves a Bayer mosaic by averaging four sites of each phase. Only whole
+/// 4 × 4 input cells contribute, so every output remains a complete Bayer cell.
+pub fn downsample(m: &Mosaic) -> Mosaic {
+    let (width, height) = (m.width / 4 * 2, m.height / 4 * 2);
+    let mut data = Vec::with_capacity(width * height);
+    for row in 0..height {
+        for col in 0..width {
+            let (r, c) = (row / 2 * 4 + row % 2, col / 2 * 4 + col % 2);
+            let i = r * m.width + c;
+            data.push(
+                (m.data[i] + m.data[i + 2] + m.data[i + 2 * m.width] + m.data[i + 2 * m.width + 2])
+                    * 0.25,
+            );
+        }
+    }
+    Mosaic { width, height, scale: m.scale * 2, data, cfa: m.cfa.clone(), camera: m.camera.clone() }
 }

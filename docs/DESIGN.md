@@ -59,8 +59,28 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 | E4 | `EvalContext` carries a downscale level `k`, which gives `scale() = 2^k`. Storing the level makes non-power-of-two scales unrepresentable. Later it will also carry a region of interest and a cancellation token. | decided | This leaves room for the deferred items: 1:1 viewing of the visible region (ROI), background evaluation (cancellation) and GPU work. None of them is built now. |
 | E5 | **Preview scale is applied in the raw reader**: after black subtraction, same-color CFA sites are averaged with the CFA phase preserved, and odd edges are cropped, so the reduced image is still a valid Bayer mosaic. Spatial parameters are expressed in full-resolution pixels and divided by `ctx.scale` inside nodes. | decided | Interactive editing must work on a reduced image, but debayering needs a real mosaic. Binning inside the CFA satisfies both. Expressing parameters at full resolution keeps preview and export consistent. |
 | E8 | Dev builds use `opt-level = 1`. | decided (user, 2026-10-04) | At opt-level 0 the real-raw tests took about 105 s, against 11 s at opt-level 1. Image processing has to be usable in development. |
-| E6 | The interactive session keeps one cache at preview scale. Full-resolution export has no persistent cache: within one run each node is evaluated once, and its outputs are held until their last consumer has run. | decided | A 45 MP 3-channel f32 image takes about 540 MB, so caching every node at full resolution isn't viable. Cache budgets and eviction (decoded raws included) still need a policy. |
-| E7 | LibRaw's decode (scale-independent and expensive) is memoized in a session resource cache keyed by path. It is not node state. | decided | Changing preview scale shouldn't re-decode the raw file. Keeping this out of the nodes keeps nodes stateless. |
+| E6 | The interactive session keeps one node-result cache at preview scale. Full-resolution export has no persistent node-result cache: within one run each node is evaluated once, and its outputs are held until their last consumer has run. Resources are shared with preview (E11). | decided | A 45 MP 3-channel f32 image takes about 540 MB, so caching every node at full resolution isn't viable. Resource retention is separate from intermediate image lifetimes. |
+| ~~E7~~ | ~~LibRaw's decode (scale-independent and expensive) is memoized in a session resource cache keyed by path. It is not node state.~~ | superseded by E11 (user, 2026-10-04) | The normalized pyramid replaces the decoded u16 buffer, also removing repeated normalization and binning. |
+| E9 | Prioritize interactive responsiveness, cross-platform support and ease of kernel development over peak throughput. Maintain exactly one source implementation of each computational kernel across CPU and GPU backends. | requirement (user, 2026-10-04) | Preview-level transitions currently interrupt interaction. Backend-specific compilation and dispatch may differ; handwritten copies of the algorithm are excluded. |
+| E10 | Evaluate CubeCL for shared CPU/GPU kernels before selecting a processing backend; ordinary Rust with Rayon remains the simpler CPU-only option. | tentative | CubeCL supplies a Rust kernel DSL and CPU and wgpu runtimes [2], but its CPU compiler adds LLVM/JIT dependencies [3], [4]. A spike must establish builds on Linux, Windows and macOS, single-worker and parallel execution, numerical behavior, first-use latency and sharing GPU buffers with the existing wgpu renderer. See the survey below. |
+| E11 | Cache a normalized f32 RAW pyramid and metadata per path and resource revision for the application session, including across project changes. Decode and normalize once, release the u16 buffer, then eagerly derive each coarser level by averaging four same-phase Bayer sites with whole-cell cropping. Preview and export share these immutable levels; export snapshots resource revisions and keeps a separate temporary node cache. Explicit reload replaces a resource without changing existing snapshots. | decided (user, 2026-10-04); implemented | The user accepts about 226 MB per 42 MP pyramid (at most 4/3 of the base mosaic), excluding processing intermediates. A level change clones an Arc instead of scanning the sensor. One implementation each for normalization and downsampling; no RAW-specific evaluator logic. Resources loaded first by an export are shared back to the session. Recursive averages agree with independent direct averages within f32 rounding. No eviction in this prototype; first-load work increases. Snapshots retain cached content, not copies of unread files on disk. |
+| E12 | Move interactive evaluation to a persistent worker, retain the last completed preview and coalesce requests so the latest graph/level wins. | tentative; would revise G2 | A faster kernel can still stall a UI frame. Keep the evaluator and its caches alive across requests; discard obsolete results and add cooperative cancellation between nodes or chunks. Resource loading and kernel compilation also belong off the UI thread. |
+
+### 3.3.1 Kernel survey (2026-10-04)
+
+This is a source/documentation survey, not a backend performance comparison. No new processing dependency has been selected.
+
+| Approach | One kernel source? | Execution and development cost |
+|----------|--------------------|--------------------------------|
+| Rust functions with Rayon | Yes, for CPU execution | Serial iteration or parallel iteration calls the same function; a Rayon pool can have one or multiple workers [5]. Small change to the current code, ordinary debugging and no GPU runtime. It does not provide GPU compilation. |
+| CubeCL | Yes, CPU and GPU | `#[cube]` functions compile through an intermediate representation to backend code. GPU targets include Vulkan/SPIR-V, Metal and WebGPU through wgpu [2]. CPU uses LLVM-based compilation and workers [3], [4]. The v0.10.0 runner dispatches one task per cube unit, so a one-unit launch is a candidate for single-worker execution, to verify in a spike [8]. This is a restricted Rust DSL, not arbitrary Rust/Vec/iterator code. The project describes its API as alpha; pin and test a version rather than assuming development-branch documentation matches the release. |
+| rust-gpu, optionally with krnl | Shared Rust arithmetic is possible | Compile GPU-compatible Rust to SPIR-V and call shared functions from CPU loops. GPU entry points, buffers and scheduling still need integration; reductions and synchronization are harder to share than pixel functions. rust-gpu requires a particular nightly toolchain [6]. krnl's example shares the arithmetic but supplies separate CPU iteration and GPU dispatch [7]. More integration work than the CubeCL runtime approach. |
+| Handwritten WGSL with wgpu | GPU source only | Portable GPU execution, but a separately maintained Rust CPU kernel violates E9. A software GPU adapter is not a substitute for a straightforward native CPU backend. |
+| OpenCL from Rust | A shared OpenCL kernel, not a Rust kernel | Supports CPU/GPU devices where implementations exist, but Rust host bindings do not turn Rust functions into OpenCL kernels. Apple deprecated OpenCL in macOS 10.14 and recommends Metal [9], making it a poor fit for the platform priority. |
+
+Vulkan and OpenCL are execution APIs; SPIR-V is an intermediate representation, not a competing runtime [10]. For Drip, the source language and runtime should be selected together. GPU processing also needs buffers to remain on the device between nodes and through preview drawing; downloading each node into today's CPU `Vec` values would add avoidable transfers. Headless processing must remain in the library, independent of the GUI.
+
+The first CubeCL experiment should include a pixel map, CFA downsampling and histogram reduction, with one source per operation. Use synthetic expected values and cross-backend comparisons, not a second production implementation. Measure compilation, transfers and end-to-end evaluation separately. Single-thread control and renderer interoperability remain unverified.
 
 ### 3.4 UI-only nodes and side effects
 
@@ -144,3 +164,21 @@ Spike done (protocol level, see D2). Still to do in M3: verify what is actually 
 ## References
 
 [1] D. Coffin, "dcraw.c," `convert_to_rgb()` and `cam_xyz_coeff()`. [Online]. Available: https://www.dechifro.org/dcraw/
+
+[2] Tracel, "CubeCL," project documentation. [Online]. Available: https://github.com/tracel-ai/cubecl. Accessed: Oct. 4, 2026.
+
+[3] Tracel, "CPU runtime for CubeCL," v0.10.0, dependency manifest. [Online]. Available: https://github.com/tracel-ai/cubecl/blob/v0.10.0/crates/cubecl-cpu/Cargo.toml. Accessed: Oct. 4, 2026.
+
+[4] Tracel, "LLVM Compiler," development-branch documentation. [Online]. Available: https://github.com/tracel-ai/cubecl/blob/main/crates/cubecl-llvm/README.md. Accessed: Oct. 4, 2026.
+
+[5] Rayon contributors, "ThreadPoolBuilder," API documentation. [Online]. Available: https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html. Accessed: Oct. 4, 2026.
+
+[6] Rust GPU contributors, "spirv_builder," API documentation. [Online]. Available: https://rust-gpu.github.io/rust-gpu/api/spirv_builder/. Accessed: Oct. 4, 2026.
+
+[7] C. R. Earp, "krnl: Safe, portable, high performance compute (GPGPU) kernels." [Online]. Available: https://github.com/charles-r-earp/krnl. Accessed: Oct. 4, 2026.
+
+[8] Tracel, "KernelRunner," CubeCL v0.10.0 source. [Online]. Available: https://github.com/tracel-ai/cubecl/blob/v0.10.0/crates/cubecl-cpu/src/compute/runner.rs. Accessed: Oct. 4, 2026.
+
+[9] Apple, "Transition to Metal." [Online]. Available: https://developer.apple.com/opencl/. Accessed: Oct. 4, 2026.
+
+[10] Khronos Group, "SPIR-V." [Online]. Available: https://www.khronos.org/spirv/. Accessed: Oct. 4, 2026.

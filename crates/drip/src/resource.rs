@@ -8,22 +8,37 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-type Loaded = HashMap<(PathBuf, TypeId), Arc<dyn Any + Send + Sync>>;
+type Loaded = HashMap<TypeId, Arc<dyn Any + Send + Sync>>;
+
+#[derive(Clone, Default)]
+struct File {
+    revision: u64,
+    loaded: Arc<Mutex<Loaded>>,
+}
 
 #[derive(Default)]
 pub struct Resources {
-    revisions: HashMap<PathBuf, u64>,
-    loaded: Mutex<Loaded>,
+    files: Mutex<HashMap<PathBuf, File>>,
 }
 
 impl Resources {
     pub fn revision(&self, path: &Path) -> u64 {
-        self.revisions.get(path).copied().unwrap_or(0)
+        self.files.lock().expect("not poisoned").get(path).map_or(0, |file| file.revision)
     }
 
     pub fn reload(&mut self, path: &Path) {
-        *self.revisions.entry(path.into()).or_default() += 1;
-        self.loaded.get_mut().expect("not poisoned").retain(|(loaded, _), _| loaded != path);
+        let file = self.files.get_mut().expect("not poisoned").entry(path.into()).or_default();
+        *file = File { revision: file.revision + 1, ..File::default() };
+    }
+
+    /// Shares the current revisions, including files not yet loaded. Reloading
+    /// either store afterwards leaves the other's revisions and values intact.
+    pub fn snapshot<'a>(&self, paths: impl IntoIterator<Item = &'a Path>) -> Self {
+        let mut files = self.files.lock().expect("not poisoned");
+        for path in paths {
+            files.entry(path.into()).or_default();
+        }
+        Self { files: Mutex::new(files.clone()) }
     }
 
     /// What `load` makes of `path`, computed once per revision and type.
@@ -33,10 +48,10 @@ impl Resources {
         path: &Path,
         load: impl FnOnce(&Path) -> Result<T, String>,
     ) -> Result<Arc<T>, String> {
-        // Held across `load`, so concurrent callers see one result per revision
-        // at the cost of serializing loads.
-        let mut loaded = self.loaded.lock().expect("not poisoned");
-        let key = (path.to_path_buf(), TypeId::of::<T>());
+        let file = self.files.lock().expect("not poisoned").entry(path.into()).or_default().clone();
+        // Serialize loads of this revision, also across export snapshots.
+        let mut loaded = file.loaded.lock().expect("not poisoned");
+        let key = TypeId::of::<T>();
         if let Some(value) = loaded.get(&key) {
             return Ok(value.clone().downcast().expect("keyed by type"));
         }

@@ -2,6 +2,22 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: cache RAW pyramids for the session
+
+- Implemented E11 after user approval: normalize each RAW once, eagerly build the Bayer-preserving pyramid and release the decoded u16 buffer. The generic resource store shares each file revision across evaluators; export snapshots retain their cached content through reload. The GUI retains resources across project changes. Evaluation stamps, ordering and node-result caching are unchanged.
+- Verification: 61 workspace tests pass, including independent direct averages with patterned black, all four Bayer phases and cropped edges; reuse of the same RAW allocations across levels/readers/evaluators; concurrent first loads; export-first resource sharing; reload isolation and release of old resources; existing LibRaw reference and TIFF checks. Clippy passes with warnings denied.
+- Fixture probe (same dev opt-level 1 setup as below, single-run timings excluding rendering/upload): cached `raw.read` now takes 1.6–2.2 µs. Level 3→2 graph evaluation fell from 215 to 78 ms, and 2→3 from 145 to 20 ms. Initial level-3 evaluation increased from 400 to 501 ms because all RAW levels are prepared upfront. Downstream nodes still recompute on level changes; level 0 remains about 1.2 s.
+- Scope: no dependencies or GPU/background-evaluation work added. The persistent pyramid is about 226 MB for the fixture; retained files accumulate until reload or application exit, as agreed for the prototype.
+
+## 2026-10-04: preview performance investigation
+
+- User requirements: cross-platform support and ease of development take priority over peak kernel performance; strictly one source implementation per computational kernel across execution backends (E9, also recorded in AGENTS.md).
+- Traced the lag: `App::ui` evaluates synchronously. Decoded u16 RAWs already survive level changes in `Resources`, but `raw.read` normalizes and bins almost the entire sensor again at every new level. The evaluator retains only one result per node, so returning to an earlier level recomputes it. Export uses a fresh evaluator and resource store, and opening/new projects drops the previous store. Preview uploads also convert RGB f32 to RGBA f16 on the CPU; that cost was not measured here.
+- Measured with a temporary external probe calling the existing library, on the 7968×5320 Sony fixture, Ryzen 5 5600G, dev opt-level 1: decode 255 ms; standalone normalize at levels 3/2/1/0 about 136/147/191/335 ms. With decoded data cached, graph evaluation from level 3→2 took 215 ms, 2→3 took 145 ms (130 ms in `raw.read`), level 1 took 488 ms and level 0 about 1.5 s. Repeating the unchanged level took 9 µs and evaluated zero nodes. These are diagnostic single-run wall times, excluding rendering/upload; the filesystem cache was uncontrolled, so decode timing is not a cold-disk measurement.
+- Surveyed upstream documentation and source: Rayon covers one-source serial/parallel CPU work; CubeCL is the leading candidate for one-source CPU/GPU execution, with an LLVM/JIT CPU dependency and evolving APIs. rust-gpu/krnl require more compiler/runtime integration; separate WGSL and Rust algorithms violate the user's requirement; OpenCL is deprecated on macOS. Details and references are in DESIGN 3.3.1.
+- Proposed, not selected or implemented: persistent background evaluation (would revise G2), cached normalized CFA levels, sharing decoded resources with export, and a small CubeCL portability/numerical/latency experiment (E10–E12). At this fixture size the decoded samples occupy 84.8 MB; a full f32 CFA pyramid would occupy at most another 226.1 MB before downstream images, so retention needs a policy.
+- Verification: the probe completed all requested levels and checked both view targets for evaluation errors. No processing code or dependencies changed. Next: settle the backend direction and caching/worker scope before implementation.
+
 ## 2026-10-04: external parameters and the canvas
 
 - User decisions: any parameter can be external, with schema defaults and one input per node (F7); nodes are identified by id with renamable labels; the editor becomes the main canvas with views drawn in nodes, zoom and resize (G7); enlarging into a separate window is postponed; zero compatibility in the prototype (F6).

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use drip::eval::{Evaluator, run_action};
+use drip::eval::Evaluator;
 use drip::graph::NodeId;
 use drip::node::Registry;
 use drip::param::ParamKind;
@@ -179,7 +179,7 @@ impl App {
         self.file = file;
         self.selected = None;
         self.editor = Editor::default();
-        self.evaluator = Evaluator::default();
+        self.evaluator = self.evaluator.fork(&self.project.graph);
     }
 
     fn open(&mut self, file: PathBuf) {
@@ -243,8 +243,9 @@ impl App {
     pub(crate) fn run_action(&mut self, id: NodeId, name: &'static str) {
         let (tx, rx) = mpsc::channel();
         let graph = self.project.graph.clone();
+        let evaluator = self.evaluator.fork(&graph);
         std::thread::spawn(move || {
-            let result = run_action(&graph, id, name).map_err(|e| e.to_string());
+            let result = evaluator.run_action(&graph, id, name).map_err(|e| e.to_string());
             // The receiver is gone only if the app quit; nothing is left to tell.
             let _ = tx.send(result);
         });
@@ -321,10 +322,15 @@ mod tests {
             image.rgb().width < 1000,
             "a view a few hundred points wide needs no full resolution"
         );
+        let raw = app.project.graph.find("raw").unwrap();
+        let cached = std::sync::Arc::downgrade(
+            app.evaluator.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic(),
+        );
 
         h.get_by_label("New").click();
         h.run();
         assert!(!has_view(h.state(), "preview"), "the new template has no raw file yet");
+        assert!(cached.upgrade().is_some(), "raw levels survive project changes");
         std::fs::remove_file(file).unwrap();
     }
 
