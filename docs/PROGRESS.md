@@ -2,6 +2,13 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: manual global preview detail
+
+- Implemented the global Preview detail selector (Full through 1/256, default 1/8), persisted as `Project::ui.preview_level`. Invalid saved levels fail at project loading without replacing the current project. New projects return to the default.
+- Removed automatic level selection and the image-dimension feedback from drawing. The existing `evaluate(graph, level, targets)` API and one-result-per-node cache are unchanged. Preview/histogram targets share the selected level; export continues using its separate full-resolution action path.
+- Validation: the headless GUI test operates the control, checks image scale and histogram pixel counts, verifies resizing preserves the result, saves/reopens the setting and resets it with New. Invalid level values are rejected. The harness now uses the application's 1600×1000 initial size so requested view targets stay visible. Workspace tests, formatting and clippy pass.
+- This commit changes detail selection only. RAW cache simplification remains pending; the next step is investigating the async worker, not implementing it yet.
+
 ## 2026-10-04: clarify evaluation targets
 
 - User emphasized that evaluation is always against a particular node. Made target identity explicit in the worker plan: a request names target NodeIds, while the graph supplies dependencies and the level controls resolution. Batching targets shares their upstream work; coalescing must preserve the complete desired target set. Export names its node and action separately and forces level 0.

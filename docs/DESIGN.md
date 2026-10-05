@@ -70,7 +70,7 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 
 | E15 | Use Rayon for white balance, 2×2 debayering, camera-to-Rec.2020, sigmoid and histogram. Remove CubeCL and postpone GPU computation. | decided (user, 2026-10-04); implemented | Ordinary Rust parallel iterators use one algorithm with one or multiple CPU workers. No JIT, compute device, runtime buffers or host transfers; graph and node contracts remain unchanged. Measured latency is lower than CubeCL on the test machine (3.3.3). |
 
-| E16 | Preview level is one manually selected global setting; exports always evaluate at level 0. | requirement (user, 2026-10-04); not implemented | Replaces the proposed per-preview parameter and automatic resolution selection. All visible targets share one evaluation level, matching the existing evaluator API. Implementation follows a separate plan. |
+| E16 | Preview level is one manually selected global setting; exports always evaluate at level 0. | requirement (user, 2026-10-04); implemented | The GUI offers Full through 1/256, defaults to 1/8 and persists the level in project UI state. All visible targets share one level through the unchanged evaluator API; one cached result per node remains sufficient. |
 | E17 | Remove eager RAW pyramid retention when manual levels are introduced. Keep ordinary dependency-stamp caching. | requirement (user, 2026-10-04); not implemented | Rapid level switching no longer justifies retaining every normalized level. The exact resource lifetime proposal is in 3.3.4; the Rayon commit leaves current caches intact. |
 
 ### 3.3.1 Kernel survey (2026-10-04)
@@ -165,18 +165,18 @@ none is changed by the Rayon replacement.
 ### 3.3.4 Preview level and background evaluation plan (2026-10-04)
 
 **Tentative implementation plan, written after the Rayon commit.** E16–E17
-record the requested behavior; the worker design below is proposed, not built.
+record the requested behavior; step 1 is implemented, while the remaining design is proposed, not built.
 Keep each implementation step in its own commit.
 
-**1. Manual global preview level.** Add a GUI selector for levels 0–8, default
-3, showing the corresponding scale. Save the setting in `Project::ui`; validate
-it when loading frontend state. Remove `App::adapt_level`, `Frame::images` and
-the drawing-to-resolution feedback. Zooming or resizing a view will only change
-its presentation. The GUI continues calling `evaluate(graph, level, targets)`;
-`EvalContext` passes the level to source nodes. No preview-node parameter,
-recursive evaluator invocation or graph-wide parameter machinery is needed.
-`run_action` continues forcing level 0, independently of the selector. With the
-current 2×2 debayer, level 0 still produces half the sensor dimensions (C6).
+**1. Manual global preview level — implemented.** The GUI selector offers
+levels 0–8 (Full through 1/256), default 3 (1/8), saved in `Project::ui` and
+validated when loading frontend state. Automatic adaptation and image-size
+feedback have been removed. Zooming or resizing a view only changes its
+presentation. The GUI calls the existing `evaluate(graph, level, targets)`;
+`EvalContext` passes the level to source nodes. `run_action` continues forcing
+level 0 independently. With the current 2×2 debayer, level 0 still produces
+half the sensor dimensions (C6). The following cache and worker changes remain
+proposals; they are not part of the detail-level implementation.
 
 **2. Simplify RAW retention.** Remove the normalized `Pyramid` and derive only
 the requested mosaic from decoded data. Keep one current result per node: that
@@ -332,7 +332,8 @@ Spike done (protocol level, see D2). Still to do in M3: verify what is actually 
 | ID | Decision | Status | Rationale |
 |----|----------|--------|-----------|
 | ~~G1~~ | ~~Custom node editor in a bottom panel, with a separate preview panel and histogram in the sidebar.~~ | superseded by G7 (user, 2026-10-04) | |
-| G2 | Interactive evaluation runs synchronously on the UI thread, for the nodes visible in the editor (and their ancestors). The preview level is the coarsest at which every drawn image still has at least as many pixels as it shows, moving coarser only with a 5% margin. Export runs on a worker thread over a clone of the graph. | decided (user, 2026-10-04) | The GUI asks for what is visible. Preview scales keep interactive evaluation cheap. A full-resolution export would freeze the UI for seconds. |
+| ~~G2~~ | ~~Evaluate visible nodes synchronously, adapting resolution to drawn image size; export on a background thread.~~ | superseded by G8 (user, 2026-10-04) | Automatic detail changes interrupted interaction. |
+| G8 | Evaluate visible target nodes and their ancestors at the manually selected global preview level. Interactive evaluation remains synchronous for now; export runs separately at level 0. | decided (user, 2026-10-04); implemented | Detail is independent of canvas zoom and node size. The evaluator API and one-result-per-node cache remain unchanged. The proposed worker is separate (E12, 3.3.4). |
 | G3 | Logging uses the `log` facade in the library and `env_logger` in the frontends. Frontends also show warnings and errors in the window. | decided (user, 2026-10-04) | The standard, minimal choice. |
 | G4 | Undo/redo is postponed. | decided (user, 2026-10-04) | Not needed for the prototype (TODO). |
 | G5 | One minimal UI style in `theme.rs`: everything on middle grey (sRGB 118, 18% linear), dark text, no shadows, rounding or borders. Fills distinguish elements; color is reserved for errors and histogram channels. | decided (user, 2026-10-04) | A neutral surround is standard for judging color. Decoration distracts from the image. |

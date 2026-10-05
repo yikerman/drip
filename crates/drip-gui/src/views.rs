@@ -5,9 +5,8 @@ use egui::{Align2, FontId, Painter, Rect, Stroke};
 
 use crate::{preview, theme};
 
-/// Draws `view` fitted into `rect`; returns the drawn image's rect in points,
-/// if the view is an image, so the caller can pick a preview resolution.
-pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &View) -> Option<(Rect, usize)> {
+/// Draws `view` fitted into `rect`.
+pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &View) {
     match view {
         View::Image(value) => {
             let image = value.rgb();
@@ -15,12 +14,8 @@ pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &View) -> Option<
             let size = egui::vec2(image.width as f32, image.height as f32) * fit;
             let shown = Rect::from_center_size(rect.center(), size);
             painter.add(preview::shape(shown, id, image.clone()));
-            Some((shown, image.width))
         }
-        View::Histogram(h) => {
-            histogram(painter, rect, h);
-            None
-        }
+        View::Histogram(h) => histogram(painter, rect, h),
     }
 }
 

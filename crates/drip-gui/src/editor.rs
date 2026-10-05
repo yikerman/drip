@@ -44,9 +44,6 @@ impl Default for Editor {
 /// What one frame of the editor reads from evaluation and reports back.
 pub struct Frame<'a> {
     pub results: &'a dyn Fn(NodeId) -> Option<&'a NodeResult>,
-    /// Per image drawn: its width in pixels and its shown width in physical
-    /// pixels, from which the app picks a preview level.
-    pub images: Vec<(usize, f32)>,
     /// An edit the graph refused.
     pub refused: Option<String>,
 }
@@ -206,11 +203,7 @@ impl Editor {
                     .on_hover_text(error);
             }
             if let Some((rect, view)) = &l.view {
-                let drawn = views::draw(&painter, *rect, ui.id().with((l.id, "view")), view);
-                // Only what is on screen decides the preview resolution.
-                if let Some((shown, width)) = drawn.filter(|(shown, _)| shown.intersects(area)) {
-                    frame.images.push((width, shown.width() * ui.ctx().pixels_per_point()));
-                }
+                views::draw(&painter, *rect, ui.id().with((l.id, "view")), view);
                 let corner = Rect::from_min_max(l.rect.max - Vec2::splat(10.0 * zoom), l.rect.max);
                 painter.line_segment(
                     [corner.left_bottom(), corner.right_top()],

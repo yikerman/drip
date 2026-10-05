@@ -63,6 +63,8 @@ In the GUI:
 - Right-click the editor background to add a node.
 - Drag from an output port to an input port to connect them; right-click an
   input port to disconnect it.
+- Choose **Preview detail** globally: Full through 1/256, default 1/8. The
+  selection is saved with the project; exports always use full detail.
 - Select a node to edit its parameters. Right-click a parameter name to bind
   it to a graph input.
 - Set the raw file and the output path under *inputs*, then press *export*

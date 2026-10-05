@@ -17,6 +17,7 @@ use crate::{inspector, theme};
 
 /// Preview levels never go coarser than 1/256 of the sensor.
 const MAX_LEVEL: u8 = 8;
+const DEFAULT_LEVEL: u8 = 3;
 
 pub struct App {
     pub(crate) project: Project,
@@ -25,8 +26,7 @@ pub struct App {
     file: Option<PathBuf>,
     pub(crate) selected: Option<NodeId>,
     editor: Editor,
-    /// The downscale level the graph is evaluated at, adapted so every image
-    /// view is drawn from at least as many pixels as it shows (DESIGN G2).
+    /// One user-selected level for every preview target (DESIGN E16).
     level: u8,
     status: Option<Status>,
     action: Option<mpsc::Receiver<Result<(), String>>>,
@@ -47,7 +47,7 @@ impl App {
             file: None,
             selected: None,
             editor: Editor::default(),
-            level: 3,
+            level: DEFAULT_LEVEL,
             status: None,
             action: None,
             wide_gamut,
@@ -93,7 +93,7 @@ impl App {
         CentralPanel::default().show(ui, |ui| {
             let evaluator = &self.evaluator;
             let results = |id| evaluator.result(id);
-            let mut frame = Frame { results: &results, images: Vec::new(), refused: None };
+            let mut frame = Frame { results: &results, refused: None };
             self.editor.show(
                 ui,
                 &mut self.project.graph,
@@ -101,40 +101,16 @@ impl App {
                 &mut self.selected,
                 &mut frame,
             );
-            let Frame { images, refused, .. } = frame;
-            if let Some(refused) = refused {
+            if let Some(refused) = frame.refused {
                 self.report(Err(refused));
             }
-            self.adapt_level(ui.ctx(), &images);
         });
-    }
-
-    /// Moves to the coarsest level at which every drawn image still has at
-    /// least as many pixels as it shows. Finer as soon as one has fewer;
-    /// coarser only with a margin, since cropping to whole Bayer cells makes
-    /// each level slightly less than half the previous and would oscillate.
-    fn adapt_level(&mut self, ctx: &egui::Context, images: &[(usize, f32)]) {
-        let shift = images
-            .iter()
-            .map(|&(pixels, shown)| {
-                let ratio = pixels as f32 / shown.max(1.0);
-                let shift = if ratio < 1.0 { ratio.log2() } else { (ratio / 1.05).log2().max(0.0) };
-                shift.floor() as i32
-            })
-            .min();
-        let Some(shift) = shift.filter(|s| *s != 0) else { return };
-        let level = (i32::from(self.level) + shift).clamp(0, i32::from(MAX_LEVEL)) as u8;
-        if level != self.level {
-            log::debug!("preview level {} -> {level}", self.level);
-            self.level = level;
-            ctx.request_repaint();
-        }
     }
 
     fn menu(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             if ui.button("New").clicked() {
-                self.set_project(templates::raw_to_tiff(), None);
+                self.set_project(templates::raw_to_tiff(), None).expect("valid template");
             }
             if ui.button("Open…").clicked()
                 && let Some(file) =
@@ -159,6 +135,25 @@ impl App {
             if ui.button("Reload files").clicked() {
                 self.reload();
             }
+            ui.separator();
+            let label = |level| {
+                if level == 0 { "Full".to_owned() } else { format!("1/{}", 1u32 << level) }
+            };
+            let previous = self.level;
+            egui::ComboBox::from_label("Preview detail")
+                .width(64.0)
+                .selected_text(label(self.level))
+                .show_ui(ui, |ui| {
+                    for level in 0..=MAX_LEVEL {
+                        ui.selectable_value(&mut self.level, level, label(level));
+                    }
+                })
+                .response
+                .on_hover_text("Global preview scale. Export always uses full detail.");
+            if self.level != previous {
+                self.project.ui["preview_level"] = serde_json::json!(self.level);
+                ui.ctx().request_repaint();
+            }
         });
     }
 
@@ -174,24 +169,34 @@ impl App {
         });
     }
 
-    fn set_project(&mut self, project: Project, file: Option<PathBuf>) {
+    fn set_project(&mut self, project: Project, file: Option<PathBuf>) -> Result<(), String> {
+        if !project.ui.is_null() && !project.ui.is_object() {
+            return Err("project UI state must be an object".into());
+        }
+        let level = match project.ui.get("preview_level") {
+            None => DEFAULT_LEVEL,
+            Some(value) => {
+                value.as_u64().filter(|&level| level <= u64::from(MAX_LEVEL)).ok_or_else(|| {
+                    format!("preview level must be an integer from 0 to {MAX_LEVEL}")
+                })? as u8
+            }
+        };
+        self.level = level;
         self.project = project;
         self.file = file;
         self.selected = None;
         self.editor = Editor::default();
         self.evaluator = self.evaluator.fork(&self.project.graph);
+        Ok(())
     }
 
     fn open(&mut self, file: PathBuf) {
         let loaded = std::fs::read_to_string(&file)
             .map_err(|e| e.to_string())
-            .and_then(|text| Project::from_json(&text, &self.registry).map_err(|e| e.to_string()));
+            .and_then(|text| Project::from_json(&text, &self.registry).map_err(|e| e.to_string()))
+            .and_then(|project| self.set_project(project, Some(file.clone())));
         match loaded {
-            Ok(project) => {
-                let text = format!("opened {}", file.display());
-                self.set_project(project, Some(file));
-                self.report(Ok(text));
-            }
+            Ok(()) => self.report(Ok(format!("opened {}", file.display()))),
             Err(e) => self.report(Err(format!("{}: {e}", file.display()))),
         }
     }
@@ -296,7 +301,9 @@ mod tests {
     }
 
     fn harness<'a>(app: App) -> Harness<'a, App> {
-        Harness::new_ui_state(|ui, app: &mut App| app.ui(ui), app)
+        Harness::builder()
+            .with_size(egui::vec2(1600.0, 1000.0))
+            .build_ui_state(|ui, app: &mut App| app.ui(ui), app)
     }
 
     fn has_view(app: &App, label: &str) -> bool {
@@ -305,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn previews_render_in_their_nodes_and_adapt_resolution() {
+    fn previews_use_the_selected_global_detail() {
         let file = fixture_project("open");
         let mut h = harness(App::new(Some(file.clone()), true));
         h.run();
@@ -318,20 +325,64 @@ mod tests {
         else {
             panic!("an image")
         };
-        assert!(
-            image.rgb().width < 1000,
-            "a view a few hundred points wide needs no full resolution"
-        );
+        assert_eq!(app.level, DEFAULT_LEVEL);
+        assert_eq!(image.rgb().scale, 16, "1/8 preview plus 2×2 debayer");
         let raw = app.project.graph.find("raw").unwrap();
         let cached = std::sync::Arc::downgrade(
             app.evaluator.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic(),
         );
 
+        h.get_by_label("Preview detail").click();
+        h.run();
+        h.get_by_label("1/4").click();
+        h.run();
+        assert_eq!(h.state().level, 2);
+        let app = h.state();
+        let Some(View::Image(image)) = &app.evaluator.result(id).unwrap().as_ref().unwrap().view
+        else {
+            panic!("an image")
+        };
+        assert_eq!(image.rgb().scale, 8);
+        let histogram = app.project.graph.find("histogram").unwrap();
+        let Some(View::Histogram(histogram)) =
+            &app.evaluator.result(histogram).unwrap().as_ref().unwrap().view
+        else {
+            panic!("a histogram")
+        };
+        assert_eq!(
+            histogram.counts.iter().map(|bin| bin[0] as usize).sum::<usize>(),
+            image.rgb().pixels.len()
+        );
+        let image = std::sync::Arc::downgrade(image.rgb());
+        h.state_mut().project.graph.set_ui(id, json!({"size": [1200.0, 900.0]})).unwrap();
+        h.run();
+        assert_eq!(h.state().level, 2, "view size does not select resolution");
+        assert!(image.upgrade().is_some(), "resizing preserves the evaluated image");
+        h.get_by_label("Save").click();
+        h.run();
+        let restored = App::new(Some(file.clone()), true);
+        assert_eq!(restored.level, 2);
+        assert!(!restored.status.unwrap().error);
+
         h.get_by_label("New").click();
         h.run();
         assert!(!has_view(h.state(), "preview"), "the new template has no raw file yet");
+        assert_eq!(h.state().level, DEFAULT_LEVEL);
         assert!(cached.upgrade().is_some(), "raw levels survive project changes");
         std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    fn invalid_detail_does_not_replace_the_open_project() {
+        let mut app = App::new(None, true);
+        let original = app.project.clone();
+        for value in [json!(-1), json!(9), json!(256), json!(2.5), json!("2"), json!(null)] {
+            let mut project = templates::raw_to_tiff();
+            project.ui = json!({"preview_level": value});
+            assert!(app.set_project(project, None).is_err());
+            assert_eq!(app.project, original);
+            assert_eq!(app.level, DEFAULT_LEVEL);
+        }
     }
 
     #[test]
