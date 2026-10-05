@@ -27,10 +27,7 @@ fn read(p: Params, _: &[Value], ctx: &EvalContext) -> Result<Evaluated, String> 
     let raw = ctx.resources().load(path, |path| {
         drip_libraw::decode(path).map_err(|e| format!("{}: {e}", path.display()))
     })?;
-    let mut mosaic = normalize(&raw)?;
-    for _ in 0..ctx.level {
-        mosaic = downsample(&mosaic);
-    }
+    let mosaic = normalize(&raw)?;
     let outputs =
         vec![Value::Mosaic(Arc::new(mosaic)), Value::RawMetadata(Arc::new(raw.metadata.clone()))];
     Ok(Evaluated { outputs, view: None })

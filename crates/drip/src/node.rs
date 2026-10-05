@@ -87,7 +87,7 @@ pub struct EvalContext<'a> {
 
 impl EvalContext<'_> {
     /// Sensor pixels per image pixel along each axis; 1 is full resolution.
-    /// Sources downsample by it, everything downstream inherits it.
+    /// Demosaic adapters downsample by it after sensor-space processing.
     pub fn scale(&self) -> u32 {
         1 << self.level
     }

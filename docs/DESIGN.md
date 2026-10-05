@@ -61,6 +61,11 @@ This sequence takes priority over CLI expansion and speculative optimization.
   existing decoding, camera conversion and output paths; separate exposure from
   tone mapping. Scope initially remains Bayer.
 
+- **Decided:** Normalize and reconstruct highlights at sensor resolution, then
+  reduce the preview at demosaic input. This preserves clipping information and
+  costs a full-sensor pass even for small previews. Demosaic kernels receive an
+  ordinary mosaic; they do not know about the evaluator's preview setting.
+
 ## Responsiveness and resource costs
 
 - **Requirement:** Prioritize responsiveness, portability and easy development
@@ -94,9 +99,9 @@ This sequence takes priority over CLI expansion and speculative optimization.
 
 ## Color and display
 
-- **Requirement:** The prototype pipeline is RAW → white balance → 2×2 binning
-  debayer → camera to linear Rec.2020 → sigmoid → TIFF. Bayer only for now.
-  Full-detail export still has half the sensor dimensions because of binning.
+- **Requirement:** The prototype pipeline is RAW → white balance → highlight
+  reconstruction → RCD → camera to linear Rec.2020 → exposure → sigmoid → TIFF.
+  Bayer only for now; RCD exports preserve sensor dimensions.
 - **Decided:** Preserve negative values after black subtraction to avoid biasing
   the noise floor. Normalize with a common denominator to avoid hidden white
   balance. Native black-level stages must not be mixed and subtracted twice.

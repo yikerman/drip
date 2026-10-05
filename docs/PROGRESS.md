@@ -4,6 +4,17 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: RCD and preview placement
+
+- Ported RCD with bounded tile scratch and Rayon; the default template now
+  produces full-size RGB at Full detail. Bilinear interpolation covers the outer
+  ten pixels and tiny inputs; interior stages follow the pinned upstream source.
+- Per user decision, preview reduction moved from RAW reading to demosaic input,
+  leaving sensor processing at full detail even for small previews.
+- Validation: 800 upstream C vectors across Bayer phases and tile seams; flat
+  fields, measured samples, tiny/odd geometry and thread consistency. Workspace
+  tests, including real RAW/GUI checks, and clippy/fmt passed.
+
 ## 2026-10-05: sigmoid and exposure
 
 - Ported darktable's per-channel sigmoid, hue/energy correction and fixed smooth

@@ -485,7 +485,7 @@ mod tests {
             panic!("an image")
         };
         assert_eq!(app.level, DEFAULT_LEVEL);
-        assert_eq!(image.width, 1992, "1/2 preview plus 2×2 debayer");
+        assert_eq!(image.width, 3984, "1/2 preview with full-size RCD");
         h.get_by_label("Invalidate cache").click();
         settle(&mut h);
         let Some(View::Image(refreshed)) = h.state().worker.result(id).unwrap().as_ref().unwrap()
@@ -503,7 +503,7 @@ mod tests {
         let Some(View::Image(image)) = app.worker.result(id).unwrap().as_ref().unwrap() else {
             panic!("an image")
         };
-        assert_eq!(image.width, 996);
+        assert_eq!(image.width, 1992);
         let histogram = app.project.graph.find("histogram").unwrap();
         let Some(View::Histogram(histogram)) =
             app.worker.result(histogram).unwrap().as_ref().unwrap()

@@ -18,7 +18,7 @@ pub fn raw_to_tiff() -> Project {
         g.set_ui(id, ui).expect("just added");
         id
     };
-    let chain = [&READ, &WHITE_BALANCE, &BIN_2X2, &CAMERA_TO_REC2020, &EXPOSURE, &SIGMOID];
+    let chain = [&READ, &WHITE_BALANCE, &RCD, &CAMERA_TO_REC2020, &EXPOSURE, &SIGMOID];
     let chain: Vec<_> = chain
         .iter()
         .enumerate()

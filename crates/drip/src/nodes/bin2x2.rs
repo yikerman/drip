@@ -18,8 +18,8 @@ pub static BIN_2X2: NodeKind = NodeKind {
     actions: &[],
 };
 
-fn bin_2x2(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {
-    let m = inputs[0].mosaic();
+fn bin_2x2(_: Params, inputs: &[Value], ctx: &EvalContext) -> Result<Evaluated, String> {
+    let m = super::demosaic::preview(inputs[0].mosaic(), ctx);
     let (width, height) = (m.width / 2, m.height / 2);
     // The second green (3) joins the first.
     let colors: Vec<u32> = m.cfa.colors.iter().map(|&c| [0, 1, 2, 1][c as usize]).collect();

@@ -2,6 +2,8 @@
 
 mod bin2x2;
 mod camera;
+mod demosaic;
+pub use demosaic::RCD;
 mod export;
 mod exposure;
 pub use exposure::EXPOSURE;
@@ -27,6 +29,7 @@ pub fn registry() -> Registry {
         &READ,
         &WHITE_BALANCE,
         &BIN_2X2,
+        &RCD,
         &CAMERA_TO_REC2020,
         &EXPOSURE,
         &SIGMOID,

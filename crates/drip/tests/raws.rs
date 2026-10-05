@@ -116,7 +116,7 @@ fn built_in_template_takes_the_raw_and_output_paths() {
     std::fs::remove_file(&path).unwrap();
     let view = ev.result(preview).unwrap().as_ref().unwrap().view.clone();
     let Some(drip::value::View::Image(image)) = view else { panic!("no preview") };
-    assert_eq!(image.rgb().scale, 16, "level 3 and the 2x2 debayer");
+    assert_eq!(image.rgb().scale, 8, "RCD preserves the requested scale");
 
     let cached = ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic().clone();
     let previous = Arc::downgrade(&cached);
@@ -138,8 +138,11 @@ fn built_in_template_takes_the_raw_and_output_paths() {
         fork.result(other).unwrap().as_ref().unwrap().outputs[0].mosaic().data,
         ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic().data,
     );
-    ev.evaluate(&p.graph, 31, &[raw]);
-    let smallest = ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic();
-    assert!(smallest.data.is_empty());
+    let demosaic = p.graph.find("demosaic").unwrap();
+    ev.evaluate(&p.graph, 31, &[demosaic]);
+    let smallest = ev.result(demosaic).unwrap().as_ref().unwrap().outputs[0].rgb();
+    assert!(smallest.pixels.is_empty());
     assert_eq!(smallest.scale, 1 << 31);
+    let sensor = ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic();
+    assert_eq!(sensor.scale, 1, "sensor processing precedes preview reduction");
 }
