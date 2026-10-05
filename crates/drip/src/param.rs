@@ -86,6 +86,11 @@ impl ParamKind {
 pub struct Params<'a>(pub(crate) &'a ParamMap);
 
 impl<'a> Params<'a> {
+    /// Borrow parameters already validated by a graph or project loader.
+    pub fn validated(values: &'a ParamMap) -> Self {
+        Self(values)
+    }
+
     pub fn float(&self, name: &str) -> f64 {
         self.0[name].as_f64().expect("validated float")
     }

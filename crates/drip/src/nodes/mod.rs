@@ -3,6 +3,8 @@
 mod bin2x2;
 mod camera;
 mod export;
+mod exposure;
+pub use exposure::EXPOSURE;
 mod histogram;
 mod preview;
 mod raw;
@@ -21,9 +23,19 @@ pub use white_balance::WHITE_BALANCE;
 use crate::node::Registry;
 
 pub fn registry() -> Registry {
-    [&READ, &WHITE_BALANCE, &BIN_2X2, &CAMERA_TO_REC2020, &SIGMOID, &PREVIEW, &HISTOGRAM, &TIFF]
-        .into_iter()
-        .fold(Registry::default(), Registry::with)
+    [
+        &READ,
+        &WHITE_BALANCE,
+        &BIN_2X2,
+        &CAMERA_TO_REC2020,
+        &EXPOSURE,
+        &SIGMOID,
+        &PREVIEW,
+        &HISTOGRAM,
+        &TIFF,
+    ]
+    .into_iter()
+    .fold(Registry::default(), Registry::with)
 }
 
 fn single(output: crate::value::Value) -> Result<crate::node::Evaluated, String> {

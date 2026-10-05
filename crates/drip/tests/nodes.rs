@@ -261,22 +261,16 @@ fn binning_debayer_averages_greens_and_halves_resolution() {
 }
 
 #[test]
-fn sigmoid_keeps_grey_and_maps_onto_unit_range() {
-    let (mut p, s) = chain(&SCENE, &[&nodes::SIGMOID]);
-    let out = evaluate(&p, s).outputs[0].rgb().pixels.clone();
-    assert!((out[0][0] - 0.18).abs() < 1e-6, "middle grey stays");
-    assert_eq!((out[0][1], out[0][2]), (0.0, 0.0), "black and negatives map to 0");
-    assert!(out[1][1] <= 1.0 && out[1][1] > 0.999, "highlights approach 1");
-    assert!(out[1][0] < 0.18 && out[1][2] > 0.18, "monotonic around grey");
-
-    p.graph.set_param(s, "exposure", json!(1.0)).unwrap();
-    let out = evaluate(&p, s).outputs[0].rgb().pixels.clone();
-    assert!((out[1][0] - 0.18).abs() < 1e-6, "+1 EV brings 0.09 to grey");
-
-    p.graph.set_param(s, "exposure", json!(10.0)).unwrap();
-    p.graph.set_param(s, "contrast", json!(4.0)).unwrap();
-    let out = evaluate(&p, s).outputs[0].rgb().pixels.clone();
-    assert_eq!(out[1][1], 1.0, "overflowing powers saturate instead of becoming NaN");
+fn exposure_is_scene_linear_and_sigmoid_outputs_finite_display_values() {
+    let (mut p, exposure) = chain(&SCENE, &[&nodes::EXPOSURE]);
+    p.graph.set_param(exposure, "ev", json!(1.0)).unwrap();
+    let rgb = evaluate(&p, exposure).outputs[0].rgb().clone();
+    assert_eq!(rgb.pixels, [[0.36, 0.0, -2.0], [0.18, 2e6, 0.72]]);
+    let sigmoid = p.graph.add_node(&nodes::SIGMOID);
+    p.graph.connect(Port(exposure, "image".into()), Port(sigmoid, "image".into())).unwrap();
+    let out = evaluate(&p, sigmoid);
+    assert_eq!(out.outputs[0].port_type(), PortType::DisplayRec2020);
+    assert!(out.outputs[0].rgb().pixels.iter().flatten().all(|v| v.is_finite()));
 }
 
 #[test]

@@ -104,9 +104,9 @@ This sequence takes priority over CLI expansion and speculative optimization.
   Rec.2020 directly. “No chromatic adaptation” means no separate CAT such as
   Bradford; neutral normalization still constitutes adaptation in camera space.
   Missing or invalid characterization is an input error.
-- **Decided:** Keep the simple per-channel sigmoid with a fixed middle-grey point
-  and soft shoulder. Highlight hue shifts and desaturation are accepted for the
-  prototype; hue preservation and gamut mapping are future work.
+- **Decided:** Use darktable-derived sigmoid color handling with fixed smooth
+  Rec.2020 primaries, optional hue preservation, 0.18 middle grey and zero black.
+  Keep exposure separate so it also applies to other display transforms.
 - **Decided:** TIFF exports embed the selected RGB ICC profile, with common
   profiles built in. “Arbitrary ICC” means suitable RGB destinations, not every
   profile class. Float output does not guarantee unbounded transforms: profile

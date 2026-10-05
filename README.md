@@ -32,7 +32,7 @@ macOS packaging is not yet verified.
 
 The prototype pipeline is:
 
-raw → white balance → 2×2 binning debayer → camera to Rec.2020 → sigmoid tone mapping → TIFF export (sRGB, Display P3, Rec.2020 or any RGB ICC profile)
+raw → white balance → 2×2 binning debayer → camera to Rec.2020 → exposure → sigmoid tone mapping → TIFF export (sRGB, Display P3, Rec.2020 or any RGB ICC profile)
 
 Preview and histogram nodes can be attached anywhere in the graph.
 

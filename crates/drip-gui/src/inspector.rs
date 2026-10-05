@@ -16,6 +16,17 @@ pub fn node(ui: &mut Ui, cx: &mut NodeCx) {
         cx.set_label(&label);
     }
     ui.weak(node.kind.name);
+    crate::node_ui::of(node.kind).controls(ui, cx);
+    for action in node.kind.actions {
+        if ui.add_enabled(!cx.action_running(), egui::Button::new(action.name)).clicked() {
+            cx.run(action.name);
+        }
+    }
+}
+
+/// Default schema controls, shared by custom node panels and generic nodes.
+pub fn parameters(ui: &mut Ui, cx: &mut NodeCx) {
+    let (id, node) = (cx.id(), cx.node().clone());
     egui::Grid::new(("params", id)).num_columns(2).show(ui, |ui| {
         for spec in node.kind.params {
             let external = node.external.contains(spec.name);
@@ -37,11 +48,6 @@ pub fn node(ui: &mut Ui, cx: &mut NodeCx) {
             ui.end_row();
         }
     });
-    for action in node.kind.actions {
-        if ui.add_enabled(!cx.action_running(), egui::Button::new(action.name)).clicked() {
-            cx.run(action.name);
-        }
-    }
 }
 
 /// The template's inputs, one per external parameter of each node, edited

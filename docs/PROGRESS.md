@@ -4,6 +4,16 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: sigmoid and exposure
+
+- Ported darktable's per-channel sigmoid, hue/energy correction and fixed smooth
+  primaries to Rust/Rayon. Retained Drip's 0.18 grey and zero black; analytic
+  coefficients and log-space evaluation avoid unstable powers. Exposure is a
+  separate scene-linear node. A shared curve plot accompanies schema controls.
+- Validation: workspace tests, f64 curve/slope checks, pinned upstream C hue
+  vectors, extreme/negative inputs and one/multiple Rayon workers; clippy and fmt.
+  Existing project schemas intentionally change without migration.
+
 ## 2026-10-05: third-party credits
 
 - Added `THIRD_PARTY.md` for direct dependencies, native libraries and adapted

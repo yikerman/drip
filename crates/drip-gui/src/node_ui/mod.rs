@@ -1,5 +1,6 @@
 //! Optional node-specific presentation; ordinary nodes use schema controls.
 
+mod sigmoid;
 mod viewer;
 use crate::editing::NodeCx;
 use crate::inspector;
@@ -15,6 +16,10 @@ pub const WIDTH: f32 = 160.0;
 pub const PAD: f32 = 6.0;
 
 pub trait NodeUi: Sync {
+    fn controls(&self, ui: &mut Ui, node: &mut NodeCx) {
+        inspector::parameters(ui, node);
+    }
+
     /// The size of the node's body, below its ports, in graph units. Its
     /// width is the node's.
     fn size(&self, _node: &Node) -> Vec2 {
@@ -35,7 +40,8 @@ pub trait NodeUi: Sync {
 
 /// The GUI of nodes of `kind`.
 pub fn of(kind: &NodeKind) -> &'static dyn NodeUi {
-    static GUIS: &[(&NodeKind, &dyn NodeUi)] = &[(&PREVIEW, &Viewer), (&HISTOGRAM, &Viewer)];
+    static GUIS: &[(&NodeKind, &dyn NodeUi)] =
+        &[(&PREVIEW, &Viewer), (&HISTOGRAM, &Viewer), (&drip::nodes::SIGMOID, &sigmoid::Controls)];
     GUIS.iter().find(|(k, _)| *k == kind).map_or(&Plain, |(_, gui)| *gui)
 }
 

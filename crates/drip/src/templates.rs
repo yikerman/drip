@@ -18,16 +18,16 @@ pub fn raw_to_tiff() -> Project {
         g.set_ui(id, ui).expect("just added");
         id
     };
-    let chain = [&READ, &WHITE_BALANCE, &BIN_2X2, &CAMERA_TO_REC2020, &SIGMOID];
+    let chain = [&READ, &WHITE_BALANCE, &BIN_2X2, &CAMERA_TO_REC2020, &EXPOSURE, &SIGMOID];
     let chain: Vec<_> = chain
         .iter()
         .enumerate()
         .map(|(i, kind)| add(kind, json!({ "pos": [195.0 * i as f64, 0.0] })))
         .collect();
     let sinks = [
-        add(&PREVIEW, json!({ "pos": [975.0, 0.0], "size": [672.0, 440.0] })),
-        add(&HISTOGRAM, json!({ "pos": [1667.0, 0.0], "size": [320.0, 240.0] })),
-        add(&TIFF, json!({ "pos": [780.0, 80.0] })),
+        add(&PREVIEW, json!({ "pos": [1170.0, 0.0], "size": [672.0, 440.0] })),
+        add(&HISTOGRAM, json!({ "pos": [1862.0, 0.0], "size": [320.0, 240.0] })),
+        add(&TIFF, json!({ "pos": [975.0, 80.0] })),
     ];
     let mut connect = |from: NodeId, output: &str, to: NodeId, input: &str| {
         g.connect(Port(from, output.into()), Port(to, input.into()))
@@ -37,8 +37,9 @@ pub fn raw_to_tiff() -> Project {
     connect(chain[1], "mosaic", chain[2], "mosaic");
     connect(chain[2], "image", chain[3], "image");
     connect(chain[3], "image", chain[4], "image");
+    connect(chain[4], "image", chain[5], "image");
     for id in sinks {
-        connect(chain[4], "image", id, "image");
+        connect(chain[5], "image", id, "image");
     }
     Project { graph: g, ui: serde_json::Value::Null }
 }
