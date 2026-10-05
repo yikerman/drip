@@ -5,10 +5,7 @@ use lcms2::{CIExyY, CIExyYTRIPLE, Locale, MLU, Profile, Tag, TagSignature, ToneC
 
 use crate::color::{D65, P3, REC709, REC2020};
 
-/// Names of the built-in profiles, as `export.tiff` offers them.
-pub const BUILT_IN: &[&str] = &["srgb", "display_p3", "rec2020"];
-
-/// One of [`BUILT_IN`].
+/// Constructs the built-in profile selected by the export parameter schema.
 pub fn built_in(name: &str) -> Profile {
     match name {
         "srgb" => rgb("sRGB", REC709, srgb_curve()),

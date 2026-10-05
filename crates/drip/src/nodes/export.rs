@@ -19,7 +19,7 @@ use crate::value::{PortType, Rgb, Value};
 
 const INTENTS: &[&str] = &["perceptual", "relative", "saturation", "absolute"];
 
-/// The built-in profiles (`profile::BUILT_IN`), or `file` for `profile_file`.
+/// The built-in profiles, or `file` for `profile_file`.
 const PROFILES: &[&str] = &["srgb", "display_p3", "rec2020", "file"];
 
 pub static TIFF: NodeKind = NodeKind {

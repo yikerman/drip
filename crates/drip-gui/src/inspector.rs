@@ -76,20 +76,20 @@ pub fn inputs(app: &mut App, ui: &mut Ui) {
 /// A widget for one parameter value; returns the new value when edited.
 fn edit_value(ui: &mut Ui, id: egui::Id, kind: &ParamKind, value: &Json) -> Option<Json> {
     match *kind {
-        ParamKind::Float { min, max, default } => {
-            let mut v = value.as_f64().unwrap_or(default);
+        ParamKind::Float { min, max, .. } => {
+            let mut v = value.as_f64().expect("validated float");
             ui.add(egui::Slider::new(&mut v, min..=max)).changed().then(|| json!(v))
         }
-        ParamKind::Int { min, max, default } => {
-            let mut v = value.as_i64().unwrap_or(default);
+        ParamKind::Int { min, max, .. } => {
+            let mut v = value.as_i64().expect("validated int");
             ui.add(egui::DragValue::new(&mut v).range(min..=max)).changed().then(|| json!(v))
         }
-        ParamKind::Bool { default } => {
-            let mut v = value.as_bool().unwrap_or(default);
+        ParamKind::Bool { .. } => {
+            let mut v = value.as_bool().expect("validated bool");
             ui.checkbox(&mut v, "").changed().then(|| json!(v))
         }
-        ParamKind::Choice { options, default } => {
-            let current = value.as_str().unwrap_or(default);
+        ParamKind::Choice { options, .. } => {
+            let current = value.as_str().expect("validated choice");
             let mut chosen = None;
             egui::ComboBox::from_id_salt(id).selected_text(current).show_ui(ui, |ui| {
                 for option in options {

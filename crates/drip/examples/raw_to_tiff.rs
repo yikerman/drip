@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use drip::eval::run_action;
-use drip::{profile, templates};
+use drip::{nodes, templates};
 use serde_json::json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -19,7 +19,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut p = templates::raw_to_tiff();
     let (read, export) =
         (p.graph.find("raw").expect("in the template"), p.graph.find("export").expect("too"));
-    match profile.to_str().filter(|name| profile::BUILT_IN.contains(name)) {
+    let profile_kind = nodes::TIFF.param("profile").expect("export profile schema").kind;
+    // The schema's custom-profile selector is an ICC path when passed as an argument.
+    match profile.to_str().filter(|name| *name != "file" && profile_kind.accepts(&json!(name))) {
         Some(name) => p.graph.set_param(export, "profile", json!(name))?,
         None => {
             p.graph.set_param(export, "profile", json!("file"))?;
