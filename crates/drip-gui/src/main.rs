@@ -92,11 +92,11 @@ impl ApplicationHandler<WorkerReady> for Shell {
         self.running = Some(Running { gpu, main, windows: Vec::new(), app });
     }
 
-    /// Results are taken by the next frame of any window; the main window's
-    /// is always wanted.
+    /// Takes the worker's results whether or not any window can draw;
+    /// `about_to_wait` then redraws the windows.
     fn user_event(&mut self, _: &ActiveEventLoop, _: WorkerReady) {
-        if let Some(running) = &self.running {
-            running.main.window.request_redraw();
+        if let Some(running) = &mut self.running {
+            running.app.poll();
         }
     }
 

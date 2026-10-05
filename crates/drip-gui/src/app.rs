@@ -95,7 +95,6 @@ impl App {
 
     /// The main window: menu, status line, inspector and editor.
     pub fn ui(&mut self, ui: &mut Ui) {
-        self.poll();
         Panel::top("menu").show_separator_line(false).show(ui, |ui| self.menu(ui));
         Panel::bottom("status").show_separator_line(false).show(ui, |ui| self.status_line(ui));
         let results = |id| self.worker.result(id);
@@ -119,7 +118,6 @@ impl App {
 
     /// A popped-out window.
     pub fn window(&mut self, ui: &mut Ui, popped: Popped) {
-        self.poll();
         let results = |id| self.worker.result(id);
         let mut frame = Frame::new(&results, &self.popped, self.action.is_some());
         let graph = &mut self.project.graph;
@@ -176,8 +174,8 @@ impl App {
         }
     }
 
-    /// Takes the worker's notices.
-    fn poll(&mut self) {
+    /// Takes the worker's notices; called whenever the worker wakes the app.
+    pub fn poll(&mut self) {
         let mut evaluated = None;
         let mut action_reported = false;
         let notices = self.worker.poll();
@@ -380,9 +378,13 @@ mod tests {
     }
 
     fn harness<'a>(app: App) -> Harness<'a, App> {
-        Harness::builder()
-            .with_size(egui::vec2(1600.0, 1000.0))
-            .build_ui_state(|ui, app: &mut App| app.ui(ui), app)
+        Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).build_ui_state(
+            |ui, app: &mut App| {
+                app.poll();
+                app.ui(ui)
+            },
+            app,
+        )
     }
 
     fn settle(h: &mut Harness<'_, App>) {
