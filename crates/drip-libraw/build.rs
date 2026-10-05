@@ -19,9 +19,20 @@ fn find_libraw() -> Vec<PathBuf> {
     vcpkg::find_package("libraw").expect("LibRaw not found through vcpkg").include_paths
 }
 
+/// Links what pkg-config lists except `stdc++`: LibRaw's upstream `.pc` file
+/// names libstdc++, which macOS doesn't have (it uses libc++), while the shared
+/// library already depends on whichever C++ runtime it was built with.
 #[cfg(not(windows))]
 fn find_libraw() -> Vec<PathBuf> {
-    pkg_config::probe_library("libraw_r")
-        .expect("libraw_r not found through pkg-config")
-        .include_paths
+    let lib = pkg_config::Config::new()
+        .cargo_metadata(false)
+        .probe("libraw_r")
+        .expect("libraw_r not found through pkg-config");
+    for path in &lib.link_paths {
+        println!("cargo:rustc-link-search=native={}", path.display());
+    }
+    for name in lib.libs.iter().filter(|name| *name != "stdc++") {
+        println!("cargo:rustc-link-lib={name}");
+    }
+    lib.include_paths
 }
