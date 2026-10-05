@@ -4,6 +4,14 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: node help UI
+
+- Added input/output contracts below the type ID in the main inspector, excluded
+  from parameter pop-outs. Canvas labels use the same frontend vocabulary, with
+  separate input/output rows and truncation on narrow nodes. Socket IDs stay stable.
+- All 20 GUI tests passed, including placement, pop-out exclusion, label coverage
+  and default widths. GUI clippy and formatting passed.
+
 ## 2026-10-05: code documentation entry point
 
 - Added library design intent and a reading order through the type, graph and

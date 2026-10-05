@@ -1,5 +1,7 @@
 //! Optional node-specific presentation; ordinary nodes use schema controls.
 
+pub mod help;
+pub mod ports;
 mod sigmoid;
 mod viewer;
 use crate::editing::NodeCx;

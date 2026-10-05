@@ -102,7 +102,7 @@ impl App {
         Panel::right("inspector").resizable(true).default_size(320.0).show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 if let Some(id) = self.selected.filter(|id| graph.node(*id).is_some()) {
-                    inspector::node(ui, &mut NodeCx::new(graph, id, &mut frame));
+                    inspector::selected_node(ui, &mut NodeCx::new(graph, id, &mut frame));
                     ui.separator();
                 }
                 inspector::inputs(ui, graph, &mut frame);
@@ -717,6 +717,33 @@ mod tests {
         {
             assert!(h.query_by_label(label).is_some(), "{label}");
         }
+    }
+
+    #[test]
+    fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
+        let mut app = App::new(None, true, || {});
+        let id = app.project.graph.find("sigmoid").unwrap();
+        app.selected = Some(id);
+        let mut h = harness(app);
+        h.run();
+        let kind = h.get_by_label("tone.sigmoid").rect();
+        let input = h.get_by_label("scn rec2020 img").rect();
+        let output = h.get_by_label("disp rec2020 img").rect();
+        let control = h.get_by_label("contrast").rect();
+        assert!(kind.bottom() <= input.top());
+        assert!(input.bottom() <= output.top());
+        assert!(output.bottom() <= control.top());
+
+        let popped = Popped { node: id, part: node_ui::Part::Parameters };
+        let mut popup = Harness::builder().with_size(egui::vec2(360.0, 320.0)).build_ui_state(
+            move |ui, app: &mut App| app.window(ui, popped),
+            App::new(None, true, || {}),
+        );
+        popup.run();
+        assert!(popup.query_by_label("tone.sigmoid").is_some());
+        assert!(popup.query_by_label("contrast").is_some());
+        assert!(popup.query_by_label("scn rec2020 img").is_none());
+        assert!(popup.query_by_label("disp rec2020 img").is_none());
     }
 
     #[test]

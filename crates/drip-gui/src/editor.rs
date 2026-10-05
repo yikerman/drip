@@ -100,18 +100,23 @@ impl Editor {
                 frame.edit(graph, Edit::Ui(l.id, "pos", pos));
             }
             let node = graph.node(l.id).expect("laid out from the graph");
+            let descriptor = node.kind;
             let (kind, kind_params) = (node_ui::of(node.kind), node.kind.params);
-            paint(&painter, l, &node.label, *selected == Some(l.id));
-            for (name, pos) in &l.inputs {
+            paint(&painter, l, node, *selected == Some(l.id));
+            for ((name, pos), spec) in l.inputs.iter().zip(descriptor.inputs()) {
                 let port = ui.interact(hit(*pos), ui.id().with((l.id, name, 0)), Sense::click());
                 if port.secondary_clicked() {
                     frame.edit(graph, Edit::Disconnect(Port(l.id, (*name).into())));
                 }
-                port.on_hover_text("right-click to disconnect");
+                port.on_hover_text(format!(
+                    "{}\nright-click to disconnect",
+                    node_ui::ports::label(spec.requirement.name)
+                ));
             }
-            for (name, pos) in &l.outputs {
+            for ((name, pos), spec) in l.outputs.iter().zip(descriptor.outputs()) {
                 if ui
                     .interact(hit(*pos), ui.id().with((l.id, name, 1)), Sense::drag())
+                    .on_hover_text(node_ui::ports::label(spec.ty.name))
                     .drag_started()
                 {
                     self.wire = Some(Port(l.id, (*name).into()));
@@ -227,25 +232,41 @@ impl Editor {
 }
 
 /// Paints a node's frame: its fill, label, ports and error.
-fn paint(painter: &Painter, l: &Layout, label: &str, selected: bool) {
+fn paint(painter: &Painter, l: &Layout, node: &Node, selected: bool) {
     let (font, small) =
         (FontId::proportional(theme::BODY_SIZE), FontId::proportional(theme::SMALL_SIZE));
     let fill = if selected { theme::LIGHTER } else { theme::DARKER };
     painter.rect_filled(l.rect, 0.0, fill);
     let title = l.rect.min + vec2(8.0, HEADER / 2.0);
-    painter.text(title, Align2::LEFT_CENTER, label, font, theme::TEXT);
-    let ports = l.inputs.iter().map(|p| (p, 8.0, Align2::LEFT_CENTER));
-    let ports = ports.chain(l.outputs.iter().map(|p| (p, -8.0, Align2::RIGHT_CENTER)));
-    for ((name, pos), offset, align) in ports {
+    painter.text(title, Align2::LEFT_CENTER, &node.label, font, theme::TEXT);
+    let inputs = l.inputs.iter().zip(node.kind.inputs()).map(|(p, spec)| {
+        (p, node_ui::ports::label(spec.requirement.name), 8.0, Align2::LEFT_CENTER)
+    });
+    let outputs = l
+        .outputs
+        .iter()
+        .zip(node.kind.outputs())
+        .map(|(p, spec)| (p, node_ui::ports::label(spec.ty.name), -8.0, Align2::RIGHT_CENTER));
+    for ((_, pos), label, offset, align) in inputs.chain(outputs) {
         painter.circle_filled(*pos, PORT, theme::TEXT);
-        painter.text(*pos + vec2(offset, 0.0), align, name, small.clone(), theme::WEAK);
+        let mut job = egui::text::LayoutJob::simple(
+            label.into(),
+            small.clone(),
+            theme::WEAK,
+            l.rect.width() - 16.0,
+        );
+        job.wrap.max_rows = 1;
+        job.wrap.break_anywhere = true;
+        let galley = painter.layout_job(job);
+        let rect = align.anchor_size(*pos + vec2(offset, 0.0), galley.size());
+        painter.galley(rect.min, galley, theme::WEAK);
     }
     if let Some((at, error)) = &l.error {
         painter.text(*at, Align2::LEFT_CENTER, elide(error, 26), small, theme::ERROR);
     }
 }
 
-/// From the top: header, one row per port pair, an error row if the node
+/// From the top: header, input rows, output rows, an error row if the node
 /// failed, the body its kind's GUI draws.
 fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> Layout {
     let error = match result {
@@ -260,7 +281,12 @@ fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> Layout {
         id,
         rect: Rect::from_min_size(pos, vec2(size.x, body_top + size.y)),
         inputs: node.kind.inputs().enumerate().map(|(i, p)| (p.name, port(i, 0.0))).collect(),
-        outputs: node.kind.outputs().enumerate().map(|(i, p)| (p.name, port(i, size.x))).collect(),
+        outputs: node
+            .kind
+            .outputs()
+            .enumerate()
+            .map(|(i, p)| (p.name, port(node.kind.inputs().len() + i, size.x)))
+            .collect(),
         error: error.map(|e| (pos + vec2(8.0, ports(node) + ROW / 2.0), e)),
         body: Rect::from_min_size(pos + vec2(0.0, body_top), size),
     }
@@ -268,7 +294,7 @@ fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> Layout {
 
 /// The height of a node's header and port rows.
 fn ports(node: &Node) -> f32 {
-    HEADER + ROW * node.kind.inputs().len().max(node.kind.outputs().len()) as f32
+    HEADER + ROW * (node.kind.inputs().len() + node.kind.outputs().len()) as f32
 }
 
 /// A node's saved position, or a spot derived from its id for nodes never placed.

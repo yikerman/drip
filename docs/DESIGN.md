@@ -162,6 +162,10 @@ This sequence takes priority over CLI expansion and speculative optimization.
 
 ## Editing and persistence
 
+- **Decided:** User-facing node help belongs below the type ID in the main
+  inspector, outside parameter pop-outs. Keep descriptions technical and brief,
+  with explicit assumptions. Port labels and help share frontend names for the
+  kernel's contracts; the frontend does not redeclare connection compatibility.
 - **Decided:** The node canvas is the main workspace. Nodes own their views;
   parameters and views can open separately in OS windows. Let the window manager
   arrange them, without docking or saved pop-out state. Pop-outs should stay
