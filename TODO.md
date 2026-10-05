@@ -24,3 +24,4 @@ Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
 | Color calibration | user | postponed | beyond the camera's built-in matrix and as-shot white balance (C3) |
 | Undo/redo in the GUI | user | postponed | G4 |
 | Colorimeter check of the wide-gamut display path | user | postponed | screenshots only verify up to sRGB (D5) |
+| Enlarge a preview in its own window | user | postponed | egui-free viewer window sharing the GPU device (G7) |

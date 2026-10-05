@@ -2,6 +2,15 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: external parameters and the canvas
+
+- User decisions: any parameter can be external, with schema defaults and one input per node (F7); nodes are identified by id with renamable labels; the editor becomes the main canvas with views drawn in nodes, zoom and resize (G7); enlarging into a separate window is postponed; zero compatibility in the prototype (F6).
+- Library: nodes hold `&'static NodeKind`, the evaluator works on the graph alone (no more eval/project cycle), the file format is private to `project` and strict, actions get the evaluation context, stamps hash canonical JSON, templates live in `templates`.
+- GUI: canvas with pan/zoom, inline image and histogram views, resizable nodes, evaluation of visible nodes only.
+- Fixed: a segfault on closing the window (the Vulkan surface outlived the Wayland connection; confirmed with exit status 139 before and 0 after), previews squashing when clipped (reported by the user), preview textures leaking, off-screen previews forcing finer levels. The last three were found by Codex's review.
+- Verified: 58 tests, every commit builds and passes on its own; GUI ran on the fixture with no wgpu validation errors.
+- Note: per-commit checks in worktrees must use their own target directory; sharing it left a test binary pointing at a deleted worktree.
+
 ## 2026-10-04: M3 (GUI)
 
 - Display path measured (D5): on KWin/NVIDIA, scRGB gives the same pixels as tagging the surface Rec.2020, and matches sRGB within rounding in gamut. Beyond sRGB still needs the colorimeter check (TODO).
