@@ -66,6 +66,9 @@ impl Display {
         let config = wgpu::SurfaceConfiguration {
             format,
             color_space,
+            // The default is the driver's first mode, which may not wait for
+            // vsync; frames beyond the refresh rate are never seen.
+            present_mode: wgpu::PresentMode::Fifo,
             ..surface
                 .get_default_config(&adapter, size.width.max(1), size.height.max(1))
                 .ok_or("unsupported surface")?
