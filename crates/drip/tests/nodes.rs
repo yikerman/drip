@@ -1,14 +1,19 @@
 //! The built-in nodes on synthetic data with independently known results.
 
+use drip::image::{DisplayRec2020, LinearThreeChannelMatrix, SceneRec2020};
+use drip::node::{EvalContext, NodeKernel};
+use drip::param::Params;
+use drip::ports::Read;
 use std::sync::Arc;
 
 use drip::color::{self, D65, REC2020};
 use drip::eval::Evaluator;
 use drip::graph::{NodeId, Port};
-use drip::node::{Evaluated, NodeKind, OutputSpec};
+use drip::image::{Camera, Cfa, Mosaic, Rgb};
+use drip::node::{Evaluated, NodeKind};
 use drip::nodes;
 use drip::project::Project;
-use drip::value::{Camera, Cfa, Mosaic, PortType, Rgb, Value, View};
+use drip::view::View;
 use drip_libraw::{BlackPattern, Raw};
 use serde_json::json;
 
@@ -183,44 +188,51 @@ fn camera_matrix_is_neutral_preserving_and_ignores_channel_gains() {
 }
 
 /// A source node emitting a fixed 4 × 2 RGGB mosaic.
-static MOSAIC: NodeKind = NodeKind {
-    name: "test.mosaic",
-    label: "mosaic",
-    params: &[],
-    inputs: &[],
-    outputs: &[OutputSpec { name: "mosaic", ty: PortType::Mosaic }],
-    eval: |_, _, _| {
+static MOSAIC: NodeKind =
+    NodeKind::new::<MosaicKernel>("test.mosaic", "mosaic", &[], &[], &["mosaic"]);
+struct MosaicKernel;
+impl NodeKernel for MosaicKernel {
+    type Inputs = ();
+    type Outputs = (Arc<Mosaic>,);
+
+    fn eval(
+        _: Params<'_>,
+        (): (),
+        _: &EvalContext<'_>,
+    ) -> Result<Evaluated<Self::Outputs>, String> {
         let camera =
             Arc::new(Camera { xyz_to_cam: [[0.0; 3]; 3], white_balance: [2.0, 1.0, 4.0, 3.0] });
         let cfa = Cfa { size: 2, colors: vec![0, 1, 3, 2] };
         let data = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
         let mosaic = Mosaic { width: 4, height: 2, scale: 1, cfa, data, camera, white: [1.0; 4] };
-        Ok(Evaluated { outputs: vec![Value::Mosaic(Arc::new(mosaic))], view: None })
-    },
-    actions: &[],
-};
+        Ok(Evaluated { outputs: (Arc::new(mosaic),), view: None })
+    }
+}
 
 /// A source node emitting the scene-referred pixels given as `pixels`.
-static SCENE: NodeKind = NodeKind {
-    name: "test.scene",
-    label: "scene",
-    params: &[],
-    inputs: &[],
-    outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
-    eval: |_, _, _| {
+static SCENE: NodeKind = NodeKind::new::<SceneKernel>("test.scene", "scene", &[], &[], &["image"]);
+struct SceneKernel;
+impl NodeKernel for SceneKernel {
+    type Inputs = ();
+    type Outputs = (Arc<SceneRec2020>,);
+
+    fn eval(
+        _: Params<'_>,
+        (): (),
+        _: &EvalContext<'_>,
+    ) -> Result<Evaluated<Self::Outputs>, String> {
         let pixels = vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]];
         Ok(Evaluated {
-            outputs: vec![Value::SceneRec2020(Arc::new(Rgb {
+            outputs: (Arc::new(SceneRec2020::from(Arc::new(Rgb {
                 width: 2,
                 height: 1,
                 scale: 1,
                 pixels,
-            }))],
+            }))),),
             view: None,
         })
-    },
-    actions: &[],
-};
+    }
+}
 
 /// Builds source → kinds… and returns the project and the last node.
 fn chain(source: &'static NodeKind, kinds: &[&'static NodeKind]) -> (Project, NodeId) {
@@ -228,8 +240,10 @@ fn chain(source: &'static NodeKind, kinds: &[&'static NodeKind]) -> (Project, No
     let mut last = p.graph.add_node(source);
     for kind in kinds {
         let id = p.graph.add_node(kind);
-        let output = p.graph.node(last).unwrap().kind.outputs[0].name;
-        p.graph.connect(Port(last, output.into()), Port(id, kind.inputs[0].name.into())).unwrap();
+        let output = p.graph.node(last).unwrap().kind.outputs().next().unwrap().name;
+        p.graph
+            .connect(Port(last, output.into()), Port(id, kind.inputs().next().unwrap().name.into()))
+            .unwrap();
         last = id;
     }
     (p, last)
@@ -247,14 +261,14 @@ fn white_balance_scales_each_site_by_its_color() {
     let out = evaluate(&p, wb);
     // Rows alternate R G R G / G2 B G2 B.
     let expected = [0.1 * 2.0, 0.2, 0.3 * 2.0, 0.4, 0.5 * 3.0, 0.6 * 4.0, 0.7 * 3.0, 0.8 * 4.0];
-    assert_eq!(out.outputs[0].mosaic().data, expected);
+    assert_eq!(out.outputs[0].downcast_ref::<Mosaic>().unwrap().data, expected);
 }
 
 #[test]
 fn binning_debayer_averages_greens_and_halves_resolution() {
     let (p, bin) = chain(&MOSAIC, &[&nodes::BIN_2X2]);
     let out = evaluate(&p, bin);
-    let image = out.outputs[0].rgb();
+    let image = out.outputs[0].borrow::<Read<dyn LinearThreeChannelMatrix>>().unwrap().rgb();
     assert_eq!((image.width, image.height, image.scale), (2, 1, 2));
     // Cells: [0.1 0.2 / 0.5 0.6] and [0.3 0.4 / 0.7 0.8], RGGB.
     assert_eq!(image.pixels, [[0.1, (0.2 + 0.5) / 2.0, 0.6], [0.3, (0.4 + 0.7) / 2.0, 0.8]]);
@@ -264,13 +278,26 @@ fn binning_debayer_averages_greens_and_halves_resolution() {
 fn exposure_is_scene_linear_and_sigmoid_outputs_finite_display_values() {
     let (mut p, exposure) = chain(&SCENE, &[&nodes::EXPOSURE]);
     p.graph.set_param(exposure, "ev", json!(1.0)).unwrap();
-    let rgb = evaluate(&p, exposure).outputs[0].rgb().clone();
+    let rgb = evaluate(&p, exposure).outputs[0]
+        .borrow::<Read<dyn LinearThreeChannelMatrix>>()
+        .unwrap()
+        .rgb()
+        .clone();
     assert_eq!(rgb.pixels, [[0.36, 0.0, -2.0], [0.18, 2e6, 0.72]]);
     let sigmoid = p.graph.add_node(&nodes::SIGMOID);
     p.graph.connect(Port(exposure, "image".into()), Port(sigmoid, "image".into())).unwrap();
     let out = evaluate(&p, sigmoid);
-    assert_eq!(out.outputs[0].port_type(), PortType::DisplayRec2020);
-    assert!(out.outputs[0].rgb().pixels.iter().flatten().all(|v| v.is_finite()));
+    assert!(out.outputs[0].downcast_ref::<DisplayRec2020>().is_some());
+    assert!(
+        out.outputs[0]
+            .borrow::<Read<dyn LinearThreeChannelMatrix>>()
+            .unwrap()
+            .rgb()
+            .pixels
+            .iter()
+            .flatten()
+            .all(|v| v.is_finite())
+    );
 }
 
 #[test]
@@ -299,26 +326,30 @@ fn preview_presents_its_input() {
     let (p, v) = chain(&SCENE, &[&nodes::PREVIEW]);
     let out = evaluate(&p, v);
     assert!(out.outputs.is_empty());
-    assert!(matches!(out.view, Some(View::Image(Value::SceneRec2020(_)))));
+    assert!(matches!(out.view, Some(View::Image(_))));
 }
 
 #[test]
 fn highlights_reconstruct_before_preview_averaging() {
-    static SOURCE: NodeKind = NodeKind {
-        name: "test.clipped",
-        label: "clipped",
-        params: &[],
-        inputs: &[],
-        outputs: &[OutputSpec { name: "mosaic", ty: PortType::Mosaic }],
-        actions: &[],
-        eval: |_, _, _| {
+    static SOURCE: NodeKind =
+        NodeKind::new::<SourceKernel>("test.clipped", "clipped", &[], &[], &["mosaic"]);
+    struct SourceKernel;
+    impl NodeKernel for SourceKernel {
+        type Inputs = ();
+        type Outputs = (Arc<Mosaic>,);
+
+        fn eval(
+            _: Params<'_>,
+            (): (),
+            _: &EvalContext<'_>,
+        ) -> Result<Evaluated<Self::Outputs>, String> {
             let cfa = Cfa { size: 2, colors: vec![0, 1, 3, 2] };
             let mut data: Vec<_> =
                 (0..64).map(|i| if cfa.color(i / 8, i % 8) == 0 { 0.2 } else { 2.0 }).collect();
             data[0] = 1.0;
             let camera = Arc::new(Camera { xyz_to_cam: [[0.0; 3]; 3], white_balance: [1.0; 4] });
             Ok(Evaluated {
-                outputs: vec![Value::Mosaic(Arc::new(Mosaic {
+                outputs: (Arc::new(Mosaic {
                     width: 8,
                     height: 8,
                     scale: 1,
@@ -326,11 +357,12 @@ fn highlights_reconstruct_before_preview_averaging() {
                     data,
                     camera,
                     white: [1.0, 4.0, 4.0, 4.0],
-                }))],
+                }),),
                 view: None,
             })
-        },
-    };
+        }
+    }
+
     let (mut p, highlights) = chain(&SOURCE, &[&nodes::HIGHLIGHTS]);
     let source = p.graph.find("clipped").unwrap();
     let repaired = p.graph.add_node(&nodes::RCD);
@@ -340,18 +372,38 @@ fn highlights_reconstruct_before_preview_averaging() {
     let mut ev = Evaluator::default();
     ev.evaluate(&p.graph, 1, &[repaired, bypass]);
     let result = |id| &ev.result(id).unwrap().as_ref().unwrap().outputs[0];
-    assert_eq!(result(highlights).mosaic().scale, 1);
-    assert_eq!(result(highlights).mosaic().width, 8);
-    assert_eq!(result(repaired).rgb().scale, 2);
-    assert_eq!(result(repaired).rgb().width, 4);
-    assert!((result(repaired).rgb().pixels[0][0] - 0.65).abs() < 1e-6);
-    assert!((result(bypass).rgb().pixels[0][0] - 0.4).abs() < 1e-6);
+    assert_eq!(result(highlights).downcast_ref::<Mosaic>().unwrap().scale, 1);
+    assert_eq!(result(highlights).downcast_ref::<Mosaic>().unwrap().width, 8);
+    assert_eq!(
+        result(repaired).borrow::<Read<dyn LinearThreeChannelMatrix>>().unwrap().rgb().scale,
+        2
+    );
+    assert_eq!(
+        result(repaired).borrow::<Read<dyn LinearThreeChannelMatrix>>().unwrap().rgb().width,
+        4
+    );
+    assert!(
+        (result(repaired).borrow::<Read<dyn LinearThreeChannelMatrix>>().unwrap().rgb().pixels[0]
+            [0]
+            - 0.65)
+            .abs()
+            < 1e-6
+    );
+    assert!(
+        (result(bypass).borrow::<Read<dyn LinearThreeChannelMatrix>>().unwrap().rgb().pixels[0][0]
+            - 0.4)
+            .abs()
+            < 1e-6
+    );
 }
 
 #[test]
 fn white_balance_scales_saturation_with_each_channel() {
     let (p, wb) = chain(&MOSAIC, &[&nodes::WHITE_BALANCE]);
-    assert_eq!(evaluate(&p, wb).outputs[0].mosaic().white, [2.0, 1.0, 4.0, 3.0]);
+    assert_eq!(
+        evaluate(&p, wb).outputs[0].downcast_ref::<Mosaic>().unwrap().white,
+        [2.0, 1.0, 4.0, 3.0]
+    );
     let mut r = raw(4, 4, vec![600; 16]);
     r.channel_black = [10, 20, 30, 40];
     r.pattern = BlackPattern { height: 3, width: 3, values: vec![1, 2, 3, 4, 5, 6, 7, 8, 9] };

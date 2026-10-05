@@ -9,6 +9,7 @@ mod exposure;
 pub use exposure::EXPOSURE;
 mod highlights;
 mod histogram;
+mod scope_settings;
 pub use highlights::HIGHLIGHTS;
 mod preview;
 mod raw;
@@ -46,8 +47,4 @@ pub fn registry() -> Registry {
     ]
     .into_iter()
     .fold(Registry::default(), Registry::with)
-}
-
-fn single(output: crate::value::Value) -> Result<crate::node::Evaluated, String> {
-    Ok(crate::node::Evaluated { outputs: vec![output], view: None })
 }

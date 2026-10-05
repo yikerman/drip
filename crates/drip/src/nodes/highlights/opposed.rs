@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Portions Copyright (C) 2022-2026 darktable developers.
 //! Inpaint opposed, developed by garagecoder and Iain of G'MIC and Hanno
-//! Schwalm of darktable [1]. Estimate a clipped channel from the cube-root
+//! Schwalm of darktable \[1\]. Estimate a clipped channel from the cube-root
 //! average of the other two; learn a chrominance offset near clipped areas.
 //! Drip processes as-shot-balanced Bayer data (no late chromatic adaptation).
 //! Unlike upstream, partial mask cells and the last sensor row/column are
 //! included, and mask dilation is clipped at image edges. Fixed row reductions
 //! accumulated in f64 keep results independent of Rayon's worker count.
 //!
-//! [1] darktable developers, “opposed.c” and “segbased.c,” commit
-//! 61dea294bedb3ab6c7cca1a45530b1ab5c0461f3. [Online]. Available:
-//! https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/hlreconstruct
+//! \[1\] darktable developers, “opposed.c” and “segbased.c,” commit
+//! 61dea294bedb3ab6c7cca1a45530b1ab5c0461f3. \[Online\]. Available:
+//! <https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/hlreconstruct>
 //! See THIRD_PARTY.md for credits and license.
 
-use crate::value::Mosaic;
+use crate::image::Mosaic;
 use rayon::prelude::*;
 
 pub(super) fn process(m: &Mosaic, threshold: f32) -> Vec<f32> {
@@ -130,7 +130,7 @@ fn reference(m: &Mosaic, row: usize, col: usize) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::{Camera, Cfa};
+    use crate::image::{Camera, Cfa};
     use std::sync::Arc;
     const PHASES: [[u8; 4]; 4] = [[0, 1, 3, 2], [1, 0, 2, 3], [3, 2, 0, 1], [2, 3, 1, 0]];
     fn mosaic(width: usize, height: usize, phase: usize) -> Mosaic {

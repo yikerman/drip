@@ -259,14 +259,8 @@ fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> Layout {
     Layout {
         id,
         rect: Rect::from_min_size(pos, vec2(size.x, body_top + size.y)),
-        inputs: node.kind.inputs.iter().enumerate().map(|(i, p)| (p.name, port(i, 0.0))).collect(),
-        outputs: node
-            .kind
-            .outputs
-            .iter()
-            .enumerate()
-            .map(|(i, p)| (p.name, port(i, size.x)))
-            .collect(),
+        inputs: node.kind.inputs().enumerate().map(|(i, p)| (p.name, port(i, 0.0))).collect(),
+        outputs: node.kind.outputs().enumerate().map(|(i, p)| (p.name, port(i, size.x))).collect(),
         error: error.map(|e| (pos + vec2(8.0, ports(node) + ROW / 2.0), e)),
         body: Rect::from_min_size(pos + vec2(0.0, body_top), size),
     }
@@ -274,7 +268,7 @@ fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> Layout {
 
 /// The height of a node's header and port rows.
 fn ports(node: &Node) -> f32 {
-    HEADER + ROW * node.kind.inputs.len().max(node.kind.outputs.len()) as f32
+    HEADER + ROW * node.kind.inputs().len().max(node.kind.outputs().len()) as f32
 }
 
 /// A node's saved position, or a spot derived from its id for nodes never placed.

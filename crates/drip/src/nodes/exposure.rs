@@ -1,22 +1,32 @@
 //! Scene-linear exposure, independent of the display transform.
 
-use crate::node::{InputSpec, NodeKind, OutputSpec};
-use crate::param::{ParamKind, ParamSpec};
-use crate::value::{PortType, Rgb, Value};
+use crate::image::{Rgb, SceneRec2020, ThreeChannelMatrix};
+use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+use crate::param::{ParamKind, ParamSpec, Params};
+use crate::ports::Read;
 use rayon::prelude::*;
 use std::sync::Arc;
 
-pub static EXPOSURE: NodeKind = NodeKind {
-    name: "color.exposure",
-    label: "exposure",
-    params: &[ParamSpec::new("ev", ParamKind::Float { min: -10.0, max: 10.0, default: 0.0 })],
-    inputs: &[InputSpec { name: "image", accepts: &[PortType::SceneRec2020] }],
-    outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
-    eval: |p, inputs, _| {
-        let image = inputs[0].rgb();
+pub static EXPOSURE: NodeKind = NodeKind::new::<Exposure>(
+    "color.exposure",
+    "exposure",
+    &[ParamSpec::new("ev", ParamKind::Float { min: -10.0, max: 10.0, default: 0.0 })],
+    &["image"],
+    &["image"],
+);
+
+struct Exposure;
+impl NodeKernel for Exposure {
+    type Inputs = (Read<SceneRec2020>,);
+    type Outputs = (Arc<SceneRec2020>,);
+    fn eval(
+        p: Params<'_>,
+        (input,): (&SceneRec2020,),
+        _: &EvalContext<'_>,
+    ) -> Result<Evaluated<Self::Outputs>, String> {
+        let image = input.rgb();
         let gain = (p.float("ev") as f32).exp2();
         let pixels = image.pixels.par_iter().map(|p| p.map(|v| v * gain)).collect();
-        super::single(Value::SceneRec2020(Arc::new(Rgb { pixels, ..**image })))
-    },
-    actions: &[],
-};
+        Ok(Evaluated::new((Arc::new(SceneRec2020::from(Arc::new(Rgb { pixels, ..**image }))),)))
+    }
+}

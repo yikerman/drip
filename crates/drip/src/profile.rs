@@ -20,10 +20,10 @@ pub fn rec2020_linear() -> Profile {
     rgb("Rec. 2020 linear", REC2020, ToneCurve::new(1.0))
 }
 
-/// The sRGB transfer function [1] as an ICC parametric curve of type 4:
+/// The sRGB transfer function \[1\] as an ICC parametric curve of type 4:
 /// `Y = (aX + b)^g` for `X ≥ d`, else `cX`.
 ///
-/// [1] IEC, "Multimedia systems and equipment - Colour measurement and
+/// \[1\] IEC, "Multimedia systems and equipment - Colour measurement and
 ///     management - Part 2-1: Colour management - Default RGB colour space
 ///     - sRGB," IEC 61966-2-1:1999, 1999.
 fn srgb_curve() -> ToneCurve {
@@ -31,11 +31,11 @@ fn srgb_curve() -> ToneCurve {
         .expect("valid curve")
 }
 
-/// The inverse of the BT.2020 opto-electronic transfer function [2], with its
+/// The inverse of the BT.2020 opto-electronic transfer function \[2\], with its
 /// 10-bit constants α = 1.099 and β = 0.018 (so the linear segment ends at the
 /// signal level 4.5β = 0.081), as type 4.
 ///
-/// [2] ITU-R, "Parameter values for ultra-high definition television systems
+/// \[2\] ITU-R, "Parameter values for ultra-high definition television systems
 ///     for production and international programme exchange," Rec. ITU-R
 ///     BT.2020-2, Oct. 2015.
 fn rec2020_curve() -> ToneCurve {

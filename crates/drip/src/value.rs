@@ -1,162 +1,185 @@
-//! Values flowing along graph edges and the semantic port types that classify
-//! them. Types are semantic rather than structural: scene- and display-referred
-//! Rec.2020 share a layout but are distinct, so the graph can refuse to export
-//! an image that has not been tone mapped.
+//! Shared edge payloads and the capability evidence retained after type erasure.
+//!
+//! An editable graph contains heterogeneous nodes and is loaded before images
+//! exist. It therefore needs both a runtime description for checking connections
+//! and an erased value for caching results. These are two uses of the same
+//! [`EdgeValue::TYPE`] declaration, rather than independent port/value enums.
+//! [`Describe`] builds the evidence used by both compatibility checks and input
+//! borrowing; a node never maintains a second list of accepted image variants.
+//!
+//! Rust's `Any` can recover a concrete type, but cannot discover which other
+//! traits it implements. Capability registration is the explicit bridge: adding
+//! an image type registers its strongest exposed capability once; adding a new
+//! capability requires a descriptor projection here and a matching `Read`
+//! implementation in [`crate::ports`]. Keep those two in sync. Stronger builders
+//! include parent capabilities so individual payload registrations need not.
 
+use std::any::{Any, TypeId};
+use std::fmt::{self, Debug};
+use std::marker::PhantomData;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+use crate::image::{
+    CameraRgb, ColorspaceRgbMatrix, DisplayRec2020, LinearThreeChannelMatrix, Mosaic, RawMetadata,
+    Rec2020, RgbIn, SceneRec2020, ThreeChannelMatrix,
+};
 
-pub use drip_libraw::Metadata as RawMetadata;
+pub(crate) type Erased = dyn Any + Send + Sync;
+type Projection<Capability> = for<'a> fn(&'a Erased) -> &'a Capability;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum PortType {
-    /// Normalized sensor data behind a color filter array.
-    Mosaic,
-    /// RGB in the camera's own primaries.
-    CameraRgb,
-    /// Scene-referred linear Rec.2020.
-    SceneRec2020,
-    /// Display-referred linear Rec.2020, nominally within [0, 1].
-    DisplayRec2020,
-    RawMetadata,
+/// Runtime evidence for one concrete edge type; projections borrow capabilities
+/// from its existing allocation rather than copying or converting the image.
+pub struct TypeDescriptor {
+    pub name: &'static str,
+    pub(crate) id: fn() -> TypeId,
+    pub(crate) channels: Option<Projection<dyn ThreeChannelMatrix>>,
+    pub(crate) linear: Option<Projection<dyn LinearThreeChannelMatrix>>,
+    pub(crate) color: Option<Projection<dyn ColorspaceRgbMatrix>>,
+    pub(crate) rec2020: Option<Projection<dyn RgbIn<Rec2020>>>,
+    equal: fn(&Erased, &Erased) -> bool,
 }
 
-/// A port value. Payloads are immutable and shared, so cloning is cheap and
-/// cached results can be handed to any number of consumers or threads.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Value {
-    Mosaic(Arc<Mosaic>),
-    CameraRgb(Arc<Rgb>, Arc<Camera>),
-    SceneRec2020(Arc<Rgb>),
-    DisplayRec2020(Arc<Rgb>),
-    RawMetadata(Arc<RawMetadata>),
+impl Debug for TypeDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name)
+    }
 }
 
+/// A registered graph payload. The builder ties all projections to this same
+/// concrete type; node input lists never repeat these capabilities.
+///
+/// # Laws
+/// Build `TYPE` with `Describe::<Self>`, and expose only capabilities whose
+/// semantic laws the payload obeys. The builder checks trait bounds, not those
+/// laws. A payload and its interpretation must remain unchanged while cached;
+/// interior mutation would invalidate dependency-stamp reuse.
+pub trait EdgeValue: Any + Send + Sync + Debug + PartialEq {
+    const TYPE: TypeDescriptor;
+}
+
+/// Register capabilities only when the payload has the corresponding trait impl.
+/// `T` is the concrete payload; its semantic laws remain an implementer obligation.
+///
+/// ```compile_fail,E0277
+/// use drip::image::Mosaic;
+/// use drip::value::Describe;
+/// let invalid = Describe::<Mosaic>::new("sensor").rec2020().build();
+/// ```
+pub struct Describe<T> {
+    descriptor: TypeDescriptor,
+    payload: PhantomData<T>,
+}
+
+// T: concrete edge payload.
+impl<T> Describe<T>
+where
+    T: EdgeValue,
+{
+    pub const fn new(name: &'static str) -> Self {
+        Self {
+            descriptor: TypeDescriptor {
+                name,
+                id: TypeId::of::<T>,
+                channels: None,
+                linear: None,
+                color: None,
+                rec2020: None,
+                equal: |left, right| left.downcast_ref::<T>() == right.downcast_ref::<T>(),
+            },
+            payload: PhantomData,
+        }
+    }
+    pub const fn channels(mut self) -> Self
+    where
+        T: ThreeChannelMatrix,
+    {
+        self.descriptor.channels =
+            Some(|value| value.downcast_ref::<T>().expect("descriptor identifies payload"));
+        self
+    }
+    pub const fn linear(mut self) -> Self
+    where
+        T: LinearThreeChannelMatrix,
+    {
+        self = self.channels();
+        self.descriptor.linear =
+            Some(|value| value.downcast_ref::<T>().expect("descriptor identifies payload"));
+        self
+    }
+    pub const fn color(mut self) -> Self
+    where
+        T: ColorspaceRgbMatrix,
+    {
+        self = self.linear();
+        self.descriptor.color =
+            Some(|value| value.downcast_ref::<T>().expect("descriptor identifies payload"));
+        self
+    }
+    pub const fn rec2020(mut self) -> Self
+    where
+        T: RgbIn<Rec2020>,
+    {
+        self = self.color();
+        self.descriptor.rec2020 =
+            Some(|value| value.downcast_ref::<T>().expect("descriptor identifies payload"));
+        self
+    }
+    pub const fn build(self) -> TypeDescriptor {
+        self.descriptor
+    }
+}
+
+// Built-in payloads expose only their strongest capability; parent registrations
+// come from Describe, so this list cannot forget channel access on a color image.
+macro_rules! edge_type {
+    ($payload:ty $(, $capability:ident)?) => {
+        impl EdgeValue for $payload {
+            const TYPE: TypeDescriptor = Describe::<Self>::new(stringify!($payload))
+                $(.$capability())?.build();
+        }
+    };
+}
+edge_type!(Mosaic);
+edge_type!(RawMetadata);
+edge_type!(CameraRgb, linear);
+edge_type!(SceneRec2020, rec2020);
+edge_type!(DisplayRec2020, rec2020);
+
+/// An immutable, shared payload at the heterogeneous graph/cache boundary.
+/// Erasure preserves its concrete semantic type and allocation identity; it is
+/// not a conversion to a common RGB type. Cache stamps describe dependencies,
+/// so evaluating cache validity never compares the image pixels here.
+#[derive(Clone)]
+pub struct Value {
+    pub(crate) descriptor: &'static TypeDescriptor,
+    pub(crate) payload: Arc<Erased>,
+}
 impl Value {
-    pub fn port_type(&self) -> PortType {
-        match self {
-            Value::Mosaic(_) => PortType::Mosaic,
-            Value::CameraRgb(..) => PortType::CameraRgb,
-            Value::SceneRec2020(_) => PortType::SceneRec2020,
-            Value::DisplayRec2020(_) => PortType::DisplayRec2020,
-            Value::RawMetadata(_) => PortType::RawMetadata,
-        }
+    pub fn new<T: EdgeValue>(payload: Arc<T>) -> Self {
+        Self { descriptor: &T::TYPE, payload }
     }
-
-    /// The image of an RGB-typed value.
-    pub fn rgb(&self) -> &Arc<Rgb> {
-        match self {
-            Value::CameraRgb(image, _)
-            | Value::SceneRec2020(image)
-            | Value::DisplayRec2020(image) => image,
-            Value::Mosaic(_) | Value::RawMetadata(_) => {
-                unreachable!("ports guarantee an RGB value")
-            }
-        }
+    pub fn descriptor(&self) -> &'static TypeDescriptor {
+        self.descriptor
     }
-
-    pub fn mosaic(&self) -> &Arc<Mosaic> {
-        let Value::Mosaic(mosaic) = self else { unreachable!("ports guarantee a mosaic") };
-        mosaic
+    pub fn downcast_ref<T: EdgeValue>(&self) -> Option<&T> {
+        self.payload.downcast_ref()
+    }
+    pub fn downcast<T: EdgeValue>(&self) -> Option<Arc<T>> {
+        self.payload.clone().downcast().ok()
+    }
+    /// Inspects a cached result through an exact type or a registered capability.
+    pub fn borrow<Requirement: crate::ports::Input>(&self) -> Option<Requirement::Borrowed<'_>> {
+        Requirement::REQUIREMENT.accepts(self.descriptor).then(|| Requirement::read(self))
     }
 }
-
-/// Interleaved 3-channel f32 image, row-major.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Rgb {
-    pub width: usize,
-    pub height: usize,
-    /// Sensor pixels per image pixel along each axis.
-    pub scale: u32,
-    pub pixels: Vec<[f32; 3]>,
-}
-
-impl Rgb {
-    /// The same geometry with `f` applied to every pixel.
-    pub fn map(&self, f: impl Fn([f32; 3]) -> [f32; 3]) -> Rgb {
-        Rgb { pixels: self.pixels.iter().map(|&p| f(p)).collect(), ..*self }
+impl Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct(self.descriptor.name).finish_non_exhaustive()
     }
 }
-
-/// One color sample per site, normalized so that black is 0 and sensor
-/// saturation is 1. Values outside [0, 1] are kept, not clipped.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Mosaic {
-    pub width: usize,
-    pub height: usize,
-    pub scale: u32,
-    pub cfa: Cfa,
-    /// Conservative saturation per CFA color in the same units as `data`.
-    /// White balance scales these with the samples; highlight detection must
-    /// not assume a balanced channel still clips at 1.
-    pub white: [f32; 4],
-    pub data: Vec<f32>,
-    pub camera: Arc<Camera>,
-}
-
-/// A color filter array repeating every `size` sites in both directions;
-/// colors are 0 R, 1 G, 2 B and 3 for a Bayer cell's second G, which some
-/// cameras balance separately.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Cfa {
-    pub size: usize,
-    pub colors: Vec<u8>,
-}
-
-impl Cfa {
-    pub fn color(&self, row: usize, col: usize) -> u8 {
-        self.colors[row % self.size * self.size + col % self.size]
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        (self.descriptor.id)() == (other.descriptor.id)()
+            && (self.descriptor.equal)(&*self.payload, &*other.payload)
     }
-}
-
-/// How to interpret a camera's RGB.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Camera {
-    /// CIE XYZ (D65) to camera RGB.
-    pub xyz_to_cam: [[f32; 3]; 3],
-    /// As-shot white balance multipliers per CFA color, with G = 1.
-    pub white_balance: [f32; 4],
-}
-
-/// What a node presents to frontends besides its ports.
-#[derive(Debug, Clone, PartialEq)]
-pub enum View {
-    Image(Value),
-    Histogram(Arc<Histogram>),
-    Scope(Arc<Scope>),
-}
-
-/// Pixel counts per channel over equal steps of log2 value (stops), which
-/// suits linear data. Values at or below `2^min_stop`, zero and negative
-/// included, fall in the first bin; values at or above `2^max_stop` in the last.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Histogram {
-    pub min_stop: f32,
-    pub max_stop: f32,
-    pub counts: Vec<[u32; 3]>,
-    /// Whether frontends plot the counts on a log scale rather than linearly.
-    pub log: bool,
-}
-
-/// Row-major density bins, top to bottom. Waveforms use RGB counts;
-/// chromaticity uses the first channel only.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Scope {
-    pub size: usize,
-    pub counts: Vec<[u32; 3]>,
-    pub axes: ScopeAxes,
-    pub log: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ScopeAxes {
-    Waveform {
-        min_stop: f32,
-        max_stop: f32,
-    },
-    /// Rec.2020 primary markers in normalized plot coordinates; D65 is centered.
-    Vectorscope {
-        primaries: [[f32; 2]; 3],
-    },
 }

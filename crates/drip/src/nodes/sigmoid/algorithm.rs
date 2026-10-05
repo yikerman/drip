@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Portions Copyright (C) 2020-2026 darktable developers.
-//! Per-channel sigmoid and hue/energy correction adapted from darktable [1].
+//! Per-channel sigmoid and hue/energy correction adapted from darktable \[1\].
 //! Fixed Rec.2020 primaries use its smooth preset's attenuation and rotation;
 //! purity recovery is zero. Drip retains its 0.18 grey point and zero black.
 //! Coefficients use analytic slopes and the curve uses log space to avoid
 //! overflowing powers; neither changes the underlying log-logistic curve.
 //!
-//! [1] darktable developers, “sigmoid.c” and “custom_primaries.c,” commit
-//! 61dea294bedb3ab6c7cca1a45530b1ab5c0461f3, 2026. [Online]. Available:
-//! https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src
+//! \[1\] darktable developers, “sigmoid.c” and “custom_primaries.c,” commit
+//! 61dea294bedb3ab6c7cca1a45530b1ab5c0461f3, 2026. \[Online\]. Available:
+//! <https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src>
 //! License: GPL-3.0-or-later; see THIRD_PARTY.md for credits and the upstream license.
 
 use crate::color::{self, D65, REC2020};

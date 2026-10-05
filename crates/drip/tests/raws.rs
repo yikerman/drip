@@ -1,5 +1,7 @@
 //! The pipeline on a real raw.
 
+use drip::image::{LinearThreeChannelMatrix, Mosaic};
+use drip::ports::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -24,8 +26,10 @@ fn pipeline(raw: &Path, tail: &[&'static drip::node::NodeKind]) -> (Project, Vec
         [&nodes::WHITE_BALANCE, &nodes::BIN_2X2, &nodes::CAMERA_TO_REC2020].iter().chain(tail)
     {
         let (last, id) = (*ids.last().unwrap(), p.graph.add_node(kind));
-        let output = p.graph.node(last).unwrap().kind.outputs[0].name;
-        p.graph.connect(Port(last, output.into()), Port(id, kind.inputs[0].name.into())).unwrap();
+        let output = p.graph.node(last).unwrap().kind.outputs().next().unwrap().name;
+        p.graph
+            .connect(Port(last, output.into()), Port(id, kind.inputs().next().unwrap().name.into()))
+            .unwrap();
         ids.push(id);
     }
     (p, ids)
@@ -39,7 +43,11 @@ fn pipeline_matches_libraw() {
     let (p, ids) = pipeline(&path, &[]);
     let mut ev = Evaluator::default();
     ev.evaluate(&p.graph, 0, &[ids[3]]);
-    let ours = ev.result(ids[3]).unwrap().as_ref().unwrap().outputs[0].rgb().clone();
+    let ours = ev.result(ids[3]).unwrap().as_ref().unwrap().outputs[0]
+        .borrow::<Read<dyn LinearThreeChannelMatrix>>()
+        .unwrap()
+        .rgb()
+        .clone();
     let (width, _, reference) = drip_libraw::reference(&path).unwrap();
 
     // LibRaw scales by 65535 and normalizes white balance to its smallest
@@ -120,34 +128,50 @@ fn built_in_template_takes_the_raw_and_output_paths() {
     // Later levels and export forks must work entirely from decoded data.
     std::fs::remove_file(&path).unwrap();
     let view = ev.result(preview).unwrap().as_ref().unwrap().view.clone();
-    let Some(drip::value::View::Image(image)) = view else { panic!("no preview") };
+    let Some(drip::view::View::Image(image)) = view else { panic!("no preview") };
     assert_eq!(image.rgb().scale, 8, "RCD preserves the requested scale");
 
-    let cached = ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic().clone();
+    let cached = ev.result(raw).unwrap().as_ref().unwrap().outputs[0].downcast::<Mosaic>().unwrap();
     let previous = Arc::downgrade(&cached);
     let expected = cached.data.clone();
     drop(cached);
     ev.evaluate(&p.graph, 2, &[raw]);
     assert!(previous.upgrade().is_none(), "old normalized levels are not retained");
     ev.evaluate(&p.graph, 3, &[raw]);
-    assert_eq!(expected, ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic().data);
+    assert_eq!(
+        expected,
+        ev.result(raw).unwrap().as_ref().unwrap().outputs[0].downcast_ref::<Mosaic>().unwrap().data
+    );
 
     let other = p.graph.add_node(&nodes::READ);
     p.graph.set_param(other, "path", json!(path)).unwrap();
     let mut fork = ev.fork();
     fork.evaluate(&p.graph, 3, &[other]);
-    assert_eq!(expected, fork.result(other).unwrap().as_ref().unwrap().outputs[0].mosaic().data);
+    assert_eq!(
+        expected,
+        fork.result(other).unwrap().as_ref().unwrap().outputs[0]
+            .downcast_ref::<Mosaic>()
+            .unwrap()
+            .data
+    );
     fork.evaluate(&p.graph, 0, &[other]);
     ev.evaluate(&p.graph, 0, &[raw]);
     assert_eq!(
-        fork.result(other).unwrap().as_ref().unwrap().outputs[0].mosaic().data,
-        ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic().data,
+        fork.result(other).unwrap().as_ref().unwrap().outputs[0]
+            .downcast_ref::<Mosaic>()
+            .unwrap()
+            .data,
+        ev.result(raw).unwrap().as_ref().unwrap().outputs[0].downcast_ref::<Mosaic>().unwrap().data,
     );
     let demosaic = p.graph.find("demosaic").unwrap();
     ev.evaluate(&p.graph, 31, &[demosaic]);
-    let smallest = ev.result(demosaic).unwrap().as_ref().unwrap().outputs[0].rgb();
+    let smallest = ev.result(demosaic).unwrap().as_ref().unwrap().outputs[0]
+        .borrow::<Read<dyn LinearThreeChannelMatrix>>()
+        .unwrap()
+        .rgb();
     assert!(smallest.pixels.is_empty());
     assert_eq!(smallest.scale, 1 << 31);
-    let sensor = ev.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic();
+    let sensor =
+        ev.result(raw).unwrap().as_ref().unwrap().outputs[0].downcast_ref::<Mosaic>().unwrap();
     assert_eq!(sensor.scale, 1, "sensor processing precedes preview reduction");
 }

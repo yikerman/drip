@@ -70,7 +70,7 @@ impl Evaluator {
         self.run(graph, 0, &targets, true);
         let inputs = self.cache.inputs(graph, id)?;
         let ctx = EvalContext { level: 0, resources: &self.resources };
-        (action.run)(Params(&node.params), &inputs, &ctx).map_err(NodeError::Failed)
+        action.run(Params(&node.params), &inputs, &ctx).map_err(NodeError::Failed)
     }
 
     /// With `release`, a result is dropped once its last consumer in this run
@@ -118,7 +118,7 @@ impl Cache {
         let mut h = DefaultHasher::new();
         (node.kind.name, ctx.level).hash(&mut h);
         serde_json::to_string(&node.params).expect("plain data serializes").hash(&mut h);
-        for spec in node.kind.inputs {
+        for spec in node.kind.inputs() {
             spec.name.hash(&mut h);
             if let Some(source) = graph.source(&Port(id, spec.name.into())) {
                 (source, self.0.get(&source.0).map(|entry| entry.stamp)).hash(&mut h);
@@ -136,8 +136,7 @@ impl Cache {
     /// The values on node `id`'s inputs, from its sources' cached results.
     fn inputs(&self, graph: &Graph, id: NodeId) -> Result<Vec<Value>, NodeError> {
         let kind = graph.node(id).expect("in graph").kind;
-        kind.inputs
-            .iter()
+        kind.inputs()
             .map(|spec| {
                 let source = graph.source(&Port(id, spec.name.into()));
                 let source = source.ok_or(NodeError::MissingInput(spec.name))?;

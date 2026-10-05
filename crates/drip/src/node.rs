@@ -1,81 +1,241 @@
-//! Node kinds: the static behavior behind graph nodes. A graph node
-//! is data plus a reference to its kind; everything a kind does lives here.
-
-use std::collections::BTreeMap;
+//! Typed kernels and their runtime descriptors for an editable graph.
+//!
+//! A kernel's input/output tuples are the source of truth. `NodeKind::new`
+//! derives socket contracts and evaluator adapters from them; names only label
+//! tuple positions. Rust checks the kernel's returned types, while the graph
+//! checks user-created connections at runtime, before any pixels are computed.
+//!
+//! The evaluator remains heterogeneous: it follows graph dependencies, borrows
+//! cached `Value`s through the input tuple, calls the kernel, then erases the
+//! output tuple for storage. This boundary lets typed kernels coexist in an
+//! editable DAG without changing dependency stamps or cache retention rules.
+//! Optional [`View`] data is presentation, not another graph output; its own
+//! types protect frontend assumptions such as the preview shader's RGB basis.
 
 use crate::param::{ParamSpec, Params};
+use crate::ports::{InputRequirement, InputTuple, OutputTuple};
 use crate::resource::Resources;
-use crate::value::{PortType, Value, View};
+use crate::value::{TypeDescriptor, Value};
+use crate::view::View;
+use std::collections::BTreeMap;
 
-pub struct NodeKind {
-    /// Stable identifier used in project files, e.g. `raw.read`.
-    pub name: &'static str,
-    /// What new nodes are called, numbered when taken: `raw`, `raw 2`, …
-    pub label: &'static str,
-    pub params: &'static [ParamSpec],
-    pub inputs: &'static [InputSpec],
-    pub outputs: &'static [OutputSpec],
-    /// Must be deterministic and free of side effects: results are cached by
-    /// dependency stamp. Errors are user-facing messages.
-    pub eval: fn(Params, &[Value], &EvalContext) -> Result<Evaluated, String>,
-    /// Side effects, run only on explicit request.
-    pub actions: &'static [Action],
+/// A signature determines both connection checking and evaluator adaptation.
+///
+/// # Laws
+/// Evaluation is deterministic in parameters, inputs and evaluation context,
+/// with no external writes. Outputs must obey their semantic image contracts;
+/// Rust checks their types, not the pixels' meaning. These obligations allow
+/// dependency stamps to reuse results without rerunning a kernel. External
+/// effects such as export belong in explicit actions, outside cached evaluation.
+///
+/// A kernel cannot return a different semantic image type:
+///
+/// ```compile_fail,E0308
+/// use std::sync::Arc;
+/// use drip::image::{DisplayRec2020, SceneRec2020, ThreeChannelMatrix};
+/// use drip::node::{EvalContext, Evaluated, NodeKernel};
+/// use drip::param::Params;
+/// use drip::ports::Read;
+/// struct IncorrectExposure;
+/// impl NodeKernel for IncorrectExposure {
+///     type Inputs = (Read<SceneRec2020>,);
+///     type Outputs = (Arc<SceneRec2020>,);
+///     fn eval(_: Params<'_>, (image,): (&SceneRec2020,), _: &EvalContext<'_>)
+///         -> Result<Evaluated<Self::Outputs>, String>
+///     {
+///         let display = Arc::new(DisplayRec2020::from(image.rgb().clone()));
+///         Ok(Evaluated::new((display,)))
+///     }
+/// }
+/// ```
+pub trait NodeKernel: Sized + 'static {
+    type Inputs: InputTuple;
+    type Outputs: OutputTuple;
+    const ACTIONS: &'static [TypedAction<Self>] = &[];
+
+    fn eval(
+        params: Params<'_>,
+        inputs: <Self::Inputs as InputTuple>::Borrowed<'_>,
+        ctx: &EvalContext<'_>,
+    ) -> Result<Evaluated<Self::Outputs>, String>;
 }
 
-/// Kinds are identified by name; their behavior is code and has no equality.
+// K: node kernel (also used by the adapters below).
+type TypedActionFn<K> = for<'params, 'inputs, 'context, 'resources> fn(
+    Params<'params>,
+    <<K as NodeKernel>::Inputs as InputTuple>::Borrowed<'inputs>,
+    &'context EvalContext<'resources>,
+) -> Result<(), String>;
+
+/// Actions use exactly their owning kernel's inputs; the tuple is declared once.
+pub struct TypedAction<K>
+where
+    K: NodeKernel,
+{
+    pub name: &'static str,
+    pub run: TypedActionFn<K>,
+}
+
+type Evaluate = fn(Params<'_>, &[Value], &EvalContext<'_>) -> Result<Evaluated, String>;
+type RunAction = fn(usize, Params<'_>, &[Value], &EvalContext<'_>) -> Result<(), String>;
+
+pub struct NodeKind {
+    pub name: &'static str,
+    pub label: &'static str,
+    pub params: &'static [ParamSpec],
+    input_names: &'static [&'static str],
+    output_names: &'static [&'static str],
+    input_types: &'static [InputRequirement],
+    output_types: &'static [&'static TypeDescriptor],
+    /// Deterministic and side-effect free: dependency stamps cache the result.
+    pub(crate) eval: Evaluate,
+    action_count: usize,
+    action_at: fn(usize) -> Action,
+}
+
+impl NodeKind {
+    /// Names annotate tuple positions. Static declarations check arity during
+    /// compilation; types and the evaluator always come from the same kernel.
+    ///
+    /// ```compile_fail,E0080
+    /// use drip::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+    /// use drip::param::Params;
+    /// struct Empty;
+    /// impl NodeKernel for Empty {
+    ///     type Inputs = ();
+    ///     type Outputs = ();
+    ///     fn eval(_: Params<'_>, (): (), _: &EvalContext<'_>)
+    ///         -> Result<Evaluated<()>, String> { Ok(Evaluated::default()) }
+    /// }
+    /// static INVALID: NodeKind = NodeKind::new::<Empty>(
+    ///     "empty", "empty", &[], &[], &["undeclared output"],
+    /// );
+    /// ```
+    pub const fn new<K>(
+        name: &'static str,
+        label: &'static str,
+        params: &'static [ParamSpec],
+        inputs: &'static [&'static str],
+        outputs: &'static [&'static str],
+    ) -> Self
+    where
+        K: NodeKernel,
+    {
+        assert!(inputs.len() == K::Inputs::REQUIREMENTS.len(), "input names must match tuple");
+        assert!(outputs.len() == K::Outputs::TYPES.len(), "output names must match tuple");
+        Self {
+            name,
+            label,
+            params,
+            input_names: inputs,
+            output_names: outputs,
+            input_types: K::Inputs::REQUIREMENTS,
+            output_types: K::Outputs::TYPES,
+            eval: evaluate::<K>,
+            action_count: K::ACTIONS.len(),
+            action_at: |index| Action { name: K::ACTIONS[index].name, index, run: run_action::<K> },
+        }
+    }
+    pub fn inputs(&self) -> impl ExactSizeIterator<Item = InputSpec> + '_ {
+        self.input_names
+            .iter()
+            .zip(self.input_types)
+            .map(|(&name, &requirement)| InputSpec { name, requirement })
+    }
+    pub fn outputs(&self) -> impl ExactSizeIterator<Item = OutputSpec> + '_ {
+        self.output_names.iter().zip(self.output_types).map(|(&name, &ty)| OutputSpec { name, ty })
+    }
+    pub fn actions(&self) -> impl ExactSizeIterator<Item = Action> + '_ {
+        (0..self.action_count).map(self.action_at)
+    }
+    pub fn param(&self, name: &str) -> Option<&ParamSpec> {
+        self.params.iter().find(|p| p.name == name)
+    }
+    pub fn input(&self, name: &str) -> Option<InputSpec> {
+        self.inputs().find(|p| p.name == name)
+    }
+    pub fn output_index(&self, name: &str) -> Option<usize> {
+        self.output_names.iter().position(|&p| p == name)
+    }
+    pub fn action(&self, name: &str) -> Option<Action> {
+        self.actions().find(|a| a.name == name)
+    }
+}
 impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
     }
 }
-
 impl std::fmt::Debug for NodeKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.name)
     }
 }
 
-impl NodeKind {
-    pub fn param(&self, name: &str) -> Option<&ParamSpec> {
-        self.params.iter().find(|p| p.name == name)
-    }
-
-    pub fn input(&self, name: &str) -> Option<&InputSpec> {
-        self.inputs.iter().find(|p| p.name == name)
-    }
-
-    pub fn output_index(&self, name: &str) -> Option<usize> {
-        self.outputs.iter().position(|p| p.name == name)
-    }
-
-    pub fn action(&self, name: &str) -> Option<&Action> {
-        self.actions.iter().find(|a| a.name == name)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub struct InputSpec {
     pub name: &'static str,
-    pub accepts: &'static [PortType],
+    pub requirement: InputRequirement,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct OutputSpec {
     pub name: &'static str,
-    pub ty: PortType,
+    pub ty: &'static TypeDescriptor,
 }
 
-/// A named side effect. Its inputs are evaluated at full resolution.
 pub struct Action {
     pub name: &'static str,
-    pub run: fn(Params, &[Value], &EvalContext) -> Result<(), String>,
+    index: usize,
+    run: RunAction,
+}
+impl Action {
+    pub fn run(
+        &self,
+        params: Params<'_>,
+        inputs: &[Value],
+        ctx: &EvalContext<'_>,
+    ) -> Result<(), String> {
+        (self.run)(self.index, params, inputs, ctx)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Evaluated {
-    /// One value per output port, in declaration order.
-    pub outputs: Vec<Value>,
+pub struct Evaluated<Outputs = Vec<Value>> {
+    pub outputs: Outputs,
     pub view: Option<View>,
+}
+impl<Outputs> Evaluated<Outputs> {
+    pub fn new(outputs: Outputs) -> Self {
+        Self { outputs, view: None }
+    }
+}
+impl Evaluated<()> {
+    pub fn view(view: View) -> Self {
+        Self { outputs: (), view: Some(view) }
+    }
+}
+
+fn evaluate<K>(
+    params: Params<'_>,
+    inputs: &[Value],
+    ctx: &EvalContext<'_>,
+) -> Result<Evaluated, String>
+where
+    K: NodeKernel,
+{
+    let result = K::eval(params, K::Inputs::read(inputs), ctx)?;
+    Ok(Evaluated { outputs: result.outputs.erase(), view: result.view })
+}
+fn run_action<K>(
+    index: usize,
+    params: Params<'_>,
+    inputs: &[Value],
+    ctx: &EvalContext<'_>,
+) -> Result<(), String>
+where
+    K: NodeKernel,
+{
+    (K::ACTIONS[index].run)(params, K::Inputs::read(inputs), ctx)
 }
 
 /// What a node's evaluation may depend on besides its params and inputs.

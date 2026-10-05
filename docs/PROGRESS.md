@@ -4,6 +4,22 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: typed graph contracts
+
+- Node input/output tuples now derive connection contracts and evaluator/action
+  adapters. Migrated library nodes and GUI consumers; dependency stamps, cache
+  retention, project format and processing algorithms retain their behavior.
+- Image capabilities separate channel access, linear samples, RGB colorimetry
+  and the fixed preview basis. Vectorscopes use the connected color space;
+  histograms and waveforms no longer share another node's accepted-type list.
+- Code docs explain the type hierarchy, trait laws and the explicit registration
+  required after type erasure. Camera channels do not claim CIE tristimulus
+  semantics; the Luther-condition reference is credited in THIRD_PARTY.
+- All 98 workspace tests and three compile-fail doctests passed, including a new
+  P3 payload, semantic connection rejection, shared pixels and cache reuse.
+  Formatting, workspace clippy and rustdoc checks passed. Native GUI rendering
+  was not visually retested; headless GUI tests cover the migrated interfaces.
+
 ## 2026-10-05: stale design references
 
 - Removed obsolete numbered design references from source comments after the

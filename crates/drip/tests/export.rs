@@ -1,16 +1,19 @@
 //! TIFF export, read back and checked against independently computed values.
 
+use drip::image::DisplayRec2020;
+use drip::node::{EvalContext, NodeKernel};
+use drip::param::Params;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use drip::color::{self, D65, P3, REC2020};
 use drip::eval::{NodeError, run_action};
 use drip::graph::{NodeId, Port};
-use drip::node::{Evaluated, NodeKind, OutputSpec};
+use drip::image::Rgb;
+use drip::node::{Evaluated, NodeKind};
 use drip::nodes;
 use drip::profile;
 use drip::project::Project;
-use drip::value::{PortType, Rgb, Value};
 use lcms2::{CIExyY, InfoType, Locale, Profile, ToneCurve};
 use serde_json::json;
 use tiff::decoder::{Decoder, DecodingResult};
@@ -20,18 +23,22 @@ use tiff::tags::Tag;
 const PIXELS: [[f32; 3]; 4] =
     [[1.0, 1.0, 1.0], [0.18, 0.18, 0.18], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]];
 
-static DISPLAY: NodeKind = NodeKind {
-    name: "test.display",
-    label: "display",
-    params: &[],
-    inputs: &[],
-    outputs: &[OutputSpec { name: "image", ty: PortType::DisplayRec2020 }],
-    eval: |_, _, _| {
+static DISPLAY: NodeKind =
+    NodeKind::new::<DisplayKernel>("test.display", "display", &[], &[], &["image"]);
+struct DisplayKernel;
+impl NodeKernel for DisplayKernel {
+    type Inputs = ();
+    type Outputs = (Arc<DisplayRec2020>,);
+
+    fn eval(
+        _: Params<'_>,
+        (): (),
+        _: &EvalContext<'_>,
+    ) -> Result<Evaluated<Self::Outputs>, String> {
         let image = Rgb { width: 2, height: 2, scale: 1, pixels: PIXELS.to_vec() };
-        Ok(Evaluated { outputs: vec![Value::DisplayRec2020(Arc::new(image))], view: None })
-    },
-    actions: &[],
-};
+        Ok(Evaluated { outputs: (Arc::new(DisplayRec2020::from(Arc::new(image))),), view: None })
+    }
+}
 
 struct Scratch(PathBuf);
 

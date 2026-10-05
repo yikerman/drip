@@ -12,20 +12,21 @@ use tiff::encoder::compression::DeflateLevel;
 use tiff::encoder::{Compression, TiffEncoder, TiffValue};
 use tiff::tags::{Tag, Type};
 
-use crate::node::{Action, EvalContext, Evaluated, InputSpec, NodeKind};
+use crate::image::{DisplayRec2020, Rgb, ThreeChannelMatrix};
+use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind, TypedAction};
 use crate::param::{ParamKind, ParamSpec, Params};
+use crate::ports::Read;
 use crate::profile;
-use crate::value::{PortType, Rgb, Value};
 
 const INTENTS: &[&str] = &["perceptual", "relative", "saturation", "absolute"];
 
 /// The built-in profiles, or `file` for `profile_file`.
 const PROFILES: &[&str] = &["srgb", "display_p3", "rec2020", "file"];
 
-pub static TIFF: NodeKind = NodeKind {
-    name: "export.tiff",
-    label: "export",
-    params: &[
+pub static TIFF: NodeKind = NodeKind::new::<TiffExport>(
+    "export.tiff",
+    "export",
+    &[
         ParamSpec::new("path", ParamKind::Path { output: true }).external(),
         ParamSpec::new("profile", ParamKind::Choice { options: PROFILES, default: "srgb" }),
         ParamSpec::new("profile_file", ParamKind::Path { output: false }),
@@ -41,13 +42,24 @@ pub static TIFF: NodeKind = NodeKind {
             ParamKind::Choice { options: &["fast", "balanced", "best"], default: "balanced" },
         ),
     ],
-    inputs: &[InputSpec { name: "image", accepts: &[PortType::DisplayRec2020] }],
-    outputs: &[],
-    eval: |_, _, _| Ok(Evaluated::default()),
-    actions: &[Action { name: "export", run: export }],
-};
+    &["image"],
+    &[],
+);
+struct TiffExport;
+impl NodeKernel for TiffExport {
+    type Inputs = (Read<DisplayRec2020>,);
+    type Outputs = ();
+    const ACTIONS: &'static [TypedAction<Self>] = &[TypedAction { name: "export", run: export }];
+    fn eval(
+        _: Params<'_>,
+        _: (&DisplayRec2020,),
+        _: &EvalContext<'_>,
+    ) -> Result<Evaluated<()>, String> {
+        Ok(Evaluated::default())
+    }
+}
 
-fn export(p: Params, inputs: &[Value], _: &EvalContext) -> Result<(), String> {
+fn export(p: Params, (input,): (&DisplayRec2020,), _: &EvalContext) -> Result<(), String> {
     let path = p.path("path").ok_or("no output file chosen")?;
     let in_file = |e: &dyn std::fmt::Display, path: &Path| format!("{}: {e}", path.display());
     let (output, icc) = match p.choice("profile") {
@@ -80,7 +92,7 @@ fn export(p: Params, inputs: &[Value], _: &EvalContext) -> Result<(), String> {
         (_, "balanced") => Compression::Deflate(DeflateLevel::Balanced),
         _ => Compression::Deflate(DeflateLevel::Best),
     };
-    let image = inputs[0].rgb();
+    let image = input.rgb();
     let convert = |format| Conversion {
         source: profile::rec2020_linear(),
         output: &output,

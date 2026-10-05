@@ -377,6 +377,11 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use drip::image::DisplayRec2020;
+    use drip::node::{EvalContext, NodeKernel};
+    use drip::param::Params;
+    use drip::view::PreviewImage;
+
     use crate::views::PreparedView as View;
     use drip::param::ParamKind;
     use egui_kittest::Harness;
@@ -542,18 +547,28 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         static CALLS: AtomicUsize = AtomicUsize::new(0);
-        static NODE: NodeKind = NodeKind {
-            name: "test.offscreen",
-            label: "offscreen",
-            params: &[ParamSpec::new("value", ParamKind::Bool { default: false })],
-            inputs: &[],
-            outputs: &[],
-            actions: &[],
-            eval: |_, _, _| {
+        static NODE: NodeKind = NodeKind::new::<OffscreenKernel>(
+            "test.offscreen",
+            "offscreen",
+            &[ParamSpec::new("value", ParamKind::Bool { default: false })],
+            &[],
+            &[],
+        );
+        struct OffscreenKernel;
+        impl NodeKernel for OffscreenKernel {
+            type Inputs = ();
+            type Outputs = ();
+
+            fn eval(
+                _: Params<'_>,
+                (): (),
+                _: &EvalContext<'_>,
+            ) -> Result<Evaluated<Self::Outputs>, String> {
                 CALLS.fetch_add(1, Ordering::SeqCst);
                 Ok(Evaluated::default())
-            },
-        };
+            }
+        }
+
         let mut project = Project::default();
         let left = project.graph.add_node(&NODE);
         let right = project.graph.add_node(&NODE);
@@ -583,35 +598,49 @@ mod tests {
 
     #[test]
     fn evaluating_message_keeps_the_ui_and_previous_preview_available() {
+        use drip::image::Rgb;
         use drip::node::{Evaluated, NodeKind};
         use drip::param::ParamSpec;
-        use drip::value::{Rgb, Value};
         use std::sync::{Arc, Mutex, mpsc};
         use std::time::{Duration, Instant};
         static GATE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
-        static SLOW: NodeKind =
-            NodeKind {
-                name: "test.slow",
-                label: "slow",
-                params: &[ParamSpec::new("block", ParamKind::Bool { default: false })],
-                inputs: &[],
-                outputs: &[],
-                actions: &[],
-                eval: |p, _, _| {
-                    if p.bool("block") {
-                        let gate = GATE.lock().unwrap();
-                        let (started, release) = gate.as_ref().unwrap();
-                        started.send(()).unwrap();
-                        release.recv_timeout(Duration::from_secs(5)).unwrap();
-                    }
-                    Ok(Evaluated {
-                        outputs: vec![],
-                        view: Some(drip::value::View::Image(Value::DisplayRec2020(Arc::new(
-                            Rgb { width: 1, height: 1, scale: 1, pixels: vec![[0.5; 3]] },
-                        )))),
-                    })
-                },
-            };
+        static SLOW: NodeKind = NodeKind::new::<SlowKernel>(
+            "test.slow",
+            "slow",
+            &[ParamSpec::new("block", ParamKind::Bool { default: false })],
+            &[],
+            &[],
+        );
+        struct SlowKernel;
+        impl NodeKernel for SlowKernel {
+            type Inputs = ();
+            type Outputs = ();
+
+            fn eval(
+                p: Params<'_>,
+                (): (),
+                _: &EvalContext<'_>,
+            ) -> Result<Evaluated<Self::Outputs>, String> {
+                if p.bool("block") {
+                    let gate = GATE.lock().unwrap();
+                    let (started, release) = gate.as_ref().unwrap();
+                    started.send(()).unwrap();
+                    release.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+                Ok(Evaluated {
+                    outputs: (),
+                    view: Some(drip::view::View::Image(PreviewImage::new(&*Arc::new(
+                        DisplayRec2020::from(Arc::new(Rgb {
+                            width: 1,
+                            height: 1,
+                            scale: 1,
+                            pixels: vec![[0.5; 3]],
+                        })),
+                    )))),
+                })
+            }
+        }
+
         let (started, entered) = mpsc::channel();
         let (release, resume) = mpsc::channel();
         *GATE.lock().unwrap() = Some((started, resume));

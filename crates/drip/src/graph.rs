@@ -8,7 +8,6 @@ use serde_json::Value as Json;
 
 use crate::node::NodeKind;
 use crate::param::ParamMap;
-use crate::value::PortType;
 
 /// Stable within a project; never reused while the graph is alive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -39,7 +38,7 @@ pub enum GraphError {
     #[error("node {0:?} has no {1} port `{2}`")]
     UnknownPort(NodeId, &'static str, String),
     #[error("input `{input}` does not accept {found:?}")]
-    TypeMismatch { input: String, found: PortType },
+    TypeMismatch { input: String, found: &'static str },
     #[error("connection would create a cycle")]
     Cycle,
     #[error("node {0:?} has no parameter `{1}`")]
@@ -121,14 +120,14 @@ impl Graph {
     /// Connects `output` to `input`, replacing the input's previous source.
     pub fn connect(&mut self, output: Port, input: Port) -> Result<(), GraphError> {
         let source = self.node(output.0).ok_or(GraphError::UnknownNode(output.0))?.kind;
-        let ty = source.outputs.iter().find(|p| p.name == output.1).map(|p| p.ty);
+        let ty = source.outputs().find(|p| p.name == output.1).map(|p| p.ty);
         let ty = ty.ok_or_else(|| GraphError::UnknownPort(output.0, "output", output.1.clone()))?;
         let sink = self.node(input.0).ok_or(GraphError::UnknownNode(input.0))?.kind;
         let spec = sink.input(&input.1);
         let spec =
             spec.ok_or_else(|| GraphError::UnknownPort(input.0, "input", input.1.clone()))?;
-        if !spec.accepts.contains(&ty) {
-            return Err(GraphError::TypeMismatch { input: input.1, found: ty });
+        if !spec.requirement.accepts(ty) {
+            return Err(GraphError::TypeMismatch { input: input.1, found: ty.name });
         }
         if self.reaches(input.0, output.0) {
             return Err(GraphError::Cycle);

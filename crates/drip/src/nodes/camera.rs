@@ -1,32 +1,42 @@
 //! Camera characterization to linear Rec.2020.
 
 use crate::color::{self, D65, REC2020};
-use crate::node::{EvalContext, Evaluated, InputSpec, NodeKind, OutputSpec};
+use crate::image::{CameraRgb, Rgb, SceneRec2020, ThreeChannelMatrix};
+use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
 use crate::param::Params;
-use crate::value::{PortType, Rgb, Value};
+use crate::ports::Read;
 use rayon::prelude::*;
 use std::sync::Arc;
 
-pub static CAMERA_TO_REC2020: NodeKind = NodeKind {
-    name: "color.camera_to_rec2020",
-    label: "camera to rec2020",
-    params: &[],
-    inputs: &[InputSpec { name: "image", accepts: &[PortType::CameraRgb] }],
-    outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
-    eval: camera_to_rec2020,
-    actions: &[],
-};
+pub static CAMERA_TO_REC2020: NodeKind = NodeKind::new::<CameraToRec2020>(
+    "color.camera_to_rec2020",
+    "camera to rec2020",
+    &[],
+    &["image"],
+    &["image"],
+);
 
-fn camera_to_rec2020(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {
-    let Value::CameraRgb(image, camera) = &inputs[0] else {
-        unreachable!("ports guarantee camera RGB")
-    };
-    let m =
-        color::camera_to_rgb(&color::to_f64(&camera.xyz_to_cam), &color::rgb_to_xyz(REC2020, D65));
-    let m = color::to_f32(&m.expect("raw.read rejects degenerate matrices"));
-    let pixels = matrix(&image.pixels, &m);
-    super::single(Value::SceneRec2020(Arc::new(Rgb { pixels, ..**image })))
+struct CameraToRec2020;
+impl NodeKernel for CameraToRec2020 {
+    type Inputs = (Read<CameraRgb>,);
+    type Outputs = (Arc<SceneRec2020>,);
+    fn eval(
+        _: Params<'_>,
+        (camera_rgb,): (&CameraRgb,),
+        _: &EvalContext<'_>,
+    ) -> Result<Evaluated<Self::Outputs>, String> {
+        let image = camera_rgb.rgb();
+        let camera = &camera_rgb.camera;
+        let m = color::camera_to_rgb(
+            &color::to_f64(&camera.xyz_to_cam),
+            &color::rgb_to_xyz(REC2020, D65),
+        );
+        let m = color::to_f32(&m.expect("raw.read rejects degenerate matrices"));
+        let pixels = matrix(&image.pixels, &m);
+        Ok(Evaluated::new((Arc::new(SceneRec2020::from(Arc::new(Rgb { pixels, ..**image }))),)))
+    }
 }
+
 pub fn matrix(input: &[[f32; 3]], matrix: &[[f32; 3]; 3]) -> Vec<[f32; 3]> {
     input
         .par_iter()

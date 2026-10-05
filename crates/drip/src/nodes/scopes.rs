@@ -1,7 +1,7 @@
 //! Photographic scopes: spatial RGB exposure and exposure-independent chromaticity.
 //!
-//! [1] CIE, "CIE 1976 uniform-chromaticity-scale diagram," e-ILV,
-//!     term 17-23-073. https://cie.co.at/eilvterm/17-23-073
+//! \[1\] CIE, "CIE 1976 uniform-chromaticity-scale diagram," e-ILV,
+//!     term 17-23-073. <https://cie.co.at/eilvterm/17-23-073>
 //! The vectorscope uses u′v′ directly, not darktable's lightness-scaled u*v*.
 //! Negative RGB components are clipped only for chromaticity visualization.
 
@@ -9,41 +9,63 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use crate::color::{self, D65, REC2020};
-use crate::node::{EvalContext, Evaluated, InputSpec, NodeKind};
+#[cfg(test)]
+use crate::color::REC2020;
+use crate::color::{self, D65};
+use crate::image::{ColorspaceRgbMatrix, LinearThreeChannelMatrix, Rgb};
+use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
 use crate::param::Params;
-use crate::value::{PortType, Rgb, Scope, ScopeAxes, Value, View};
+use crate::ports::Read;
+use crate::view::{Scope, ScopeAxes, View};
 
 const SIZE: usize = 256;
 const RADIUS: f32 = 0.5;
 
-pub static WAVEFORM: NodeKind = NodeKind {
-    name: "view.waveform",
-    label: "waveform",
-    params: super::histogram::HISTOGRAM.params,
-    inputs: super::histogram::HISTOGRAM.inputs,
-    outputs: &[],
-    eval: waveform,
-    actions: &[],
-};
+pub static WAVEFORM: NodeKind = NodeKind::new::<Waveform>(
+    "view.waveform",
+    "waveform",
+    super::scope_settings::EXPOSURE_PARAMS,
+    &["image"],
+    &[],
+);
 
-pub static VECTORSCOPE: NodeKind = NodeKind {
-    name: "view.vectorscope",
-    label: "vectorscope",
-    params: &[],
-    inputs: &[InputSpec {
-        name: "image",
-        accepts: &[PortType::SceneRec2020, PortType::DisplayRec2020],
-    }],
-    outputs: &[],
-    eval: vectorscope,
-    actions: &[],
-};
+struct Waveform;
+impl NodeKernel for Waveform {
+    type Inputs = (Read<dyn LinearThreeChannelMatrix>,);
+    type Outputs = ();
+    fn eval(
+        p: Params<'_>,
+        (image,): (&dyn LinearThreeChannelMatrix,),
+        _: &EvalContext<'_>,
+    ) -> Result<Evaluated<Self::Outputs>, String> {
+        let (min, max) = (p.int("min_ev") as f32, p.int("max_ev") as f32);
+        let counts = waveform_counts(image.rgb(), min, max);
+        scope(
+            counts,
+            ScopeAxes::Waveform { min_stop: min, max_stop: max },
+            p.choice("scale") == "log",
+        )
+    }
+}
 
-fn waveform(p: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {
-    let (min, max) = (p.int("min_ev") as f32, p.int("max_ev") as f32);
-    let counts = waveform_counts(inputs[0].rgb(), min, max);
-    scope(counts, ScopeAxes::Waveform { min_stop: min, max_stop: max }, p.choice("scale") == "log")
+pub static VECTORSCOPE: NodeKind =
+    NodeKind::new::<Vectorscope>("view.vectorscope", "vectorscope", &[], &["image"], &[]);
+
+struct Vectorscope;
+impl NodeKernel for Vectorscope {
+    type Inputs = (Read<dyn ColorspaceRgbMatrix>,);
+    type Outputs = ();
+    fn eval(
+        _: Params<'_>,
+        (image,): (&dyn ColorspaceRgbMatrix,),
+        _: &EvalContext<'_>,
+    ) -> Result<Evaluated<Self::Outputs>, String> {
+        let space = image.color_space();
+        let matrix = &space.to_xyz_d65;
+        let counts = vector_counts(&image.rgb().pixels, matrix);
+        let primaries = color::transpose(*matrix).map(|primary| position(uv(primary)));
+        scope(counts, ScopeAxes::Vectorscope { primaries, color_space: space.name }, true)
+    }
 }
 
 fn waveform_counts(image: &Rgb, min: f32, max: f32) -> Vec<[u32; 3]> {
@@ -86,19 +108,12 @@ fn position([u, v]: [f32; 2]) -> [f32; 2] {
 }
 
 /// CIE XYZ at Y = 1 for an occupied vectorscope bin's normalized position.
-/// Inverts the u′v′ equations [1] so frontends share the scope's coordinates.
+/// Inverts the u′v′ equations \[1\] so frontends share the scope's coordinates.
 pub fn vectorscope_xyz([x, y]: [f32; 2]) -> [f64; 3] {
     let white = white_uv();
     let u = f64::from(white[0] + (x - 0.5) * (2.0 * RADIUS));
     let v = f64::from(white[1] - (y - 0.5) * (2.0 * RADIUS));
     [9.0 * u / (4.0 * v), 1.0, (12.0 - 3.0 * u - 20.0 * v) / (4.0 * v)]
-}
-
-fn vectorscope(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {
-    let matrix = color::rgb_to_xyz(REC2020, D65);
-    let counts = vector_counts(&inputs[0].rgb().pixels, &matrix);
-    let primaries = REC2020.map(|[x, y]| position(uv([x, y, 1.0 - x - y])));
-    scope(counts, ScopeAxes::Vectorscope { primaries }, true)
 }
 
 fn vector_counts(pixels: &[[f32; 3]], matrix: &color::Mat3) -> Vec<[u32; 3]> {
@@ -128,9 +143,9 @@ fn vector_counts(pixels: &[[f32; 3]], matrix: &color::Mat3) -> Vec<[u32; 3]> {
         )
 }
 
-fn scope(counts: Vec<[u32; 3]>, axes: ScopeAxes, log: bool) -> Result<Evaluated, String> {
+fn scope(counts: Vec<[u32; 3]>, axes: ScopeAxes, log: bool) -> Result<Evaluated<()>, String> {
     Ok(Evaluated {
-        outputs: vec![],
+        outputs: (),
         view: Some(View::Scope(Arc::new(Scope { size: SIZE, counts, axes, log }))),
     })
 }

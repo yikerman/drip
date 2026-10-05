@@ -78,10 +78,16 @@ SMPTE RP 431-2:2011, 2011. P3 primaries; Drip uses D65 for Display P3.
 [6] CIE, “CIE 1976 uniform-chromaticity-scale diagram,” *International Lighting
 Vocabulary*, term 17-23-073. [Online]. Available:
 https://cie.co.at/eilvterm/17-23-073. Vectorscope u′v′ equations; implemented
-directly in Rust, with Rec.2020/D65 colorimetry.
+directly in Rust, using the input RGB space’s transform to D65 XYZ.
 
 [7] darktable developers, “Scopes,” *darktable user manual*, development edition.
 [Online]. Available:
 https://docs.darktable.org/usermanual/development/en/module-reference/utility-modules/shared/scopes/.
 Scope behavior reference, accessed Oct. 5, 2026; no source code copied.
 Drip uses exposure-independent u′v′ chromaticity and an EV waveform.
+
+[8] Y. Zhu and G. D. Finlayson, “A Mathematical Investigation into the Design
+of Prefilters That Make Cameras More Colorimetric,” *Sensors*, vol. 20, no. 23,
+Art. no. 6882, Dec. 2020, doi: [10.3390/s20236882](https://doi.org/10.3390/s20236882).
+Luther-condition reference for image capability contracts; no algorithm copied.
+Article licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).

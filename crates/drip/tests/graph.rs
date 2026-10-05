@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use drip::graph::{Graph, GraphError};
-use drip::value::PortType;
+
 use serde_json::json;
 
 #[test]
@@ -10,10 +10,7 @@ fn connect_rejects_incompatible_types() {
     let mut g = Graph::default();
     let (c, w) = (g.add_node(&CONST), g.add_node(&WRITE));
     let err = g.connect(port(c, "image"), port(w, "image")).unwrap_err();
-    assert_eq!(
-        err,
-        GraphError::TypeMismatch { input: "image".into(), found: PortType::SceneRec2020 }
-    );
+    assert_eq!(err, GraphError::TypeMismatch { input: "image".into(), found: "SceneRec2020" });
     assert_eq!(g.edges().count(), 0);
 }
 

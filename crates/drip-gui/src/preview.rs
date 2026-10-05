@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use drip::value::Rgb;
+use drip::image::Rgb;
 use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
 
 /// An image packed as `Rgba16Float` texels. Packing is CPU work, done off the

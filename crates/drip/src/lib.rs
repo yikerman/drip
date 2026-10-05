@@ -5,11 +5,14 @@
 pub mod color;
 pub mod eval;
 pub mod graph;
+pub mod image;
 pub mod node;
 pub mod nodes;
 pub mod param;
+pub mod ports;
 pub mod profile;
 pub mod project;
 pub mod resource;
 pub mod templates;
 pub mod value;
+pub mod view;

@@ -4,8 +4,9 @@
 use std::sync::Arc;
 
 use drip::color::{self, D65, REC709};
+use drip::image::Rgb;
 use drip::nodes::scopes::vectorscope_xyz;
-use drip::value::{Histogram, Rgb, Scope, ScopeAxes, View};
+use drip::view::{Histogram, Scope, ScopeAxes, View};
 use egui::{Align2, FontId, Painter, Rect, Stroke};
 
 use crate::preview::{self, Image};
@@ -187,7 +188,7 @@ fn draw_scope(painter: &Painter, rect: Rect, scope: &Scope, mesh: &egui::Mesh, f
             plot.label(rect.left_bottom(), Align2::LEFT_BOTTOM, &format!("{min_stop} EV"));
             plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, "image x");
         }
-        ScopeAxes::Vectorscope { primaries } => {
+        ScopeAxes::Vectorscope { primaries, color_space } => {
             painter.hline(rect.x_range(), rect.center().y, Stroke::new(0.5, theme::LIGHTER));
             painter.vline(rect.center().x, rect.y_range(), Stroke::new(0.5, theme::LIGHTER));
             let points = primaries.into_iter().chain([primaries[0]]).map(at).collect();
@@ -197,14 +198,15 @@ fn draw_scope(painter: &Painter, rect: Rect, scope: &Scope, mesh: &egui::Mesh, f
                 plot.label(at(point) + egui::vec2(4.0, 0.0), Align2::LEFT_CENTER, name);
             }
             plot.label(rect.left_top(), Align2::LEFT_TOP, "u'v' · D65");
-            plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, "Rec.2020");
+            plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, color_space);
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use drip::value::Value;
+    use drip::image::DisplayRec2020;
+    use drip::view::PreviewImage;
 
     use super::*;
 
@@ -234,7 +236,7 @@ mod tests {
         let source =
             Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[-1.0, 0.5, 2.0]] });
         let raw = Arc::downgrade(&source);
-        let view = View::Image(Value::DisplayRec2020(source));
+        let view = View::Image(PreviewImage::new(&DisplayRec2020::from(source)));
         let mut prepared = Prepared::default();
         let PreparedView::Image(first) = prepared.view(&view) else { panic!("image") };
         let PreparedView::Image(second) = prepared.view(&view) else { panic!("image") };

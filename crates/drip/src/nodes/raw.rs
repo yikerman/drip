@@ -5,32 +5,35 @@ use std::sync::Arc;
 use drip_libraw::Raw;
 
 use crate::color::{self, D65, REC2020};
-use crate::node::{EvalContext, Evaluated, NodeKind, OutputSpec};
+use crate::image::{Camera, Cfa, Mosaic, RawMetadata};
+use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
 use crate::param::{ParamKind, ParamSpec, Params};
-use crate::value::{Camera, Cfa, Mosaic, PortType, Value};
 
-pub static READ: NodeKind = NodeKind {
-    name: "raw.read",
-    label: "raw",
-    params: &[ParamSpec::new("path", ParamKind::Path { output: false }).external()],
-    inputs: &[],
-    outputs: &[
-        OutputSpec { name: "mosaic", ty: PortType::Mosaic },
-        OutputSpec { name: "metadata", ty: PortType::RawMetadata },
-    ],
-    eval: read,
-    actions: &[],
-};
+pub static READ: NodeKind = NodeKind::new::<ReadRaw>(
+    "raw.read",
+    "raw",
+    &[ParamSpec::new("path", ParamKind::Path { output: false }).external()],
+    &[],
+    &["mosaic", "metadata"],
+);
 
-fn read(p: Params, _: &[Value], ctx: &EvalContext) -> Result<Evaluated, String> {
-    let path = p.path("path").ok_or("no raw file chosen")?;
-    let raw = ctx.resources().load(path, |path| {
-        drip_libraw::decode(path).map_err(|e| format!("{}: {e}", path.display()))
-    })?;
-    let mosaic = normalize(&raw)?;
-    let outputs =
-        vec![Value::Mosaic(Arc::new(mosaic)), Value::RawMetadata(Arc::new(raw.metadata.clone()))];
-    Ok(Evaluated { outputs, view: None })
+struct ReadRaw;
+impl NodeKernel for ReadRaw {
+    type Inputs = ();
+    type Outputs = (Arc<Mosaic>, Arc<RawMetadata>);
+    fn eval(
+        p: Params<'_>,
+        (): (),
+        ctx: &EvalContext<'_>,
+    ) -> Result<Evaluated<Self::Outputs>, String> {
+        let path = p.path("path").ok_or("no raw file chosen")?;
+        let raw = ctx.resources().load(path, |path| {
+            drip_libraw::decode(path).map_err(|e| format!("{}: {e}", path.display()))
+        })?;
+        let mosaic = normalize(&raw)?;
+        let outputs = (Arc::new(mosaic), Arc::new(raw.metadata.clone()));
+        Ok(Evaluated { outputs, view: None })
+    }
 }
 
 /// Subtracts black and scales sensor saturation to 1, cropping partial Bayer
@@ -39,10 +42,10 @@ fn read(p: Params, _: &[Value], ctx: &EvalContext) -> Result<Evaluated, String> 
 /// Black follows LibRaw's model as it stands right after unpacking: a common
 /// level, a per-color offset and a repeating pattern. As in dcraw, every site
 /// is divided by one denominator, saturation minus the black common to all
-/// sites as LibRaw's `adjust_bl()` derives it [1]; per-color denominators would
+/// sites as LibRaw's `adjust_bl()` derives it \[1\]; per-color denominators would
 /// act as a hidden white balance.
 ///
-/// [1] LibRaw, `adjust_bl()` and `subtract_black_internal()`, LibRaw 0.22.
+/// \[1\] LibRaw, `adjust_bl()` and `subtract_black_internal()`, LibRaw 0.22.
 pub fn normalize(raw: &Raw) -> Result<Mosaic, String> {
     // Like LibRaw, use the first green's multiplier when the second has none.
     let g2 = if raw.as_shot[3] > 0.0 { raw.as_shot[3] } else { raw.as_shot[1] };

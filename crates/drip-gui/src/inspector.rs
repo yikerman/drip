@@ -17,7 +17,7 @@ pub fn node(ui: &mut Ui, cx: &mut NodeCx) {
     }
     ui.weak(node.kind.name);
     crate::node_ui::of(node.kind).controls(ui, cx);
-    for action in node.kind.actions {
+    for action in node.kind.actions() {
         if ui.add_enabled(!cx.action_running(), egui::Button::new(action.name)).clicked() {
             cx.run(action.name);
         }

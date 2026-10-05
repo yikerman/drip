@@ -2,8 +2,12 @@ mod common;
 
 use common::*;
 use drip::eval::{Evaluator, NodeError, run_action};
+use drip::image::{DisplayRec2020, SceneRec2020, ThreeChannelMatrix};
+use drip::node::{EvalContext, NodeKernel, TypedAction};
+use drip::param::Params;
+use drip::ports::Read;
 use drip::project::Project;
-use drip::value::View;
+use drip::view::View;
 use serde_json::json;
 
 /// c1 ─┐
@@ -93,7 +97,7 @@ fn ui_only_nodes_present_views() {
     let result = eval(&mut ev, &p, view).as_ref().unwrap();
     assert!(result.outputs.is_empty());
     let Some(View::Image(image)) = &result.view else { panic!("no view") };
-    assert_eq!(pixel(image), [3.0, 8.0, 0.0]);
+    assert_eq!(image.rgb().pixels[0], [3.0, 8.0, 0.0]);
 }
 
 #[test]
@@ -204,45 +208,55 @@ mod release {
     use std::sync::{Arc, Mutex, Weak};
 
     use super::*;
-    use drip::node::{Action, Evaluated, InputSpec, NodeKind, OutputSpec};
-    use drip::value::{PortType, Rgb, Value};
+    use drip::image::Rgb;
+    use drip::node::{Evaluated, NodeKind};
 
     static PROBED: Mutex<Option<Weak<Rgb>>> = Mutex::new(None);
     static SEEN: Mutex<Option<(bool, [f32; 3])>> = Mutex::new(None);
 
     /// Remembers its output allocation so tests can see when it is freed.
-    static PROBE: NodeKind = NodeKind {
-        name: "test.probe",
-        label: "probe",
-        params: &[],
-        inputs: &[],
-        outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
-        eval: |_, _, _| {
+    static PROBE: NodeKind =
+        NodeKind::new::<ProbeKernel>("test.probe", "probe", &[], &[], &["image"]);
+    struct ProbeKernel;
+    impl NodeKernel for ProbeKernel {
+        type Inputs = ();
+        type Outputs = (Arc<SceneRec2020>,);
+
+        fn eval(
+            _: Params<'_>,
+            (): (),
+            _: &EvalContext<'_>,
+        ) -> Result<Evaluated<Self::Outputs>, String> {
             let image =
                 Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[1.0, 2.0, 3.0]] });
             *PROBED.lock().unwrap() = Some(Arc::downgrade(&image));
-            Ok(Evaluated { outputs: vec![Value::SceneRec2020(image)], view: None })
-        },
-        actions: &[],
-    };
+            Ok(Evaluated { outputs: (Arc::new(SceneRec2020::from(image)),), view: None })
+        }
+    }
 
     /// Records, while its action runs, whether the probe's output is alive.
-    static CHECK: NodeKind = NodeKind {
-        name: "test.check",
-        label: "check",
-        params: &[],
-        inputs: &[InputSpec { name: "image", accepts: &[PortType::DisplayRec2020] }],
-        outputs: &[],
-        eval: |_, _, _| Ok(Evaluated::default()),
-        actions: &[Action {
+    static CHECK: NodeKind =
+        NodeKind::new::<CheckKernel>("test.check", "check", &[], &["image"], &[]);
+    struct CheckKernel;
+    impl NodeKernel for CheckKernel {
+        type Inputs = (Read<DisplayRec2020>,);
+        type Outputs = ();
+        const ACTIONS: &'static [TypedAction<Self>] = &[TypedAction {
             name: "check",
-            run: |_, inputs, _| {
+            run: |_, (input0,), _| {
                 let alive = PROBED.lock().unwrap().as_ref().unwrap().upgrade().is_some();
-                *SEEN.lock().unwrap() = Some((alive, pixel(&inputs[0])));
+                *SEEN.lock().unwrap() = Some((alive, input0.rgb().pixels[0]));
                 Ok(())
             },
-        }],
-    };
+        }];
+        fn eval(
+            _: Params<'_>,
+            _: (&DisplayRec2020,),
+            _: &EvalContext<'_>,
+        ) -> Result<Evaluated<Self::Outputs>, String> {
+            Ok(Evaluated::default())
+        }
+    }
 
     /// Runs `check` on `probe → middle… → tonemap → check`.
     fn run(middle: &[&'static NodeKind]) -> (bool, [f32; 3]) {
@@ -250,10 +264,10 @@ mod release {
         let mut last = port(p.graph.add_node(&PROBE), "image");
         for kind in middle {
             let id = p.graph.add_node(kind);
-            for input in kind.inputs {
+            for input in kind.inputs() {
                 p.graph.connect(last.clone(), port(id, input.name)).unwrap();
             }
-            last = port(id, kind.outputs[0].name);
+            last = port(id, kind.outputs().next().unwrap().name);
         }
         let (t, check) = (p.graph.add_node(&TONEMAP), p.graph.add_node(&CHECK));
         p.graph.connect(last, port(t, "scene")).unwrap();

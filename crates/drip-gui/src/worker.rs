@@ -245,26 +245,31 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
 
 #[cfg(test)]
 mod tests {
+    use drip::image::{DisplayRec2020, ThreeChannelMatrix};
+    use drip::node::{EvalContext, NodeKernel, TypedAction};
+    use drip::param::Params;
+    use drip::ports::Read;
+
     use super::*;
     use drip::graph::Port;
-    use drip::node::{Action, Evaluated, InputSpec, NodeKind, OutputSpec};
+    use drip::image::Rgb;
+    use drip::node::{Evaluated, NodeKind};
     use drip::nodes;
     use drip::param::{ParamKind, ParamSpec};
-    use drip::value::{PortType, Rgb, Value};
     use serde_json::json;
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
     const TIMEOUT: Duration = Duration::from_secs(5);
 
-    fn image(value: f32, scale: u32) -> Evaluated {
+    fn image(value: f32, scale: u32) -> Evaluated<(Arc<DisplayRec2020>,)> {
         Evaluated {
-            outputs: vec![Value::DisplayRec2020(Arc::new(Rgb {
+            outputs: (Arc::new(DisplayRec2020::from(Arc::new(Rgb {
                 width: 1,
                 height: 1,
                 scale,
                 pixels: vec![[value, scale as f32, 0.0]],
-            }))],
+            }))),),
             view: None,
         }
     }
@@ -307,16 +312,26 @@ mod tests {
     fn latest_targets_win_and_project_reset_rejects_old_results() {
         static GATE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
         static CALLS: Mutex<Vec<f32>> = Mutex::new(Vec::new());
-        static SOURCE: NodeKind = NodeKind {
-            name: "test.blocking",
-            label: "blocking",
-            params: &[
+        static SOURCE: NodeKind = NodeKind::new::<SourceKernel>(
+            "test.blocking",
+            "blocking",
+            &[
                 ParamSpec::new("value", ParamKind::Float { min: 0.0, max: 10.0, default: 1.0 }),
                 ParamSpec::new("block", ParamKind::Bool { default: false }),
             ],
-            inputs: &[],
-            outputs: &[OutputSpec { name: "image", ty: PortType::DisplayRec2020 }],
-            eval: |p, _, ctx| {
+            &[],
+            &["image"],
+        );
+        struct SourceKernel;
+        impl NodeKernel for SourceKernel {
+            type Inputs = ();
+            type Outputs = (Arc<DisplayRec2020>,);
+
+            fn eval(
+                p: Params<'_>,
+                (): (),
+                ctx: &EvalContext<'_>,
+            ) -> Result<Evaluated<Self::Outputs>, String> {
                 let value = p.float("value") as f32;
                 CALLS.lock().unwrap().push(value);
                 if p.bool("block") {
@@ -326,9 +341,9 @@ mod tests {
                     release.recv_timeout(TIMEOUT).unwrap();
                 }
                 Ok(image(value, ctx.scale()))
-            },
-            actions: &[],
-        };
+            }
+        }
+
         let (started, entered) = mpsc::channel();
         let (release, resume) = mpsc::channel();
         *GATE.lock().unwrap() = Some((started, resume));
@@ -400,39 +415,58 @@ mod tests {
 
     #[test]
     fn exports_follow_invalidation_order_and_always_use_full_detail() {
-        static FILE: NodeKind = NodeKind {
-            name: "test.file",
-            label: "file",
-            params: &[ParamSpec::new("path", ParamKind::Path { output: false })],
-            inputs: &[],
-            outputs: &[OutputSpec { name: "image", ty: PortType::DisplayRec2020 }],
-            eval: |p, _, ctx| {
+        static FILE: NodeKind = NodeKind::new::<FileKernel>(
+            "test.file",
+            "file",
+            &[ParamSpec::new("path", ParamKind::Path { output: false })],
+            &[],
+            &["image"],
+        );
+        struct FileKernel;
+        impl NodeKernel for FileKernel {
+            type Inputs = ();
+            type Outputs = (Arc<DisplayRec2020>,);
+
+            fn eval(
+                p: Params<'_>,
+                (): (),
+                ctx: &EvalContext<'_>,
+            ) -> Result<Evaluated<Self::Outputs>, String> {
                 let value = ctx.resources().load(p.path("path").unwrap(), |path| {
                     std::fs::read_to_string(path).map_err(|e| e.to_string())
                 })?;
                 Ok(image(value.parse().unwrap(), ctx.scale()))
-            },
-            actions: &[],
-        };
-        static WRITE: NodeKind = NodeKind {
-            name: "test.write",
-            label: "write",
-            params: &[ParamSpec::new("path", ParamKind::Path { output: true })],
-            inputs: &[InputSpec { name: "image", accepts: &[PortType::DisplayRec2020] }],
-            outputs: &[],
-            eval: |_, _, _| Ok(Evaluated::default()),
-            actions: &[Action {
+            }
+        }
+
+        static WRITE: NodeKind = NodeKind::new::<WriteKernel>(
+            "test.write",
+            "write",
+            &[ParamSpec::new("path", ParamKind::Path { output: true })],
+            &["image"],
+            &[],
+        );
+        struct WriteKernel;
+        impl NodeKernel for WriteKernel {
+            type Inputs = (Read<DisplayRec2020>,);
+            type Outputs = ();
+            const ACTIONS: &'static [TypedAction<Self>] = &[TypedAction {
                 name: "write",
-                run: |p, inputs, ctx| {
+                run: |p, (input0,), ctx| {
                     assert_eq!(ctx.scale(), 1);
-                    std::fs::write(
-                        p.path("path").unwrap(),
-                        format!("{:?}", inputs[0].rgb().pixels[0]),
-                    )
-                    .map_err(|e| e.to_string())
+                    std::fs::write(p.path("path").unwrap(), format!("{:?}", input0.rgb().pixels[0]))
+                        .map_err(|e| e.to_string())
                 },
-            }],
-        };
+            }];
+            fn eval(
+                _: Params<'_>,
+                _: (&DisplayRec2020,),
+                _: &EvalContext<'_>,
+            ) -> Result<Evaluated<Self::Outputs>, String> {
+                Ok(Evaluated::default())
+            }
+        }
+
         let input = std::env::temp_dir().join(format!("drip-worker-input-{}", std::process::id()));
         let output = input.with_extension("out");
         std::fs::write(&input, "1").unwrap();
@@ -482,15 +516,21 @@ mod tests {
 
     #[test]
     fn panic_wakes_the_ui_and_ends_the_busy_state() {
-        static PANIC: NodeKind = NodeKind {
-            name: "test.panic",
-            label: "panic",
-            params: &[],
-            inputs: &[],
-            outputs: &[],
-            eval: |_, _, _| panic!("test worker failure"),
-            actions: &[],
-        };
+        static PANIC: NodeKind = NodeKind::new::<PanicKernel>("test.panic", "panic", &[], &[], &[]);
+        struct PanicKernel;
+        impl NodeKernel for PanicKernel {
+            type Inputs = ();
+            type Outputs = ();
+
+            fn eval(
+                _: Params<'_>,
+                (): (),
+                _: &EvalContext<'_>,
+            ) -> Result<Evaluated<Self::Outputs>, String> {
+                panic!("test worker failure")
+            }
+        }
+
         let mut graph = Graph::default();
         let id = graph.add_node(&PANIC);
         let (wake, woke) = mpsc::channel();

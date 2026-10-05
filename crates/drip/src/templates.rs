@@ -34,8 +34,8 @@ pub fn raw_to_tiff() -> Project {
     ];
     for i in 1..chain.len() {
         g.connect(
-            Port(chain[i - 1], kinds[i - 1].outputs[0].name.into()),
-            Port(chain[i], kinds[i].inputs[0].name.into()),
+            Port(chain[i - 1], kinds[i - 1].outputs().next().unwrap().name.into()),
+            Port(chain[i], kinds[i].inputs().next().unwrap().name.into()),
         )
         .expect("compatible built-in ports");
     }

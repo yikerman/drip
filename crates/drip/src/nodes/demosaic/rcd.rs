@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Portions Copyright (C) 2010-2026 darktable developers.
 //! Ratio Corrected Demosaicing by Luis Sanz Rodríguez; tiling by Ingo Weyrich,
-//! with optimizations by Luis Sanz Rodríguez and Hanno Schwalm [1].
+//! with optimizations by Luis Sanz Rodríguez and Hanno Schwalm \[1\].
 //! Rust uses owned tile scratch and Rayon over disjoint output strips. The
 //! ten-pixel halo is essential: later passes depend on earlier interpolations.
 //! Unlike darktable's PPG border, the outer ten pixels use bilinear interpolation
 //! preserving measured samples. This also defines tiny-image behavior.
 //!
-//! [1] L. Sanz Rodríguez et al., “Ratio Corrected Demosaicing,” darktable
+//! \[1\] L. Sanz Rodríguez et al., “Ratio Corrected Demosaicing,” darktable
 //! `src/iop/demosaicing/rcd.c`, commit 61dea294bedb3ab6c7cca1a45530b1ab5c0461f3.
-//! https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/demosaicing/rcd.c
-//! Original RCD: https://github.com/LuisSR/RCD-Demosaicing. See THIRD_PARTY.md.
+//! <https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/demosaicing/rcd.c>
+//! Original RCD: <https://github.com/LuisSR/RCD-Demosaicing>. See THIRD_PARTY.md.
 
-use crate::value::Mosaic;
+use crate::image::Mosaic;
 use rayon::prelude::*;
 
 const SIDE: usize = 128;
@@ -249,7 +249,7 @@ fn mix(t: f32, a: f32, b: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::{Camera, Cfa};
+    use crate::image::{Camera, Cfa};
     use std::sync::Arc;
     const PHASES: [[u8; 4]; 4] = [[0, 1, 3, 2], [1, 0, 2, 3], [3, 2, 0, 1], [2, 3, 1, 0]];
     fn mosaic(width: usize, height: usize, phase: usize) -> Mosaic {

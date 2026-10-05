@@ -37,7 +37,7 @@ This sequence takes priority over CLI expansion and speculative optimization.
   mirroring version-dependent native struct layouts; native handles do not
   escape into graph values. Existing bindings had ownership or maintenance
   problems when surveyed.
-- **Decided:** Prefer a closed set of semantic image types over plugin
+- **Decided:** Use explicit semantic image contracts without adding plugin
   machinery. Scene and display RGB are distinct so export requires tone
   mapping. Camera characterization travels with its image to prevent mixing
   one camera/file's matrix with another image.
@@ -50,6 +50,26 @@ This sequence takes priority over CLI expansion and speculative optimization.
   accidentally control whether or how an export runs.
 
 ## Node organization
+
+- **Requirement (2026-10-05):** Node input/output tuples should be the single
+  source of truth for edge compatibility and evaluation. Shared scopes should
+  require image capabilities rather than borrow another node's accepted types.
+- **Decided:** Use concrete semantic image types, traits for channel access
+  and color interpretation, and typed node signatures. Derive runtime port
+  descriptors and value adapters from those declarations; runtime editing still
+  requires connection checks before values exist. Separate channel layout,
+  linearity, color basis and scene/display meaning. Color characterization must
+  stay attached to the data it describes.
+- **Decided (2026-10-05):** Preserve existing dependency stamps and cache behavior
+  through the type refactor, including preview-level invalidation. Dirty flags,
+  revision keys and an execution-plan compiler are not prerequisites.
+- **Decided:** Keep semantic laws beside the traits: channel storage, linearity,
+  color interpretation and scene/display reference are distinct promises. Rust
+  checks signatures; implementers remain responsible for the mathematical laws.
+  Runtime capability registration exposes these promises without converting data.
+  Preview presentation requires linear Rec.2020 because the shader assumes it.
+  Associated input-borrow families take inspiration from
+  [higher](https://github.com/bodil/higher); no dependency is needed.
 
 - **Decided:** Each backend node owns its schema, adapter and algorithm. Split
   substantial algorithms into local modules; keep small nodes in one file.
@@ -133,8 +153,8 @@ This sequence takes priority over CLI expansion and speculative optimization.
   distinct from the image preview’s middle-grey surround.
 - **Decided:** Scopes inspect the connected node output. Waveforms retain image
   columns and measure RGB in EV, matching the histogram. Vectorscopes use
-  exposure-independent CIE u′v′ centered on D65, with Rec.2020 primary markers;
-  omit black and clip negative channels only for this chromaticity visualization.
+  exposure-independent CIE u′v′ centered on D65, with the input RGB space’s primary
+  markers; omit black and clip negative channels only for this chromaticity visualization.
   Density colors are sRGB annotations of chromaticity, with brightness indicating
   count; out-of-gamut colors are clipped without moving their plotted positions.
   These conventions keep scene and display data interpretable without a video
