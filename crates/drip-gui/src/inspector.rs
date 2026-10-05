@@ -11,7 +11,7 @@ use crate::gui::{Frame, NodeCx};
 
 /// A node's label, kind, parameters and actions.
 pub fn node(ui: &mut Ui, cx: &mut NodeCx) {
-    let (id, node) = (cx.id, cx.node().clone());
+    let (id, node) = (cx.id(), cx.node().clone());
     if let Some(label) = edit_text(ui, egui::Id::new(("label", id)), &node.label) {
         cx.set_label(&label);
     }
@@ -38,7 +38,7 @@ pub fn node(ui: &mut Ui, cx: &mut NodeCx) {
         }
     });
     for action in node.kind.actions {
-        if ui.add_enabled(!cx.frame.action_running, egui::Button::new(action.name)).clicked() {
+        if ui.add_enabled(!cx.action_running(), egui::Button::new(action.name)).clicked() {
             cx.run(action.name);
         }
     }

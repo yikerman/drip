@@ -178,7 +178,7 @@ impl ApplicationHandler<WorkerReady> for Shell {
                 }
             }
         }
-        if r.app.take_changed() {
+        if r.app.take_redraw() {
             r.panes().for_each(|p| p.window.request_redraw());
         }
         let wake = r.panes().filter_map(|p| p.repaint_at).min();

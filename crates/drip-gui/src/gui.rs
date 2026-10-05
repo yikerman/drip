@@ -171,16 +171,23 @@ pub fn resize(ui: &mut Ui, rect: Rect) -> Option<Vec2> {
     handle.dragged().then(|| rect.size() + handle.drag_delta())
 }
 
-/// What one frame of node GUIs reads from the app and reports back.
+/// What one frame of node GUIs reads from the app, and what they did.
 pub struct Frame<'a> {
     pub results: &'a dyn Fn(NodeId) -> Option<&'a Presentation>,
     /// The windows popped out.
     pub popped: &'a BTreeSet<Popped>,
     /// Disables actions while one runs.
     pub action_running: bool,
+    pub report: Report,
+}
+
+/// What node GUIs did in one frame, for the app to apply.
+#[derive(Default)]
+pub struct Report {
+    /// Whether the graph was edited.
+    pub edited: bool,
     /// An edit the graph refused.
     pub refused: Option<String>,
-    pub changed: bool,
     /// An action the user asked to run.
     pub action: Option<(NodeId, &'static str)>,
     /// A window the user opened or closed.
@@ -193,21 +200,13 @@ impl<'a> Frame<'a> {
         popped: &'a BTreeSet<Popped>,
         action_running: bool,
     ) -> Self {
-        Frame {
-            results,
-            popped,
-            action_running,
-            refused: None,
-            changed: false,
-            action: None,
-            toggled: None,
-        }
+        Frame { results, popped, action_running, report: Report::default() }
     }
 
     pub fn set_param(&mut self, graph: &mut Graph, id: NodeId, name: &str, value: Json) {
         match graph.set_param(id, name, value) {
-            Ok(()) => self.changed = true,
-            Err(e) => self.refused = Some(e.to_string()),
+            Ok(()) => self.report.edited = true,
+            Err(e) => self.report.refused = Some(e.to_string()),
         }
     }
 }
@@ -215,14 +214,18 @@ impl<'a> Frame<'a> {
 /// One node as its GUI sees it. Edits go through the graph's validated
 /// operations and are reported to the frame.
 pub struct NodeCx<'g, 'f, 'a> {
-    pub id: NodeId,
+    id: NodeId,
     graph: &'g mut Graph,
-    pub frame: &'f mut Frame<'a>,
+    frame: &'f mut Frame<'a>,
 }
 
 impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
     pub fn new(graph: &'g mut Graph, id: NodeId, frame: &'f mut Frame<'a>) -> Self {
         NodeCx { id, graph, frame }
+    }
+
+    pub fn id(&self) -> NodeId {
+        self.id
     }
 
     pub fn node(&self) -> &Node {
@@ -240,7 +243,7 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
 
     pub fn set_label(&mut self, label: &str) {
         if let Err(e) = self.graph.set_label(self.id, label) {
-            self.frame.refused = Some(e.to_string());
+            self.frame.report.refused = Some(e.to_string());
         }
     }
 
@@ -254,7 +257,12 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
     }
 
     pub fn run(&mut self, action: &'static str) {
-        self.frame.action = Some((self.id, action));
+        self.frame.report.action = Some((self.id, action));
+    }
+
+    /// Whether actions are disabled because one runs.
+    pub fn action_running(&self) -> bool {
+        self.frame.action_running
     }
 
     /// Whether `part` of the node is shown in its own window.
@@ -264,7 +272,7 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
 
     /// Opens the window of `part`, or closes it if open.
     pub fn toggle(&mut self, part: Part) {
-        self.frame.toggled = Some(Popped { node: self.id, part });
+        self.frame.report.toggled = Some(Popped { node: self.id, part });
     }
 }
 

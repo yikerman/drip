@@ -100,7 +100,7 @@ impl Editor {
                 if ui.button(kind.label).clicked() {
                     let pointer = ui.ctx().pointer_interact_pos().unwrap_or(area.center());
                     let id = graph.add_node(kind);
-                    frame.changed = true;
+                    frame.report.edited = true;
                     set_ui(graph, id, "pos", (to_global.inverse() * pointer).to_vec2());
                     *selected = Some(id);
                     ui.close();
@@ -163,7 +163,7 @@ impl Editor {
                 let port = ui.interact(hit(*pos), ui.id().with((l.id, name, 0)), Sense::click());
                 if port.secondary_clicked() {
                     graph.disconnect(&Port(l.id, (*name).into()));
-                    frame.changed = true;
+                    frame.report.edited = true;
                 }
                 port.on_hover_text("right-click to disconnect");
             }
@@ -222,8 +222,8 @@ impl Editor {
                 let target = pointer.and_then(|p| inputs.find(|(_, _, pos)| hit(*pos).contains(p)));
                 if let Some((id, name, _)) = target {
                     match graph.connect(from, Port(id, name.into())) {
-                        Ok(()) => frame.changed = true,
-                        Err(e) => frame.refused = Some(e.to_string()),
+                        Ok(()) => frame.report.edited = true,
+                        Err(e) => frame.report.refused = Some(e.to_string()),
                     }
                 }
             }
@@ -234,7 +234,7 @@ impl Editor {
             && !ui.ctx().egui_wants_keyboard_input()
         {
             graph.remove_node(id);
-            frame.changed = true;
+            frame.report.edited = true;
             *selected = None;
         }
     }

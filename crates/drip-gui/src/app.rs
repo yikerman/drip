@@ -11,7 +11,7 @@ use drip::{nodes, templates};
 use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
 
 use crate::editor::Editor;
-use crate::gui::{Frame, NodeCx, Popped};
+use crate::gui::{Frame, NodeCx, Popped, Report};
 use crate::worker::{Notice, Worker};
 use crate::{inspector, theme};
 
@@ -34,8 +34,8 @@ pub struct App {
     wide_gamut: bool,
     /// Parts of nodes shown in their own windows (DESIGN G13); not saved.
     popped: BTreeSet<Popped>,
-    /// Whether what the windows show changed since the last check.
-    changed: bool,
+    /// Whether the windows need redrawing because what they show changed.
+    redraw: bool,
 }
 
 /// A popped-out window as the app wants it.
@@ -70,7 +70,7 @@ impl App {
             action: None,
             wide_gamut,
             popped: BTreeSet::new(),
-            changed: false,
+            redraw: false,
         };
         if let Some(file) = file {
             app.open(file);
@@ -90,7 +90,7 @@ impl App {
             log::info!("{text}");
         }
         self.status = Some(Status { error, text });
-        self.changed = true;
+        self.redraw = true;
     }
 
     /// The main window: menu, status line, inspector and editor.
@@ -113,8 +113,8 @@ impl App {
         CentralPanel::default().show(ui, |ui| {
             self.editor.show(ui, graph, &self.registry, &mut self.selected, &mut frame);
         });
-        let Frame { changed, refused, action, toggled, .. } = frame;
-        self.apply(changed, refused, action, toggled);
+        let report = frame.report;
+        self.apply(report);
     }
 
     /// A popped-out window.
@@ -128,8 +128,8 @@ impl App {
                 popped.show(ui, &mut NodeCx::new(graph, popped.node, &mut frame));
             }
         });
-        let Frame { changed, refused, action, toggled, .. } = frame;
-        self.apply(changed, refused, action, toggled);
+        let report = frame.report;
+        self.apply(report);
     }
 
     pub fn windows(&self) -> Vec<Window> {
@@ -142,34 +142,28 @@ impl App {
 
     pub fn close_window(&mut self, popped: Popped) {
         self.popped.remove(&popped);
-        self.changed = true;
+        self.redraw = true;
     }
 
-    /// Whether what the windows show changed since the last call.
-    pub fn take_changed(&mut self) -> bool {
-        std::mem::take(&mut self.changed)
+    /// Whether the windows need redrawing since the last call.
+    pub fn take_redraw(&mut self) -> bool {
+        std::mem::take(&mut self.redraw)
     }
 
-    /// Applies what a frame's GUIs reported and requests evaluation after edits.
-    fn apply(
-        &mut self,
-        changed: bool,
-        refused: Option<String>,
-        action: Option<(NodeId, &'static str)>,
-        toggled: Option<Popped>,
-    ) {
-        self.dirty |= changed;
-        if let Some(refused) = refused {
+    /// Applies what a frame's GUIs did and requests evaluation after edits.
+    fn apply(&mut self, report: Report) {
+        self.dirty |= report.edited;
+        if let Some(refused) = report.refused {
             self.report(Err(refused));
         }
-        if let Some((id, name)) = action {
+        if let Some((id, name)) = report.action {
             self.run_action(id, name);
         }
-        if let Some(popped) = toggled {
+        if let Some(popped) = report.toggled {
             if !self.popped.remove(&popped) {
                 self.popped.insert(popped);
             }
-            self.changed = true;
+            self.redraw = true;
         }
         let graph = &self.project.graph;
         self.popped.retain(|p| graph.node(p.node).is_some());
@@ -178,7 +172,7 @@ impl App {
             if let Err(error) = self.worker.request(&self.project.graph, self.level, targets) {
                 self.report(Err(error));
             }
-            self.changed = true;
+            self.redraw = true;
         }
     }
 
@@ -187,7 +181,7 @@ impl App {
         let mut evaluated = None;
         let mut action_reported = false;
         let notices = self.worker.poll();
-        self.changed |= !notices.is_empty();
+        self.redraw |= !notices.is_empty();
         for notice in notices {
             match notice {
                 Notice::Evaluated(result) => evaluated = Some(result),
