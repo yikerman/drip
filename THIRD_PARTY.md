@@ -48,3 +48,26 @@ here when introduced.
 | [egui contributors](https://github.com/emilk/egui) (`egui_kittest`) | Headless GUI tests | MIT OR Apache-2.0 |
 
 RAW fixture provenance is recorded with the files in `fixtures/`.
+
+## Papers and technical references
+
+References used in processing and colorimetry; individual source modules cite
+these works where the formulas are implemented.
+
+[1] K.-I. Naka and W. A. H. Rushton, “S-potentials from colour units in the
+retina of fish (Cyprinidae),” *J. Physiol.*, vol. 185, no. 3, pp. 536–555, 1966.
+Historical basis for Drip's original sigmoid curve.
+
+[2] ITU-R, “Parameter values for ultra-high definition television systems for
+production and international programme exchange,” Rec. ITU-R BT.2020-2,
+Oct. 2015. Rec.2020 primaries and white point.
+
+[3] SMPTE, “Derivation of basic television color equations,” SMPTE RP 177-1993,
+1993. RGB/XYZ matrix construction.
+
+[4] ITU-R, “Parameter values for the HDTV standards for production and
+international programme exchange,” Rec. ITU-R BT.709-6, Jun. 2015.
+BT.709/sRGB primaries.
+
+[5] SMPTE, “D-Cinema quality – Reference projector and environment,”
+SMPTE RP 431-2:2011, 2011. P3 primaries; Drip uses D65 for Display P3.

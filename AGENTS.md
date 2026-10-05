@@ -2,7 +2,7 @@
 
 - code should be modular, concise, funtional and self-explaintory. minimize special cases, only do checks at user input and treat every internal code input/output correct.
 - docs/comments are complementry to code. if a piece of code is not self-explaintory, especially for some dense kernel code, comment. also explain motivation when needed. do not write obvious/trivial things.
-- cite when needed in IEEE format, such as algorithm borrowed from another paper or software.
+- cite borrowed algorithms and papers in IEEE format. Maintain `THIRD_PARTY.md` with credits and licenses for major dependencies and adapted code, pinned revisions for source ports, and full references for papers. Keep upstream notices and brief citations beside adapted algorithms; explain meaningful deviations there. Link upstream license texts from `THIRD_PARTY.md` rather than duplicating them in a `LICENSES/` directory.
 - do not add any agentic coding system or model into co-authored-by.
 - commits are self-contained, do one thing right, and has the format of "{submodule} or chore: {summary} \n {explanation (follow same guidelines as docs/comments)}"
 - when some ideas are incomplete, conflicting or inheritly difficult to implement or require hackish methods, stop and talk to the user
@@ -19,4 +19,5 @@
 - `crates/drip-libraw`: minimal LibRaw binding (C shim + safe `decode`).
 - `docs/DESIGN.md`: decisions, status, rationale. `docs/PROGRESS.md`: session log.
 - `TODO.md`: ideas not implemented.
+- `THIRD_PARTY.md`: dependency and algorithm credits, licenses, and paper references.
 - `fixtures/`: test data; raws are stored with Git LFS.
