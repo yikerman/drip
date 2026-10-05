@@ -4,7 +4,6 @@ Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
 
 | Idea | Source | Status | Notes |
 |------|--------|--------|-------|
-| Review: consume expired repaint deadlines | 2026-10-05 review | open | hidden Wayland windows can withhold redraw while a past `WaitUntil` deadline spins the event loop |
 | Review: redraw after label and external-parameter edits | 2026-10-05 review | open | notify other windows without requesting image reevaluation |
 | Review: safe project and export replacement | 2026-10-05 review | deferred | user postponed robustness work; same-directory temporary files and streamed TIFF encoding remain possible improvements |
 | Review: export completion and unsaved edits on close | 2026-10-05 review | deferred | robustness work postponed for the prototype; DESIGN 6.1 |

@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-05: consume scheduled repaint deadlines
+
+- Clear each elapsed repaint deadline when requesting its redraw. If Wayland withholds the frame for a hidden window, the event loop now waits for events rather than repeatedly waking on the same expired deadline. A rendered frame schedules its next deadline as before.
+- Verification: formatting and the GUI tests; native compositor behavior remains untested in this session.
+
 ## 2026-10-05: preserve save filename extensions
 
 - Save As preserves names ending in `.drip` and otherwise appends `.drip`, as requested. `photo.backup` becomes `photo.backup.drip` rather than replacing the user's extension.

@@ -102,10 +102,14 @@ impl ApplicationHandler<WorkerReady> for Shell {
     }
 
     fn new_events(&mut self, _: &ActiveEventLoop, cause: StartCause) {
-        if let (StartCause::ResumeTimeReached { .. }, Some(r)) = (cause, &self.running) {
+        if let (StartCause::ResumeTimeReached { .. }, Some(r)) = (cause, &mut self.running) {
             let now = Instant::now();
-            for pane in r.panes().filter(|p| p.repaint_at.is_some_and(|at| at <= now)) {
-                pane.window.request_redraw();
+            for pane in std::iter::once(&mut r.main).chain(r.windows.iter_mut().map(|(_, p)| p)) {
+                // A hidden Wayland window may not draw until it becomes visible.
+                // Consume its deadline now so waiting for that frame cannot spin.
+                if pane.repaint_at.take_if(|at| *at <= now).is_some() {
+                    pane.window.request_redraw();
+                }
             }
         }
     }
