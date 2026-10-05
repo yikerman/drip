@@ -23,6 +23,8 @@ const PAD: f32 = 6.0;
 /// Default size of a node's view, in graph units.
 const VIEW: Vec2 = vec2(280.0, 190.0);
 const ZOOM: (f32, f32) = (0.2, 4.0);
+/// Space kept around the graph when fitting it into view, in screen points.
+const MARGIN: f32 = 20.0;
 
 pub struct Editor {
     /// Screen offset of the graph's origin within the canvas; `None` until
@@ -69,7 +71,11 @@ impl Editor {
         let (area, background) =
             ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let painter = ui.painter_at(area);
-        let offset = self.offset.get_or_insert_with(|| fit(graph, area, self.zoom));
+        let offset = self.offset.get_or_insert_with(|| {
+            let (offset, zoom) = fit(graph, area);
+            self.zoom = zoom;
+            offset
+        });
         if background.dragged() {
             *offset += background.drag_delta();
         }
@@ -302,15 +308,23 @@ fn set_ui(graph: &mut Graph, id: NodeId, key: &str, value: Vec2) {
     graph.set_ui(id, ui).expect("node exists");
 }
 
-/// The offset that centers the graph's node positions in `area` at `zoom`.
-fn fit(graph: &Graph, area: Rect, zoom: f32) -> Vec2 {
-    let positions: Vec<_> =
-        graph.nodes().map(|(id, node)| position(&node.ui, id).to_pos2()).collect();
-    if positions.is_empty() {
-        return Vec2::ZERO;
-    }
-    let center = Rect::from_points(&positions).center().to_vec2() + vec2(WIDTH, HEADER) / 2.0;
-    area.size() / 2.0 - center * zoom
+/// A node's rectangle in graph units, with room for a view when it has a
+/// saved size.
+fn bounds(id: NodeId, node: &Node) -> Rect {
+    let ports = HEADER + ROW * node.kind.inputs.len().max(node.kind.outputs.len()) as f32;
+    let size = pair(&node.ui["size"]).unwrap_or(vec2(WIDTH, 0.0));
+    Rect::from_min_size(position(&node.ui, id).to_pos2(), vec2(size.x, ports + size.y + PAD))
+}
+
+/// The offset and zoom that center the whole graph in `area`, zooming out as
+/// far as needed to show all of it but never in.
+fn fit(graph: &Graph, area: Rect) -> (Vec2, f32) {
+    let Some(bounds) = graph.nodes().map(|(id, node)| bounds(id, node)).reduce(Rect::union) else {
+        return (Vec2::ZERO, 1.0);
+    };
+    let room = area.size() - Vec2::splat(2.0 * MARGIN);
+    let zoom = (room / bounds.size()).min_elem().clamp(ZOOM.0, 1.0);
+    (area.size() / 2.0 - bounds.center().to_vec2() * zoom, zoom)
 }
 
 fn bezier(from: Pos2, to: Pos2, stroke: Stroke) -> CubicBezierShape {

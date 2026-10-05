@@ -2,6 +2,12 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: balanced default layout
+
+- The built-in template places a 3:2 preview (672×440) beside the end of the processing chain, the histogram (320×240) beyond it and the exporter under the chain, following the user's arrangement.
+- Opening a project now fits the whole graph, view sizes included, and zooms out as needed (about 0.8 maximized, 0.62 in the default window); it never zooms in past 1. Before, it centered node corners at zoom 1.
+- Verification: workspace tests, formatting and clippy pass; the user checked the layout in the GUI.
+
 ## 2026-10-04: frame timing log
 
 - Each frame logs its UI, tessellation and render time and egui's font atlas fill at debug level under the `frame` target (`RUST_LOG=frame=debug`). Evaluation timings were already logged per node. Motivation: fast zooming lags slightly, suspected to be node text re-rasterized at every new `13.0 * zoom` font size.
