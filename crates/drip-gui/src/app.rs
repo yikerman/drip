@@ -17,12 +17,12 @@ const MAX_LEVEL: u8 = 8;
 const DEFAULT_LEVEL: u8 = 1;
 
 pub struct App {
-    pub(crate) project: Project,
+    project: Project,
     registry: Registry,
     worker: Worker,
     dirty: bool,
     file: Option<PathBuf>,
-    pub(crate) selected: Option<NodeId>,
+    selected: Option<NodeId>,
     editor: Editor,
     /// One user-selected level for every preview target (DESIGN E16).
     level: u8,
@@ -62,7 +62,7 @@ impl App {
     }
 
     /// Shows `result` in the status line and the log.
-    pub(crate) fn report(&mut self, result: Result<String, String>) {
+    fn report(&mut self, result: Result<String, String>) {
         let (error, text) = match result {
             Ok(text) => (false, text),
             Err(text) => (true, text),
@@ -104,14 +104,23 @@ impl App {
         Panel::top("menu").show_separator_line(false).show(ui, |ui| self.menu(ui));
         Panel::bottom("status").show_separator_line(false).show(ui, |ui| self.status_line(ui));
         Panel::right("inspector").resizable(true).default_size(320.0).show(ui, |ui| {
+            let mut frame =
+                inspector::Frame { action_running: self.action.is_some(), ..Default::default() };
             egui::ScrollArea::vertical().show(ui, |ui| {
-                if let Some(id) = self.selected.filter(|id| self.project.graph.node(*id).is_some())
-                {
-                    inspector::node(self, ui, id);
+                let graph = &mut self.project.graph;
+                if let Some(id) = self.selected.filter(|id| graph.node(*id).is_some()) {
+                    inspector::node(ui, graph, id, &mut frame);
                     ui.separator();
                 }
-                inspector::inputs(self, ui);
+                inspector::inputs(ui, graph, &mut frame);
             });
+            self.dirty |= frame.changed;
+            if let Some(refused) = frame.refused {
+                self.report(Err(refused));
+            }
+            if let Some((id, name)) = frame.action {
+                self.run_action(id, name);
+            }
         });
         CentralPanel::default().show(ui, |ui| {
             let results = |id| self.worker.result(id);
@@ -139,13 +148,6 @@ impl App {
 
     pub fn after_frame(&mut self) {
         self.worker.after_frame();
-    }
-
-    pub(crate) fn set_param(&mut self, id: NodeId, name: &str, value: serde_json::Value) {
-        match self.project.graph.set_param(id, name, value) {
-            Ok(()) => self.dirty = true,
-            Err(error) => self.report(Err(error.to_string())),
-        }
     }
 
     fn menu(&mut self, ui: &mut Ui) {
@@ -281,7 +283,7 @@ impl App {
     }
 
     /// The evaluator-owning worker snapshots resources in command order.
-    pub(crate) fn run_action(&mut self, id: NodeId, name: &'static str) {
+    fn run_action(&mut self, id: NodeId, name: &'static str) {
         match self.worker.action(&self.project.graph, id, name) {
             Ok(()) => {
                 self.action = Some(name);
@@ -289,10 +291,6 @@ impl App {
             }
             Err(error) => self.report(Err(error)),
         }
-    }
-
-    pub(crate) fn action_running(&self) -> bool {
-        self.action.is_some()
     }
 }
 
@@ -337,6 +335,13 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         h.run();
+    }
+
+    /// A parameter edit as the inspector reports it.
+    fn set_param(h: &mut Harness<'_, App>, id: NodeId, name: &str, value: serde_json::Value) {
+        let app = h.state_mut();
+        app.project.graph.set_param(id, name, value).unwrap();
+        app.dirty = true;
     }
 
     fn has_view(app: &App, label: &str) -> bool {
@@ -443,7 +448,7 @@ mod tests {
         assert!(h.state().worker.result(left).unwrap().is_ok());
         assert!(h.state().worker.result(right).unwrap().is_ok());
 
-        h.state_mut().set_param(left, "value", json!(true));
+        set_param(&mut h, left, "value", json!(true));
         settle(&mut h);
         assert_eq!(CALLS.load(Ordering::SeqCst), 3, "off-screen edits are evaluated");
         let before = completions.load(Ordering::SeqCst);
@@ -497,7 +502,7 @@ mod tests {
             panic!("image")
         };
         let before = before.clone();
-        h.state_mut().set_param(id, "block", json!(true));
+        set_param(&mut h, id, "block", json!(true));
         h.step();
         entered.recv_timeout(Duration::from_secs(5)).unwrap();
         let start = Instant::now();

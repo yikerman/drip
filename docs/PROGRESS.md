@@ -5,7 +5,8 @@ Newest first. Each entry: what happened, what is verified, what is next.
 ## 2026-10-04: GUI decoupling
 
 - Moved view preparation out of `worker`: `preview::Image` packs `Rgba16Float` texels next to the upload that consumes them, and `views` owns `PreparedView` and the prepared-image cache. The worker still runs preparation and owns the cache; it is now only the mailbox and evaluator host.
-- Verification: all 11 GUI tests, formatting and clippy pass.
+- The inspector now takes the graph and an `inspector::Frame` that reports edits, refusals and requested actions, matching the editor's `Frame`. `App` applies them after drawing and exposes nothing to other modules.
+- Verification: all 11 GUI tests, formatting and clippy pass after each commit.
 
 ## 2026-10-04: consume the export evaluator
 

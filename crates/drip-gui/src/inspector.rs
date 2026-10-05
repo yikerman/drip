@@ -2,19 +2,38 @@
 //! Widgets come from parameter schemas; every edit goes through the graph's
 //! validated operations.
 
-use drip::graph::NodeId;
+use drip::graph::{Graph, NodeId};
 use drip::param::ParamKind;
 use egui::{Sense, Ui};
 use serde_json::{Value as Json, json};
 
-use crate::app::App;
+/// What one frame of the inspector reads from the app and reports back.
+#[derive(Default)]
+pub struct Frame {
+    /// Disables actions while one runs.
+    pub action_running: bool,
+    /// An edit the graph refused.
+    pub refused: Option<String>,
+    pub changed: bool,
+    /// An action the user asked to run.
+    pub action: Option<(NodeId, &'static str)>,
+}
 
-pub fn node(app: &mut App, ui: &mut Ui, id: NodeId) {
-    let node = app.project.graph.node(id).expect("selected nodes exist").clone();
+impl Frame {
+    fn set_param(&mut self, graph: &mut Graph, id: NodeId, name: &str, value: Json) {
+        match graph.set_param(id, name, value) {
+            Ok(()) => self.changed = true,
+            Err(e) => self.refused = Some(e.to_string()),
+        }
+    }
+}
+
+pub fn node(ui: &mut Ui, graph: &mut Graph, id: NodeId, frame: &mut Frame) {
+    let node = graph.node(id).expect("selected nodes exist").clone();
     if let Some(label) = edit_text(ui, egui::Id::new(("label", id)), &node.label)
-        && let Err(e) = app.project.graph.set_label(id, &label)
+        && let Err(e) = graph.set_label(id, &label)
     {
-        app.report(Err(e.to_string()));
+        frame.refused = Some(e.to_string());
     }
     ui.weak(node.kind.name);
     egui::Grid::new(("params", id)).num_columns(2).show(ui, |ui| {
@@ -26,15 +45,12 @@ pub fn node(app: &mut App, ui: &mut Ui, id: NodeId) {
             if let Some(value) =
                 edit_value(ui, egui::Id::new((id, spec.name)), &spec.kind, &node.params[spec.name])
             {
-                app.set_param(id, spec.name, value);
+                frame.set_param(graph, id, spec.name, value);
             }
             name.context_menu(|ui| {
                 let toggle = if external { "Fix in template" } else { "Make template input" };
                 if ui.button(toggle).clicked() {
-                    app.project
-                        .graph
-                        .set_external(id, spec.name, !external)
-                        .expect("the kind's parameter");
+                    graph.set_external(id, spec.name, !external).expect("the kind's parameter");
                     ui.close();
                 }
             });
@@ -42,29 +58,29 @@ pub fn node(app: &mut App, ui: &mut Ui, id: NodeId) {
         }
     });
     for action in node.kind.actions {
-        if ui.add_enabled(!app.action_running(), egui::Button::new(action.name)).clicked() {
-            app.run_action(id, action.name);
+        if ui.add_enabled(!frame.action_running, egui::Button::new(action.name)).clicked() {
+            frame.action = Some((id, action.name));
         }
     }
 }
 
 /// The template's inputs, one per external parameter of each node, edited
 /// in place.
-pub fn inputs(app: &mut App, ui: &mut Ui) {
-    let inputs: Vec<_> = app.project.graph.inputs().collect();
+pub fn inputs(ui: &mut Ui, graph: &mut Graph, frame: &mut Frame) {
+    let inputs: Vec<_> = graph.inputs().collect();
     if inputs.is_empty() {
         return;
     }
     ui.weak("inputs");
     egui::Grid::new("inputs").num_columns(2).show(ui, |ui| {
         for (id, param) in inputs {
-            let node = app.project.graph.node(id).expect("listed");
+            let node = graph.node(id).expect("listed");
             ui.label(format!("{} · {param}", node.label));
             let kind = node.kind.param(param).expect("listed").kind;
             let value = node.params[param].clone();
             if let Some(value) = edit_value(ui, egui::Id::new(("input", id, param)), &kind, &value)
             {
-                app.set_param(id, param, value);
+                frame.set_param(graph, id, param, value);
             }
             ui.end_row();
         }
