@@ -8,7 +8,7 @@ Newest first. Each entry: what happened, what is verified, what is next.
 - Verification: formatting and clippy pass; a debug run prints sub-millisecond idle frames.
 - Confirmed in release logs: a fast zoom stalls one frame each time egui's font atlas doubles (up to 274 ms at 50% full), since every frame lays text out at a new `13.0 * zoom` size. Rounding font sizes to whole points stopped the growth but looked wrong and was dropped.
 - Surfaces now request `Fifo`; wgpu's default took the driver's first mode, which rendered 500–800 frames per second. With vsync, frames hold at about 120 per second, but zooming still grows the atlas (32% in a few seconds, 136 ms stall at 25%).
-- Next: decide how editor text scales with zoom (open in TODO).
+- The remaining zoom stalls are accepted for now; the text-scaling options are deferred in TODO.
 
 ## 2026-10-04: GUI decoupling
 
