@@ -1,7 +1,7 @@
 //! Widgets node GUIs and the editor's frame share (DESIGN G13), in the units
 //! of the `Ui` they are drawn into.
 
-use egui::{Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::gui::{NodeCx, Part};
 use crate::theme;
@@ -28,14 +28,14 @@ pub fn pop_out(ui: &mut Ui, rect: Rect, node: &mut NodeCx, part: Part) {
     }
 }
 
-/// A handle in the bottom-right corner of `rect` that resizes it; returns the
+/// A handle ending at `corner` that resizes something of `size`; returns the
 /// new size while dragged.
-pub fn resize(ui: &mut Ui, rect: Rect) -> Option<Vec2> {
-    let corner = Rect::from_min_max(rect.max - Vec2::splat(10.0), rect.max);
+pub fn resize(ui: &mut Ui, corner: Pos2, size: Vec2) -> Option<Vec2> {
+    let corner = Rect::from_min_max(corner - Vec2::splat(10.0), corner);
     ui.painter().line_segment(
         [corner.left_bottom(), corner.right_top()],
         Stroke::new(point(ui), theme::WEAK),
     );
     let handle = ui.interact(corner, ui.id().with("resize"), Sense::drag());
-    handle.dragged().then(|| rect.size() + handle.drag_delta())
+    handle.dragged().then(|| size + handle.drag_delta())
 }

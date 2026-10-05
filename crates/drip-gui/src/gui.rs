@@ -105,14 +105,20 @@ struct Viewer;
 const VIEW: Vec2 = vec2(280.0, 190.0);
 const SHOWN: Part = Part::Gui("view");
 
+/// The view's size the user set, which is the node's width and the body's
+/// height without its bottom padding.
+fn view_size(node: &Node) -> Vec2 {
+    pair(&node.ui["size"]).unwrap_or(VIEW)
+}
+
 impl NodeGui for Viewer {
     fn size(&self, node: &Node) -> Vec2 {
-        pair(&node.ui["size"]).unwrap_or(VIEW) + vec2(0.0, PAD)
+        view_size(node) + vec2(0.0, PAD)
     }
 
     fn body(&self, ui: &mut Ui, node: &mut NodeCx) {
-        let body = ui.max_rect();
-        let rect = Rect::from_min_max(body.min + vec2(PAD, 0.0), body.max - vec2(PAD, PAD));
+        let (body, size) = (ui.max_rect(), view_size(node.node()));
+        let rect = Rect::from_min_size(body.min + vec2(PAD, 0.0), size - vec2(2.0 * PAD, 0.0));
         if node.popped(SHOWN) {
             let layout = egui::Layout::centered_and_justified(egui::Direction::TopDown);
             ui.scope_builder(UiBuilder::new().max_rect(rect).layout(layout), |ui| {
@@ -126,13 +132,13 @@ impl NodeGui for Viewer {
         let button = Rect::from_min_size(rect.right_top() - vec2(BUTTON, 0.0), Vec2::splat(BUTTON));
         ui.painter().rect_filled(button, 0.0, theme::DARKER);
         widgets::pop_out(ui, button, node, SHOWN);
-        if let Some(size) = widgets::resize(ui, body) {
-            node.set_ui("size", (size - vec2(0.0, PAD)).max(vec2(80.0, 60.0)));
+        if let Some(size) = widgets::resize(ui, body.max, size) {
+            node.set_ui("size", size.max(vec2(80.0, 60.0)));
         }
     }
 
     fn window_size(&self, _name: &'static str, node: &Node) -> Vec2 {
-        pair(&node.ui["size"]).unwrap_or(VIEW)
+        view_size(node)
     }
 
     fn window(&self, ui: &mut Ui, _name: &'static str, node: &mut NodeCx) {
