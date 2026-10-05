@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use drip::graph::{Graph, Node, NodeId};
+use drip::graph::{Graph, GraphError, Node, NodeId, Port};
 use drip::node::NodeKind;
 use drip::nodes::{HISTOGRAM, PREVIEW};
 use egui::{FontId, Rect, Ui, UiBuilder, Vec2, vec2};
@@ -183,14 +183,29 @@ pub struct Frame<'a> {
 /// What node GUIs did in one frame, for the app to apply.
 #[derive(Default)]
 pub struct Report {
-    /// Whether the graph was edited.
+    /// Whether processing inputs or connections changed.
     pub edited: bool,
+    /// Whether shared presentation changed, including noncomputational edits.
+    pub redraw: bool,
     /// An edit the graph refused.
     pub refused: Option<String>,
     /// An action the user asked to run.
     pub action: Option<(NodeId, &'static str)>,
     /// A window the user opened or closed.
     pub toggled: Option<Popped>,
+}
+
+/// All frontend graph mutations pass through `Frame::edit`, which owns their
+/// redraw and evaluation effects. Windows read the same graph after each edit.
+pub enum Edit<'a> {
+    Add(&'static NodeKind, Vec2),
+    Remove(NodeId),
+    Connect(Port, Port),
+    Disconnect(Port),
+    Param(NodeId, &'a str, Json),
+    Label(NodeId, &'a str),
+    External(NodeId, &'a str, bool),
+    Ui(NodeId, &'a str, Vec2),
 }
 
 impl<'a> Frame<'a> {
@@ -202,10 +217,40 @@ impl<'a> Frame<'a> {
         Frame { results, popped, action_running, report: Report::default() }
     }
 
-    pub fn set_param(&mut self, graph: &mut Graph, id: NodeId, name: &str, value: Json) {
-        match graph.set_param(id, name, value) {
-            Ok(()) => self.report.edited = true,
-            Err(e) => self.report.refused = Some(e.to_string()),
+    /// Applies an edit immediately; adding a node returns its id for selection.
+    pub fn edit(&mut self, graph: &mut Graph, edit: Edit<'_>) -> Option<NodeId> {
+        let evaluate = !matches!(edit, Edit::Label(..) | Edit::External(..) | Edit::Ui(..));
+        let result: Result<_, GraphError> = (|| {
+            match edit {
+                Edit::Add(kind, pos) => {
+                    let id = graph.add_node(kind);
+                    set_ui(graph, id, "pos", pos);
+                    return Ok(Some(id));
+                }
+                Edit::Remove(id) => {
+                    graph.remove_node(id);
+                }
+                Edit::Connect(output, input) => graph.connect(output, input)?,
+                Edit::Disconnect(input) => {
+                    graph.disconnect(&input);
+                }
+                Edit::Param(id, name, value) => graph.set_param(id, name, value)?,
+                Edit::Label(id, label) => graph.set_label(id, label)?,
+                Edit::External(id, name, external) => graph.set_external(id, name, external)?,
+                Edit::Ui(id, key, value) => set_ui(graph, id, key, value),
+            }
+            Ok(None)
+        })();
+        match result {
+            Ok(added) => {
+                self.report.redraw = true;
+                self.report.edited |= evaluate;
+                added
+            }
+            Err(e) => {
+                self.report.refused = Some(e.to_string());
+                None
+            }
         }
     }
 }
@@ -237,22 +282,20 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
     }
 
     pub fn set_param(&mut self, name: &str, value: Json) {
-        self.frame.set_param(self.graph, self.id, name, value);
+        self.frame.edit(self.graph, Edit::Param(self.id, name, value));
     }
 
     pub fn set_label(&mut self, label: &str) {
-        if let Err(e) = self.graph.set_label(self.id, label) {
-            self.frame.report.refused = Some(e.to_string());
-        }
+        self.frame.edit(self.graph, Edit::Label(self.id, label));
     }
 
     pub fn set_external(&mut self, name: &str, external: bool) {
-        self.graph.set_external(self.id, name, external).expect("the kind's parameter");
+        self.frame.edit(self.graph, Edit::External(self.id, name, external));
     }
 
     /// Sets `key` in the node's ui object to `value`, keeping the rest of it.
     pub fn set_ui(&mut self, key: &str, value: Vec2) {
-        set_ui(self.graph, self.id, key, value);
+        self.frame.edit(self.graph, Edit::Ui(self.id, key, value));
     }
 
     pub fn run(&mut self, action: &'static str) {
@@ -276,7 +319,7 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
 }
 
 /// Sets `key` in a node's ui object to `value`, keeping the rest of it.
-pub fn set_ui(graph: &mut Graph, id: NodeId, key: &str, value: Vec2) {
+fn set_ui(graph: &mut Graph, id: NodeId, key: &str, value: Vec2) {
     let mut ui = graph.node(id).expect("node exists").ui.clone();
     if !ui.is_object() {
         ui = json!({});

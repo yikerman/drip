@@ -5,7 +5,7 @@
 //! everything on it is drawn and interacted with in graph units. The editor
 //! draws each node's frame (header, ports, error) and its kind's GUI the body.
 
-use crate::gui::{self, Frame, NodeCx, Part, pair, set_ui};
+use crate::gui::{self, Edit, Frame, NodeCx, Part, pair};
 use crate::widgets::{self, BUTTON};
 use crate::worker::Presentation;
 use drip::eval::NodeError;
@@ -96,7 +96,7 @@ impl Editor {
             if body.dragged() {
                 let pos =
                     position(&graph.node(l.id).expect("laid out").ui, l.id) + body.drag_delta();
-                set_ui(graph, l.id, "pos", pos);
+                frame.edit(graph, Edit::Ui(l.id, "pos", pos));
             }
             let node = graph.node(l.id).expect("laid out from the graph");
             let (kind, kind_params) = (gui::of(node.kind), node.kind.params);
@@ -104,8 +104,7 @@ impl Editor {
             for (name, pos) in &l.inputs {
                 let port = ui.interact(hit(*pos), ui.id().with((l.id, name, 0)), Sense::click());
                 if port.secondary_clicked() {
-                    graph.disconnect(&Port(l.id, (*name).into()));
-                    frame.report.edited = true;
+                    frame.edit(graph, Edit::Disconnect(Port(l.id, (*name).into())));
                 }
                 port.on_hover_text("right-click to disconnect");
             }
@@ -148,10 +147,7 @@ impl Editor {
                     .flat_map(|l| l.inputs.iter().map(move |(name, pos)| (l.id, *name, *pos)));
                 let target = pointer.and_then(|p| inputs.find(|(_, _, pos)| hit(*pos).contains(p)));
                 if let Some((id, name, _)) = target {
-                    match graph.connect(from, Port(id, name.into())) {
-                        Ok(()) => frame.report.edited = true,
-                        Err(e) => frame.report.refused = Some(e.to_string()),
-                    }
+                    frame.edit(graph, Edit::Connect(from, Port(id, name.into())));
                 }
             }
         }
@@ -160,8 +156,7 @@ impl Editor {
             && ui.input(|i| i.key_pressed(egui::Key::Delete))
             && !ui.ctx().egui_wants_keyboard_input()
         {
-            graph.remove_node(id);
-            frame.report.edited = true;
+            frame.edit(graph, Edit::Remove(id));
             *selected = None;
         }
     }
@@ -215,10 +210,8 @@ impl Editor {
             for kind in registry.kinds() {
                 if ui.button(kind.label).clicked() {
                     let pointer = ui.ctx().pointer_interact_pos().unwrap_or(area.center());
-                    let id = graph.add_node(kind);
-                    frame.report.edited = true;
-                    set_ui(graph, id, "pos", (to_global.inverse() * pointer).to_vec2());
-                    *selected = Some(id);
+                    let pos = (to_global.inverse() * pointer).to_vec2();
+                    *selected = frame.edit(graph, Edit::Add(kind, pos));
                     ui.close();
                 }
             }

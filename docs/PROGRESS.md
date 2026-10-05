@@ -2,6 +2,13 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-05: centralize frontend graph edits
+
+- Added one typed edit entry point on `Frame` for node creation/removal, connections, parameters, labels, template inputs and layout. Canvas and inspector edits and node controls use it; it owns redraw and evaluation effects, eliminating caller-side flag bookkeeping.
+- Labels and template-input edits now redraw every window, as do saved layout changes, without requesting processing. Parameter and connection edits continue to request evaluation. All windows read the same graph; worker snapshots and generation handling are unchanged.
+- Added a regression test for shared presentation changes, rejected edits, updated pop-out titles/template inputs, and processing requests. Existing evaluation tests now use the production editing entry point.
+- Verification: all 15 GUI tests pass; formatting and GUI clippy across all targets pass with warnings denied.
+
 ## 2026-10-05: consume scheduled repaint deadlines
 
 - Clear each elapsed repaint deadline when requesting its redraw. If Wayland withholds the frame for a hidden window, the event loop now waits for events rather than repeatedly waking on the same expired deadline. A rendered frame schedules its next deadline as before.

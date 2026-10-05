@@ -7,7 +7,7 @@ use drip::param::ParamKind;
 use egui::{Sense, Ui};
 use serde_json::{Value as Json, json};
 
-use crate::gui::{Frame, NodeCx};
+use crate::gui::{Edit, Frame, NodeCx};
 
 /// A node's label, kind, parameters and actions.
 pub fn node(ui: &mut Ui, cx: &mut NodeCx) {
@@ -60,7 +60,7 @@ pub fn inputs(ui: &mut Ui, graph: &mut Graph, frame: &mut Frame) {
             let value = node.params[param].clone();
             if let Some(value) = edit_value(ui, egui::Id::new(("input", id, param)), &kind, &value)
             {
-                frame.set_param(graph, id, param, value);
+                frame.edit(graph, Edit::Param(id, param, value));
             }
             ui.end_row();
         }

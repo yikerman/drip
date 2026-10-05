@@ -165,6 +165,7 @@ impl App {
 
     /// Applies what a frame's GUIs did and requests evaluation after edits.
     fn apply(&mut self, report: Report) {
+        self.redraw |= report.redraw;
         self.dirty |= report.edited;
         if let Some(refused) = report.refused {
             self.report(Err(refused));
@@ -422,9 +423,46 @@ mod tests {
 
     /// A parameter edit as the inspector reports it.
     fn set_param(h: &mut Harness<'_, App>, id: NodeId, name: &str, value: serde_json::Value) {
+        edit(h.state_mut(), gui::Edit::Param(id, name, value));
+    }
+
+    fn edit(app: &mut App, edit: gui::Edit<'_>) {
+        let results = |id| app.worker.result(id);
+        let mut frame = Frame::new(&results, &app.popped, app.action.is_some());
+        frame.edit(&mut app.project.graph, edit);
+        app.apply(frame.report);
+    }
+
+    #[test]
+    fn shared_edits_redraw_windows_without_evaluating_presentation_changes() {
+        let mut h = harness(App::new(None, true, || {}));
+        settle(&mut h);
         let app = h.state_mut();
-        app.project.graph.set_param(id, name, value).unwrap();
-        app.dirty = true;
+        let id = app.project.graph.find("sigmoid").unwrap();
+        let popped = Popped { node: id, part: gui::Part::Parameters };
+        app.popped.insert(popped);
+        app.take_redraw();
+
+        for change in [
+            gui::Edit::Label(id, "tone"),
+            gui::Edit::External(id, "contrast", true),
+            gui::Edit::Ui(id, "pos", egui::vec2(40.0, 50.0)),
+        ] {
+            edit(app, change);
+            assert!(app.take_redraw(), "other windows must see the shared edit");
+            assert!(!app.worker.busy(), "presentation edits need no evaluation");
+        }
+        assert_eq!(app.windows()[0].title, "tone parameters · Drip");
+        assert!(app.project.graph.inputs().any(|input| input == (id, "contrast")));
+
+        edit(app, gui::Edit::Label(id, ""));
+        assert_eq!(app.project.graph.node(id).unwrap().label, "tone");
+        assert!(app.status.as_ref().unwrap().error);
+        assert!(!app.worker.busy());
+
+        edit(app, gui::Edit::Param(id, "contrast", json!(2.0)));
+        assert!(app.take_redraw());
+        assert!(app.worker.busy(), "processing edits must request evaluation");
     }
 
     fn has_view(app: &App, label: &str) -> bool {
