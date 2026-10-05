@@ -16,6 +16,7 @@ mod parent;
 mod preview;
 mod theme;
 mod views;
+mod widgets;
 mod worker;
 
 use std::path::PathBuf;

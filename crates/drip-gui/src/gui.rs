@@ -9,10 +9,11 @@ use std::collections::BTreeSet;
 use drip::graph::{Graph, Node, NodeId};
 use drip::node::NodeKind;
 use drip::nodes::{HISTOGRAM, PREVIEW};
-use egui::{FontId, Rect, Sense, Stroke, Ui, UiBuilder, Vec2, vec2};
+use egui::{FontId, Rect, Ui, UiBuilder, Vec2, vec2};
 use serde_json::{Value as Json, json};
 
 use crate::views::{self, PreparedView};
+use crate::widgets::{self, BUTTON};
 use crate::worker::Presentation;
 use crate::{inspector, theme};
 
@@ -20,8 +21,6 @@ use crate::{inspector, theme};
 pub const WIDTH: f32 = 160.0;
 /// Space around a node's contents, in graph units.
 pub const PAD: f32 = 6.0;
-/// Side of a pop-out button, in graph units.
-pub const BUTTON: f32 = 20.0;
 
 pub trait NodeGui: Sync {
     /// The size of the node's body, below its ports, in graph units. Its
@@ -64,7 +63,7 @@ pub enum Part {
 }
 
 impl Part {
-    fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Part::Parameters => "parameters",
             Part::Gui(name) => name,
@@ -91,20 +90,6 @@ impl Popped {
             Part::Parameters => inspector::node(ui, node),
             Part::Gui(name) => of(node.node().kind).window(ui, name, node),
         }
-    }
-}
-
-/// A button over `rect` that pops `part` of the node out, or back in.
-pub fn pop_out(ui: &mut Ui, rect: Rect, node: &mut NodeCx, part: Part) {
-    let popped = node.popped(part);
-    let icon = match part {
-        Part::Parameters => "⚙",
-        Part::Gui(_) => "🗗",
-    };
-    let button = egui::Button::new(icon).frame(false).selected(popped);
-    let hint = if popped { "close its window" } else { "show in its own window" };
-    if ui.put(rect, button).on_hover_text(format!("{}: {hint}", part.name())).clicked() {
-        node.toggle(part);
     }
 }
 
@@ -140,8 +125,8 @@ impl NodeGui for Viewer {
         // Over the view, so on a backdrop.
         let button = Rect::from_min_size(rect.right_top() - vec2(BUTTON, 0.0), Vec2::splat(BUTTON));
         ui.painter().rect_filled(button, 0.0, theme::DARKER);
-        pop_out(ui, button, node, SHOWN);
-        if let Some(size) = resize(ui, body) {
+        widgets::pop_out(ui, button, node, SHOWN);
+        if let Some(size) = widgets::resize(ui, body) {
             node.set_ui("size", (size - vec2(0.0, PAD)).max(vec2(80.0, 60.0)));
         }
     }
@@ -156,19 +141,6 @@ impl NodeGui for Viewer {
             views::draw(ui.painter(), rect, ui.id().with("view"), view, &font);
         }
     }
-}
-
-/// A handle in the bottom-right corner of `rect` that resizes it; returns the
-/// new size while dragged.
-pub fn resize(ui: &mut Ui, rect: Rect) -> Option<Vec2> {
-    let corner = Rect::from_min_max(rect.max - Vec2::splat(10.0), rect.max);
-    let scale = ui.ctx().layer_transform_to_global(ui.layer_id()).map_or(1.0, |t| t.scaling);
-    ui.painter().line_segment(
-        [corner.left_bottom(), corner.right_top()],
-        Stroke::new(1.0 / scale, theme::WEAK),
-    );
-    let handle = ui.interact(corner, ui.id().with("resize"), Sense::drag());
-    handle.dragged().then(|| rect.size() + handle.drag_delta())
 }
 
 /// What one frame of node GUIs reads from the app, and what they did.

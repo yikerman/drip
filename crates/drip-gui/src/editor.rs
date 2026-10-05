@@ -5,7 +5,8 @@
 //! everything on it is drawn and interacted with in graph units. The editor
 //! draws each node's frame (header, ports, error) and its kind's GUI the body.
 
-use crate::gui::{self, BUTTON, Frame, NodeCx, Part, pair, set_ui};
+use crate::gui::{self, Frame, NodeCx, Part, pair, set_ui};
+use crate::widgets::{self, BUTTON};
 use crate::worker::Presentation;
 use drip::eval::NodeError;
 use drip::graph::{Graph, Node, NodeId, Port};
@@ -124,9 +125,10 @@ impl Editor {
             ports.iter().find(|(name, _)| *name == port.1).map(|(_, pos)| *pos)
         };
 
-        // Strokes and hit areas are in graph units; these keep their on-screen
-        // size as it was before the canvas was transformed.
-        let wire = Stroke::new(1.5 / zoom.sqrt(), theme::TEXT);
+        // Wires thin out slower than the zoom; port hit areas keep their
+        // on-screen size.
+        let point = widgets::point(ui);
+        let wire = Stroke::new(1.5 * zoom.sqrt() * point, theme::TEXT);
         for (output, input) in graph.edges() {
             if let (Some(from), Some(to)) = (port_pos(output, true), port_pos(input, false)) {
                 painter.add(bezier(from, to, wire));
@@ -134,7 +136,7 @@ impl Editor {
         }
 
         let (font, small) = (FontId::proportional(13.0), FontId::proportional(11.0));
-        let hit = |pos: Pos2| Rect::from_center_size(pos, Vec2::splat(4.0 * PORT / zoom));
+        let hit = |pos: Pos2| Rect::from_center_size(pos, Vec2::splat(16.0 * point));
         for l in &layouts {
             let body = ui.interact(l.rect, ui.id().with(l.id), Sense::click_and_drag());
             if body.clicked() || body.drag_started() {
@@ -204,7 +206,7 @@ impl Editor {
                     l.rect.right_top() + vec2(-HEADER, (HEADER - BUTTON) / 2.0),
                     Vec2::splat(BUTTON),
                 );
-                gui::pop_out(ui, button, &mut cx, Part::Parameters);
+                widgets::pop_out(ui, button, &mut cx, Part::Parameters);
             }
             kind.body(&mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body)), &mut cx);
         }
