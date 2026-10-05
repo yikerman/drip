@@ -334,7 +334,11 @@ impl App {
         let Some(file) = rfd::FileDialog::new().add_filter(name, &["drip"]).save_file() else {
             return;
         };
-        let file = file.with_extension("drip");
+        let mut file = file.into_os_string();
+        if !file.as_encoded_bytes().ends_with(b".drip") {
+            file.push(".drip");
+        }
+        let file = PathBuf::from(file);
         if template {
             self.save(&file, self.project.template());
         } else if self.save(&file, self.project.clone()) {

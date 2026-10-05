@@ -2,6 +2,12 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-05: preserve save filename extensions
+
+- Save As preserves names ending in `.drip` and otherwise appends `.drip`, as requested. `photo.backup` becomes `photo.backup.drip` rather than replacing the user's extension.
+- Inspected pinned rfd 0.17.2: Windows sets a default extension from the filter; Linux delegates to the portal without library-side suffix enforcement.
+- Verification: formatting and all 14 GUI tests passed in the preceding follow-up. Native dialog interaction was not exercised.
+
 ## 2026-10-05: prototype code review
 
 - Reviewed the current processing core, graph/persistence, LibRaw boundary and GUI for correctness, performance and avoidable complexity. Per user direction, design notes were context rather than unquestionable constraints. Application code is unchanged.
