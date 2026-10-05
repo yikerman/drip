@@ -2,6 +2,14 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-05: prototype code review
+
+- Reviewed the current processing core, graph/persistence, LibRaw boundary and GUI for correctness, performance and avoidable complexity. Per user direction, design notes were context rather than unquestionable constraints. Application code is unchanged.
+- Findings: expired repaint deadlines can spin the Wayland event loop while a hidden window withholds redraw; label/external-parameter edits do not redraw other windows; Save As changes the destination extension after dialog approval; direct project/TIFF writes can truncate an existing file on failure; detached exports are terminated by application exit. These are source-traced findings, not live window-manager or disk-failure reproductions.
+- Recommendations: separate unsaved-project state from evaluation dirtiness; stream TIFF encoding to a temporary file; bound decoded resources after path changes. The encoded-file allocation alone adds about 135 MB for an uncompressed float export from a 45 MP sensor through the current bin2x2 node. Also noted a low-priority public API edge: level 31 RAW evaluation is supported but bin2x2 overflows the resulting u32 scale.
+- Verification: `cargo test --workspace --all-targets` passed all 77 tests, including the real RAW fixture and headless GUI tests. No high-confidence numerical defect found in the reviewed processing kernels. Native GUI lifecycle, Windows/macOS and I/O fault injection were not exercised.
+- Next: resolve the open lifecycle/resource decisions and implement the concrete fixes tracked in TODO. No fixes or commits made in this review.
+
 ## 2026-10-05: per-node GUI and pop-out windows
 
 - Decided with the user (G13): each node kind gets a frontend GUI drawing real widgets on a transformed canvas, and nodes can pop out into OS windows arranged by the window manager. Zoom is capped at 1; pop-out state is not saved; no docking.

@@ -4,6 +4,11 @@ Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
 
 | Idea | Source | Status | Notes |
 |------|--------|--------|-------|
+| Review: consume expired repaint deadlines | 2026-10-05 review | open | hidden Wayland windows can withhold redraw while a past `WaitUntil` deadline spins the event loop |
+| Review: redraw after label and external-parameter edits | 2026-10-05 review | open | notify other windows without requesting image reevaluation |
+| Review: safe project and export replacement | 2026-10-05 review | deferred | user postponed robustness work; same-directory temporary files and streamed TIFF encoding remain possible improvements |
+| Review: export completion and unsaved edits on close | 2026-10-05 review | deferred | robustness work postponed for the prototype; DESIGN 6.1 |
+| Review: evaluation scale bounds | 2026-10-05 review | open | level 31 is accepted for RAW but the following bin2x2 node overflows its u32 scale; validate the public evaluation boundary |
 | CLI batch implementation | handoff | deferred | scaffolded; template binding per F4 |
 | GPU computation | user | postponed | Rayon replaces CubeCL; reconsider only with a measured need and one kernel source (E9, E13, E15) |
 | End-to-end UI latency | measurement | open | image evaluation, texture preparation and CPU image retirement now run off-thread; measure remaining driver upload/draw latency at full detail (DESIGN 3.3.6) |
