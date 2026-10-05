@@ -121,7 +121,7 @@ fn built_in_template_takes_the_raw_and_output_paths() {
 
     let other = p.graph.add_node(&nodes::READ);
     p.graph.set_param(other, "path", json!(fixture())).unwrap();
-    let mut fork = ev.fork(&p.graph);
+    let mut fork = ev.fork();
     fork.evaluate(&p.graph, 3, &[other]);
     assert!(Arc::ptr_eq(
         &cached,

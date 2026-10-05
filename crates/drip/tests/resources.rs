@@ -10,7 +10,7 @@ use drip::resource::Resources;
 fn snapshots_share_first_load_and_keep_old_values_until_dropped() {
     let path = Path::new("shared.raw");
     let mut resources = Resources::default();
-    let snapshot = resources.snapshot([path]);
+    let snapshot = resources.clone();
     let loads = AtomicUsize::new(0);
     let load = || {
         loads.fetch_add(1, Ordering::SeqCst);
@@ -26,11 +26,10 @@ fn snapshots_share_first_load_and_keep_old_values_until_dropped() {
     let old = Arc::downgrade(&a);
     drop((a, b));
 
-    resources.reload(path);
-    assert_eq!((resources.revision(path), snapshot.revision(path)), (1, 0));
+    resources = Resources::default();
     assert_eq!(*resources.load(path, |_| Ok(vec![84])).unwrap(), [84]);
     assert_eq!(*snapshot.load::<Vec<i32>>(path, |_| panic!("already loaded")).unwrap(), [42]);
     assert!(old.upgrade().is_some());
     drop(snapshot);
-    assert!(old.upgrade().is_none(), "reload releases the old value after its last snapshot");
+    assert!(old.upgrade().is_none(), "invalidation releases the old value after its last reader");
 }

@@ -33,7 +33,7 @@ struct Request {
 
 enum Command {
     Evaluate(Request),
-    Reset(Graph),
+    Reset,
     Invalidate,
     Action { graph: Graph, id: NodeId, name: &'static str },
     Collect,
@@ -126,13 +126,13 @@ impl Worker {
         self.start()
     }
 
-    pub fn reset(&mut self, graph: &Graph) -> Result<(), String> {
+    pub fn reset(&mut self) -> Result<(), String> {
         // Generations never reset, even when node IDs are reused by a project.
         self.generation += 1;
         self.pending = None;
         self.views.clear();
         self.collect = true;
-        self.send(Command::Reset(graph.clone()))
+        self.send(Command::Reset)
     }
 
     pub fn invalidate(&mut self) -> Result<(), String> {
@@ -267,10 +267,9 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
                     .collect();
                 notify.send(Event::Evaluated { generation: request.generation, views });
             }
-            Command::Reset(graph) => evaluator = evaluator.fork(&graph),
-            Command::Invalidate => evaluator = Evaluator::default(),
+            Command::Reset | Command::Invalidate => evaluator = Evaluator::default(),
             Command::Action { graph, id, name } => {
-                let evaluator = evaluator.fork(&graph);
+                let evaluator = evaluator.fork();
                 let notify = notify.clone();
                 thread::spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -429,7 +428,7 @@ mod tests {
         worker.request(&graph, 1, vec![preview]).unwrap();
         entered.recv_timeout(TIMEOUT).unwrap();
         graph.set_param(source, "block", json!(false)).unwrap();
-        worker.reset(&graph).unwrap();
+        worker.reset().unwrap();
         assert!(worker.result(histogram).is_none());
         worker.request(&graph, 2, vec![preview]).unwrap();
         release.send(()).unwrap();
@@ -514,6 +513,11 @@ mod tests {
         worker.request(&graph, 3, vec![preview]).unwrap();
         wait(&mut worker);
         assert_eq!(pixel(&worker, preview), [2.0, 8.0, 0.0, 1.0]);
+        std::fs::write(&input, "3").unwrap();
+        worker.reset().unwrap();
+        worker.request(&graph, 3, vec![preview]).unwrap();
+        wait(&mut worker);
+        assert_eq!(pixel(&worker, preview), [3.0, 8.0, 0.0, 1.0]);
         std::fs::remove_file(input).unwrap();
         std::fs::remove_file(output).unwrap();
     }

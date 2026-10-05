@@ -152,7 +152,7 @@ fn errors_name_the_current_upstream() {
 }
 
 #[test]
-fn files_are_reread_only_on_reload() {
+fn files_are_reread_after_cache_invalidation() {
     let path = std::env::temp_dir().join(format!("drip-resource-{}", std::process::id()));
     std::fs::write(&path, "abc").unwrap();
     let mut p = Project::default();
@@ -166,13 +166,13 @@ fn files_are_reread_only_on_reload() {
     assert_eq!(ev.evaluate(&p.graph, 0, &[f]), [f]);
     assert_eq!(output(ev.result(f).unwrap())[0], 3.0, "a new scale reuses what was loaded");
 
-    ev.reload(&path);
+    ev = Evaluator::default();
     assert_eq!(output(eval(&mut ev, &p, f))[0], 6.0);
     std::fs::remove_file(&path).unwrap();
 }
 
 #[test]
-fn actions_share_resources_with_preview_and_keep_their_revision() {
+fn actions_share_resources_with_preview_and_survive_invalidation() {
     let path = std::env::temp_dir().join(format!("drip-shared-input-{}", std::process::id()));
     let out = path.with_extension("out");
     std::fs::write(&path, "abc").unwrap();
@@ -185,11 +185,11 @@ fn actions_share_resources_with_preview_and_keep_their_revision() {
 
     let mut ev = Evaluator::default();
     // An export can be the first consumer of a resource, before any preview.
-    let action = ev.fork(&p.graph);
+    let action = ev.fork();
     action.run_action(&p.graph, w, "write").unwrap();
     std::fs::write(&path, "abcdef").unwrap();
     assert_eq!(output(eval(&mut ev, &p, f))[0], 3.0);
-    ev.reload(&path);
+    ev = Evaluator::default();
     assert_eq!(output(eval(&mut ev, &p, f))[0], 6.0);
     action.run_action(&p.graph, w, "write").unwrap();
     assert_eq!(std::fs::read_to_string(&out).unwrap(), "[3.0, 0.0, 0.0]");

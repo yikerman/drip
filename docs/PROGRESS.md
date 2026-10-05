@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: simplify resource invalidation
+
+- Removed per-file reload/revisions and resource-path enumeration. Preview/export share a resource store, including concurrent first reads; invalidation and project replacement create a fresh store while existing exports retain their readers.
+- Verification: workspace tests, formatting and clippy pass. Tests retain cache reuse across levels, fresh reads after invalidation/project reset, shared first loads and export lifetime checks. RAW level retention and duplicate export snapshot cleanup follow separately.
+
 ## 2026-10-04: remove visibility-based evaluation
 
 - The GUI now requests every graph node when computation changes. Removed viewport target selection, the editor's stored viewport, target-set comparison and partial presentation merging. Canvas navigation and node geometry no longer schedule evaluations; export still targets its own dependencies at full detail.

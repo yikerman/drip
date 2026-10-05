@@ -1,16 +1,15 @@
 //! Pull-based evaluation (DESIGN E1-E3, E6, U2). Frontends request target
 //! nodes; only those and their ancestors are evaluated, in dependency order.
 //! A node is recomputed only when its dependency stamp changes: a hash of
-//! everything its result depends on, including the stamps of its sources and
-//! the revisions of the files it reads.
+//! its kind, parameters, level and the stamps of its sources. Files stay cached
+//! until the frontend replaces the evaluator.
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::path::Path;
 
 use crate::graph::{Graph, NodeId, Port};
 use crate::node::{EvalContext, Evaluated};
-use crate::param::{ParamKind, Params};
+use crate::param::Params;
 use crate::resource::Resources;
 use crate::value::Value;
 
@@ -45,16 +44,9 @@ struct Entry {
 }
 
 impl Evaluator {
-    /// A fresh node cache sharing the graph's current resource revisions.
-    pub fn fork(&self, graph: &Graph) -> Self {
-        let paths = graph.nodes().flat_map(|(_, node)| {
-            node.kind.params.iter().filter_map(|spec| {
-                matches!(spec.kind, ParamKind::Path { .. })
-                    .then(|| Params(&node.params).path(spec.name))
-                    .flatten()
-            })
-        });
-        Self { cache: Cache::default(), resources: self.resources.snapshot(paths) }
+    /// A fresh node cache sharing loaded resources, including future first loads.
+    pub fn fork(&self) -> Self {
+        Self { cache: Cache::default(), resources: self.resources.clone() }
     }
 
     /// Brings `targets` up to date at downscale `level` and returns the nodes
@@ -68,18 +60,12 @@ impl Evaluator {
         self.cache.0.get(&id).map(|entry| &entry.result)
     }
 
-    /// Forgets what was loaded from `path`; results depending on it are
-    /// recomputed on the next evaluation.
-    pub fn reload(&mut self, path: &Path) {
-        self.resources.reload(path);
-    }
-
     /// Evaluates an action at full resolution with shared resources and a
     /// temporary node cache, releasing intermediates after their last consumer.
     pub fn run_action(&self, graph: &Graph, id: NodeId, name: &str) -> Result<(), NodeError> {
         let node = graph.node(id).expect("in graph");
         let action = node.kind.action(name).ok_or_else(|| NodeError::UnknownAction(name.into()))?;
-        let mut evaluator = self.fork(graph);
+        let mut evaluator = self.fork();
         let targets: Vec<_> = sources(graph, id).collect();
         evaluator.run(graph, 0, &targets, true);
         let inputs = evaluator.cache.inputs(graph, id)?;
@@ -132,12 +118,6 @@ impl Cache {
         let mut h = DefaultHasher::new();
         (node.kind.name, ctx.level).hash(&mut h);
         serde_json::to_string(&node.params).expect("plain data serializes").hash(&mut h);
-        let paths =
-            node.kind.params.iter().filter(|spec| matches!(spec.kind, ParamKind::Path { .. }));
-        for spec in paths {
-            let path = Params(&node.params).path(spec.name);
-            path.map(|path| ctx.resources.revision(path)).hash(&mut h);
-        }
         for spec in node.kind.inputs {
             spec.name.hash(&mut h);
             if let Some(source) = graph.source(&Port(id, spec.name.into())) {

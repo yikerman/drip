@@ -238,7 +238,7 @@ impl App {
         self.selected = None;
         self.editor = Editor::default();
         self.dirty = true;
-        self.worker.reset(&self.project.graph)
+        self.worker.reset()
     }
 
     fn open(&mut self, file: PathBuf) {

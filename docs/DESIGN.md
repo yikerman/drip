@@ -54,7 +54,7 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 | ID | Decision | Status | Rationale |
 |----|----------|--------|-----------|
 | E1 | **Pull-based.** A frontend asks for a set of target nodes. The evaluator topologically sorts their ancestors and evaluates only those. | decided | The GUI requests every graph node regardless of canvas position (G11). Export requests only its dependencies; unrelated branches cost nothing for that action. |
-| E2 | Change detection by **dependency stamps**. A node's stamp hashes its kind, its params as canonical JSON, the evaluation scale and the revisions of the external resources it reads (raw files, ICC files), together with, for each connected input, the input name, the source output name and the source's stamp. A node is recomputed only when its stamp differs from its cached entry. One entry is cached per node. | decided | "Recompute when it or something upstream changed" falls straight out of this, with no dirty flags to keep in sync. Files aren't detected changing on disk. A manual reload bumps the resource's revision, which invalidates the decoded resource, all downstream results and any cached errors. Resource revisions arrive with the first resource-reading node in M2. The stamp also covers the identity of each source node, so rewiring between identical nodes never serves an error naming the wrong node. Kinds are identified by name; two different kinds with the same name are a programming error. |
+| E2 | Dependency stamps hash node kind, canonical parameters, the global level and each input connection with its upstream stamp. One result is cached per node. | decided | Files remain cached until the evaluator is replaced. Per-file reload and revision tracking were removed in E19; paths still participate through parameters. Source identity prevents rewiring from reusing errors naming an old upstream node. |
 | E3 | Errors are values, kept per node. A failing node records its error, its descendants are marked blocked, and nodes in other branches still evaluate. | decided | The GUI can show the error on the node itself while the rest of the graph keeps working. |
 | E4 | `EvalContext` carries a downscale level `k`, which gives `scale() = 2^k`. Storing the level makes non-power-of-two scales unrepresentable. Later it will also carry a region of interest and a cancellation token. | decided | This leaves room for the deferred items: 1:1 viewing of the visible region (ROI), background evaluation (cancellation) and GPU work. None of them is built now. |
 | E5 | **Preview scale is applied in the raw reader**: after black subtraction, same-color CFA sites are averaged with the CFA phase preserved, and odd edges are cropped, so the reduced image is still a valid Bayer mosaic. Spatial parameters are expressed in full-resolution pixels and divided by `ctx.scale` inside nodes. | decided | Interactive editing must work on a reduced image, but debayering needs a real mosaic. Binning inside the CFA satisfies both. Expressing parameters at full resolution keeps preview and export consistent. |
@@ -74,6 +74,8 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 | E17 | Remove eager RAW pyramid retention when manual levels are introduced. Keep ordinary dependency-stamp caching. | requirement (user, 2026-10-04); not implemented | Rapid level switching no longer justifies retaining every normalized level. The exact resource lifetime proposal is in 3.3.4; the Rayon commit leaves current caches intact. |
 
 | E18 | Use the existing lowercase status style: “evaluating…” for pending preview work, “running export…” for export, then “done” or the error. | requirement (user, 2026-10-04); implemented | Keep the previous preview available while a new result is computed. Current failures replace the old view with an error. |
+
+| E19 | Share one resource store between preview and exports; replace it on cache invalidation or project replacement. Remove per-file reload and revision tracking. | decided (user, 2026-10-04); implemented | Cloning the store shares both loaded values and future first loads. Existing exports keep their store; a new project cannot retain the previous project's resources. No path enumeration or revision hashing is needed. |
 
 ### 3.3.1 Kernel survey (2026-10-04)
 
@@ -357,16 +359,15 @@ The last completed view remains available while the status line says
 old image as if it were current.
 
 Reset, cache invalidation and export commands use the same ordered channel. Export snapshots
-the graph at the click and resource revisions when that command is processed,
+the graph at the click and shares the current resource store when the command is processed,
 after preceding invalidations. The existing separate export thread then runs the full-
 detail action and reports completion. The GUI still permits one export at a
 time; preview and export computation can run concurrently. Both reuse the same
-Rayon pool. RAW pyramid retention and resource sharing are unchanged (E17 remains
-pending).
+Rayon pool. Project replacement starts with a fresh evaluator and resource store
+(E19). RAW pyramid removal remains pending (E17).
 
 “Invalidate cache” replaces the worker's entire evaluator with a fresh instance,
-discarding every node result (including errors) and loaded resource, even files
-retained from earlier projects. It advances the request generation and discards
+discarding every node result (including errors) and loaded resource. It advances the request generation and discards
 pending work so an earlier completion cannot become current. All graph nodes
 are requested again. Last presentations remain for stable layout and display
 until replaced; they cannot supply evaluator results. Existing export snapshots
@@ -465,7 +466,7 @@ Spike done (protocol level, see D2). Still to do in M3: verify what is actually 
 | ~~G2~~ | ~~Evaluate visible nodes synchronously, adapting resolution to drawn image size; export on a background thread.~~ | superseded by G8 (user, 2026-10-04) | Automatic detail changes interrupted interaction. |
 | ~~G8~~ | ~~Evaluate visible targets synchronously at a manual global level; export separately at level 0.~~ | superseded by G9 (user, 2026-10-04) | Detail selection remains; evaluation moves off the UI. |
 | G9 | Evaluate node targets on a persistent worker at the global preview level. Render the last completed presentation and show lowercase activity messages. Export retains its separate full-detail action thread. | decided (user, 2026-10-04); implemented | Image computation, texture-byte preparation and CPU image retirement are off-thread; the renderer owns GPU upload/drawing. Target selection follows G11. See E12, E18 and 3.3.6. |
-| G10 | “Invalidate cache” clears all evaluator node results and loaded resources, then recomputes all graph nodes. | decided (user, 2026-10-04); implemented | Replaces the former per-file reload action. Includes nodes without file dependencies and resources from previous projects; preserves the last presentation during recomputation and existing export snapshots. |
+| G10 | “Invalidate cache” clears all evaluator node results and loaded resources, then recomputes all graph nodes. | decided (user, 2026-10-04); implemented | Replaces the former per-file reload action. Includes nodes without file dependencies and every loaded resource; preserves the last presentation during recomputation and existing export snapshots. |
 | G11 | Remove visibility-based evaluation. The GUI requests every graph node at the global detail level. | decided (user, 2026-10-04); implemented | Canvas position, pan, zoom and resizing no longer select targets or schedule evaluation. Off-screen results and errors stay current; ordinary dependency caching and node-targeted export remain unchanged. |
 | G3 | Logging uses the `log` facade in the library and `env_logger` in the frontends. Frontends also show warnings and errors in the window. | decided (user, 2026-10-04) | The standard, minimal choice. |
 | G4 | Undo/redo is postponed. | decided (user, 2026-10-04) | Not needed for the prototype (TODO). |
