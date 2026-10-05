@@ -5,8 +5,8 @@ built around color accuracy. A processing pipeline is a typed graph of nodes,
 built and tuned interactively in a GUI and reusable as a template for batch
 processing.
 
-Status: early prototype. Linux on Wayland is the primary platform; Windows and
-macOS packaging is not yet verified.
+Status: **0.1.0-dev**, an early prototype for Bayer RAW photos. Linux on Wayland
+is the primary platform; Windows and macOS packaging is not yet verified.
 
 ## Goals
 
@@ -15,11 +15,11 @@ macOS packaging is not yet verified.
   node regardless of canvas position; a node is recomputed only when something
   it depends on changes.
 - **Color done right.** Processing runs in 32-bit float and linear Rec.2020.
-  Exports are TIFFs with an embedded ICC profile. On Wayland, previews keep
-  their wide gamut and the compositor maps them to the display.
+  Exports are TIFFs with an embedded ICC profile. Wide-gamut previews use scRGB
+  and compositor color management, with a visible warning on sRGB fallback.
 - **Templates as functions.** A template is a graph whose parameters can be
-  bound to named inputs (such as the raw file and the output path). A project
-  is a template applied to values for those inputs.
+  exposed as per-node inputs, such as the raw file and output path. Saving a
+  template resets those inputs to their defaults; a project keeps their values.
 
 ## How it works
 
@@ -30,15 +30,30 @@ macOS packaging is not yet verified.
 | `drip-gui` | Node editor and preview: winit + wgpu + egui. |
 | `drip-cli` | Batch frontend (not implemented yet). |
 
-The prototype pipeline is:
+The default pipeline is:
 
-raw → white balance → highlight reconstruction → RCD demosaic → camera to Rec.2020 → exposure → sigmoid tone mapping → TIFF export (sRGB, Display P3, Rec.2020 or any RGB ICC profile)
+```text
+RAW normalization → as-shot white balance → inpaint-opposed highlights
+→ RCD demosaic → linear Rec.2020 → exposure → sigmoid → ICC TIFF export
+```
 
-Preview and histogram nodes can be attached anywhere in the graph.
+Sigmoid, RCD and highlight reconstruction are adapted from darktable into Rust
+with Rayon parallelism. RCD produces full-size output; the older half-size
+binning node remains available. Sensor processing runs at full resolution,
+then preview reduction happens immediately before demosaicing. Export always
+uses full detail.
+
+Exposure adjusts scene brightness independently of sigmoid's contrast, skew and
+hue preservation. Sigmoid's panel plots the same curve used for processing.
+Exports support 16-bit integer or float TIFF, with sRGB, Display P3, Rec.2020 or
+a suitable custom RGB ICC profile. Preview nodes accept scene/display Rec.2020;
+histograms also accept camera RGB.
 
 [LittleCMS](https://www.littlecms.com/) does the color transforms.
-`docs/DESIGN.md` records current intent and tradeoffs;
-`docs/PROGRESS.md` is a compact development handoff.
+Backend nodes keep their schemas and algorithms together. Frontend node UIs
+reuse schema controls and a shared editing interface; custom UI is optional.
+[DESIGN](docs/DESIGN.md) records intent and tradeoffs;
+[PROGRESS](docs/PROGRESS.md) is a compact development handoff.
 
 ## Usage
 
@@ -51,26 +66,33 @@ sudo dnf install LibRaw-devel lcms2-devel git-lfs
 git lfs install && git lfs pull
 
 # The GUI, starting from the built-in raw-to-TIFF template or a project file
-cargo run -p drip-gui -- [project.drip]
+cargo run --release -p drip-gui
+# Or open a saved project:
+cargo run --release -p drip-gui -- project.drip
 
 # One raw file through the built-in template, without the GUI
-cargo run -p drip --example raw_to_tiff -- photo.arw srgb out.tif
+cargo run --release -p drip --example raw_to_tiff -- photo.arw srgb out.tif
 
 cargo test --workspace
 ```
 
 In the GUI:
-- Right-click the editor background to add a node.
+
+- Drag empty canvas to pan and scroll to zoom. Right-click the background to add a node.
 - Drag from an output port to an input port to connect them; right-click an
   input port to disconnect it.
 - Choose **Preview detail** globally: Full through 1/256, default 1/2. The
   selection is saved with the project; exports always use full detail.
 - Previews update in the background. The status line shows **evaluating…**
   while the previous completed image remains visible.
-- Select a node to edit its parameters. Right-click a parameter name to bind
-  it to a graph input.
+- Select a node to edit its parameters. Use **⚙** to open its parameter window,
+  or **🗗** on a preview/histogram to open its view separately. Closing the view
+  window returns it to the canvas; pop-out state is not saved.
+- Right-click a parameter name to make it a template input or fix its value.
 - Set the raw file and the output path under *inputs*, then press *export*
-  on the export node.
+  in the export node’s parameter panel.
+- Use **Invalidate cache** after changing an input file on disk. Save projects
+  and templates as `.drip`; the suffix is appended when missing.
 
 Set `RUST_LOG=debug` to see evaluation timings.
 
@@ -87,6 +109,17 @@ RAYON_NUM_THREADS=12 cargo run --release -p drip --example preview_latency -- ph
 
 See [the compute measurements](docs/DESIGN.md#performance-evidence)
 for historical hardware measurements and their limits.
+
+## Before v0.1
+
+The pipeline has numerical reference tests, upstream C comparisons and a real
+Sony RAW-to-TIFF test. Broader photographic validation comes next, followed by
+UI/UX refinement, SpyderX display verification, and packaging. Wide-gamut output
+has not yet been verified with the colorimeter.
+
+Project files must match the current schema; prototype changes can break older
+files. Batch CLI, undo/redo, denoising and lens corrections are not implemented.
+See [TODO](TODO.md) for remaining work and deferred items.
 
 ## License
 

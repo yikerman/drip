@@ -4,6 +4,12 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: README refresh
+
+- Updated pipeline, preview placement, node organization, pop-out controls and
+  release scope. Corrected template terminology and launch examples; checked
+  descriptions against code and local document links.
+
 ## 2026-10-05: readable default typography
 
 - Increased shared body/button text to 16 points and secondary text to 14,
