@@ -206,9 +206,9 @@ impl Editor {
                     .on_hover_text(error);
             }
             if let Some((rect, view)) = &l.view {
-                if let Some((shown, width)) =
-                    views::draw(&painter, *rect, ui.id().with((l.id, "view")), view)
-                {
+                let drawn = views::draw(&painter, *rect, ui.id().with((l.id, "view")), view);
+                // Only what is on screen decides the preview resolution.
+                if let Some((shown, width)) = drawn.filter(|(shown, _)| shown.intersects(area)) {
                     frame.images.push((width, shown.width() * ui.ctx().pixels_per_point()));
                 }
                 let corner = Rect::from_min_max(l.rect.max - Vec2::splat(10.0 * zoom), l.rect.max);
