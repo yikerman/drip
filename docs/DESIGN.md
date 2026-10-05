@@ -53,7 +53,7 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 
 | ID | Decision | Status | Rationale |
 |----|----------|--------|-----------|
-| E1 | **Pull-based.** A frontend asks for a set of target nodes. The evaluator topologically sorts their ancestors and evaluates only those. | decided | The CLI asks only for what it exports, and the GUI asks only for what is visible. Unreachable or broken branches cost nothing, and UI-only nodes never get in the CLI's way, with no special case anywhere. |
+| E1 | **Pull-based.** A frontend asks for a set of target nodes. The evaluator topologically sorts their ancestors and evaluates only those. | decided | The GUI requests every graph node regardless of canvas position (G11). Export requests only its dependencies; unrelated branches cost nothing for that action. |
 | E2 | Change detection by **dependency stamps**. A node's stamp hashes its kind, its params as canonical JSON, the evaluation scale and the revisions of the external resources it reads (raw files, ICC files), together with, for each connected input, the input name, the source output name and the source's stamp. A node is recomputed only when its stamp differs from its cached entry. One entry is cached per node. | decided | "Recompute when it or something upstream changed" falls straight out of this, with no dirty flags to keep in sync. Files aren't detected changing on disk. A manual reload bumps the resource's revision, which invalidates the decoded resource, all downstream results and any cached errors. Resource revisions arrive with the first resource-reading node in M2. The stamp also covers the identity of each source node, so rewiring between identical nodes never serves an error naming the wrong node. Kinds are identified by name; two different kinds with the same name are a programming error. |
 | E3 | Errors are values, kept per node. A failing node records its error, its descendants are marked blocked, and nodes in other branches still evaluate. | decided | The GUI can show the error on the node itself while the rest of the graph keeps working. |
 | E4 | `EvalContext` carries a downscale level `k`, which gives `scale() = 2^k`. Storing the level makes non-power-of-two scales unrepresentable. Later it will also carry a region of interest and a cancellation token. | decided | This leaves room for the deferred items: 1:1 viewing of the visible region (ROI), background evaluation (cancellation) and GPU work. None of them is built now. |
@@ -70,7 +70,7 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 
 | E15 | Use Rayon for white balance, 2×2 debayering, camera-to-Rec.2020, sigmoid and histogram. Remove CubeCL and postpone GPU computation. | decided (user, 2026-10-04); implemented | Ordinary Rust parallel iterators use one algorithm with one or multiple CPU workers. No JIT, compute device, runtime buffers or host transfers; graph and node contracts remain unchanged. Measured latency is lower than CubeCL on the test machine (3.3.3). |
 
-| E16 | Preview level is one manually selected global setting; exports always evaluate at level 0. | requirement (user, 2026-10-04); implemented | The GUI offers Full through 1/256, defaults to 1/2 and persists the level in project UI state. All visible targets share one level through the unchanged evaluator API; one cached result per node remains sufficient. |
+| E16 | Preview level is one manually selected global setting; exports always evaluate at level 0. | requirement (user, 2026-10-04); implemented | The GUI offers Full through 1/256, defaults to 1/2 and persists the level in project UI state. All targets share one level through the unchanged evaluator API; one cached result per node remains sufficient. |
 | E17 | Remove eager RAW pyramid retention when manual levels are introduced. Keep ordinary dependency-stamp caching. | requirement (user, 2026-10-04); not implemented | Rapid level switching no longer justifies retaining every normalized level. The exact resource lifetime proposal is in 3.3.4; the Rayon commit leaves current caches intact. |
 
 | E18 | Use the existing lowercase status style: “evaluating…” for pending preview work, “running export…” for export, then “done” or the error. | requirement (user, 2026-10-04); implemented | Keep the previous preview available while a new result is computed. Current failures replace the old view with an error. |
@@ -168,7 +168,8 @@ none is changed by the Rayon replacement.
 
 **Original implementation plan, written after the Rayon commit.** Steps 1, 3
 and 4 are now implemented; RAW retention changes in step 2 remain pending.
-The resulting worker behavior is recorded in 3.3.6.
+The resulting worker behavior is recorded in 3.3.6. The original visibility-based
+target policy below was subsequently removed by G11.
 
 **1. Manual global preview level — implemented.** The GUI selector offers
 levels 0–8 (Full through 1/256), default 1 (1/2), saved in `Project::ui` and
@@ -346,8 +347,9 @@ monotonically increasing generation. Generations never reset when a project
 reuses node IDs; a separate project epoch is unnecessary.
 
 The UI sends at most one preview request at a time and retains only the latest
-pending request. Parameter/topology edits and changes to visible targets request
-work; canvas geometry, labels and selection do not themselves invalidate image
+pending request. Each GUI request targets every graph node. Parameter/topology
+edits, detail changes and cache invalidation request work; canvas geometry,
+labels and selection do not themselves invalidate image
 computation. The current evaluation finishes normally, then obsolete completion
 is discarded and the latest pending request runs. There is no cancellation yet.
 The last completed view remains available while the status line says
@@ -365,15 +367,16 @@ pending).
 “Invalidate cache” replaces the worker's entire evaluator with a fresh instance,
 discarding every node result (including errors) and loaded resource, even files
 retained from earlier projects. It advances the request generation and discards
-pending work so an earlier completion cannot become current. Visible targets
+pending work so an earlier completion cannot become current. All graph nodes
 are requested again. Last presentations remain for stable layout and display
 until replaced; they cannot supply evaluator results. Existing export snapshots
 remain valid, while subsequent exports use the fresh resource store.
 
 The worker publishes per-node views/errors, not intermediate output values.
-The UI keeps one last presentation per existing node, including off-screen nodes,
-so their geometry stays stable when the requested target set changes. Deleted
-nodes and project resets release those presentations. Images are converted to RGBA f16 before publication. A worker-owned preparation
+Each accepted completion replaces the presentation snapshot. There is no
+viewport intersection test, visible-target tracking or merging of off-screen
+presentations. Deleted nodes and project resets release their presentations.
+Images are converted to RGBA f16 before publication. A worker-owned preparation
 cache reuses bytes by source Arc identity and keeps a reference to each image
 until renderer/UI references are released. After a frame drops its previous
 callbacks and textures, a collect command frees unreferenced prepared images
@@ -461,8 +464,9 @@ Spike done (protocol level, see D2). Still to do in M3: verify what is actually 
 | ~~G1~~ | ~~Custom node editor in a bottom panel, with a separate preview panel and histogram in the sidebar.~~ | superseded by G7 (user, 2026-10-04) | |
 | ~~G2~~ | ~~Evaluate visible nodes synchronously, adapting resolution to drawn image size; export on a background thread.~~ | superseded by G8 (user, 2026-10-04) | Automatic detail changes interrupted interaction. |
 | ~~G8~~ | ~~Evaluate visible targets synchronously at a manual global level; export separately at level 0.~~ | superseded by G9 (user, 2026-10-04) | Detail selection remains; evaluation moves off the UI. |
-| G9 | Evaluate visible node targets on a persistent worker at the global preview level. Render the last completed presentation and show lowercase activity messages. Export retains its separate full-detail action thread. | decided (user, 2026-10-04); implemented | Image computation, texture-byte preparation and CPU image retirement are off-thread; the renderer owns GPU upload/drawing. See E12, E18 and 3.3.6. |
-| G10 | “Invalidate cache” clears all evaluator node results and loaded resources, then recomputes visible targets. | decided (user, 2026-10-04); implemented | Replaces the former per-file reload action. Includes nodes without file dependencies and resources from previous projects; preserves the last presentation during recomputation and existing export snapshots. |
+| G9 | Evaluate node targets on a persistent worker at the global preview level. Render the last completed presentation and show lowercase activity messages. Export retains its separate full-detail action thread. | decided (user, 2026-10-04); implemented | Image computation, texture-byte preparation and CPU image retirement are off-thread; the renderer owns GPU upload/drawing. Target selection follows G11. See E12, E18 and 3.3.6. |
+| G10 | “Invalidate cache” clears all evaluator node results and loaded resources, then recomputes all graph nodes. | decided (user, 2026-10-04); implemented | Replaces the former per-file reload action. Includes nodes without file dependencies and resources from previous projects; preserves the last presentation during recomputation and existing export snapshots. |
+| G11 | Remove visibility-based evaluation. The GUI requests every graph node at the global detail level. | decided (user, 2026-10-04); implemented | Canvas position, pan, zoom and resizing no longer select targets or schedule evaluation. Off-screen results and errors stay current; ordinary dependency caching and node-targeted export remain unchanged. |
 | G3 | Logging uses the `log` facade in the library and `env_logger` in the frontends. Frontends also show warnings and errors in the window. | decided (user, 2026-10-04) | The standard, minimal choice. |
 | G4 | Undo/redo is postponed. | decided (user, 2026-10-04) | Not needed for the prototype (TODO). |
 | G5 | One minimal UI style in `theme.rs`: everything on middle grey (sRGB 118, 18% linear), dark text, no shadows, rounding or borders. Fills distinguish elements; color is reserved for errors and histogram channels. | decided (user, 2026-10-04) | A neutral surround is standard for judging color. Decoration distracts from the image. |

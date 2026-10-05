@@ -11,9 +11,9 @@ macOS packaging is not yet verified.
 ## Goals
 
 - **A graph you can trust.** Typed connections refuse mismatches, such as
-  exporting an image that has not been tone mapped. Only what is visible or
-  requested is computed, and a node is recomputed only when something it
-  depends on changes.
+  exporting an image that has not been tone mapped. The GUI evaluates every
+  node regardless of canvas position; a node is recomputed only when something
+  it depends on changes.
 - **Color done right.** Processing runs in 32-bit float and linear Rec.2020.
   Exports are TIFFs with an embedded ICC profile. On Wayland, previews keep
   their wide gamut and the compositor maps them to the display.

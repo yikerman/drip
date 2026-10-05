@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: remove visibility-based evaluation
+
+- The GUI now requests every graph node when computation changes. Removed viewport target selection, the editor's stored viewport, target-set comparison and partial presentation merging. Canvas navigation and node geometry no longer schedule evaluations; export still targets its own dependencies at full detail.
+- Verification: all 11 GUI tests, formatting and workspace clippy pass. A regression test places disconnected nodes far off-screen, verifies evaluation and parameter updates, and checks that moving a node schedules no work. No new deferred work.
+
 ## 2026-10-04: half-scale preview default
 
 - Changed the default global preview detail to 1/2 as requested. Applies to new projects and projects without a saved level; explicit saved settings still take precedence.

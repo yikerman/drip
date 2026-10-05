@@ -1,4 +1,4 @@
-//! Application state and layout: one project, evaluated for what is visible.
+//! Application state and layout: one project, evaluated at a global detail level.
 
 use std::path::{Path, PathBuf};
 
@@ -21,7 +21,6 @@ pub struct App {
     registry: Registry,
     worker: Worker,
     dirty: bool,
-    targets: Vec<NodeId>,
     file: Option<PathBuf>,
     pub(crate) selected: Option<NodeId>,
     editor: Editor,
@@ -48,7 +47,6 @@ impl App {
             registry: nodes::registry(),
             worker: Worker::new(wake),
             dirty: true,
-            targets: Vec::new(),
             file: None,
             selected: None,
             editor: Editor::default(),
@@ -130,12 +128,9 @@ impl App {
                 self.report(Err(refused));
             }
         });
-        let targets = self.editor.visible(&self.project.graph, |id| self.worker.result(id));
-        if std::mem::take(&mut self.dirty) || targets != self.targets {
-            self.targets = targets;
-            if let Err(error) =
-                self.worker.request(&self.project.graph, self.level, self.targets.clone())
-            {
+        if std::mem::take(&mut self.dirty) {
+            let targets = self.project.graph.nodes().map(|(id, _)| id).collect();
+            if let Err(error) = self.worker.request(&self.project.graph, self.level, targets) {
                 self.report(Err(error));
             }
             ui.ctx().request_repaint();
@@ -243,7 +238,6 @@ impl App {
         self.selected = None;
         self.editor = Editor::default();
         self.dirty = true;
-        self.targets.clear();
         self.worker.reset(&self.project.graph)
     }
 
@@ -409,6 +403,53 @@ mod tests {
         assert!(!has_view(h.state(), "preview"), "the new template has no raw file yet");
         assert_eq!(h.state().level, DEFAULT_LEVEL);
         std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    fn evaluation_is_independent_of_node_positions() {
+        use drip::node::{Evaluated, NodeKind};
+        use drip::param::ParamSpec;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        static NODE: NodeKind = NodeKind {
+            name: "test.offscreen",
+            label: "offscreen",
+            params: &[ParamSpec::new("value", ParamKind::Bool { default: false })],
+            inputs: &[],
+            outputs: &[],
+            actions: &[],
+            eval: |_, _, _| {
+                CALLS.fetch_add(1, Ordering::SeqCst);
+                Ok(Evaluated::default())
+            },
+        };
+        let mut project = Project::default();
+        let left = project.graph.add_node(&NODE);
+        let right = project.graph.add_node(&NODE);
+        for (id, x) in [(left, -100_000), (right, 100_000)] {
+            project.graph.set_ui(id, json!({"pos": [x, 0]})).unwrap();
+        }
+        let completions = Arc::new(AtomicUsize::new(0));
+        let wake = completions.clone();
+        let mut app = App::new(None, true, move || {
+            wake.fetch_add(1, Ordering::SeqCst);
+        });
+        app.set_project(project, None).unwrap();
+        let mut h = harness(app);
+        settle(&mut h);
+        assert_eq!(CALLS.load(Ordering::SeqCst), 2);
+        assert!(h.state().worker.result(left).unwrap().is_ok());
+        assert!(h.state().worker.result(right).unwrap().is_ok());
+
+        h.state_mut().set_param(left, "value", json!(true));
+        settle(&mut h);
+        assert_eq!(CALLS.load(Ordering::SeqCst), 3, "off-screen edits are evaluated");
+        let before = completions.load(Ordering::SeqCst);
+        h.state_mut().project.graph.set_ui(left, json!({"pos": [0, 0]})).unwrap();
+        settle(&mut h);
+        assert_eq!(completions.load(Ordering::SeqCst), before, "moving nodes requests no work");
     }
 
     #[test]

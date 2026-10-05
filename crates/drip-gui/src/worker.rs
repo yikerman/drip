@@ -156,9 +156,7 @@ impl Worker {
                         let error = views
                             .values()
                             .find_map(|view| view.as_ref().err().map(ToString::to_string));
-                        // Keep off-screen nodes' last presentation: losing their
-                        // view would change layout and hence the next target set.
-                        self.views.extend(views);
+                        self.views = views;
                         notices.push(Notice::Evaluated(error.map_or(Ok(()), Err)));
                     }
                 }
@@ -401,10 +399,10 @@ mod tests {
         assert_eq!(pixel(&worker, preview), [3.0, 2.0, 0.0, 1.0]);
         assert!(worker.result(histogram).is_some());
 
-        // A new target set reuses computation and keeps off-screen layout stable.
+        // A new target set reuses computation and replaces the presentation.
         worker.request(&graph, 1, vec![histogram]).unwrap();
         wait(&mut worker);
-        assert!(worker.result(preview).is_some());
+        assert!(worker.result(preview).is_none());
         assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0]);
 
         // Invalidation also recomputes nodes with no file dependencies.

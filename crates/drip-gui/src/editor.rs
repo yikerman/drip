@@ -30,14 +30,11 @@ pub struct Editor {
     zoom: f32,
     /// The output a wire is being dragged from.
     wire: Option<Port>,
-    /// Last frame's canvas, to tell which nodes are visible before this
-    /// frame's layout.
-    area: Option<Rect>,
 }
 
 impl Default for Editor {
     fn default() -> Self {
-        Editor { offset: None, zoom: 1.0, wire: None, area: None }
+        Editor { offset: None, zoom: 1.0, wire: None }
     }
 }
 
@@ -60,23 +57,6 @@ struct Layout {
 }
 
 impl Editor {
-    /// The nodes inside last frame's canvas, or all of them before the first
-    /// frame: what the app requests from the worker (DESIGN G9).
-    pub fn visible<'a>(
-        &self,
-        graph: &Graph,
-        results: impl Fn(NodeId) -> Option<&'a Presentation>,
-    ) -> Vec<NodeId> {
-        let (Some(area), Some(offset)) = (self.area, self.offset) else {
-            return graph.nodes().map(|(id, _)| id).collect();
-        };
-        let to_screen = |p: Vec2| area.min + offset + p * self.zoom;
-        let visible = |(id, node): &(NodeId, &Node)| {
-            layout(*id, node, results(*id), &to_screen, self.zoom).rect.intersects(area)
-        };
-        graph.nodes().filter(visible).map(|(id, _)| id).collect()
-    }
-
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -87,7 +67,6 @@ impl Editor {
     ) {
         let (area, background) =
             ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-        self.area = Some(area);
         let painter = ui.painter_at(area);
         let offset = self.offset.get_or_insert_with(|| fit(graph, area, self.zoom));
         if background.dragged() {
