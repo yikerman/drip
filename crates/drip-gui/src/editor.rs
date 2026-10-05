@@ -13,7 +13,9 @@ use drip::graph::{Graph, Node, NodeId, Port};
 use drip::node::Registry;
 use egui::emath::TSTransform;
 use egui::epaint::CubicBezierShape;
-use egui::{Align2, FontId, LayerId, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2, pos2, vec2};
+use egui::{
+    Align2, FontId, LayerId, Painter, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
+};
 use serde_json::Value as Json;
 
 use crate::theme;
@@ -61,58 +63,8 @@ impl Editor {
         selected: &mut Option<NodeId>,
         frame: &mut Frame,
     ) {
-        let (area, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
-        let offset = self.offset.get_or_insert_with(|| {
-            let (offset, zoom) = fit(graph, area);
-            self.zoom = zoom;
-            offset
-        });
-        // The canvas is its own background, so the nodes drawn on it later
-        // take input first; a widget behind its layer would get none.
-        let layer = LayerId::new(ui.layer_id().order, ui.id().with("canvas"));
-        ui.ctx().set_sublayer(ui.layer_id(), layer);
-        let to_global = TSTransform::new(area.min.to_vec2() + *offset, self.zoom);
-        let canvas = UiBuilder::new()
-            .layer_id(layer)
-            .max_rect(to_global.inverse() * area)
-            .sense(Sense::click_and_drag());
-        let mut canvas = ui.new_child(canvas);
-        let background = canvas.response();
-        if background.dragged() {
-            *offset += ui.input(|i| i.pointer.delta());
-        }
-        if background.clicked() {
-            *selected = None;
-        }
-        // The wheel zooms around the pointer, keeping the point under it fixed.
-        if let Some(pointer) = ui.ctx().pointer_hover_pos().filter(|p| area.contains(*p)) {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll != 0.0 {
-                let zoom = (self.zoom * (scroll * 0.002).exp()).clamp(ZOOM.0, ZOOM.1);
-                let at = pointer - area.min;
-                *offset = at - (at - *offset) * (zoom / self.zoom);
-                self.zoom = zoom;
-            }
-        }
-        let zoom = self.zoom;
-        let to_global = TSTransform::new(area.min.to_vec2() + *offset, zoom);
-        background.context_menu(|ui| {
-            for kind in registry.kinds() {
-                if ui.button(kind.label).clicked() {
-                    let pointer = ui.ctx().pointer_interact_pos().unwrap_or(area.center());
-                    let id = graph.add_node(kind);
-                    frame.report.edited = true;
-                    set_ui(graph, id, "pos", (to_global.inverse() * pointer).to_vec2());
-                    *selected = Some(id);
-                    ui.close();
-                }
-            }
-        });
-
-        ui.ctx().set_transform_layer(layer, to_global);
-        let visible = to_global.inverse() * area;
-        canvas.set_clip_rect(visible);
-        canvas.expand_to_include_rect(visible);
+        let (mut canvas, to_global) = self.canvas(ui, graph, registry, selected, frame);
+        let zoom = to_global.scaling;
         let ui = &mut canvas;
         let painter = ui.painter().clone();
 
@@ -135,7 +87,6 @@ impl Editor {
             }
         }
 
-        let (font, small) = (FontId::proportional(13.0), FontId::proportional(11.0));
         let hit = |pos: Pos2| Rect::from_center_size(pos, Vec2::splat(16.0 * point));
         for l in &layouts {
             let body = ui.interact(l.rect, ui.id().with(l.id), Sense::click_and_drag());
@@ -149,19 +100,8 @@ impl Editor {
             }
             let node = graph.node(l.id).expect("laid out from the graph");
             let (kind, kind_params) = (gui::of(node.kind), node.kind.params);
-            let fill = if *selected == Some(l.id) { theme::LIGHTER } else { theme::DARKER };
-            painter.rect_filled(l.rect, 0.0, fill);
-            let title = l.rect.min + vec2(8.0, HEADER / 2.0);
-            painter.text(title, Align2::LEFT_CENTER, &node.label, font.clone(), theme::TEXT);
+            paint(&painter, l, &node.label, *selected == Some(l.id));
             for (name, pos) in &l.inputs {
-                painter.circle_filled(*pos, PORT, theme::TEXT);
-                painter.text(
-                    *pos + vec2(8.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    name,
-                    small.clone(),
-                    theme::WEAK,
-                );
                 let port = ui.interact(hit(*pos), ui.id().with((l.id, name, 0)), Sense::click());
                 if port.secondary_clicked() {
                     graph.disconnect(&Port(l.id, (*name).into()));
@@ -170,14 +110,6 @@ impl Editor {
                 port.on_hover_text("right-click to disconnect");
             }
             for (name, pos) in &l.outputs {
-                painter.circle_filled(*pos, PORT, theme::TEXT);
-                painter.text(
-                    *pos - vec2(8.0, 0.0),
-                    Align2::RIGHT_CENTER,
-                    name,
-                    small.clone(),
-                    theme::WEAK,
-                );
                 if ui
                     .interact(hit(*pos), ui.id().with((l.id, name, 1)), Sense::drag())
                     .drag_started()
@@ -186,13 +118,6 @@ impl Editor {
                 }
             }
             if let Some((at, error)) = &l.error {
-                painter.text(
-                    *at,
-                    Align2::LEFT_CENTER,
-                    elide(error, 26),
-                    small.clone(),
-                    theme::ERROR,
-                );
                 let row = Rect::from_min_size(
                     pos2(l.rect.min.x, at.y - ROW / 2.0),
                     vec2(l.rect.width(), ROW),
@@ -239,6 +164,89 @@ impl Editor {
             frame.report.edited = true;
             *selected = None;
         }
+    }
+
+    /// The canvas: a layer over the editor's area under the current pan and
+    /// zoom, and the transform into it. Its background pans, zooms, deselects
+    /// and adds nodes.
+    fn canvas(
+        &mut self,
+        ui: &mut Ui,
+        graph: &mut Graph,
+        registry: &Registry,
+        selected: &mut Option<NodeId>,
+        frame: &mut Frame,
+    ) -> (Ui, TSTransform) {
+        let (area, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
+        let offset = self.offset.get_or_insert_with(|| {
+            let (offset, zoom) = fit(graph, area);
+            self.zoom = zoom;
+            offset
+        });
+        // The canvas is its own background, so the nodes drawn on it later
+        // take input first; a widget behind its layer would get none.
+        let layer = LayerId::new(ui.layer_id().order, ui.id().with("canvas"));
+        ui.ctx().set_sublayer(ui.layer_id(), layer);
+        let to_global = TSTransform::new(area.min.to_vec2() + *offset, self.zoom);
+        let canvas = UiBuilder::new()
+            .layer_id(layer)
+            .max_rect(to_global.inverse() * area)
+            .sense(Sense::click_and_drag());
+        let mut canvas = ui.new_child(canvas);
+        let background = canvas.response();
+        if background.dragged() {
+            *offset += ui.input(|i| i.pointer.delta());
+        }
+        if background.clicked() {
+            *selected = None;
+        }
+        // The wheel zooms around the pointer, keeping the point under it fixed.
+        if let Some(pointer) = ui.ctx().pointer_hover_pos().filter(|p| area.contains(*p)) {
+            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+            if scroll != 0.0 {
+                let zoom = (self.zoom * (scroll * 0.002).exp()).clamp(ZOOM.0, ZOOM.1);
+                let at = pointer - area.min;
+                *offset = at - (at - *offset) * (zoom / self.zoom);
+                self.zoom = zoom;
+            }
+        }
+        let to_global = TSTransform::new(area.min.to_vec2() + *offset, self.zoom);
+        background.context_menu(|ui| {
+            for kind in registry.kinds() {
+                if ui.button(kind.label).clicked() {
+                    let pointer = ui.ctx().pointer_interact_pos().unwrap_or(area.center());
+                    let id = graph.add_node(kind);
+                    frame.report.edited = true;
+                    set_ui(graph, id, "pos", (to_global.inverse() * pointer).to_vec2());
+                    *selected = Some(id);
+                    ui.close();
+                }
+            }
+        });
+
+        ui.ctx().set_transform_layer(layer, to_global);
+        let visible = to_global.inverse() * area;
+        canvas.set_clip_rect(visible);
+        canvas.expand_to_include_rect(visible);
+        (canvas, to_global)
+    }
+}
+
+/// Paints a node's frame: its fill, label, ports and error.
+fn paint(painter: &Painter, l: &Layout, label: &str, selected: bool) {
+    let (font, small) = (FontId::proportional(13.0), FontId::proportional(11.0));
+    let fill = if selected { theme::LIGHTER } else { theme::DARKER };
+    painter.rect_filled(l.rect, 0.0, fill);
+    let title = l.rect.min + vec2(8.0, HEADER / 2.0);
+    painter.text(title, Align2::LEFT_CENTER, label, font, theme::TEXT);
+    let ports = l.inputs.iter().map(|p| (p, 8.0, Align2::LEFT_CENTER));
+    let ports = ports.chain(l.outputs.iter().map(|p| (p, -8.0, Align2::RIGHT_CENTER)));
+    for ((name, pos), offset, align) in ports {
+        painter.circle_filled(*pos, PORT, theme::TEXT);
+        painter.text(*pos + vec2(offset, 0.0), align, name, small.clone(), theme::WEAK);
+    }
+    if let Some((at, error)) = &l.error {
+        painter.text(*at, Align2::LEFT_CENTER, elide(error, 26), small, theme::ERROR);
     }
 }
 
