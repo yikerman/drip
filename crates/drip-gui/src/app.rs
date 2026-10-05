@@ -11,7 +11,7 @@ use drip::{nodes, templates};
 use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
 
 use crate::editor::Editor;
-use crate::gui::{Frame, NodeCx, Popped, Report};
+use crate::gui::{self, Frame, NodeCx, Popped, Report};
 use crate::worker::{Notice, Worker};
 use crate::{inspector, theme};
 
@@ -42,8 +42,6 @@ pub struct App {
 pub struct Window {
     pub popped: Popped,
     pub title: String,
-    /// The initial size, in points.
-    pub size: Vec2,
 }
 
 struct Status {
@@ -133,9 +131,26 @@ impl App {
     pub fn windows(&self) -> Vec<Window> {
         let window = |popped: Popped| {
             let node = self.project.graph.node(popped.node).expect("popped nodes exist");
-            Window { popped, title: popped.title(node), size: popped.size(node) }
+            Window { popped, title: popped.title(node) }
         };
         self.popped.iter().map(|&popped| window(popped)).collect()
+    }
+
+    /// The size, in points, to open window `popped` at. egui has no pass
+    /// that only measures, so the content is laid out once, unseen, in a
+    /// scratch context at the window's scale; a size it records there wins
+    /// over its kind's. Resizing once the window is open would race the
+    /// compositor's own configures.
+    pub fn window_size(&mut self, popped: Popped, pixels_per_point: f32) -> Vec2 {
+        let ctx = egui::Context::default();
+        theme::apply(&ctx);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(2000.0));
+        let mut input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+        input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point =
+            Some(pixels_per_point);
+        ctx.run_ui(input, |ui| self.window(ui, popped)).textures_delta.clear();
+        let node = self.project.graph.node(popped.node).expect("popped nodes exist");
+        gui::fitted(&ctx).unwrap_or_else(|| popped.size(node))
     }
 
     pub fn close_window(&mut self, popped: Popped) {
@@ -678,12 +693,18 @@ mod tests {
         let export = app.project.graph.find("export").unwrap();
         let popped = Popped { node: export, part: crate::gui::Part::Parameters };
         app.popped.insert(popped);
+        // The window opens at the size its content takes, smaller than a
+        // guess yet with every parameter inside.
+        let size = app.window_size(popped, 1.25);
+        assert!(size.x < 360.0 && size.y < 320.0, "{size:?}");
         let mut h = Harness::builder()
-            .with_size(egui::vec2(360.0, 320.0))
+            .with_size(size)
             .build_ui_state(move |ui, app: &mut App| app.window(ui, popped), app);
         h.run();
+        let window = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
         for label in ["profile", "intent", "depth", "export"] {
-            assert!(h.query_by_label(label).is_some(), "{label}");
+            let rect = h.query_by_label(label).unwrap_or_else(|| panic!("{label}")).rect();
+            assert!(window.contains_rect(rect), "{label} at {rect:?} outside {size:?}");
         }
         h.state_mut().project.graph.remove_node(export);
         h.run();

@@ -76,10 +76,10 @@ impl Popped {
         format!("{} {} · Drip", node.label, self.part.name())
     }
 
-    /// The window's initial size, in points.
+    /// The window's size, in points, when its content does not ask for one.
     pub fn size(self, node: &Node) -> Vec2 {
         match self.part {
-            Part::Parameters => vec2(360.0, 80.0 + 26.0 * node.kind.params.len() as f32),
+            Part::Parameters => vec2(360.0, 240.0),
             Part::Gui(name) => of(node.kind).window_size(name, node),
         }
     }
@@ -87,10 +87,31 @@ impl Popped {
     /// Draws the window's content.
     pub fn show(self, ui: &mut Ui, node: &mut NodeCx) {
         match self.part {
-            Part::Parameters => inspector::node(ui, node),
+            Part::Parameters => {
+                let used = ui.scope(|ui| inspector::node(ui, node)).response.rect;
+                fit_window(ui.ctx(), used);
+            }
             Part::Gui(name) => of(node.node().kind).window(ui, name, node),
         }
     }
+}
+
+/// Records a window size that fits `used`, the rect the window's content
+/// took, for `App::window_size` to open the window at. Passes egui discards
+/// are not laid out for real, so they record nothing.
+fn fit_window(ctx: &egui::Context, used: Rect) {
+    if !ctx.will_discard() {
+        // The panel's margins are equal on all sides.
+        let size = used.max.to_vec2() + used.min.to_vec2();
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(FITTED), size));
+    }
+}
+
+const FITTED: &str = "fitted window size";
+
+/// The window size the content last recorded in `ctx`, if it fits itself.
+pub fn fitted(ctx: &egui::Context) -> Option<Vec2> {
+    ctx.data(|d| d.get_temp(egui::Id::new(FITTED)))
 }
 
 struct Plain;

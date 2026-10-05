@@ -13,6 +13,15 @@ Newest first. Each entry: what happened, what is verified, what is next.
 - Pop-outs are children of the main window, so KWin keeps them in front of it (the user's choice over always-on-top, which Wayland does not offer). winit has no parent windows on Wayland, so `parent::set_parent` sends `xdg_toplevel.set_parent` on winit's connection; `WAYLAND_DEBUG` showed the request with no protocol error. Windows and macOS are in TODO.
 - Resizing any window stalled for a second at a time since vsync (36a6edc): during an interactive resize KWin takes no buffers until the client answers its latest configure, extra frames filled the `Fifo` swapchain, and the blocked image acquire kept Drip from answering until wgpu's 1 s timeout. `pre_present_notify` now lets winit hold redraws until the compositor asks for a frame. In the user's resize log: 878 resize events and 293 frames, the slowest 3.9 ms, no timeouts (before: three 1 s stalls).
 - Panning failed above and left of the nodes: egui registers the canvas `Ui` as a hover widget over the area its contents span, which hid the pan response in the layer behind it. The canvas `Ui` now senses clicks and drags itself and spans the visible area, as `egui::Scene` does; a test clicks empty canvas above the nodes. The user checked panning and node interaction.
+- Review of the session's code, then cleanup in separate commits:
+  - `Frame` carries a `Report` of what node GUIs did; `NodeCx` no longer exposes its id or frame for writing; `App::redraw` and `Report::edited` replace two flags both called `changed`.
+  - The shell polls the worker on its wake event; before, results were taken only inside a window's frame, so popped-out windows went stale while the main window could not draw.
+  - `widgets` holds the pop-out button, the resize handle and `point`, the one way to undo the canvas zoom.
+  - The main window's display reuses the surface that picked the adapter.
+  - The viewer reads its saved size in one place.
+  - `Editor::show` keeps interaction; canvas setup and frame painting have functions of their own.
+  - Parameter windows open at the size their content takes (sigmoid 296×91, export 296×238 points), replacing a guessed `80 + 26 × parameters` height. egui has no measuring pass, so `App::window_size` lays the content out once in a scratch context at the window's scale. A first version resized the window after its first frame; KWin's next configure restored the creation size, so measuring has to come before the window opens.
+- A render that looked changed after polling moved to the shell came from the render helper, which drove `App::ui` without polling; with polling, the render matched the one before the cleanup pixel for pixel.
 - Verification: 13 GUI tests (two new: ⚙ and 🗗 counts, opening both histogram windows, closing and project replacement; parameter window content and removal), formatting and clippy pass; offscreen renders of the default template and a live run with the histogram's parameters and view popped out (three scRGB surfaces, both parented) looked right.
 
 ## 2026-10-04: histogram range and labels

@@ -163,9 +163,11 @@ impl ApplicationHandler<WorkerReady> for Shell {
                     }
                 }
                 None => {
+                    let scale = r.main.window.scale_factor() as f32;
+                    let size = r.app.window_size(w.popped, scale);
                     let attributes = Window::default_attributes()
                         .with_title(&w.title)
-                        .with_inner_size(LogicalSize::new(w.size.x, w.size.y));
+                        .with_inner_size(LogicalSize::new(size.x, size.y));
                     match Pane::open(event_loop, &r.gpu, attributes) {
                         Ok(pane) => {
                             parent::set_parent(&pane.window, &r.main.window);
