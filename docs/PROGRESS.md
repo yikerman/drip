@@ -2,6 +2,12 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: frame timing log
+
+- Each frame logs its UI, tessellation and render time and egui's font atlas fill at debug level under the `frame` target (`RUST_LOG=frame=debug`). Evaluation timings were already logged per node. Motivation: fast zooming lags slightly, suspected to be node text re-rasterized at every new `13.0 * zoom` font size.
+- Verification: formatting and clippy pass; a debug run prints sub-millisecond idle frames.
+- Next: confirm the zoom lag with the log, then quantize editor font sizes if it is glyph rasterization.
+
 ## 2026-10-04: GUI decoupling
 
 - Moved view preparation out of `worker`: `preview::Image` packs `Rgba16Float` texels next to the upload that consumes them, and `views` owns `PreparedView` and the prepared-image cache. The worker still runs preparation and owns the cache; it is now only the mailbox and evaluator host.

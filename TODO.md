@@ -7,6 +7,7 @@ Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
 | CLI batch implementation | handoff | deferred | scaffolded; template binding per F4 |
 | GPU computation | user | postponed | Rayon replaces CubeCL; reconsider only with a measured need and one kernel source (E9, E13, E15) |
 | End-to-end UI latency | measurement | open | image evaluation, texture preparation and CPU image retirement now run off-thread; measure remaining driver upload/draw latency at full detail (DESIGN 3.3.6) |
+| Profiler integration | user | open | Tracy through the `profiling` crate, which egui, epaint, egui-wgpu and wgpu already instrument; the frame log covers coarse timings |
 | Cooperative evaluation cancellation | design | deferred | running evaluations finish before the latest pending request; consider a between-node check only if stale-work latency warrants it (DESIGN 3.3.6) |
 | Full-res region of interest for 1:1 viewing | handoff | deferred | ROI in `EvalContext` (E4) |
 | EXIF passthrough | handoff | deferred | `RawMetadata` travels the graph (P3) |

@@ -3,7 +3,8 @@
 //!
 //!     drip-gui [project.drip]
 //!
-//! Logging goes to stderr; `RUST_LOG=debug` shows evaluation timings.
+//! Logging goes to stderr; `RUST_LOG=debug` shows evaluation and frame
+//! timings, `RUST_LOG=frame=debug` frame timings alone.
 
 mod app;
 mod display;
@@ -137,14 +138,26 @@ impl ApplicationHandler<WorkerReady> for Shell {
 
 impl Running {
     fn frame(&mut self) {
+        let start = Instant::now();
         let input = self.egui.take_egui_input(&self.window);
         let ctx = self.egui.egui_ctx().clone();
         let output = ctx.run_ui(input, |ui| self.app.ui(ui));
         self.egui.handle_platform_output(&self.window, output.platform_output);
+        let ui = start.elapsed();
         let jobs = ctx.tessellate(output.shapes, output.pixels_per_point);
+        let tessellate = start.elapsed() - ui;
         self.display.render(&jobs, output.textures_delta, output.pixels_per_point);
         drop(jobs);
         self.app.after_frame();
+        let total = start.elapsed();
+        // Render includes waiting for a surface texture, which can block on
+        // vsync. egui rebuilds its font atlas once it passes 80% full.
+        log::debug!(
+            target: "frame",
+            "{total:.1?}: ui {ui:.1?}, tessellate {tessellate:.1?}, render {:.1?}; font atlas {:.1}% full",
+            total - ui - tessellate,
+            ctx.fonts(|f| f.font_atlas_fill_ratio()) * 100.0,
+        );
 
         let delay = output.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.repaint_delay);
         self.repaint_at = match delay {
