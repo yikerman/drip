@@ -23,9 +23,9 @@ use crate::theme;
 const HEADER: f32 = 22.0;
 const ROW: f32 = 18.0;
 const PORT: f32 = 4.0;
-/// egui rasterizes text once and scales it with the layer, so zooming in past
-/// 1 would blur it.
-const ZOOM: (f32, f32) = (0.2, 1.0);
+/// egui rasterizes text once and scales it with the layer, so text blurs past
+/// 1; previews draw at their own resolution and stay sharp.
+const ZOOM: (f32, f32) = (0.2, 2.0);
 /// Space kept around the graph when fitting it into view, in screen points.
 const MARGIN: f32 = 20.0;
 

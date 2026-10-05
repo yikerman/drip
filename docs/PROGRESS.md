@@ -21,6 +21,7 @@ Newest first. Each entry: what happened, what is verified, what is next.
   - The viewer reads its saved size in one place.
   - `Editor::show` keeps interaction; canvas setup and frame painting have functions of their own.
   - Parameter windows open at the size their content takes (sigmoid 296×91, export 296×238 points), replacing a guessed `80 + 26 × parameters` height. egui has no measuring pass, so `App::window_size` lays the content out once in a scratch context at the window's scale. A first version resized the window after its first frame; KWin's next configure restored the creation size, so measuring has to come before the window opens.
+- Canvas zoom goes up to 2 at the user's request (was 1); text blurs past 1, previews stay sharp. Fitting a project still stops at 1.
 - A render that looked changed after polling moved to the shell came from the render helper, which drove `App::ui` without polling; with polling, the render matched the one before the cleanup pixel for pixel.
 - Verification: 13 GUI tests (two new: ⚙ and 🗗 counts, opening both histogram windows, closing and project replacement; parameter window content and removal), formatting and clippy pass; offscreen renders of the default template and a live run with the histogram's parameters and view popped out (three scRGB surfaces, both parented) looked right.
 
