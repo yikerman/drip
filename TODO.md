@@ -1,35 +1,31 @@
 # TODO
 
-Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
+Unimplemented work only. “Deferred” includes user-postponed work; it is not a
+commitment to implement. Current costs and prototype robustness are acceptable
+for now. Revisit performance work when measurements or usage justify it.
 
-| Idea | Source | Status | Notes |
-|------|--------|--------|-------|
-| Review: safe project and export replacement | 2026-10-05 review | deferred | user postponed robustness work; same-directory temporary files and streamed TIFF encoding remain possible improvements |
-| Review: export completion and unsaved edits on close | 2026-10-05 review | deferred | robustness work postponed for the prototype; DESIGN 6.1 |
-| Review: evaluation scale bounds | 2026-10-05 review | open | level 31 is accepted for RAW but the following bin2x2 node overflows its u32 scale; validate the public evaluation boundary |
-| CLI batch implementation | handoff | deferred | scaffolded; template binding per F4 |
-| GPU computation | user | postponed | Rayon replaces CubeCL; reconsider only with a measured need and one kernel source (E9, E13, E15) |
-| End-to-end UI latency | measurement | open | image evaluation, texture preparation and CPU image retirement now run off-thread; measure remaining driver upload/draw latency at full detail (DESIGN 3.3.6) |
-| Profiler integration | user | open | Tracy through the `profiling` crate, which egui, epaint, egui-wgpu and wgpu already instrument; the frame log covers coarse timings |
-| Cooperative evaluation cancellation | design | deferred | running evaluations finish before the latest pending request; consider a between-node check only if stale-work latency warrants it (DESIGN 3.3.6) |
-| Full-res region of interest for 1:1 viewing | handoff | deferred | ROI in `EvalContext` (E4) |
-| EXIF passthrough | handoff | deferred | `RawMetadata` travels the graph (P3) |
-| Soft-proofing | handoff | deferred | extra transform in the display path |
-| Windows/macOS display color paths | handoff | deferred | |
-| X-Trans and other non-Bayer CFAs | design | deferred | general CFA representation (P5) |
-| Detect input files changing on disk | design | idea | beyond manual cache invalidation (E2, G10) |
-| Static LibRaw build with only the features we need | user | planned | vendored source, built with `cc`, unused decoders and demosaics and the DNG SDK/RawSpeed glue disabled; replaces linking system `libraw_r` (L3) |
-| App-side display transform | design | deferred | for compositors without color management (D3) |
-| Arbitrary deflate levels 1-9 | user | blocked | `tiff` 0.11 only offers fast/balanced/best (C5) |
-| Unicode raw paths on Windows | M2 | open | LibRaw takes narrow paths; needs `libraw_open_wfile` there |
-| Relative paths against the project file | design | open | needs the project's location; with the CLI (F2) |
-| Budget and eviction for loaded resources | design | deferred | decoded RAW resources last until project replacement or invalidation; path changes within a project retain earlier reads (E17, E19) |
-| Test raws from more cameras | user | postponed | e.g. CC0 samples from raw.pixls.us; one Sony fixture for now |
-| Better tone mapper | user | postponed | hue-preserving and gamut-aware, beyond the per-channel sigmoid (C4) |
-| Color calibration | user | postponed | beyond the camera's built-in matrix and as-shot white balance (C3) |
-| Undo/redo in the GUI | user | postponed | G4 |
-| Colorimeter check of the wide-gamut display path | user | postponed | screenshots only verify up to sRGB (D5) |
-| Frame pacing without cross-window stalls | spike | deferred | `Mailbox` where available with Drip limiting each window to the refresh rate, if the `Fifo` stutter from hidden windows shows in use (G13) |
-| Skip redrawing occluded windows | design | deferred | Windows and macOS report `Occluded`; on macOS a hidden `Fifo` window may block up to a second (G13) |
-| Pop-outs above the main window on Windows and macOS | design | deferred | Wayland uses `xdg_toplevel.set_parent` (G13); Windows has owned windows (`with_owner_window`), macOS child windows also move with their parent |
-| Pin button for pop-outs on Windows and macOS | design | deferred | their window managers offer no pin; winit can set always-on-top there but not on Wayland (G13) |
+| Idea | Status | Reason to revisit / scope |
+|------|--------|---------------------------|
+| Static minimal LibRaw build | Planned | Vendor the needed decoder features for controlled builds. |
+| CLI batch frontend | Deferred | Apply template inputs; define overwrite, destination collisions and partial-failure behavior. |
+| Project-relative paths | Open | Resolve paths against the project location, alongside CLI work. |
+| Windows Unicode RAW paths | Open | Use LibRaw's wide-path entry point. |
+| Evaluation scale bounds | Open | Public API accepts level 31, whose scale overflows in bin2x2; GUI levels do not reach it. |
+| Confirm AGPL variant | Open | Repository uses `-or-later`; original choice left `-only` versus `-or-later` unresolved. |
+| End-to-end latency measurement and profiling | Open | Measure upload/draw as well as CPU work; Tracy via `profiling` is a candidate beyond frame logs. |
+| Failure-safe saves and exports | Deferred | Avoid truncating an existing destination when a write fails. |
+| Unsaved edits and exports on close | Deferred | Document-loss protection and completion of in-flight exports. |
+| Resource memory and streamed TIFF encoding | Deferred | Revisit if retained RAWs after path changes or export buffers become costly. |
+| Detect changed input files | Idea | Currently requires manual invalidation. |
+| Cooperative cancellation | Deferred | Only if obsolete evaluations noticeably delay the latest edit. |
+| GPU computation | Deferred | Require a measured whole-node gain and one kernel source across backends. |
+| Full-detail region of interest | Deferred | Efficient 1:1 viewing without processing the whole frame. |
+| Better tone mapping and color calibration | Deferred | Hue/gamut handling and calibration beyond camera matrix/as-shot WB. |
+| More camera fixtures and CFA support | Deferred | Broaden validation beyond the Sony fixture; X-Trans and other non-Bayer inputs. |
+| EXIF passthrough | Deferred | Carry source metadata into exports. |
+| Soft-proofing | Deferred | Preview the intended output medium. |
+| Display portability and measurement | Deferred | Windows/macOS paths, app-side fallback, monitor changes and colorimeter verification beyond sRGB. |
+| Pop-out behavior on Windows/macOS | Deferred | Parenting above the main window and a pin control where the WM provides none. |
+| Cross-window frame pacing and occlusion | Deferred | Revisit if hidden-window Fifo stalls matter in use; avoid unnecessary hidden draws. |
+| Undo/redo | Deferred | Not needed for current prototype use. |
+| Arbitrary deflate levels 1–9 | Blocked | Current TIFF encoder exposes only fast/balanced/best. |

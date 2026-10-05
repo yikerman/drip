@@ -37,8 +37,8 @@ raw → white balance → 2×2 binning debayer → camera to Rec.2020 → sigmoi
 Preview and histogram nodes can be attached anywhere in the graph.
 
 [LittleCMS](https://www.littlecms.com/) does the color transforms.
-`docs/DESIGN.md` records every design decision and its rationale;
-`docs/PROGRESS.md` is the development log.
+`docs/DESIGN.md` records current intent and tradeoffs;
+`docs/PROGRESS.md` is a compact development handoff.
 
 ## Usage
 
@@ -85,8 +85,8 @@ To measure complete preview evaluation without drawing:
 RAYON_NUM_THREADS=12 cargo run --release -p drip --example preview_latency -- photo.arw
 ```
 
-See [the compute measurements](docs/DESIGN.md#333-rayon-inside-processing-nodes-2026-10-04)
-for tested hardware, numerical tolerances and latency limits.
+See [the compute measurements](docs/DESIGN.md#performance-evidence)
+for historical hardware measurements and their limits.
 
 ## License
 
