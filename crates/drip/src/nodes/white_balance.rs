@@ -24,6 +24,7 @@ fn white_balance(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluat
     let data = process(&m.data, m.width, m.cfa.size, &gains);
     super::single(Value::Mosaic(Arc::new(Mosaic {
         data,
+        white: std::array::from_fn(|c| m.white[c] * wb[c]),
         camera: m.camera.clone(),
         cfa: m.cfa.clone(),
         ..**m

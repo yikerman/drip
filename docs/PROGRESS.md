@@ -4,6 +4,19 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: highlight reconstruction
+
+- Ported Bayer inpaint opposed to Rust/Rayon with per-color saturation carried
+  through white balance. The default template reconstructs at sensor resolution
+  before demosaic reduces previews; bypassing highlights preserves preview scaling.
+- Added pinned upstream C vectors, edge/partial-mask and thread checks, and a
+  graph test showing reconstruction before averaging. The real RAW export test
+  now exercises the new full-size default pipeline and embedded ICC profile.
+- Workspace tests (89 total), clippy with warnings denied, and formatting pass.
+- Broader photo/camera validation remains in TODO. RCD uses bilinear outer
+  borders; opposed includes partial mask cells and complete edge neighborhoods,
+  unlike the pinned upstream implementation. Ports retain source citations.
+
 ## 2026-10-05: RCD and preview placement
 
 - Ported RCD with bounded tile scratch and Rayon; the default template now

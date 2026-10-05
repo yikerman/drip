@@ -87,6 +87,10 @@ pub struct Mosaic {
     pub height: usize,
     pub scale: u32,
     pub cfa: Cfa,
+    /// Conservative saturation per CFA color in the same units as `data`.
+    /// White balance scales these with the samples; highlight detection must
+    /// not assume a balanced channel still clips at 1.
+    pub white: [f32; 4],
     pub data: Vec<f32>,
     pub camera: Arc<Camera>,
 }

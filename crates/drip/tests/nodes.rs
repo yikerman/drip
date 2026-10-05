@@ -194,7 +194,7 @@ static MOSAIC: NodeKind = NodeKind {
             Arc::new(Camera { xyz_to_cam: [[0.0; 3]; 3], white_balance: [2.0, 1.0, 4.0, 3.0] });
         let cfa = Cfa { size: 2, colors: vec![0, 1, 3, 2] };
         let data = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
-        let mosaic = Mosaic { width: 4, height: 2, scale: 1, cfa, data, camera };
+        let mosaic = Mosaic { width: 4, height: 2, scale: 1, cfa, data, camera, white: [1.0; 4] };
         Ok(Evaluated { outputs: vec![Value::Mosaic(Arc::new(mosaic))], view: None })
     },
     actions: &[],
@@ -300,4 +300,68 @@ fn preview_presents_its_input() {
     let out = evaluate(&p, v);
     assert!(out.outputs.is_empty());
     assert!(matches!(out.view, Some(View::Image(Value::SceneRec2020(_)))));
+}
+
+#[test]
+fn highlights_reconstruct_before_preview_averaging() {
+    static SOURCE: NodeKind = NodeKind {
+        name: "test.clipped",
+        label: "clipped",
+        params: &[],
+        inputs: &[],
+        outputs: &[OutputSpec { name: "mosaic", ty: PortType::Mosaic }],
+        actions: &[],
+        eval: |_, _, _| {
+            let cfa = Cfa { size: 2, colors: vec![0, 1, 3, 2] };
+            let mut data: Vec<_> =
+                (0..64).map(|i| if cfa.color(i / 8, i % 8) == 0 { 0.2 } else { 2.0 }).collect();
+            data[0] = 1.0;
+            let camera = Arc::new(Camera { xyz_to_cam: [[0.0; 3]; 3], white_balance: [1.0; 4] });
+            Ok(Evaluated {
+                outputs: vec![Value::Mosaic(Arc::new(Mosaic {
+                    width: 8,
+                    height: 8,
+                    scale: 1,
+                    cfa,
+                    data,
+                    camera,
+                    white: [1.0, 4.0, 4.0, 4.0],
+                }))],
+                view: None,
+            })
+        },
+    };
+    let (mut p, highlights) = chain(&SOURCE, &[&nodes::HIGHLIGHTS]);
+    let source = p.graph.find("clipped").unwrap();
+    let repaired = p.graph.add_node(&nodes::RCD);
+    let bypass = p.graph.add_node(&nodes::RCD);
+    p.graph.connect(Port(highlights, "mosaic".into()), Port(repaired, "mosaic".into())).unwrap();
+    p.graph.connect(Port(source, "mosaic".into()), Port(bypass, "mosaic".into())).unwrap();
+    let mut ev = Evaluator::default();
+    ev.evaluate(&p.graph, 1, &[repaired, bypass]);
+    let result = |id| &ev.result(id).unwrap().as_ref().unwrap().outputs[0];
+    assert_eq!(result(highlights).mosaic().scale, 1);
+    assert_eq!(result(highlights).mosaic().width, 8);
+    assert_eq!(result(repaired).rgb().scale, 2);
+    assert_eq!(result(repaired).rgb().width, 4);
+    assert!((result(repaired).rgb().pixels[0][0] - 0.65).abs() < 1e-6);
+    assert!((result(bypass).rgb().pixels[0][0] - 0.4).abs() < 1e-6);
+}
+
+#[test]
+fn white_balance_scales_saturation_with_each_channel() {
+    let (p, wb) = chain(&MOSAIC, &[&nodes::WHITE_BALANCE]);
+    assert_eq!(evaluate(&p, wb).outputs[0].mosaic().white, [2.0, 1.0, 4.0, 3.0]);
+    let mut r = raw(4, 4, vec![600; 16]);
+    r.channel_black = [10, 20, 30, 40];
+    r.pattern = BlackPattern { height: 3, width: 3, values: vec![1, 2, 3, 4, 5, 6, 7, 8, 9] };
+    let m = nodes::normalize(&r).unwrap();
+    for row in 0..4 {
+        for col in 0..4 {
+            let c = r.cfa[row % 2][col % 2] as usize;
+            let saturation =
+                (r.maximum - r.black - r.channel_black[c] - r.pattern.at(row, col)) as f32 / 989.0;
+            assert!(m.white[c] <= saturation + 1e-6);
+        }
+    }
 }

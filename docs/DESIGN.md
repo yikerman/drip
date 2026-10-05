@@ -89,13 +89,18 @@ This sequence takes priority over CLI expansion and speculative optimization.
 - **Decided:** Export captures the graph at the click and runs independently of
   later edits. Preview and export share decoded resources; invalidation or
   project replacement starts fresh without disrupting an existing export.
-- **Requirement:** Cache decoded RAWs and derive only the requested mosaic.
-  Retaining every normalized level costs too much memory for manual detail
-  selection. Keep ordinary node-result reuse; release export intermediates when
+- **Requirement:** Cache decoded RAWs without retaining a normalized pyramid.
+  Sensor processing now requires a full-detail mosaic; demosaic adapters derive
+  only the requested preview level and discard temporary levels. Keep ordinary node-result reuse; release export intermediates when
   no longer needed instead of retaining a full-detail graph cache.
 - **Decided:** Current resource costs are reasonable for prototype use. Memory
   budgets, streaming export and cancellation are deferred, as are failure-safe
   replacement, unsaved-change protection and waiting for exports on exit.
+
+- **Decided:** Carry conservative per-color saturation levels with each mosaic,
+  scaling them with white balance. This keeps highlight detection in the same
+  units as samples without inferring whether a WB node ran. Inpaint opposed
+  uses as-shot-balanced data; no late chromatic adaptation is applied.
 
 ## Color and display
 

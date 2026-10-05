@@ -7,7 +7,9 @@ pub use demosaic::RCD;
 mod export;
 mod exposure;
 pub use exposure::EXPOSURE;
+mod highlights;
 mod histogram;
+pub use highlights::HIGHLIGHTS;
 mod preview;
 mod raw;
 pub mod sigmoid;
@@ -28,6 +30,7 @@ pub fn registry() -> Registry {
     [
         &READ,
         &WHITE_BALANCE,
+        &HIGHLIGHTS,
         &BIN_2X2,
         &RCD,
         &CAMERA_TO_REC2020,

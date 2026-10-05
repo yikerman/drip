@@ -78,14 +78,26 @@ pub fn normalize(raw: &Raw) -> Result<Mosaic, String> {
 
     let (width, height) = (raw.width / 2 * 2, raw.height / 2 * 2);
     let mut data = Vec::with_capacity(width * height);
+    let mut white = [f32::INFINITY; 4];
     for row in 0..height {
         for col in 0..width {
-            data.push((raw.data[row * raw.width + col] as f32 - black(row, col) as f32) * gain);
+            let black = black(row, col) as f32;
+            let color = raw.cfa[row % 2][col % 2] as usize;
+            // A patterned black can vary within one color. Use its lowest
+            // saturation level so no genuinely clipped site is missed.
+            white[color] = white[color].min((raw.maximum as f32 - black) * gain);
+            data.push((raw.data[row * raw.width + col] as f32 - black) * gain);
         }
+    }
+    if white[3].is_infinite() {
+        white[3] = white[1];
+    }
+    if !white.iter().all(|&v| v.is_finite() && v > 0.0) {
+        return Err("the raw has no usable per-color saturation levels".into());
     }
     let cfa = Cfa { size: 2, colors: raw.cfa.concat() };
     let camera = Arc::new(Camera { xyz_to_cam: raw.xyz_to_cam, white_balance });
-    Ok(Mosaic { width, height, scale: 1, cfa, data, camera })
+    Ok(Mosaic { width, height, scale: 1, cfa, data, camera, white })
 }
 
 /// Halves a Bayer mosaic by averaging four sites of each phase. Only whole
@@ -103,5 +115,13 @@ pub fn downsample(m: &Mosaic) -> Mosaic {
             );
         }
     }
-    Mosaic { width, height, scale: m.scale * 2, data, cfa: m.cfa.clone(), camera: m.camera.clone() }
+    Mosaic {
+        width,
+        height,
+        scale: m.scale * 2,
+        data,
+        cfa: m.cfa.clone(),
+        camera: m.camera.clone(),
+        white: m.white,
+    }
 }

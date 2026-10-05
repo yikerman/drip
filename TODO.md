@@ -6,7 +6,7 @@ for now. Revisit performance work when measurements or usage justify it.
 
 | Idea | Status | Reason to revisit / scope |
 |------|--------|---------------------------|
-| Production processing pipeline | Next | Select and adapt proven algorithms from darktable, vkdt or Ansel; validate on real RAWs. |
+| Production pipeline validation | Next | Sigmoid, RCD and inpaint opposed are implemented; judge detail, highlights and color on varied real photos before calling the pipeline production-ready. |
 | Editing UI/UX | Planned | Refine the workflow around the production pipeline. |
 | SpyderX color verification | Planned | Measure display output and check the complete color path before release. |
 | Packaging and v0.1 | Planned | Follow processing, workflow and color verification. |
@@ -24,7 +24,7 @@ for now. Revisit performance work when measurements or usage justify it.
 | Cooperative cancellation | Deferred | Only if obsolete evaluations noticeably delay the latest edit. |
 | GPU computation | Deferred | Require a measured whole-node gain and one kernel source across backends. |
 | Full-detail region of interest | Deferred | Efficient 1:1 viewing without processing the whole frame. |
-| Tone mapping and camera color improvements | Next | Assess within production algorithm selection; exact algorithms remain open. |
+| Camera color improvements | Deferred | Calibration beyond the current matrix/as-shot WB; sigmoid color handling is implemented. |
 | Broader real-RAW validation | Next | Exercise production algorithms beyond the current Sony fixture. |
 | Other CFA support | Deferred | X-Trans and other non-Bayer inputs. |
 | EXIF passthrough | Deferred | Carry source metadata into exports. |

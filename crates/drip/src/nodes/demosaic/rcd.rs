@@ -257,6 +257,7 @@ mod tests {
             width,
             height,
             scale: 1,
+            white: [1.0; 4],
             cfa: Cfa { size: 2, colors: PHASES[phase].to_vec() },
             camera: Arc::new(Camera { xyz_to_cam: [[0.0; 3]; 3], white_balance: [1.0; 4] }),
             data: (0..width * height)

@@ -77,8 +77,10 @@ fn exports_a_tiff_from_a_raw() {
     let (profile, out) = (dir.join("srgb.icc"), dir.join("out.tif"));
     std::fs::write(&profile, Profile::new_srgb().icc().unwrap()).unwrap();
 
-    let (mut p, ids) = pipeline(&fixture(), &[&nodes::SIGMOID, &nodes::TIFF]);
-    let export = *ids.last().unwrap();
+    let mut p = drip::templates::raw_to_tiff();
+    let read = p.graph.find("raw").unwrap();
+    let export = p.graph.find("export").unwrap();
+    p.graph.set_param(read, "path", json!(fixture())).unwrap();
     p.graph.set_param(export, "path", json!(out)).unwrap();
     p.graph.set_param(export, "profile", json!("file")).unwrap();
     p.graph.set_param(export, "profile_file", json!(profile)).unwrap();
@@ -86,7 +88,10 @@ fn exports_a_tiff_from_a_raw() {
 
     let raw = drip_libraw::decode(&fixture()).unwrap();
     let mut decoder = tiff::decoder::Decoder::new(std::fs::File::open(&out).unwrap()).unwrap();
-    assert_eq!(decoder.dimensions().unwrap(), (raw.width as u32 / 2, raw.height as u32 / 2));
+    assert_eq!(
+        decoder.dimensions().unwrap(),
+        (raw.width as u32 / 2 * 2, raw.height as u32 / 2 * 2)
+    );
     let icc = decoder.get_tag_u8_vec(tiff::tags::Tag::IccProfile).unwrap();
     assert_eq!(icc, std::fs::read(&profile).unwrap());
     let tiff::decoder::DecodingResult::U16(data) = decoder.read_image().unwrap() else {
