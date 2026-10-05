@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 
 use drip::graph::NodeId;
 use drip::node::Registry;
-use drip::param::ParamKind;
 use drip::project::Project;
 use drip::{nodes, templates};
 use egui::{CentralPanel, Panel, RichText, Ui};
@@ -182,7 +181,7 @@ impl App {
                 self.save_as(true);
             }
             if ui.button("Invalidate cache").clicked() {
-                self.reload();
+                self.invalidate_cache();
             }
             ui.separator();
             let label = |level| {
@@ -281,25 +280,10 @@ impl App {
         saved
     }
 
-    /// Re-reads every file the project names, recomputing what depends on them.
-    fn reload(&mut self) {
-        let paths: Vec<PathBuf> = self
-            .project
-            .graph
-            .nodes()
-            .flat_map(|(_, node)| {
-                let paths = node
-                    .kind
-                    .params
-                    .iter()
-                    .filter(|spec| matches!(spec.kind, ParamKind::Path { .. }));
-                paths.filter_map(|spec| node.params[spec.name].as_str().map(PathBuf::from))
-            })
-            .collect();
+    fn invalidate_cache(&mut self) {
         self.dirty = true;
-        let count = paths.len();
-        let result = self.worker.reload(paths);
-        self.report(result.map(|()| format!("reloaded {count} files")));
+        let result = self.worker.invalidate();
+        self.report(result.map(|()| "invalidating cache…".into()));
     }
 
     /// The evaluator-owning worker snapshots resources in command order.
@@ -321,6 +305,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use crate::worker::PreparedView as View;
+    use drip::param::ParamKind;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
     use serde_json::json;
@@ -380,6 +365,14 @@ mod tests {
         };
         assert_eq!(app.level, DEFAULT_LEVEL);
         assert_eq!(image.width, 498, "1/8 preview plus 2×2 debayer");
+        h.get_by_label("Invalidate cache").click();
+        settle(&mut h);
+        let Some(View::Image(refreshed)) = h.state().worker.result(id).unwrap().as_ref().unwrap()
+        else {
+            panic!("an image")
+        };
+        assert!(!std::sync::Arc::ptr_eq(&image, refreshed));
+        assert_eq!(image.texels, refreshed.texels);
         h.get_by_label("Preview detail").click();
         settle(&mut h);
         h.get_by_label("1/4").click();

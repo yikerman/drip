@@ -1,7 +1,6 @@
 //! Background evaluation of explicit targets at one global preview level.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::{Arc, mpsc};
 use std::thread;
 
@@ -35,7 +34,7 @@ struct Request {
 enum Command {
     Evaluate(Request),
     Reset(Graph),
-    Reload(Vec<PathBuf>),
+    Invalidate,
     Action { graph: Graph, id: NodeId, name: &'static str },
     Collect,
     Shutdown,
@@ -136,8 +135,10 @@ impl Worker {
         self.send(Command::Reset(graph.clone()))
     }
 
-    pub fn reload(&self, paths: Vec<PathBuf>) -> Result<(), String> {
-        self.send(Command::Reload(paths))
+    pub fn invalidate(&mut self) -> Result<(), String> {
+        self.generation += 1;
+        self.pending = None;
+        self.send(Command::Invalidate)
     }
 
     pub fn action(&self, graph: &Graph, id: NodeId, name: &'static str) -> Result<(), String> {
@@ -269,11 +270,7 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
                 notify.send(Event::Evaluated { generation: request.generation, views });
             }
             Command::Reset(graph) => evaluator = evaluator.fork(&graph),
-            Command::Reload(paths) => {
-                for path in paths {
-                    evaluator.reload(&path);
-                }
-            }
+            Command::Invalidate => evaluator = Evaluator::default(),
             Command::Action { graph, id, name } => {
                 let evaluator = evaluator.fork(&graph);
                 let notify = notify.clone();
@@ -410,6 +407,26 @@ mod tests {
         assert!(worker.result(preview).is_some());
         assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0]);
 
+        // Invalidation also recomputes nodes with no file dependencies.
+        worker.invalidate().unwrap();
+        worker.request(&graph, 1, vec![preview, histogram]).unwrap();
+        wait(&mut worker);
+        assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0, 3.0]);
+
+        // Work already running at invalidation cannot restore an old result.
+        graph.set_param(source, "block", json!(true)).unwrap();
+        worker.request(&graph, 1, vec![preview]).unwrap();
+        entered.recv_timeout(TIMEOUT).unwrap();
+        worker.request(&graph, 2, vec![preview]).unwrap();
+        worker.invalidate().unwrap();
+        assert!(worker.pending.is_none());
+        release.send(()).unwrap();
+        assert!(wait(&mut worker).is_empty(), "invalidated completion is not presented");
+        graph.set_param(source, "block", json!(false)).unwrap();
+        worker.request(&graph, 1, vec![preview]).unwrap();
+        wait(&mut worker);
+        assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0, 3.0, 3.0, 3.0]);
+
         graph.set_param(source, "block", json!(true)).unwrap();
         worker.request(&graph, 1, vec![preview]).unwrap();
         entered.recv_timeout(TIMEOUT).unwrap();
@@ -427,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn exports_follow_reload_order_and_always_use_full_detail() {
+    fn exports_follow_invalidation_order_and_always_use_full_detail() {
         static FILE: NodeKind = NodeKind {
             name: "test.file",
             label: "file",
@@ -474,9 +491,9 @@ mod tests {
         wait(&mut worker);
         let before = pixel(&worker, preview);
         std::fs::write(&input, "2").unwrap();
-        for (reload, expected) in [(false, "[1.0, 1.0, 0.0]"), (true, "[2.0, 1.0, 0.0]")] {
-            if reload {
-                worker.reload(vec![input.clone()]).unwrap();
+        for (invalidate, expected) in [(false, "[1.0, 1.0, 0.0]"), (true, "[2.0, 1.0, 0.0]")] {
+            if invalidate {
+                worker.invalidate().unwrap();
             }
             worker.action(&graph, export, "write").unwrap();
             let deadline = Instant::now() + TIMEOUT;
@@ -496,6 +513,9 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&output).unwrap(), expected);
             assert_eq!(pixel(&worker, preview), before, "export leaves preview intact");
         }
+        worker.request(&graph, 3, vec![preview]).unwrap();
+        wait(&mut worker);
+        assert_eq!(pixel(&worker, preview), [2.0, 8.0, 0.0, 1.0]);
         std::fs::remove_file(input).unwrap();
         std::fs::remove_file(output).unwrap();
     }

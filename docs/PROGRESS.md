@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: invalidate the full evaluation cache
+
+- Replaced the button's per-file reload with a fresh evaluator on the worker, clearing every node result and loaded resource. Earlier completions are rejected and pending requests discarded; the UI requests visible targets again while retaining the last presentation. Existing exports retain their snapshots; subsequent exports use the fresh resource store.
+- Verification: GUI tests cover recomputing nodes without files, rejecting in-flight results, discarding pending work, fresh file reads, export ordering and clicking the button to regenerate identical preview pixels. Formatting and clippy pass. No new deferred work.
+
 ## 2026-10-04: cache button wording
 
 - Renamed “Reload files” to “Invalidate cache” as requested; the existing resource invalidation behavior is unchanged.

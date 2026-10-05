@@ -354,13 +354,21 @@ The last completed view remains available while the status line says
 “evaluating…”. A current failure publishes the node error instead of keeping an
 old image as if it were current.
 
-Reset, reload and export commands use the same ordered channel. Export snapshots
+Reset, cache invalidation and export commands use the same ordered channel. Export snapshots
 the graph at the click and resource revisions when that command is processed,
-after preceding reloads. The existing separate export thread then runs the full-
+after preceding invalidations. The existing separate export thread then runs the full-
 detail action and reports completion. The GUI still permits one export at a
 time; preview and export computation can run concurrently. Both reuse the same
 Rayon pool. RAW pyramid retention and resource sharing are unchanged (E17 remains
 pending).
+
+“Invalidate cache” replaces the worker's entire evaluator with a fresh instance,
+discarding every node result (including errors) and loaded resource, even files
+retained from earlier projects. It advances the request generation and discards
+pending work so an earlier completion cannot become current. Visible targets
+are requested again. Last presentations remain for stable layout and display
+until replaced; they cannot supply evaluator results. Existing export snapshots
+remain valid, while subsequent exports use the fresh resource store.
 
 The worker publishes per-node views/errors, not intermediate output values.
 The UI keeps one last presentation per existing node, including off-screen nodes,
@@ -454,7 +462,7 @@ Spike done (protocol level, see D2). Still to do in M3: verify what is actually 
 | ~~G2~~ | ~~Evaluate visible nodes synchronously, adapting resolution to drawn image size; export on a background thread.~~ | superseded by G8 (user, 2026-10-04) | Automatic detail changes interrupted interaction. |
 | ~~G8~~ | ~~Evaluate visible targets synchronously at a manual global level; export separately at level 0.~~ | superseded by G9 (user, 2026-10-04) | Detail selection remains; evaluation moves off the UI. |
 | G9 | Evaluate visible node targets on a persistent worker at the global preview level. Render the last completed presentation and show lowercase activity messages. Export retains its separate full-detail action thread. | decided (user, 2026-10-04); implemented | Image computation, texture-byte preparation and CPU image retirement are off-thread; the renderer owns GPU upload/drawing. See E12, E18 and 3.3.6. |
-| G10 | Label the manual resource invalidation button “Invalidate cache”. | decided (user, 2026-10-04); implemented | Names its cache effect; retains the existing reload behavior. |
+| G10 | “Invalidate cache” clears all evaluator node results and loaded resources, then recomputes visible targets. | decided (user, 2026-10-04); implemented | Replaces the former per-file reload action. Includes nodes without file dependencies and resources from previous projects; preserves the last presentation during recomputation and existing export snapshots. |
 | G3 | Logging uses the `log` facade in the library and `env_logger` in the frontends. Frontends also show warnings and errors in the window. | decided (user, 2026-10-04) | The standard, minimal choice. |
 | G4 | Undo/redo is postponed. | decided (user, 2026-10-04) | Not needed for the prototype (TODO). |
 | G5 | One minimal UI style in `theme.rs`: everything on middle grey (sRGB 118, 18% linear), dark text, no shadows, rounding or borders. Fills distinguish elements; color is reserved for errors and histogram channels. | decided (user, 2026-10-04) | A neutral surround is standard for judging color. Decoration distracts from the image. |
