@@ -86,13 +86,17 @@ impl ApplicationHandler for Shell {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        if let WindowEvent::CloseRequested = event {
+            self.running = None;
+            event_loop.exit();
+            return;
+        }
         let Some(r) = &mut self.running else { return };
         let response = r.egui.on_window_event(&r.window, &event);
         // egui asks to repaint after every redraw; follow-up frames are
         // scheduled from its repaint delay in `frame` instead.
         let repaint = response.repaint && !matches!(event, WindowEvent::RedrawRequested);
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => r.display.resize(size.width, size.height),
             WindowEvent::RedrawRequested => r.frame(),
             _ => {}
@@ -100,6 +104,14 @@ impl ApplicationHandler for Shell {
         if repaint {
             r.window.request_redraw();
         }
+    }
+
+    /// The GPU surface must go before the event loop closes the Wayland
+    /// connection it was created on; destroying it afterwards crashes the
+    /// driver. `run_app` returns only after dropping the event loop, so the
+    /// window state is dropped here rather than with `Shell`.
+    fn exiting(&mut self, _: &ActiveEventLoop) {
+        self.running = None;
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
