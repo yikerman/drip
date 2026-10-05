@@ -4,14 +4,18 @@
 
 @group(0) @binding(0) var image: texture_2d<f32>;
 @group(0) @binding(1) var image_sampler: sampler;
+// Where the whole image goes, in normalized device coordinates: top-left and
+// bottom-right corners. egui's scissor clips it to the visible part.
+@group(0) @binding(2) var<uniform> rect: vec4<f32>;
 
 struct Out { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> Out {
-    // One triangle covering the viewport, which egui sets to the image rect.
-    let uv = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
-    return Out(vec4<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0), uv);
+    // Two triangles covering the image rect.
+    let corners = array(vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, 1.0), vec2(1.0, 0.0), vec2(1.0, 1.0));
+    let uv = corners[i];
+    return Out(vec4<f32>(mix(rect.xy, rect.zw, uv), 0.0, 1.0), uv);
 }
 
 // Rec.2020 to BT.709/sRGB primaries, both D65 [ITU-R BT.2407-0, eq. (1)], column-major.

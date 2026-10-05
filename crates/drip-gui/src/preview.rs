@@ -1,5 +1,6 @@
 //! Linear Rec.2020 images drawn through egui paint callbacks, so they sit in
-//! egui's draw order (popups cover them) while keeping their full gamut.
+//! egui's draw order (nodes and popups cover them) while keeping their full
+//! gamut.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,9 +12,17 @@ use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
 struct Previews {
     pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
-    /// The image each preview last showed and its texture; holding the image
-    /// keeps identity comparisons by pointer sound.
-    uploaded: HashMap<egui::Id, (Arc<Rgb>, wgpu::BindGroup)>,
+    shown: HashMap<egui::Id, Shown>,
+    /// The render target's size in pixels, for the viewport.
+    screen: [u32; 2],
+}
+
+/// One preview's texture and placement. Holding the image keeps identity
+/// comparisons by pointer sound.
+struct Shown {
+    image: Arc<Rgb>,
+    group: wgpu::BindGroup,
+    rect: wgpu::Buffer,
 }
 
 pub fn install(device: &wgpu::Device, renderer: &mut egui_wgpu::Renderer) {
@@ -44,17 +53,20 @@ pub fn install(device: &wgpu::Device, renderer: &mut egui_wgpu::Renderer) {
         min_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
-    renderer.callback_resources.insert(Previews { pipeline, sampler, uploaded: HashMap::new() });
+    let previews = Previews { pipeline, sampler, shown: HashMap::new(), screen: [1, 1] };
+    renderer.callback_resources.insert(previews);
 }
 
-/// A shape drawing `image` stretched over `rect`; `id` names the preview so its
-/// texture is reused while the image is unchanged.
+/// A shape drawing `image` stretched over `rect`, clipped like any other
+/// shape; `id` names the preview so its texture is reused while the image is
+/// unchanged.
 pub fn shape(rect: egui::Rect, id: egui::Id, image: Arc<Rgb>) -> egui::Shape {
-    egui_wgpu::Callback::new_paint_callback(rect, Paint { id, image }).into()
+    egui_wgpu::Callback::new_paint_callback(rect, Paint { id, rect, image }).into()
 }
 
 struct Paint {
     id: egui::Id,
+    rect: egui::Rect,
     image: Arc<Rgb>,
 }
 
@@ -63,64 +75,28 @@ impl CallbackTrait for Paint {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _: &ScreenDescriptor,
+        screen: &ScreenDescriptor,
         _: &mut wgpu::CommandEncoder,
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let previews: &mut Previews = resources.get_mut().expect("installed");
-        if previews.uploaded.get(&self.id).is_some_and(|(image, _)| Arc::ptr_eq(image, &self.image))
-        {
-            return vec![];
+        previews.screen = screen.size_in_pixels;
+        if !previews.shown.get(&self.id).is_some_and(|s| Arc::ptr_eq(&s.image, &self.image)) {
+            let shown = upload(device, queue, previews, &self.image);
+            previews.shown.insert(self.id, shown);
         }
-        let image = &self.image;
-        let size = wgpu::Extent3d {
-            width: image.width as u32,
-            height: image.height as u32,
-            depth_or_array_layers: 1,
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("preview"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba16Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let texels: Vec<u8> = image
-            .pixels
-            .iter()
-            .flat_map(|&[r, g, b]| [r, g, b, 1.0])
-            .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
-            .collect();
-        queue.write_texture(
-            texture.as_image_copy(),
-            &texels,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(size.width * 8),
-                rows_per_image: None,
-            },
-            size,
-        );
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("preview"),
-            layout: &previews.pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        &texture.create_view(&Default::default()),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&previews.sampler),
-                },
-            ],
-        });
-        previews.uploaded.insert(self.id, (self.image.clone(), group));
+        // The rect in normalized device coordinates, y up.
+        let [w, h] = screen.size_in_pixels.map(|v| v as f32);
+        let (min, max) =
+            (self.rect.min * screen.pixels_per_point, self.rect.max * screen.pixels_per_point);
+        let ndc = [
+            min.x / w * 2.0 - 1.0,
+            1.0 - min.y / h * 2.0,
+            max.x / w * 2.0 - 1.0,
+            1.0 - max.y / h * 2.0,
+        ];
+        let bytes: Vec<u8> = ndc.iter().flat_map(|v| v.to_ne_bytes()).collect();
+        queue.write_buffer(&previews.shown[&self.id].rect, 0, &bytes);
         vec![]
     }
 
@@ -131,8 +107,74 @@ impl CallbackTrait for Paint {
         resources: &CallbackResources,
     ) {
         let previews: &Previews = resources.get().expect("installed");
+        // egui narrows the viewport to the visible part of the rect; the
+        // shader places the image itself and the scissor does the clipping.
+        let [w, h] = previews.screen.map(|v| v as f32);
+        pass.set_viewport(0.0, 0.0, w, h, 0.0, 1.0);
         pass.set_pipeline(&previews.pipeline);
-        pass.set_bind_group(0, &previews.uploaded[&self.id].1, &[]);
-        pass.draw(0..3, 0..1);
+        pass.set_bind_group(0, &previews.shown[&self.id].group, &[]);
+        pass.draw(0..6, 0..1);
     }
+}
+
+fn upload(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    previews: &Previews,
+    image: &Arc<Rgb>,
+) -> Shown {
+    let size = wgpu::Extent3d {
+        width: image.width as u32,
+        height: image.height as u32,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("preview"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let texels: Vec<u8> = image
+        .pixels
+        .iter()
+        .flat_map(|&[r, g, b]| [r, g, b, 1.0])
+        .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
+        .collect();
+    queue.write_texture(
+        texture.as_image_copy(),
+        &texels,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(size.width * 8),
+            rows_per_image: None,
+        },
+        size,
+    );
+    let rect = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("preview rect"),
+        size: 16,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let view = texture.create_view(&Default::default());
+    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("preview"),
+        layout: &previews.pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&previews.sampler),
+            },
+            wgpu::BindGroupEntry { binding: 2, resource: rect.as_entire_binding() },
+        ],
+    });
+    Shown { image: image.clone(), group, rect }
 }
