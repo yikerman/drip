@@ -1,8 +1,8 @@
-//! The window's GPU output (DESIGN D2, D6). egui and the previews draw into an
-//! offscreen canvas in egui's gamma encoding, extended beyond [0, 1] for
-//! wide-gamut previews; a final pass converts the canvas for the swapchain. On
-//! an scRGB swapchain the compositor maps the result to the display; otherwise
-//! output is clipped to sRGB.
+//! Each window's GPU output on one shared device (DESIGN D2, D6). egui and the
+//! previews draw into an offscreen canvas in egui's gamma encoding, extended
+//! beyond [0, 1] for wide-gamut previews; a final pass converts the canvas for
+//! the swapchain. On an scRGB swapchain the compositor maps the result to the
+//! display; otherwise output is clipped to sRGB.
 
 use std::sync::Arc;
 
@@ -16,12 +16,42 @@ const CANVAS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// 80 cd/m², as the Vulkan WSI declares it to Wayland.
 const SCRGB_WHITE: f32 = 203.0 / 80.0;
 
-pub struct Display {
+/// The GPU every window draws with.
+#[derive(Clone)]
+pub struct Gpu {
     instance: wgpu::Instance,
-    window: Arc<Window>,
-    surface: wgpu::Surface<'static>,
+    adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
+}
+
+impl Gpu {
+    /// Picks an adapter that can present to `window`; the app's other windows
+    /// are on the same display.
+    pub fn new(window: Arc<Window>) -> Result<Self, String> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let surface = instance.create_surface(window).map_err(|e| e.to_string())?;
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            compatible_surface: Some(&surface),
+            ..Default::default()
+        }))
+        .map_err(|e| e.to_string())?;
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+                .map_err(|e| e.to_string())?;
+        Ok(Gpu { instance, adapter, device, queue })
+    }
+
+    pub fn max_texture_side(&self) -> usize {
+        self.device.limits().max_texture_dimension_2d as usize
+    }
+}
+
+/// One window's output.
+pub struct Display {
+    gpu: Gpu,
+    window: Arc<Window>,
+    surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     /// Whether the swapchain is scRGB, i.e. previews keep their full gamut.
     pub wide_gamut: bool,
@@ -33,19 +63,11 @@ pub struct Display {
 }
 
 impl Display {
-    pub fn new(window: Arc<Window>) -> Result<Self, String> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    pub fn new(gpu: &Gpu, window: Arc<Window>) -> Result<Self, String> {
+        let Gpu { instance, adapter, device, queue } = gpu;
         let size = window.inner_size();
         let surface = instance.create_surface(window.clone()).map_err(|e| e.to_string())?;
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .map_err(|e| e.to_string())?;
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .map_err(|e| e.to_string())?;
-        let caps = surface.get_capabilities(&adapter);
+        let caps = surface.get_capabilities(adapter);
 
         let scrgb =
             caps.color_spaces(CANVAS).contains(wgpu::SurfaceColorSpaces::EXTENDED_SRGB_LINEAR);
@@ -70,10 +92,10 @@ impl Display {
             // vsync; frames beyond the refresh rate are never seen.
             present_mode: wgpu::PresentMode::Fifo,
             ..surface
-                .get_default_config(&adapter, size.width.max(1), size.height.max(1))
+                .get_default_config(adapter, size.width.max(1), size.height.max(1))
                 .ok_or("unsupported surface")?
         };
-        surface.configure(&device, &config);
+        surface.configure(device, &config);
 
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("composite params"),
@@ -106,17 +128,15 @@ impl Display {
             multiview_mask: None,
             cache: None,
         });
-        let canvas = Self::canvas(&device, &config);
-        let composite_group = Self::composite_group(&device, &composite, &canvas, &params);
+        let canvas = Self::canvas(device, &config);
+        let composite_group = Self::composite_group(device, &composite, &canvas, &params);
         let mut egui =
-            egui_wgpu::Renderer::new(&device, CANVAS, egui_wgpu::RendererOptions::default());
-        preview::install(&device, &mut egui);
+            egui_wgpu::Renderer::new(device, CANVAS, egui_wgpu::RendererOptions::default());
+        preview::install(device, &mut egui);
         Ok(Display {
-            instance,
+            gpu: gpu.clone(),
             window,
             surface,
-            device,
-            queue,
             config,
             wide_gamut: scrgb,
             canvas,
@@ -166,19 +186,15 @@ impl Display {
         })
     }
 
-    pub fn max_texture_side(&self) -> usize {
-        self.device.limits().max_texture_dimension_2d as usize
-    }
-
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
         }
         (self.config.width, self.config.height) = (width, height);
-        self.surface.configure(&self.device, &self.config);
-        self.canvas = Self::canvas(&self.device, &self.config);
+        self.surface.configure(&self.gpu.device, &self.config);
+        self.canvas = Self::canvas(&self.gpu.device, &self.config);
         self.composite_group =
-            Self::composite_group(&self.device, &self.composite, &self.canvas, &self.params);
+            Self::composite_group(&self.gpu.device, &self.composite, &self.canvas, &self.params);
     }
 
     /// Draws one frame. Texture changes are applied even if the frame is
@@ -191,7 +207,7 @@ impl Display {
     ) {
         for (id, deltas) in textures.set.drain() {
             for delta in deltas {
-                self.egui.update_texture(&self.device, &self.queue, id, &delta);
+                self.egui.update_texture(&self.gpu.device, &self.gpu.queue, id, &delta);
             }
         }
         let frame = match self.surface.get_current_texture() {
@@ -199,16 +215,16 @@ impl Display {
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => Some(frame),
             wgpu::CurrentSurfaceTexture::Lost => {
                 log::warn!("the surface was lost; recreating it");
-                match self.instance.create_surface(self.window.clone()) {
+                match self.gpu.instance.create_surface(self.window.clone()) {
                     Ok(surface) => self.surface = surface,
                     Err(e) => log::error!("cannot recreate the surface: {e}"),
                 }
-                self.surface.configure(&self.device, &self.config);
+                self.surface.configure(&self.gpu.device, &self.config);
                 None
             }
             other => {
                 log::debug!("skipping a frame: {other:?}");
-                self.surface.configure(&self.device, &self.config);
+                self.surface.configure(&self.gpu.device, &self.config);
                 None
             }
         };
@@ -230,9 +246,14 @@ impl Display {
             size_in_pixels: [self.config.width, self.config.height],
             pixels_per_point,
         };
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        let mut commands =
-            self.egui.update_buffers(&self.device, &self.queue, &mut encoder, jobs, &screen);
+        let mut encoder = self.gpu.device.create_command_encoder(&Default::default());
+        let mut commands = self.egui.update_buffers(
+            &self.gpu.device,
+            &self.gpu.queue,
+            &mut encoder,
+            jobs,
+            &screen,
+        );
         {
             let mut pass = encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -272,7 +293,7 @@ impl Display {
             pass.draw(0..3, 0..1);
         }
         commands.push(encoder.finish());
-        self.queue.submit(commands);
-        self.queue.present(frame);
+        self.gpu.queue.submit(commands);
+        self.gpu.queue.present(frame);
     }
 }

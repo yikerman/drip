@@ -25,7 +25,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::window::{Window, WindowId};
 
 use app::App;
-use display::Display;
+use display::{Display, Gpu};
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -63,8 +63,10 @@ impl ApplicationHandler<WorkerReady> for Shell {
             .with_title("Drip")
             .with_inner_size(winit::dpi::LogicalSize::new(1600, 1000));
         let window = Arc::new(event_loop.create_window(attributes).expect("a window"));
-        let display = match Display::new(window.clone()) {
-            Ok(display) => display,
+        let output =
+            Gpu::new(window.clone()).and_then(|gpu| Ok((Display::new(&gpu, window.clone())?, gpu)));
+        let (display, gpu) = match output {
+            Ok(output) => output,
             Err(e) => {
                 log::error!("cannot set up the display: {e}");
                 event_loop.exit();
@@ -79,7 +81,7 @@ impl ApplicationHandler<WorkerReady> for Shell {
             &window,
             Some(window.scale_factor() as f32),
             None,
-            Some(display.max_texture_side()),
+            Some(gpu.max_texture_side()),
         );
         let wake = self.wake.clone();
         let app = App::new(self.file.take(), display.wide_gamut, move || {
