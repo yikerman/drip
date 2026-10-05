@@ -227,7 +227,8 @@ cloning or comparing the whole graph every frame: edits report changes, while
 changes to the visible target set are tracked separately. A level or parameter
 edit supersedes old work; moving a node without changing visibility does not.
 
-The worker sends completion tagged with its epoch/generation and wakes egui.
+The worker sends completion tagged with its epoch/generation and wakes the
+window loop through a winit user event (3.3.5).
 The UI accepts only the current generation, retains the previous completed view
 while busy, and immediately dispatches the newest pending request when the
 worker finishes. Opening/New increments the epoch so reused node IDs cannot
@@ -267,6 +268,71 @@ and export/reload ordering. Use a deliberately slow test node to prove UI
 callbacks return while computation is blocked elsewhere. Finally measure frame
 time during RAW loading, edits and export, including texture upload and buffer
 retirement; the compute-only benchmark cannot establish UI responsiveness.
+
+### 3.3.5 Worker investigation after manual detail (2026-10-04)
+
+**Tentative; no application worker implemented.** The existing synchronous
+`Evaluator::evaluate(graph, level, targets)` can remain intact. A temporary
+external probe successfully kept an evaluator on a persistent standard thread,
+sent graph snapshots and global levels over channels, and evaluated preview and
+histogram targets at levels 3/2/1/0. No async runtime or node API changes were
+needed. The production adapter must carry explicit target IDs as in 3.3.4;
+there is still one global preview level and one result per node.
+
+The code investigation identifies these integration points:
+
+| Module | Required change |
+|--------|-----------------|
+| `drip-gui::worker` (new) | Own evaluator and preparation cache; receive explicit node-target requests, reload/reset/export commands; emit generation-tagged presentation snapshots and completion/errors. Keep the adapter in the frontend. |
+| `App`, `inspector`, `editor` | Replace direct evaluator reads with the last completed snapshot. Report successful parameter/topology edits, aggregate them after drawing, then submit the latest complete target set and global level. Labels, selection and template-input flags do not affect computation; geometry matters only when visibility changes. |
+| `main` | Use a winit user event to wake the sleeping window loop when a result or worker termination is reported. |
+| `preview`, `views`, editor layout | Consume prepared images and per-node view/error information; avoid sending intermediate output images to the UI. Keep texture upload and draw calls in the renderer. |
+| Export dispatch | Ask the evaluator-owning worker for the graph/resource snapshot after earlier reloads; keep the existing separate export thread. |
+
+`main.rs` currently sleeps in `ControlFlow::Wait` or waits for a frame deadline.
+It neither installs egui's repaint callback nor receives user events. Calling
+`Context::request_repaint` from a worker therefore does not by itself wake this
+integration [16]. Prefer a small `WorkerReady` event sent through
+`EventLoopProxy` after enqueueing the completion [17]; `Shell::user_event`
+requests a redraw, and the frame drains results without blocking. Pass a wake
+callback into the adapter so tests do not need a window. Signal termination on
+both normal exit and panic, otherwise a waiting UI can stay busy indefinitely.
+This avoids polling and does not require a general repaint-callback rewrite.
+
+`editor::layout` reads only a node's view/error, not its output values. A compact
+presentation snapshot is therefore sufficient. Returning whole `NodeResult`s
+would retain unnecessary large images on the UI thread. The worker must retain
+ownership needed to free replaced image buffers off-thread; simply wrapping
+results in Arc does not determine where their last reference is dropped.
+
+The GUI currently converts RGB f32 to RGBA f16 inside `preview::upload` on the UI
+thread. An external release probe copied that exact conversion, including Vec
+allocation, and measured seven repetitions per image. Ryzen 5600G, Sony fixture,
+Rayon with 12 workers for evaluation:
+
+| Global level | RGB pixels | CPU texture preparation, median |
+|--------------|------------|---------------------------------|
+| 3 (1/8) | 165,336 | 1.3 ms |
+| 2 (1/4) | 662,340 | 6.3 ms |
+| 1 (1/2) | 2,649,360 | 21.5 ms |
+| 0 (Full) | 10,597,440 | 118.4 ms |
+
+These measurements exclude driver upload, drawing and buffer destruction; they
+are not measured frame times. They confirm that moving evaluation alone would
+leave a substantial full-detail CPU stall. Prepare the same texture bytes on the
+worker before publishing a view, reusing them for unchanged source images. No
+new conversion algorithm or second compute kernel is needed.
+
+Recommended next implementation: one frontend worker, one in-flight preview
+request plus one replaceable pending request, reliable ordered control commands,
+and explicit completion wake-up. Retain the library API and existing global-level
+cache. Test the scheduler with a blocked synthetic node, including completion
+while the window is idle, target-set replacement, project changes with reused IDs,
+reload/export ordering, and worker termination. Integrate CPU texture preparation
+and buffer retirement before claiming that computation is entirely off the UI.
+RAW pyramid removal remains an independent pending change; it is not necessary
+to establish this worker boundary. Do not add cancellation inside kernels or a
+new async runtime in the initial implementation.
 
 ### 3.4 UI-only nodes and side effects
 
@@ -379,3 +445,7 @@ Spike done (protocol level, see D2). Still to do in M3: verify what is actually 
 [14] Apple, "Porting just-in-time compilers to Apple silicon." [Online]. Available: https://developer.apple.com/documentation/apple-silicon/porting-just-in-time-compilers-to-apple-silicon. Accessed: Oct. 4, 2026.
 
 [15] Rayon contributors, “ParallelIterator,” Rayon 1.12.0 API documentation. [Online]. Available: https://docs.rs/rayon/1.12.0/rayon/iter/trait.ParallelIterator.html. Accessed: Oct. 4, 2026.
+
+[16] egui contributors, “Context::request_repaint,” egui 0.36.2 API documentation. [Online]. Available: https://docs.rs/egui/0.36.2/egui/struct.Context.html#method.request_repaint. Accessed: Oct. 4, 2026.
+
+[17] winit contributors, “EventLoopProxy::send_event,” winit 0.30.13 API documentation. [Online]. Available: https://docs.rs/winit/0.30.13/winit/event_loop/struct.EventLoopProxy.html#method.send_event. Accessed: Oct. 4, 2026.

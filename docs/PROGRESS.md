@@ -2,6 +2,13 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: investigate the async worker
+
+- After committing manual global detail as `ec2fa58`, traced evaluation ownership, UI edit paths, presentation data and the window loop. The library API can stay synchronous and unchanged; the adapter belongs in `drip-gui`, with explicit target IDs and the single global preview level.
+- Found that the current window loop has no background wake-up bridge. An egui repaint request alone cannot wake this integration. Proposed a winit `WorkerReady` user event following result enqueueing, with notifications on worker termination as well; verified the pinned egui/winit sources and documentation.
+- A temporary probe outside the repository ran the existing evaluator on a persistent std thread through all four measured levels. It also measured the exact current RGB f32→RGBA f16 preparation: median 1.3/6.3/21.5/118.4 ms at levels 3/2/1/0 over seven release repetitions. This excludes GPU upload/drawing and confirms preparation must also move off the UI. The probe is not committed.
+- Recorded concrete module boundaries and remaining validation in DESIGN 3.3.5; updated TODO. No worker, scheduler or cache implementation changes. Diff checks pass; the preceding global-detail commit passed all 68 workspace tests, formatting and clippy.
+
 ## 2026-10-04: manual global preview detail
 
 - Implemented the global Preview detail selector (Full through 1/256, default 1/8), persisted as `Project::ui.preview_level`. Invalid saved levels fail at project loading without replacing the current project. New projects return to the default.
