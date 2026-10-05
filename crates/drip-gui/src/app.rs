@@ -478,7 +478,9 @@ mod tests {
         settle(&mut h);
         let app = h.state();
         assert!(app.file.as_ref() == Some(&file));
-        assert!(has_view(app, "preview") && has_view(app, "histogram"));
+        for name in ["preview", "histogram", "waveform", "vectorscope"] {
+            assert!(has_view(app, name), "{name}");
+        }
         let id = app.project.graph.find("preview").unwrap();
         let Some(View::Image(image)) = app.worker.result(id).unwrap().as_ref().unwrap().clone()
         else {
@@ -699,7 +701,10 @@ mod tests {
             graph.nodes().filter(|(_, n)| !n.kind.params.is_empty()).map(|(id, _)| id).collect();
         let viewers: Vec<_> = graph
             .nodes()
-            .filter(|(_, n)| [&nodes::PREVIEW, &nodes::HISTOGRAM].contains(&n.kind))
+            .filter(|(_, n)| {
+                [&nodes::PREVIEW, &nodes::HISTOGRAM, &nodes::WAVEFORM, &nodes::VECTORSCOPE]
+                    .contains(&n.kind)
+            })
             .map(|(id, _)| id)
             .collect();
         assert_eq!(h.get_all_by_label("⚙").count(), with_params.len());

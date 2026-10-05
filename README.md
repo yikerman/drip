@@ -47,9 +47,9 @@ Exposure adjusts scene brightness independently of sigmoid's contrast, skew and
 hue preservation. Sigmoid's panel plots the same curve used for processing.
 Exports support 16-bit integer or float TIFF, with sRGB, Display P3, Rec.2020 or
 a suitable custom RGB ICC profile. Preview nodes accept scene/display Rec.2020;
-histograms and RGB waveforms also accept camera RGB. Add waveform or vectorscope
-nodes from the node menu to inspect exposure across image columns or D65-centered
-u′v′ chromaticity. Waveform levels use EV; vectorscope markers show Rec.2020
+histograms and RGB waveforms also accept camera RGB. The default template includes
+histogram, waveform and vectorscope probes after sigmoid. These inspect exposure
+distribution, exposure across image columns and D65-centered u′v′ chromaticity. Waveform levels use EV; vectorscope markers show Rec.2020
 primaries. Black has no chromaticity, and negative channels are clipped for the
 vectorscope visualization only.
 

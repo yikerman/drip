@@ -4,6 +4,13 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: default probes
+
+- New projects include histogram, waveform and vectorscope after sigmoid, beside
+  the preview. Existing saved projects retain their own graphs.
+- All 17 GUI tests passed, including real RAW probe evaluation and pop-outs;
+  formatting and workspace clippy passed.
+
 ## 2026-10-05: vectorscope color
 
 - Color density bins by chromaticity, with white neutrals and brightness tied

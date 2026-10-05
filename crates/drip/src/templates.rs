@@ -8,7 +8,7 @@ use crate::nodes::*;
 use crate::project::Project;
 
 /// The prototype pipeline, laid out for the editor: the processing chain on
-/// the left, a 3:2 preview beside its end and the histogram beyond that, the
+/// the left, a 3:2 preview beside its end and three scopes beyond that, the
 /// exporter under the chain. Its inputs are the raw reader's path and the
 /// exporter's path; the output profile defaults to sRGB.
 pub fn raw_to_tiff() -> Project {
@@ -28,6 +28,8 @@ pub fn raw_to_tiff() -> Project {
     let sinks = [
         add(&PREVIEW, json!({"pos":[end+195.0,0.0],"size":[672.0,440.0]})),
         add(&HISTOGRAM, json!({"pos":[end+887.0,0.0],"size":[320.0,240.0]})),
+        add(&WAVEFORM, json!({"pos":[end+887.0,300.0],"size":[320.0,240.0]})),
+        add(&VECTORSCOPE, json!({"pos":[end+1227.0,0.0],"size":[320.0,320.0]})),
         add(&TIFF, json!({"pos":[end,80.0]})),
     ];
     for i in 1..chain.len() {
