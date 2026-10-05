@@ -6,6 +6,7 @@ Newest first. Each entry: what happened, what is verified, what is next.
 
 - Histogram nodes take `min_ev` and `max_ev` (G12); the plot labels 0 EV, and its labels use the editor's zoomed port font. Projects saved before this lack the two parameters and no longer load (F6, no migration).
 - The empty region above 0 EV is not clipping: the template's histogram reads the sigmoid output, which maps scene values into [0, 1).
+- Integer parameters get the same slider as floats in the inspector instead of a drag value.
 - A `scale` parameter plots counts linearly or on a log scale (default), replacing the square root; the choice travels in `Histogram::log`.
 - Verification: workspace tests (including custom bounds and scale), formatting and clippy pass; the user checked the GUI.
 

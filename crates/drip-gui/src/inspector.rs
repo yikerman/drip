@@ -96,7 +96,7 @@ fn edit_value(ui: &mut Ui, id: egui::Id, kind: &ParamKind, value: &Json) -> Opti
         }
         ParamKind::Int { min, max, .. } => {
             let mut v = value.as_i64().expect("validated int");
-            ui.add(egui::DragValue::new(&mut v).range(min..=max)).changed().then(|| json!(v))
+            ui.add(egui::Slider::new(&mut v, min..=max)).changed().then(|| json!(v))
         }
         ParamKind::Bool { .. } => {
             let mut v = value.as_bool().expect("validated bool");
