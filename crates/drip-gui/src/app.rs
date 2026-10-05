@@ -298,7 +298,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use crate::worker::PreparedView as View;
+    use crate::views::PreparedView as View;
     use drip::param::ParamKind;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;

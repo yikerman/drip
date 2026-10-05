@@ -6,20 +6,8 @@ use std::thread;
 
 use drip::eval::{Evaluator, NodeError};
 use drip::graph::{Graph, NodeId};
-use drip::value::{Histogram, Rgb, View};
 
-/// Pixels are packed on the worker; the renderer only uploads them.
-pub struct Image {
-    pub width: usize,
-    pub height: usize,
-    pub texels: Vec<u8>,
-}
-
-#[derive(Clone)]
-pub enum PreparedView {
-    Image(Arc<Image>),
-    Histogram(Arc<Histogram>),
-}
+use crate::views::{Prepared, PreparedView};
 
 pub type Presentation = Result<Option<PreparedView>, NodeError>;
 type Snapshot = BTreeMap<NodeId, Presentation>;
@@ -215,36 +203,6 @@ impl Drop for Worker {
     }
 }
 
-#[derive(Default)]
-struct Prepared(Vec<(Arc<Rgb>, Arc<Image>)>);
-
-impl Prepared {
-    fn view(&mut self, view: &View) -> PreparedView {
-        match view {
-            View::Histogram(histogram) => PreparedView::Histogram(histogram.clone()),
-            View::Image(value) => {
-                let source = value.rgb();
-                if let Some((_, image)) = self.0.iter().find(|(rgb, _)| Arc::ptr_eq(rgb, source)) {
-                    return PreparedView::Image(image.clone());
-                }
-                let texels = source
-                    .pixels
-                    .iter()
-                    .flat_map(|&[r, g, b]| [r, g, b, 1.0])
-                    .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
-                    .collect();
-                let image = Arc::new(Image { width: source.width, height: source.height, texels });
-                self.0.push((source.clone(), image.clone()));
-                PreparedView::Image(image)
-            }
-        }
-    }
-
-    fn collect(&mut self) {
-        self.0.retain(|(_, image)| Arc::strong_count(image) > 1);
-    }
-}
-
 fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
     let mut evaluator = Evaluator::default();
     let mut prepared = Prepared::default();
@@ -292,7 +250,7 @@ mod tests {
     use drip::node::{Action, Evaluated, InputSpec, NodeKind, OutputSpec};
     use drip::nodes;
     use drip::param::{ParamKind, ParamSpec};
-    use drip::value::{PortType, Value};
+    use drip::value::{PortType, Rgb, Value};
     use serde_json::json;
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
@@ -520,34 +478,6 @@ mod tests {
         assert_eq!(pixel(&worker, preview), [3.0, 8.0, 0.0, 1.0]);
         std::fs::remove_file(input).unwrap();
         std::fs::remove_file(output).unwrap();
-    }
-
-    #[test]
-    fn preparation_reuses_images_and_keeps_destruction_on_its_owner() {
-        let source =
-            Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[-1.0, 0.5, 2.0]] });
-        let raw = Arc::downgrade(&source);
-        let view = View::Image(Value::DisplayRec2020(source));
-        let mut prepared = Prepared::default();
-        let PreparedView::Image(first) = prepared.view(&view) else { panic!("image") };
-        let PreparedView::Image(second) = prepared.view(&view) else { panic!("image") };
-        assert!(Arc::ptr_eq(&first, &second));
-        assert_eq!(
-            first.texels,
-            [0xbc00u16, 0x3800, 0x4000, 0x3c00]
-                .into_iter()
-                .flat_map(u16::to_ne_bytes)
-                .collect::<Vec<_>>()
-        );
-        let pixels = Arc::downgrade(&first);
-        drop(view);
-        drop(first);
-        prepared.collect();
-        assert!(raw.upgrade().is_some(), "renderer still owns the prepared image");
-        drop(second);
-        assert!(pixels.upgrade().is_some(), "the worker owns final destruction");
-        prepared.collect();
-        assert!(pixels.upgrade().is_none() && raw.upgrade().is_none());
     }
 
     #[test]

@@ -1,10 +1,47 @@
-//! Drawing node views (DESIGN U1) into a rectangle of the editor.
+//! Node views (DESIGN U1): prepared for drawing on the worker, then drawn into
+//! a rectangle of the editor.
 
-use crate::worker::PreparedView;
-use drip::value::Histogram;
+use std::sync::Arc;
+
+use drip::value::{Histogram, Rgb, View};
 use egui::{Align2, FontId, Painter, Rect, Stroke};
 
-use crate::{preview, theme};
+use crate::preview::{self, Image};
+use crate::theme;
+
+/// A view in the form the UI thread draws without further CPU work.
+#[derive(Clone)]
+pub enum PreparedView {
+    Image(Arc<Image>),
+    Histogram(Arc<Histogram>),
+}
+
+/// Prepared images by source, so an unchanged image is packed once. The owner
+/// keeps every image until nothing else does, so the last drop happens there.
+#[derive(Default)]
+pub struct Prepared(Vec<(Arc<Rgb>, Arc<Image>)>);
+
+impl Prepared {
+    pub fn view(&mut self, view: &View) -> PreparedView {
+        match view {
+            View::Histogram(histogram) => PreparedView::Histogram(histogram.clone()),
+            View::Image(value) => {
+                let source = value.rgb();
+                if let Some((_, image)) = self.0.iter().find(|(rgb, _)| Arc::ptr_eq(rgb, source)) {
+                    return PreparedView::Image(image.clone());
+                }
+                let image = Arc::new(Image::new(source));
+                self.0.push((source.clone(), image.clone()));
+                PreparedView::Image(image)
+            }
+        }
+    }
+
+    /// Drops the images no one else holds.
+    pub fn collect(&mut self) {
+        self.0.retain(|(_, image)| Arc::strong_count(image) > 1);
+    }
+}
 
 /// Draws `view` fitted into `rect`.
 pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &PreparedView) {
@@ -40,4 +77,39 @@ fn histogram(painter: &Painter, rect: Rect, h: &Histogram) {
     let label = |at, align, text: String| painter.text(at, align, text, font.clone(), theme::WEAK);
     label(rect.left_bottom(), Align2::LEFT_BOTTOM, format!("{} EV", h.min_stop));
     label(rect.right_bottom(), Align2::RIGHT_BOTTOM, format!("+{} EV", h.max_stop));
+}
+
+#[cfg(test)]
+mod tests {
+    use drip::value::Value;
+
+    use super::*;
+
+    #[test]
+    fn preparation_reuses_images_and_keeps_destruction_on_its_owner() {
+        let source =
+            Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[-1.0, 0.5, 2.0]] });
+        let raw = Arc::downgrade(&source);
+        let view = View::Image(Value::DisplayRec2020(source));
+        let mut prepared = Prepared::default();
+        let PreparedView::Image(first) = prepared.view(&view) else { panic!("image") };
+        let PreparedView::Image(second) = prepared.view(&view) else { panic!("image") };
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(
+            first.texels,
+            [0xbc00u16, 0x3800, 0x4000, 0x3c00]
+                .into_iter()
+                .flat_map(u16::to_ne_bytes)
+                .collect::<Vec<_>>()
+        );
+        let pixels = Arc::downgrade(&first);
+        drop(view);
+        drop(first);
+        prepared.collect();
+        assert!(raw.upgrade().is_some(), "renderer still owns the prepared image");
+        drop(second);
+        assert!(pixels.upgrade().is_some(), "the owner does the final destruction");
+        prepared.collect();
+        assert!(pixels.upgrade().is_none() && raw.upgrade().is_none());
+    }
 }

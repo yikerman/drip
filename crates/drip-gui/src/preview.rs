@@ -5,8 +5,28 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::worker::Image;
+use drip::value::Rgb;
 use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
+
+/// An image packed as `Rgba16Float` texels. Packing is CPU work, done off the
+/// UI thread; the renderer only uploads the bytes.
+pub struct Image {
+    pub width: usize,
+    pub height: usize,
+    pub texels: Vec<u8>,
+}
+
+impl Image {
+    pub fn new(rgb: &Rgb) -> Self {
+        let texels = rgb
+            .pixels
+            .iter()
+            .flat_map(|&[r, g, b]| [r, g, b, 1.0])
+            .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
+            .collect();
+        Image { width: rgb.width, height: rgb.height, texels }
+    }
+}
 
 /// GPU state shared by all previews, kept in egui's callback resources.
 struct Previews {

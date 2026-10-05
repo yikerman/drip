@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: GUI decoupling
+
+- Moved view preparation out of `worker`: `preview::Image` packs `Rgba16Float` texels next to the upload that consumes them, and `views` owns `PreparedView` and the prepared-image cache. The worker still runs preparation and owns the cache; it is now only the mailbox and evaluator host.
+- Verification: all 11 GUI tests, formatting and clippy pass.
+
 ## 2026-10-04: consume the export evaluator
 
 - `run_action` consumes its evaluator, using its resource store and a fresh temporary node cache. The worker forks once before dispatch; removed the second fork inside the action. Standalone actions need no fork.

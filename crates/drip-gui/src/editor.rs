@@ -4,7 +4,8 @@
 //! the canvas pans and zooms over them. Nodes whose result has a view draw it
 //! in their body and can be resized.
 
-use crate::worker::{PreparedView, Presentation};
+use crate::views::PreparedView;
+use crate::worker::Presentation;
 use drip::eval::NodeError;
 use drip::graph::{Graph, Node, NodeId, Port};
 use drip::node::Registry;
