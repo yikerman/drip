@@ -1,4 +1,4 @@
-//! The node editor (DESIGN G1, G7, G13): the main canvas. It draws straight from
+//! The node editor: the main canvas. It draws straight from
 //! the graph and edits it only through the graph's validated operations. Node
 //! positions and sizes live in each node's opaque `ui` field, in graph units.
 //! The canvas is an egui layer that egui transforms to pan and zoom, so

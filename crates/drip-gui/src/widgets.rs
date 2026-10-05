@@ -1,4 +1,4 @@
-//! Widgets node GUIs and the editor's frame share (DESIGN G13), in the units
+//! Widgets node GUIs and the editor's frame share, in the units
 //! of the `Ui` they are drawn into.
 
 use egui::{Pos2, Rect, Sense, Stroke, Ui, Vec2};

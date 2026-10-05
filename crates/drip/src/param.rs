@@ -14,7 +14,7 @@ pub struct ParamSpec {
     pub name: &'static str,
     pub kind: ParamKind,
     /// Whether new nodes expose the parameter as an input of their template,
-    /// i.e. expect a value per image (DESIGN F7). Users can change it per node.
+    /// i.e. expect a value per image. Users can change it per node.
     pub external: bool,
 }
 

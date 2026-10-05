@@ -35,7 +35,7 @@ pub fn rgb_to_xyz(primaries: [[f64; 2]; 3], white: [f64; 2]) -> Mat3 {
 
 /// The dcraw camera matrix [3]: maps white-balanced camera RGB to linear RGB
 /// with the given RGB-to-XYZ matrix, such that camera neutral (1, 1, 1) maps
-/// to the RGB white. This is the only chromatic adaptation applied (DESIGN C3).
+/// to the RGB white. This is the only chromatic adaptation applied.
 /// `None` if the camera matrix is degenerate.
 ///
 /// [3] D. Coffin, "dcraw.c," `cam_xyz_coeff()`. [Online]. Available:

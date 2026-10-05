@@ -1,4 +1,4 @@
-//! Each window's GPU output on one shared device (DESIGN D2, D6). egui and the
+//! Each window's GPU output on one shared device. egui and the
 //! previews draw into an offscreen canvas in egui's gamma encoding, extended
 //! beyond [0, 1] for wide-gamut previews; a final pass converts the canvas for
 //! the swapchain. On an scRGB swapchain the compositor maps the result to the

@@ -1,4 +1,4 @@
-//! One neutral style for the whole UI (DESIGN G5): everything sits on middle
+//! One neutral style for the whole UI: everything sits on middle
 //! grey, the standard surround for judging color, with no shadows, rounding or
 //! strokes beyond what is needed to tell elements apart.
 

@@ -1,6 +1,6 @@
 //! Interactive frontend for building and tuning node graphs: winit windows,
 //! wgpu output and egui widgets over the drip library. The main window holds
-//! the editor; popped-out nodes get windows of their own (DESIGN G13).
+//! the editor; popped-out nodes get windows of their own.
 //!
 //!     drip-gui [project.drip]
 //!

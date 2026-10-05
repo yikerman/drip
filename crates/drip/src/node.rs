@@ -1,4 +1,4 @@
-//! Node kinds: the static behavior behind graph nodes (DESIGN N1). A graph node
+//! Node kinds: the static behavior behind graph nodes. A graph node
 //! is data plus a reference to its kind; everything a kind does lives here.
 
 use std::collections::BTreeMap;
@@ -16,9 +16,9 @@ pub struct NodeKind {
     pub inputs: &'static [InputSpec],
     pub outputs: &'static [OutputSpec],
     /// Must be deterministic and free of side effects: results are cached by
-    /// dependency stamp (DESIGN E2). Errors are user-facing messages.
+    /// dependency stamp. Errors are user-facing messages.
     pub eval: fn(Params, &[Value], &EvalContext) -> Result<Evaluated, String>,
-    /// Side effects, run only on explicit request (DESIGN U2).
+    /// Side effects, run only on explicit request.
     pub actions: &'static [Action],
 }
 

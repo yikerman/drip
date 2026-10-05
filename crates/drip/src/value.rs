@@ -110,7 +110,7 @@ impl Cfa {
     }
 }
 
-/// How to interpret a camera's RGB (DESIGN P3).
+/// How to interpret a camera's RGB.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Camera {
     /// CIE XYZ (D65) to camera RGB.
@@ -119,7 +119,7 @@ pub struct Camera {
     pub white_balance: [f32; 4],
 }
 
-/// What a node presents to frontends besides its ports (DESIGN U1).
+/// What a node presents to frontends besides its ports.
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
     Image(Value),

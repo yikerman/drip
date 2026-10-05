@@ -1,4 +1,4 @@
-//! Node views (DESIGN U1): prepared for drawing on the worker, then drawn into
+//! Node views: prepared for drawing on the worker, then drawn into
 //! a rectangle of a node's body or window.
 
 use std::sync::Arc;

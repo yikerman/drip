@@ -28,12 +28,12 @@ pub struct App {
     file: Option<PathBuf>,
     selected: Option<NodeId>,
     editor: Editor,
-    /// One user-selected level for every preview target (DESIGN E16).
+    /// One user-selected level for every preview target.
     level: u8,
     status: Option<Status>,
     action: Option<&'static str>,
     wide_gamut: bool,
-    /// Parts of nodes shown in their own windows (DESIGN G13); not saved.
+    /// Parts of nodes shown in their own windows; not saved.
     popped: BTreeSet<Popped>,
     /// Whether the windows need redrawing because what they show changed.
     redraw: bool,

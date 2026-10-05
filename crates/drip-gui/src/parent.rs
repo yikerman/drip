@@ -1,4 +1,4 @@
-//! Pop-outs as children of the main window (DESIGN G13): the window manager
+//! Pop-outs as children of the main window: the window manager
 //! keeps a child above its parent and minimizes it with it. winit has no
 //! parent windows on Wayland, so Drip sends `xdg_toplevel.set_parent` itself,
 //! on winit's connection. Other platforms are not handled yet (TODO).

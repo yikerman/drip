@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use std::sync::Arc;
 
 /// Naive debayering: each 2 × 2 Bayer cell becomes one pixel, averaging its
-/// two greens. Halves the resolution (DESIGN C6).
+/// two greens. Halves the resolution.
 pub static BIN_2X2: NodeKind = NodeKind {
     name: "demosaic.bin2x2",
     label: "debayer",

@@ -1,4 +1,4 @@
-//! Pull-based evaluation (DESIGN E1-E3, E6, U2). Frontends request target
+//! Pull-based evaluation. Frontends request target
 //! nodes; only those and their ancestors are evaluated, in dependency order.
 //! A node is recomputed only when its dependency stamp changes: a hash of
 //! its kind, parameters, level and the stamps of its sources. Files stay cached

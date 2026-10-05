@@ -1,4 +1,4 @@
-//! `raw.read`: decodes a raw file into a normalized mosaic (DESIGN C2, E5).
+//! `raw.read`: decodes a raw file into a normalized mosaic.
 
 use std::sync::Arc;
 

@@ -1,4 +1,4 @@
-//! TIFF export with an embedded output profile (DESIGN C5).
+//! TIFF export with an embedded output profile.
 
 use std::borrow::Cow;
 use std::io::Cursor;

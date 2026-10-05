@@ -4,6 +4,13 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: stale design references
+
+- Removed obsolete numbered design references from source comments after the
+  design compaction; retained their self-contained explanations.
+- Checked for remaining numbered references and verified formatting. Comments
+  only; runtime behavior is unchanged.
+
 ## 2026-10-05: workflow README and demo
 
 - Rewrote the README as a product introduction: photographic workflow first,

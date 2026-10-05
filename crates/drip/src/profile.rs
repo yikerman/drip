@@ -1,4 +1,4 @@
-//! Built-in ICC output profiles (DESIGN C7), so the common cases need no
+//! Built-in ICC output profiles, so the common cases need no
 //! profile file. Each is a matrix/shaper profile on D65 primaries.
 
 use lcms2::{CIExyY, CIExyYTRIPLE, Locale, MLU, Profile, Tag, TagSignature, ToneCurve};

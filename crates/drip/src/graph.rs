@@ -26,7 +26,7 @@ pub struct Node {
     /// A valid value for every parameter of the kind.
     pub params: ParamMap,
     /// Parameters exposed as inputs of the template: they take a value per
-    /// image and are cleared when saving as a template (DESIGN F7).
+    /// image and are cleared when saving as a template.
     pub external: BTreeSet<&'static str>,
     /// Opaque frontend state such as the node's position.
     pub ui: Json,

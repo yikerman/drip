@@ -1,4 +1,4 @@
-//! Projects and their file format (DESIGN F1, F2, F6, F7). A template is a
+//! Projects and their file format. A template is a
 //! graph whose external parameters are its inputs; a project is the same
 //! graph with those parameters filled in. Both are saved in the same format,
 //! defined here by private types so the in-memory model can change freely.
@@ -16,7 +16,7 @@ const FORMAT: &str = "drip";
 
 /// Files carry the major version of the crate that wrote them, and only that
 /// major version reads them. The prototype keeps no compatibility otherwise:
-/// a file must match exactly what this build writes (DESIGN F6).
+/// a file must match exactly what this build writes.
 const VERSION: u32 = match u32::from_str_radix(env!("CARGO_PKG_VERSION_MAJOR"), 10) {
     Ok(major) => major,
     Err(_) => panic!("the crate's major version is a number"),
