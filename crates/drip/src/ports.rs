@@ -1,15 +1,7 @@
-//! Typed port requirements and tuple adapters. Only this boundary erases types;
-//! kernels receive concrete borrows or the capability their signature requests.
-//!
-//! `Read<SceneRec2020>` requires an exact semantic type, whereas
-//! `Read<dyn LinearThreeChannelMatrix>` accepts any registered exposure-linear
-//! image. Both generate a connection predicate and the matching input borrow.
-//! Graph validation checks the predicate before evaluation; adapters can then
-//! trust it instead of repeating fallible type switches inside every node.
-//!
-//! Tuple order determines socket order and evaluator argument order together.
-//! The GUI obtains the same requirements from `NodeKind`, so adding a payload
-//! that implements a capability does not require editing its consumers.
+//! Port requirements and tuple adapters. `Read<SceneRec2020>` asks for an exact
+//! type; `Read<dyn LinearThreeChannelMatrix>` asks for a capability. Both derive
+//! connection checks and input borrows from the same evidence, so kernels need
+//! no fallible type switches. Tuple order defines socket and argument order.
 
 use crate::image::{
     ColorspaceRgbMatrix, LinearThreeChannelMatrix, Rec2020, RgbIn, ThreeChannelMatrix,

@@ -1,8 +1,18 @@
-//! Pull-based evaluation. Frontends request target
-//! nodes; only those and their ancestors are evaluated, in dependency order.
-//! A node is recomputed only when its dependency stamp changes: a hash of
-//! its kind, parameters, level and the stamps of its sources. Files stay cached
-//! until the frontend replaces the evaluator.
+//! Pull-based evaluation and node-result caching. Only requested targets and
+//! their ancestors run, in dependency order.
+//!
+//! Follow [`Evaluator::evaluate`] into `Evaluator::run`, then `Cache::stamp` in
+//! the source. The cache holds one result (including failures) per node ID. Its
+//! dependency stamp hashes kind, parameters, preview level, input names, source
+//! ports and upstream stamps. Matching stamps reuse results without inspecting
+//! pixels; changed stamps propagate recomputation through descendants. This
+//! relies on the laws of [`crate::node::NodeKernel`] and [`crate::value::EdgeValue`].
+//!
+//! [`crate::resource::Resources`] separately caches decoded files by path and
+//! payload type. [`Evaluator::fork`] shares these files with an empty node cache.
+//! [`Evaluator::run_action`] evaluates inputs at full detail, dropping intermediates
+//! after their last consumer; the action itself is never cached. Neither cache
+//! watches the filesystem: changed files need explicit resource invalidation.
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};

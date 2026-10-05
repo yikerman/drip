@@ -2,6 +2,11 @@
 //! wgpu output and egui widgets over the drip library. The main window holds
 //! the editor; popped-out nodes get windows of their own.
 //!
+//! `app.rs` owns the project, `editing.rs` applies edits and their effects, and
+//! `worker.rs` schedules background evaluation. `editor.rs`, `inspector.rs` and
+//! `node_ui/` handle interaction; `views.rs`, `preview.rs` and `display.rs` prepare
+//! and render results. This module owns OS windows and the event loop.
+//!
 //!     drip-gui [project.drip]
 //!
 //! Logging goes to stderr; `RUST_LOG=debug` shows evaluation and frame

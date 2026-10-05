@@ -5,7 +5,7 @@
 //! | Contract | Promise | Consumer |
 //! |----------|---------|----------|
 //! | [`ThreeChannelMatrix`] | Three samples per pixel and image geometry | Channel access |
-//! | [`LinearThreeChannelMatrix`] | Samples scale with exposure | Histogram, waveform |
+//! | [`LinearThreeChannelMatrix`] | Samples scale with represented light | Histogram, waveform |
 //! | [`ColorspaceRgbMatrix`] | A declared linear RGB basis with a D65 XYZ transform | Vectorscope |
 //! | [`RgbIn<Rec2020>`] | That basis is specifically Rec.2020 | Preview shader |
 //!
@@ -14,11 +14,9 @@
 //! requires the former and export requires the latter. Sharing a capability
 //! does not make the concrete types interchangeable or perform a conversion.
 //!
-//! Like typeclass laws, the semantic laws below are obligations on implementers,
-//! not proofs provided by trait bounds. Rust checks that methods and instances
-//! exist; it cannot establish that pixels are linear or a matrix describes them.
-//! Constructors and processing kernels must preserve these laws. Registration
-//! exposes that assertion to the graph; it does not validate the pixel data.
+//! Like typeclass laws, the laws below are implementer obligations. Rust checks
+//! signatures, not whether pixels are linear or a matrix describes them.
+//! Constructors and kernels must preserve these laws; registration asserts them.
 //!
 //! The base trait deliberately avoids “tristimulus”: camera channels need not
 //! determine CIE XYZ uniquely. An exact linear camera-to-XYZ relation requires
@@ -122,9 +120,8 @@ pub trait ThreeChannelMatrix: Send + Sync {
 /// above-one values remain permitted; this contract does not assert a gamut.
 pub trait LinearThreeChannelMatrix: ThreeChannelMatrix {}
 
-/// A declared RGB interpretation, sufficient to compute chromaticity.
-/// This promises the meaning of the stored coordinates, not the accuracy of
-/// an earlier camera characterization or that every value is displayable.
+/// A declared RGB interpretation for chromaticity, without promising camera
+/// characterization accuracy or displayability.
 ///
 /// # Laws
 /// `color_space().to_xyz_d65 * rgb` gives XYZ in the common D65 frame, using the
@@ -136,20 +133,16 @@ pub trait ColorspaceRgbMatrix: LinearThreeChannelMatrix {
     fn color_space(&self) -> &LinearRgbColorSpace;
 }
 
-/// The exact linear RGB basis, independent of scene/display reference.
-/// `C` identifies the basis. This extra constraint protects consumers such as
-/// the preview shader whose coefficients assume one particular color space.
+/// A specific RGB basis `C`, for consumers with fixed coefficients such as the
+/// preview shader. Scene/display reference remains independent.
 ///
 /// # Laws
-/// The returned color-space definition and the pixels must agree with the basis
-/// promised by `C`. In particular, `RgbIn<Rec2020>` must use Rec.2020/D65, never
-/// merely another three-channel RGB space. Implementing this marker does not
-/// perform the conversion, and says nothing about scene/display reference.
+/// Pixels and their color-space definition must agree with `C`'s promised basis:
+/// `RgbIn<Rec2020>` means Rec.2020/D65. The marker performs no conversion.
 pub trait RgbIn<C>: ColorspaceRgbMatrix {}
 
-/// A linear RGB interpretation in a common D65 XYZ frame. A non-D65 source
-/// must include its chromatic adaptation in this transform. Primary markers
-/// are derived from its columns rather than maintained separately.
+/// The transform required by [`ColorspaceRgbMatrix`]. Primary markers come from
+/// its columns so a separate primary definition cannot drift out of sync.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearRgbColorSpace {
     pub name: &'static str,

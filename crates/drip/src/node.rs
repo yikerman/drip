@@ -1,16 +1,9 @@
-//! Typed kernels and their runtime descriptors for an editable graph.
+//! Typed kernels and runtime descriptions for an editable graph.
 //!
-//! A kernel's input/output tuples are the source of truth. `NodeKind::new`
-//! derives socket contracts and evaluator adapters from them; names only label
-//! tuple positions. Rust checks the kernel's returned types, while the graph
-//! checks user-created connections at runtime, before any pixels are computed.
-//!
-//! The evaluator remains heterogeneous: it follows graph dependencies, borrows
-//! cached `Value`s through the input tuple, calls the kernel, then erases the
-//! output tuple for storage. This boundary lets typed kernels coexist in an
-//! editable DAG without changing dependency stamps or cache retention rules.
-//! Optional [`View`] data is presentation, not another graph output; its own
-//! types protect frontend assumptions such as the preview shader's RGB basis.
+//! `NodeKind::new` derives port contracts and evaluator adapters from a kernel's
+//! tuples; names only label positions. Rust checks returned types, while the
+//! graph checks user-created connections before evaluation. Optional [`View`]
+//! data has its own presentation contract and is not a graph output.
 
 use crate::param::{ParamSpec, Params};
 use crate::ports::{InputRequirement, InputTuple, OutputTuple};

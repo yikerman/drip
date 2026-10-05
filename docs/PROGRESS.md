@@ -4,6 +4,15 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: code documentation entry point
+
+- Added library design intent and a reading order through the type, graph and
+  evaluator modules. The frontend source map lives in drip-gui's crate docs.
+  Explained node-result and decoded-file cache lifetimes. README links both guides;
+  trimmed repetition and housekeeping prose for readers familiar with Rust and
+  imaging, retaining the semantic laws beside their traits.
+- Rustdoc with warnings denied, formatting and diff checks passed. Docs only.
+
 ## 2026-10-05: typed graph contracts
 
 - Node input/output tuples now derive connection contracts and evaluator/action

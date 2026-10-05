@@ -1,11 +1,8 @@
 //! Shared edge payloads and the capability evidence retained after type erasure.
 //!
-//! An editable graph contains heterogeneous nodes and is loaded before images
-//! exist. It therefore needs both a runtime description for checking connections
-//! and an erased value for caching results. These are two uses of the same
-//! [`EdgeValue::TYPE`] declaration, rather than independent port/value enums.
-//! [`Describe`] builds the evidence used by both compatibility checks and input
-//! borrowing; a node never maintains a second list of accepted image variants.
+//! Connections are checked before images exist; cached values are heterogeneous.
+//! Both use [`EdgeValue::TYPE`]: [`Describe`] builds the evidence for connection
+//! checks and input borrowing from one declaration.
 //!
 //! Rust's `Any` can recover a concrete type, but cannot discover which other
 //! traits it implements. Capability registration is the explicit bridge: adding

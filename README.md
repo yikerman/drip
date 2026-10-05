@@ -150,7 +150,10 @@ Drip is written in Rust, with Rayon for processing and wgpu/egui for the GUI.
 The processing library is independent of the interface. Several algorithms
 come from darktable; sources and credits are in [THIRD_PARTY.md](THIRD_PARTY.md).
 
-For development, see [DESIGN](docs/DESIGN.md) for decisions and
+For development, see the [library design and reading guide](crates/drip/src/lib.rs)
+and [GUI overview](crates/drip-gui/src/main.rs).
+Build its linked API docs with `cargo doc -p drip --no-deps`.
+See [DESIGN](docs/DESIGN.md) for decisions and
 [PROGRESS](docs/PROGRESS.md) for the current handoff. Run the tests with:
 
 ```sh
