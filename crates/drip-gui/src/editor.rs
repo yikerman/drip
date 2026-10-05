@@ -60,15 +60,25 @@ impl Editor {
         selected: &mut Option<NodeId>,
         frame: &mut Frame,
     ) {
-        let (area, background) =
-            ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+        let (area, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
         let offset = self.offset.get_or_insert_with(|| {
             let (offset, zoom) = fit(graph, area);
             self.zoom = zoom;
             offset
         });
+        // The canvas is its own background, so the nodes drawn on it later
+        // take input first; a widget behind its layer would get none.
+        let layer = LayerId::new(ui.layer_id().order, ui.id().with("canvas"));
+        ui.ctx().set_sublayer(ui.layer_id(), layer);
+        let to_global = TSTransform::new(area.min.to_vec2() + *offset, self.zoom);
+        let canvas = UiBuilder::new()
+            .layer_id(layer)
+            .max_rect(to_global.inverse() * area)
+            .sense(Sense::click_and_drag());
+        let mut canvas = ui.new_child(canvas);
+        let background = canvas.response();
         if background.dragged() {
-            *offset += background.drag_delta();
+            *offset += ui.input(|i| i.pointer.delta());
         }
         if background.clicked() {
             *selected = None;
@@ -98,12 +108,11 @@ impl Editor {
             }
         });
 
-        let layer = LayerId::new(ui.layer_id().order, ui.id().with("canvas"));
-        ui.ctx().set_sublayer(ui.layer_id(), layer);
         ui.ctx().set_transform_layer(layer, to_global);
         let visible = to_global.inverse() * area;
-        let ui = &mut ui.new_child(UiBuilder::new().layer_id(layer).max_rect(visible));
-        ui.set_clip_rect(visible);
+        canvas.set_clip_rect(visible);
+        canvas.expand_to_include_rect(visible);
+        let ui = &mut canvas;
         let painter = ui.painter().clone();
 
         let results = frame.results;

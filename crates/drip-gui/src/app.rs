@@ -693,4 +693,26 @@ mod tests {
         h.run();
         assert!(h.state().windows().is_empty());
     }
+
+    #[test]
+    fn empty_canvas_above_the_nodes_takes_clicks() {
+        let mut app = App::new(None, true, || {});
+        app.selected = app.project.graph.find("export");
+        let mut h = harness(app);
+        h.run();
+        // Above the fitted graph, inside the area the nodes' layer spans.
+        let at = egui::pos2(400.0, 150.0);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        h.event(egui::Event::PointerMoved(at));
+        h.event(button(true));
+        h.step();
+        h.event(button(false));
+        h.run();
+        assert!(h.state().selected.is_none());
+    }
 }
