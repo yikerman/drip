@@ -77,6 +77,8 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 
 | E19 | Share one resource store between preview and exports; replace it on cache invalidation or project replacement. Remove per-file reload and revision tracking. | decided (user, 2026-10-04); implemented | Cloning the store shares both loaded values and future first loads. Existing exports keep their store; a new project cannot retain the previous project's resources. No path enumeration or revision hashing is needed. |
 
+| E20 | An action consumes its evaluator; interactive callers fork once before dispatch. | decided (user, 2026-10-04); implemented | The export worker already owns an isolated evaluator. Removing the second fork avoids duplicate setup, retains full-detail evaluation and releases its temporary node cache when the action ends. A caller preserving preview state uses `evaluator.fork().run_action(...)`. |
+
 ### 3.3.1 Kernel survey (2026-10-04)
 
 This initial survey informed the CubeCL trial (E10), subsequently replaced with Rayon (E15). Measurements follow in 3.3.2–3.3.3.
@@ -361,7 +363,8 @@ old image as if it were current.
 Reset, cache invalidation and export commands use the same ordered channel. Export snapshots
 the graph at the click and shares the current resource store when the command is processed,
 after preceding invalidations. The existing separate export thread then runs the full-
-detail action and reports completion. The GUI still permits one export at a
+detail action by consuming that evaluator without another fork (E20), then reports
+completion. The GUI still permits one export at a
 time; preview and export computation can run concurrently. Both reuse the same
 Rayon pool. Project replacement starts with a fresh evaluator and resource store
 (E19). RAW resources retain decoded data rather than a normalized pyramid (E17).

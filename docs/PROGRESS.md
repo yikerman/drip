@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: consume the export evaluator
+
+- `run_action` consumes its evaluator, using its resource store and a fresh temporary node cache. The worker forks once before dispatch; removed the second fork inside the action. Standalone actions need no fork.
+- Verification: all 74 workspace tests, formatting and clippy pass, including full-detail actions, preview-cache preservation, resource sharing/invalidation, TIFF output and intermediate release. The three cleanup items are complete in separate commits; no new deferred work.
+
 ## 2026-10-04: remove eager RAW pyramids
 
 - Cache decoded RAW once per resource store; derive the requested normalized level using the existing normalization/downsampling algorithms and discard intermediates. Removed E17 from TODO.

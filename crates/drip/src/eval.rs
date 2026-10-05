@@ -60,16 +60,16 @@ impl Evaluator {
         self.cache.0.get(&id).map(|entry| &entry.result)
     }
 
-    /// Evaluates an action at full resolution with shared resources and a
-    /// temporary node cache, releasing intermediates after their last consumer.
-    pub fn run_action(&self, graph: &Graph, id: NodeId, name: &str) -> Result<(), NodeError> {
+    /// Consumes this evaluator for a full-resolution action, releasing
+    /// intermediates after their last consumer. Fork first to keep a preview cache.
+    pub fn run_action(mut self, graph: &Graph, id: NodeId, name: &str) -> Result<(), NodeError> {
         let node = graph.node(id).expect("in graph");
         let action = node.kind.action(name).ok_or_else(|| NodeError::UnknownAction(name.into()))?;
-        let mut evaluator = self.fork();
+        self.cache = Cache::default();
         let targets: Vec<_> = sources(graph, id).collect();
-        evaluator.run(graph, 0, &targets, true);
-        let inputs = evaluator.cache.inputs(graph, id)?;
-        let ctx = EvalContext { level: 0, resources: &evaluator.resources };
+        self.run(graph, 0, &targets, true);
+        let inputs = self.cache.inputs(graph, id)?;
+        let ctx = EvalContext { level: 0, resources: &self.resources };
         (action.run)(Params(&node.params), &inputs, &ctx).map_err(NodeError::Failed)
     }
 
@@ -156,7 +156,7 @@ fn sources(graph: &Graph, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
 }
 
 /// Runs a standalone action with fresh resources. Interactive callers use
-/// `Evaluator::run_action` to reuse their session's loaded files.
+/// `Evaluator::fork().run_action(...)` to reuse their session's loaded files.
 pub fn run_action(graph: &Graph, id: NodeId, name: &str) -> Result<(), NodeError> {
     Evaluator::default().run_action(graph, id, name)
 }
