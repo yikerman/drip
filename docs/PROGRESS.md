@@ -2,6 +2,14 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: plan preview and worker architecture
+
+- After committing the Rayon replacement as `c6857e5`, inspected the frontend/evaluator boundary and recorded a separate tentative plan in DESIGN 3.3.4. No processing, level, cache or scheduling code changed in this step.
+- Current behavior: the GUI requests all visible nodes at one level; nodes are passive, the evaluator walks ancestors and passes `EvalContext`. Export already evaluates at level 0 on a separate background thread. These boundaries can remain.
+- Requested next behavior: one manual global preview level, replacing the earlier per-preview proposal, and removal of eager RAW pyramid retention. Proposed implementation keeps normal node-result caching and active-project decoded-resource sharing; persistence and resource lifetime details remain a plan for review.
+- Proposed async ownership: a persistent preview worker owns the evaluator; one active/one latest pending preview request, project/generation checks, ordered reset/reload/export commands, and the existing export worker. GUI-side texture packing and large-buffer retirement must also leave the UI thread. Cancellation between nodes is deferred unless measurements justify it.
+- Validation for the future implementation is listed in the plan. This step is documentation only; diff checks pass. The Rayon implementation remains the tested state, with automatic levels and RAW pyramids still active.
+
 ## 2026-10-04: replace CubeCL with Rayon
 
 - User selected Rayon and requested replacing the current CubeCL commit. White balance, debayer, color matrix, sigmoid and histogram now use one ordinary Rust implementation each, with Rayon's shared CPU pool. Removed CubeCL, the dispatch/transfer layer and compiler dependencies; restored MSRV 1.92. No experiment files or second kernel versions remain. GPU computation is postponed (E15).
