@@ -3,9 +3,9 @@
 //! in each node's opaque `ui` field.
 
 use drip::eval::{NodeError, NodeResult};
+use drip::graph::Graph;
 use drip::graph::{NodeId, Port};
 use drip::node::Registry;
-use drip::project::Project;
 use egui::epaint::CubicBezierShape;
 use egui::{Align2, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use serde_json::json;
@@ -40,7 +40,7 @@ impl Editor {
     pub fn show<'a>(
         &mut self,
         ui: &mut Ui,
-        project: &mut Project,
+        graph: &mut Graph,
         registry: &Registry,
         selected: &mut Option<NodeId>,
         results: impl Fn(NodeId) -> Option<&'a NodeResult>,
@@ -50,7 +50,7 @@ impl Editor {
         let painter = ui.painter_at(area);
         let offset = self.offset.get_or_insert_with(|| {
             let positions: Vec<_> =
-                project.graph.nodes().map(|(id, node)| position(&node.ui, id).to_pos2()).collect();
+                graph.nodes().map(|(id, node)| position(&node.ui, id).to_pos2()).collect();
             if positions.is_empty() {
                 return Vec2::ZERO;
             }
@@ -67,24 +67,22 @@ impl Editor {
         let origin = area.min + *offset;
         background.context_menu(|ui| {
             for kind in registry.kinds() {
-                if ui.button(kind.name).clicked() {
+                if ui.button(kind.label).clicked() {
                     let at = ui.ctx().pointer_interact_pos().unwrap_or(area.center()) - origin;
-                    let id = project.graph.add_node(kind);
-                    project.graph.set_ui(id, json!({ "pos": [at.x, at.y] })).expect("just added");
+                    let id = graph.add_node(kind);
+                    graph.set_ui(id, json!({ "pos": [at.x, at.y] })).expect("just added");
                     *selected = Some(id);
                     ui.close();
                 }
             }
         });
 
-        let layouts: Vec<Layout> = project
-            .graph
+        let layouts: Vec<Layout> = graph
             .nodes()
             .map(|(id, node)| {
                 let pos = origin + position(&node.ui, id);
-                let kind = registry.get(&node.kind);
-                let inputs = kind.map_or(&[][..], |k| k.inputs).iter().map(|p| p.name);
-                let outputs = kind.map_or(&[][..], |k| k.outputs).iter().map(|p| p.name);
+                let inputs = node.kind.inputs.iter().map(|p| p.name);
+                let outputs = node.kind.outputs.iter().map(|p| p.name);
                 let rows = inputs.len().max(outputs.len());
                 let port =
                     |i: usize, x: f32| pos2(pos.x + x, pos.y + HEADER + ROW * (i as f32 + 0.5));
@@ -109,7 +107,7 @@ impl Editor {
         };
 
         let wire = Stroke::new(1.5, theme::TEXT);
-        for (output, input) in project.graph.edges() {
+        for (output, input) in graph.edges() {
             if let (Some(from), Some(to)) = (port_pos(output, true), port_pos(input, false)) {
                 painter.add(bezier(from, to, wire));
             }
@@ -117,7 +115,7 @@ impl Editor {
 
         let mut refused = None;
         for layout in &layouts {
-            let node = project.graph.node(layout.id).expect("laid out from the graph");
+            let node = graph.node(layout.id).expect("laid out from the graph");
             let body = ui.interact(layout.rect, ui.id().with(layout.id), Sense::click_and_drag());
             if body.clicked() || body.drag_started() {
                 *selected = Some(layout.id);
@@ -129,9 +127,9 @@ impl Editor {
                     ui_state = json!({});
                 }
                 ui_state["pos"] = json!([pos.x, pos.y]);
-                project.graph.set_ui(layout.id, ui_state).expect("node exists");
+                graph.set_ui(layout.id, ui_state).expect("node exists");
             }
-            let node = project.graph.node(layout.id).expect("laid out from the graph");
+            let node = graph.node(layout.id).expect("laid out from the graph");
             let fill = if *selected == Some(layout.id) { theme::LIGHTER } else { theme::DARKER };
             painter.rect_filled(layout.rect, 0.0, fill);
             let font = FontId::proportional(13.0);
@@ -158,7 +156,7 @@ impl Editor {
                     Sense::click(),
                 );
                 if port.secondary_clicked() {
-                    project.graph.disconnect(&Port(layout.id, (*name).into()));
+                    graph.disconnect(&Port(layout.id, (*name).into()));
                 }
                 port.on_hover_text("right-click to disconnect");
             }
@@ -204,7 +202,7 @@ impl Editor {
                         .find(|(_, _, pos)| pos.distance(p) <= 2.0 * PORT)
                 });
                 if let Some((id, name, _)) = target
-                    && let Err(e) = project.graph.connect(registry, from, Port(id, name.into()))
+                    && let Err(e) = graph.connect(from, Port(id, name.into()))
                 {
                     refused = Some(e.to_string());
                 }
@@ -215,7 +213,7 @@ impl Editor {
             && ui.input(|i| i.key_pressed(egui::Key::Delete))
             && !ui.ctx().egui_wants_keyboard_input()
         {
-            project.graph.remove_node(id);
+            graph.remove_node(id);
             *selected = None;
         }
         refused

@@ -1,38 +1,34 @@
-//! The node graph as plain data, with editing operations that keep it valid:
-//! nodes exist and are of registered kinds, connections are type-compatible
-//! and the graph stays acyclic.
+//! The node graph, with editing operations that keep it valid: connections
+//! are type-compatible, every input has at most one source and the graph stays
+//! acyclic. The file format lives in `project`, not here.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
-use crate::node::{NodeKind, Registry};
+use crate::node::NodeKind;
 use crate::param::ParamMap;
 use crate::value::PortType;
 
 /// Stable within a project; never reused while the graph is alive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(pub u64);
 
 /// A named port of a node, input or output depending on context.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Port(pub NodeId, pub String);
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Node {
-    /// Unique within the graph; how users and the CLI refer to the node.
+    /// Unique and renamable; how users and the CLI refer to the node.
     pub label: String,
-    pub kind: String,
-    /// Literal parameter values.
-    #[serde(default)]
+    pub kind: &'static NodeKind,
+    /// A valid value for every parameter of the kind.
     pub params: ParamMap,
-    /// Parameters taken from graph inputs instead: param name → input name.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub bindings: BTreeMap<String, String>,
+    /// Parameters exposed as inputs of the template: they take a value per
+    /// image and are cleared when saving as a template (DESIGN F7).
+    pub external: BTreeSet<&'static str>,
     /// Opaque frontend state such as the node's position.
-    #[serde(default, skip_serializing_if = "Json::is_null")]
     pub ui: Json,
 }
 
@@ -40,8 +36,6 @@ pub struct Node {
 pub enum GraphError {
     #[error("no node {0:?}")]
     UnknownNode(NodeId),
-    #[error("unknown node kind `{0}`")]
-    UnknownKind(String),
     #[error("node {0:?} has no {1} port `{2}`")]
     UnknownPort(NodeId, &'static str, String),
     #[error("input `{input}` does not accept {found:?}")]
@@ -52,20 +46,16 @@ pub enum GraphError {
     UnknownParam(NodeId, String),
     #[error("invalid value {value} for parameter `{param}`")]
     InvalidParam { param: String, value: Json },
-    #[error("graph has no input `{0}`")]
-    UnknownInput(String),
-    #[error("input `{input}` takes a different kind of value than parameter `{param}`")]
-    IncompatibleInput { input: String, param: String },
     #[error("label `{0}` is empty or already used")]
     InvalidLabel(String),
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Graph {
-    pub(crate) nodes: BTreeMap<NodeId, Node>,
+    nodes: BTreeMap<NodeId, Node>,
     /// Input port → the output port feeding it.
-    pub(crate) edges: BTreeMap<Port, Port>,
-    pub(crate) next_id: u64,
+    edges: BTreeMap<Port, Port>,
+    next_id: u64,
 }
 
 impl Graph {
@@ -90,29 +80,37 @@ impl Graph {
         self.edges.get(input)
     }
 
-    /// The graph's inputs: every name some parameter is bound to (DESIGN F5).
-    pub fn inputs(&self) -> BTreeSet<&str> {
-        self.nodes.values().flat_map(|node| node.bindings.values().map(String::as_str)).collect()
+    /// The template's inputs: every external parameter of every node.
+    pub fn inputs(&self) -> impl Iterator<Item = (NodeId, &'static str)> + '_ {
+        self.nodes().flat_map(|(id, node)| node.external.iter().map(move |param| (id, *param)))
     }
 
-    pub fn add_node(&mut self, kind: &NodeKind) -> NodeId {
-        let id = NodeId(self.next_id);
-        self.next_id += 1;
+    pub fn add_node(&mut self, kind: &'static NodeKind) -> NodeId {
         let label = (1..)
-            .map(|n| if n == 1 { kind.name.to_string() } else { format!("{} {n}", kind.name) })
+            .map(|n| if n == 1 { kind.label.to_string() } else { format!("{} {n}", kind.label) })
             .find(|label| self.find(label).is_none())
             .expect("unbounded");
-        let params =
-            kind.params.iter().map(|p| (p.name.to_string(), p.kind.default_value())).collect();
         let node = Node {
             label,
-            kind: kind.name.into(),
-            params,
-            bindings: BTreeMap::new(),
+            kind,
+            params: kind
+                .params
+                .iter()
+                .map(|p| (p.name.to_string(), p.kind.default_value()))
+                .collect(),
+            external: kind.params.iter().filter(|p| p.external).map(|p| p.name).collect(),
             ui: Json::Null,
         };
-        self.nodes.insert(id, node);
+        let id = NodeId(self.next_id);
+        self.insert(id, node);
         id
+    }
+
+    /// Adds a node built elsewhere (by the loader), keeping ids unique. The
+    /// loader rejects the largest id, so this cannot overflow.
+    pub(crate) fn insert(&mut self, id: NodeId, node: Node) {
+        self.next_id = self.next_id.max(id.0 + 1);
+        self.nodes.insert(id, node);
     }
 
     pub fn remove_node(&mut self, id: NodeId) -> Option<Node> {
@@ -121,20 +119,12 @@ impl Graph {
     }
 
     /// Connects `output` to `input`, replacing the input's previous source.
-    pub fn connect(
-        &mut self,
-        registry: &Registry,
-        output: Port,
-        input: Port,
-    ) -> Result<(), GraphError> {
-        let ty = self
-            .kind(registry, output.0)?
-            .outputs
-            .iter()
-            .find(|p| p.name == output.1)
-            .map(|p| p.ty);
+    pub fn connect(&mut self, output: Port, input: Port) -> Result<(), GraphError> {
+        let source = self.node(output.0).ok_or(GraphError::UnknownNode(output.0))?.kind;
+        let ty = source.outputs.iter().find(|p| p.name == output.1).map(|p| p.ty);
         let ty = ty.ok_or_else(|| GraphError::UnknownPort(output.0, "output", output.1.clone()))?;
-        let spec = self.kind(registry, input.0)?.input(&input.1);
+        let sink = self.node(input.0).ok_or(GraphError::UnknownNode(input.0))?.kind;
+        let spec = sink.input(&input.1);
         let spec =
             spec.ok_or_else(|| GraphError::UnknownPort(input.0, "input", input.1.clone()))?;
         if !spec.accepts.contains(&ty) {
@@ -151,21 +141,32 @@ impl Graph {
         self.edges.remove(input)
     }
 
-    pub fn set_param(
-        &mut self,
-        registry: &Registry,
-        id: NodeId,
-        name: &str,
-        value: Json,
-    ) -> Result<(), GraphError> {
-        let spec = self
-            .kind(registry, id)?
-            .param(name)
-            .ok_or_else(|| GraphError::UnknownParam(id, name.into()))?;
+    pub fn set_param(&mut self, id: NodeId, name: &str, value: Json) -> Result<(), GraphError> {
+        let node = self.node_mut(id)?;
+        let spec =
+            node.kind.param(name).ok_or_else(|| GraphError::UnknownParam(id, name.into()))?;
         if !spec.kind.accepts(&value) {
             return Err(GraphError::InvalidParam { param: name.into(), value });
         }
-        self.nodes.get_mut(&id).expect("checked by kind").params.insert(name.into(), value);
+        node.params.insert(name.into(), value);
+        Ok(())
+    }
+
+    /// Exposes parameter `name` as a template input, or stops doing so.
+    pub fn set_external(
+        &mut self,
+        id: NodeId,
+        name: &str,
+        external: bool,
+    ) -> Result<(), GraphError> {
+        let node = self.node_mut(id)?;
+        let spec =
+            node.kind.param(name).ok_or_else(|| GraphError::UnknownParam(id, name.into()))?;
+        if external {
+            node.external.insert(spec.name);
+        } else {
+            node.external.remove(spec.name);
+        }
         Ok(())
     }
 
@@ -182,21 +183,12 @@ impl Graph {
         Ok(())
     }
 
-    pub(crate) fn node_mut(&mut self, id: NodeId) -> Result<&mut Node, GraphError> {
+    fn node_mut(&mut self, id: NodeId) -> Result<&mut Node, GraphError> {
         self.nodes.get_mut(&id).ok_or(GraphError::UnknownNode(id))
     }
 
-    pub(crate) fn kind(
-        &self,
-        registry: &Registry,
-        id: NodeId,
-    ) -> Result<&'static NodeKind, GraphError> {
-        let node = self.nodes.get(&id).ok_or(GraphError::UnknownNode(id))?;
-        Ok(registry.get(&node.kind).expect("graphs hold only registered kinds"))
-    }
-
     /// Whether `to` is reachable from `from` along edges (or is `from`).
-    pub(crate) fn reaches(&self, from: NodeId, to: NodeId) -> bool {
+    fn reaches(&self, from: NodeId, to: NodeId) -> bool {
         let mut stack = vec![from];
         let mut seen = BTreeSet::new();
         while let Some(id) = stack.pop() {
@@ -204,12 +196,8 @@ impl Graph {
                 return true;
             }
             if seen.insert(id) {
-                stack.extend(
-                    self.edges
-                        .iter()
-                        .filter(|(_, output)| output.0 == id)
-                        .map(|(input, _)| input.0),
-                );
+                let consumers = self.edges.iter().filter(|(_, output)| output.0 == id);
+                stack.extend(consumers.map(|(input, _)| input.0));
             }
         }
         false
@@ -219,11 +207,8 @@ impl Graph {
     pub(crate) fn upstream_order(&self, targets: &[NodeId]) -> Vec<NodeId> {
         fn visit(graph: &Graph, id: NodeId, seen: &mut BTreeSet<NodeId>, order: &mut Vec<NodeId>) {
             if seen.insert(id) {
-                for (_, output) in graph
-                    .edges
-                    .range(Port(id, String::new())..)
-                    .take_while(|(input, _)| input.0 == id)
-                {
+                let inputs = graph.edges.range(Port(id, String::new())..);
+                for (_, output) in inputs.take_while(|(input, _)| input.0 == id) {
                     visit(graph, output.0, seen, order);
                 }
                 order.push(id);

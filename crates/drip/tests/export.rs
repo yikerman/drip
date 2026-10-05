@@ -6,7 +6,7 @@ use std::sync::Arc;
 use drip::color::{self, D65, P3, REC2020};
 use drip::eval::{NodeError, run_action};
 use drip::graph::{NodeId, Port};
-use drip::node::{Evaluated, NodeKind, OutputSpec, Registry};
+use drip::node::{Evaluated, NodeKind, OutputSpec};
 use drip::nodes;
 use drip::profile;
 use drip::project::Project;
@@ -22,6 +22,7 @@ const PIXELS: [[f32; 3]; 4] =
 
 static DISPLAY: NodeKind = NodeKind {
     name: "test.display",
+    label: "display",
     params: &[],
     inputs: &[],
     outputs: &[OutputSpec { name: "image", ty: PortType::DisplayRec2020 }],
@@ -31,10 +32,6 @@ static DISPLAY: NodeKind = NodeKind {
     },
     actions: &[],
 };
-
-fn registry() -> Registry {
-    nodes::registry().with(&DISPLAY)
-}
 
 struct Scratch(PathBuf);
 
@@ -59,18 +56,17 @@ impl Drop for Scratch {
 }
 
 fn export(out: &Path, params: serde_json::Value) -> Result<(), NodeError> {
-    let reg = registry();
     let mut p = Project::default();
     let (src, tiff) = (p.graph.add_node(&DISPLAY), p.graph.add_node(&nodes::TIFF));
-    p.graph.connect(&reg, Port(src, "image".into()), Port(tiff, "image".into())).unwrap();
+    p.graph.connect(Port(src, "image".into()), Port(tiff, "image".into())).unwrap();
     set(&mut p, tiff, json!({ "path": out }));
     set(&mut p, tiff, params);
-    run_action(&p, &reg, tiff, "export")
+    run_action(&p.graph, tiff, "export")
 }
 
 fn set(p: &mut Project, id: NodeId, params: serde_json::Value) {
     for (name, value) in params.as_object().unwrap() {
-        p.graph.set_param(&registry(), id, name, value.clone()).unwrap();
+        p.graph.set_param(id, name, value.clone()).unwrap();
     }
 }
 

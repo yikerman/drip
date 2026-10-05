@@ -1,6 +1,6 @@
-//! Panels for the selected node's parameters, the graph's inputs and the
-//! histogram. Widgets come from parameter schemas; every edit goes through the
-//! project's validated operations.
+//! The sidebar: the selected node's parameters and the template's inputs.
+//! Widgets come from parameter schemas; every edit goes through the graph's
+//! validated operations.
 
 use drip::graph::NodeId;
 use drip::param::ParamKind;
@@ -18,83 +18,55 @@ pub fn node(app: &mut App, ui: &mut Ui, id: NodeId) {
     {
         app.report(Err(e.to_string()));
     }
-    ui.weak(&node.kind);
-    let kind = app.registry.get(&node.kind).expect("graphs hold only registered kinds");
+    ui.weak(node.kind.name);
     egui::Grid::new(("params", id)).num_columns(2).show(ui, |ui| {
-        for spec in kind.params {
-            let name = ui.label(spec.name).interact(Sense::click());
-            let bound = node.bindings.get(spec.name);
-            match bound {
-                Some(input) => {
-                    ui.weak(format!("input {input}"));
-                }
-                None => {
-                    if let Some(value) = edit_value(
-                        ui,
-                        egui::Id::new((id, spec.name)),
-                        &spec.kind,
-                        &node.params[spec.name],
-                    ) && let Err(e) =
-                        app.project.graph.set_param(&app.registry, id, spec.name, value)
-                    {
-                        app.report(Err(e.to_string()));
-                    }
-                }
+        for spec in node.kind.params {
+            let external = node.external.contains(spec.name);
+            let text = if external { format!("{} (input)", spec.name) } else { spec.name.into() };
+            let name =
+                ui.label(text).interact(Sense::click()).on_hover_text("right-click to change");
+            if let Some(value) =
+                edit_value(ui, egui::Id::new((id, spec.name)), &spec.kind, &node.params[spec.name])
+                && let Err(e) = app.project.graph.set_param(id, spec.name, value)
+            {
+                app.report(Err(e.to_string()));
             }
             name.context_menu(|ui| {
-                if bound.is_some() {
-                    if ui.button("Unbind").clicked() {
-                        app.project.unbind(id, spec.name);
-                        ui.close();
-                    }
-                    return;
-                }
-                // Only inputs taking this parameter's kind of value, or a new one.
-                let same = |kind: ParamKind| {
-                    std::mem::discriminant(&kind) == std::mem::discriminant(&spec.kind)
-                };
-                let mut inputs: Vec<String> =
-                    app.project.graph.inputs().into_iter().map(String::from).collect();
-                inputs.retain(|i| app.project.input_kind(&app.registry, i).is_none_or(same));
-                if !inputs.iter().any(|i| i == spec.name) {
-                    inputs.push(spec.name.into());
-                }
-                for input in inputs {
-                    if ui.button(format!("Bind to input {input}")).clicked() {
-                        if let Err(e) = app.project.bind(&app.registry, id, spec.name, &input) {
-                            app.report(Err(e.to_string()));
-                        }
-                        ui.close();
-                    }
+                let toggle = if external { "Fix in template" } else { "Make template input" };
+                if ui.button(toggle).clicked() {
+                    app.project
+                        .graph
+                        .set_external(id, spec.name, !external)
+                        .expect("the kind's parameter");
+                    ui.close();
                 }
             });
             ui.end_row();
         }
     });
-    for action in kind.actions {
-        let button = ui.add_enabled(!app.action_running(), egui::Button::new(action.name));
-        if button.clicked() {
+    for action in node.kind.actions {
+        if ui.add_enabled(!app.action_running(), egui::Button::new(action.name)).clicked() {
             app.run_action(id, action.name);
         }
     }
 }
 
-/// The graph's inputs and the arguments given for them.
+/// The template's inputs, one per external parameter of each node, edited
+/// in place.
 pub fn inputs(app: &mut App, ui: &mut Ui) {
-    let inputs: Vec<String> = app.project.graph.inputs().into_iter().map(String::from).collect();
+    let inputs: Vec<_> = app.project.graph.inputs().collect();
     if inputs.is_empty() {
         return;
     }
     ui.weak("inputs");
     egui::Grid::new("inputs").num_columns(2).show(ui, |ui| {
-        for input in inputs {
-            ui.label(&input);
-            let kind = app.project.input_kind(&app.registry, &input);
-            let current = app.project.arguments().get(&input).cloned().unwrap_or(Json::Null);
-            if let Some(kind) = kind
-                && let Some(value) =
-                    edit_value(ui, egui::Id::new(("input", &input)), &kind, &current)
-                && let Err(e) = app.project.set_argument(&app.registry, &input, value)
+        for (id, param) in inputs {
+            let node = app.project.graph.node(id).expect("listed");
+            ui.label(format!("{} · {param}", node.label));
+            let kind = node.kind.param(param).expect("listed").kind;
+            let value = node.params[param].clone();
+            if let Some(value) = edit_value(ui, egui::Id::new(("input", id, param)), &kind, &value)
+                && let Err(e) = app.project.graph.set_param(id, param, value)
             {
                 app.report(Err(e.to_string()));
             }

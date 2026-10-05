@@ -19,12 +19,10 @@ const GREY: f32 = 0.18;
 ///     pp. 536-555, 1966.
 pub static SIGMOID: NodeKind = NodeKind {
     name: "tone.sigmoid",
+    label: "sigmoid",
     params: &[
-        ParamSpec {
-            name: "exposure",
-            kind: ParamKind::Float { min: -10.0, max: 10.0, default: 0.0 },
-        },
-        ParamSpec { name: "contrast", kind: ParamKind::Float { min: 0.5, max: 4.0, default: 1.5 } },
+        ParamSpec::new("exposure", ParamKind::Float { min: -10.0, max: 10.0, default: 0.0 }),
+        ParamSpec::new("contrast", ParamKind::Float { min: 0.5, max: 4.0, default: 1.5 }),
     ],
     inputs: &[InputSpec { name: "image", accepts: &[PortType::SceneRec2020] }],
     outputs: &[OutputSpec { name: "image", ty: PortType::DisplayRec2020 }],

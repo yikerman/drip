@@ -1,20 +1,22 @@
-//! Projects and their file format (DESIGN F1, F2, F5, F6). A template is a
-//! graph whose bound parameters form its inputs; a project is a template
-//! applied to arguments. Both are saved in the same JSON format.
+//! Projects and their file format (DESIGN F1, F2, F6, F7). A template is a
+//! graph whose external parameters are its inputs; a project is the same
+//! graph with those parameters filled in. Both are saved in the same format,
+//! defined here by private types so the in-memory model can change freely.
+
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
-use crate::eval::NodeError;
 use crate::graph::{Graph, GraphError, Node, NodeId, Port};
 use crate::node::Registry;
-use crate::param::{ParamKind, ParamMap};
+use crate::param::ParamMap;
 
 const FORMAT: &str = "drip";
 
-/// Files carry the major version of the crate that wrote them. Within a major
-/// version, files stay compatible (semantic versioning, DESIGN F6); across
-/// major versions they are rejected rather than migrated.
+/// Files carry the major version of the crate that wrote them, and only that
+/// major version reads them. The prototype keeps no compatibility otherwise:
+/// a file must match exactly what this build writes (DESIGN F6).
 const VERSION: u32 = match u32::from_str_radix(env!("CARGO_PKG_VERSION_MAJOR"), 10) {
     Ok(major) => major,
     Err(_) => panic!("the crate's major version is a number"),
@@ -23,9 +25,6 @@ const VERSION: u32 = match u32::from_str_radix(env!("CARGO_PKG_VERSION_MAJOR"), 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Project {
     pub graph: Graph,
-    /// Values for the graph's inputs, by input name. Private so every value is
-    /// validated against the parameters bound to its input.
-    arguments: ParamMap,
     /// Opaque frontend state such as the editor's viewport.
     pub ui: Json,
 }
@@ -38,162 +37,89 @@ pub enum LoadError {
     NotDrip,
     #[error("written by Drip {0}.x; this is Drip {VERSION}.x")]
     Version(u32),
+    #[error("unknown node kind `{0}`")]
+    UnknownKind(String),
+    #[error("node {0:?} has no value for parameter `{1}`")]
+    MissingParam(NodeId, &'static str),
     #[error("input {0:?} has more than one connection")]
     DuplicateInput(Port),
-    #[error("node id {0:?} is duplicated or out of range")]
-    InvalidId(NodeId),
+    #[error("node id {0} is duplicated or out of range")]
+    InvalidId(u64),
     #[error(transparent)]
     Graph(#[from] GraphError),
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct File {
     format: String,
     version: u32,
     /// A list rather than a map keyed by id, so duplicate ids are detected
     /// instead of silently collapsed by the JSON parser.
     nodes: Vec<FileNode>,
-    #[serde(default)]
-    edges: Vec<Edge>,
-    #[serde(default, skip_serializing_if = "ParamMap::is_empty")]
-    arguments: ParamMap,
+    edges: Vec<FileEdge>,
     #[serde(default, skip_serializing_if = "Json::is_null")]
     ui: Json,
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct FileNode {
-    id: NodeId,
-    #[serde(flatten)]
-    node: Node,
+    id: u64,
+    label: String,
+    kind: String,
+    params: ParamMap,
+    external: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Json::is_null")]
+    ui: Json,
 }
 
 #[derive(Serialize, Deserialize)]
-struct Edge {
-    from: Port,
-    to: Port,
+#[serde(deny_unknown_fields)]
+struct FileEdge {
+    from: (u64, String),
+    to: (u64, String),
 }
 
 impl Project {
-    /// The same graph without arguments, i.e. a function of its inputs.
+    /// The same graph with every external parameter back at its default:
+    /// a function of its inputs.
     pub fn template(&self) -> Project {
-        Project { arguments: ParamMap::new(), ..self.clone() }
-    }
-
-    pub fn arguments(&self) -> &ParamMap {
-        &self.arguments
-    }
-
-    /// The kind of value graph input `input` takes: that of the parameters
-    /// bound to it, which all share one kind.
-    pub fn input_kind(&self, registry: &Registry, input: &str) -> Option<ParamKind> {
-        self.graph.nodes().find_map(|(id, node)| {
-            let (param, _) = node.bindings.iter().find(|(_, bound)| *bound == input)?;
-            let kind = self.graph.kind(registry, id).expect("node exists");
-            Some(kind.param(param).expect("bindings name parameters").kind)
-        })
-    }
-
-    /// Makes parameter `name` of node `id` take its value from graph input
-    /// `input`, which must not already take a different kind of value.
-    pub fn bind(
-        &mut self,
-        registry: &Registry,
-        id: NodeId,
-        name: &str,
-        input: &str,
-    ) -> Result<(), GraphError> {
-        let spec = self
-            .graph
-            .kind(registry, id)?
-            .param(name)
-            .ok_or_else(|| GraphError::UnknownParam(id, name.into()))?;
-        if let Some(kind) = self.input_kind(registry, input)
-            && std::mem::discriminant(&kind) != std::mem::discriminant(&spec.kind)
-        {
-            return Err(GraphError::IncompatibleInput { input: input.into(), param: name.into() });
+        let mut template = self.clone();
+        for (id, param) in self.graph.inputs() {
+            let spec = self.graph.node(id).expect("listed").kind.param(param).expect("listed");
+            template
+                .graph
+                .set_param(id, param, spec.kind.default_value())
+                .expect("defaults are valid");
         }
-        if let Some(value) = self.arguments.get(input).filter(|value| !spec.kind.accepts(value)) {
-            return Err(GraphError::InvalidParam { param: name.into(), value: value.clone() });
-        }
-        self.graph.node_mut(id)?.bindings.insert(name.into(), input.into());
-        Ok(())
-    }
-
-    pub fn unbind(&mut self, id: NodeId, name: &str) -> Option<String> {
-        self.graph.node_mut(id).ok()?.bindings.remove(name)
-    }
-
-    /// Sets graph input `input`, checked against every parameter bound to it.
-    pub fn set_argument(
-        &mut self,
-        registry: &Registry,
-        input: &str,
-        value: Json,
-    ) -> Result<(), GraphError> {
-        self.check_argument(registry, input, &value)?;
-        self.arguments.insert(input.into(), value);
-        Ok(())
-    }
-
-    fn check_argument(
-        &self,
-        registry: &Registry,
-        input: &str,
-        value: &Json,
-    ) -> Result<(), GraphError> {
-        if !self.graph.inputs().contains(input) {
-            return Err(GraphError::UnknownInput(input.into()));
-        }
-        for (id, node) in self.graph.nodes() {
-            let kind = self.graph.kind(registry, id).expect("node exists");
-            for (param, _) in node.bindings.iter().filter(|(_, bound)| *bound == input) {
-                if !kind.param(param).expect("bindings name parameters").kind.accepts(value) {
-                    let param = param.clone();
-                    return Err(GraphError::InvalidParam { param, value: value.clone() });
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Node `id`'s literal params with bound ones replaced by arguments.
-    pub(crate) fn effective_params(&self, id: NodeId) -> Result<ParamMap, NodeError> {
-        let node = self.graph.node(id).expect("in graph");
-        let mut params = node.params.clone();
-        for (param, input) in &node.bindings {
-            let value = self
-                .arguments
-                .get(input)
-                .ok_or_else(|| NodeError::MissingArgument(input.clone()))?;
-            params.insert(param.clone(), value.clone());
-        }
-        Ok(params)
+        template
     }
 
     pub fn to_json(&self) -> String {
+        let nodes = self.graph.nodes().map(|(id, node)| FileNode {
+            id: id.0,
+            label: node.label.clone(),
+            kind: node.kind.name.into(),
+            params: node.params.clone(),
+            external: node.external.iter().map(|p| p.to_string()).collect(),
+            ui: node.ui.clone(),
+        });
+        let edges = self.graph.edges().map(|(from, to)| FileEdge {
+            from: (from.0.0, from.1.clone()),
+            to: (to.0.0, to.1.clone()),
+        });
         let file = File {
             format: FORMAT.into(),
             version: VERSION,
-            nodes: self
-                .graph
-                .nodes()
-                .map(|(id, node)| FileNode { id, node: node.clone() })
-                .collect(),
-            edges: self
-                .graph
-                .edges()
-                .map(|(from, to)| Edge { from: from.clone(), to: to.clone() })
-                .collect(),
-            arguments: self.arguments.clone(),
+            nodes: nodes.collect(),
+            edges: edges.collect(),
             ui: self.ui.clone(),
         };
         serde_json::to_string_pretty(&file).expect("plain data serializes")
     }
 
-    /// Loads a project written by this major version, validating everything
-    /// as editing would. Parameters missing from the file take their defaults,
-    /// so a minor version may add parameters without breaking older files.
+    /// Loads a project, validating everything as editing would.
     pub fn from_json(text: &str, registry: &Registry) -> Result<Project, LoadError> {
         let file: File = serde_json::from_str(text)?;
         if file.format != FORMAT {
@@ -203,52 +129,47 @@ impl Project {
             return Err(LoadError::Version(file.version));
         }
         let mut graph = Graph::default();
-        let mut bindings = Vec::new();
-        for FileNode { id, mut node } in file.nodes {
-            graph.next_id = id.0.checked_add(1).ok_or(LoadError::InvalidId(id))?.max(graph.next_id);
-            if graph.node(id).is_some() {
-                return Err(LoadError::InvalidId(id));
+        for n in file.nodes {
+            let id = NodeId(n.id);
+            if n.id == u64::MAX || graph.node(id).is_some() {
+                return Err(LoadError::InvalidId(n.id));
             }
-            let kind = registry
-                .get(&node.kind)
-                .ok_or_else(|| GraphError::UnknownKind(node.kind.clone()))?;
-            let unknown = node
-                .params
-                .keys()
-                .chain(node.bindings.keys())
-                .find(|name| kind.param(name).is_none());
+            let kind =
+                registry.get(&n.kind).ok_or_else(|| LoadError::UnknownKind(n.kind.clone()))?;
+            let unknown =
+                n.params.keys().chain(&n.external).find(|name| kind.param(name).is_none());
             if let Some(name) = unknown {
                 return Err(GraphError::UnknownParam(id, name.clone()).into());
             }
             for spec in kind.params {
                 let value =
-                    node.params.entry(spec.name).or_insert_with(|| spec.kind.default_value());
+                    n.params.get(spec.name).ok_or(LoadError::MissingParam(id, spec.name))?;
                 if !spec.kind.accepts(value) {
-                    let param = spec.name.into();
-                    return Err(GraphError::InvalidParam { param, value: value.clone() }.into());
+                    return Err(GraphError::InvalidParam {
+                        param: spec.name.into(),
+                        value: value.clone(),
+                    }
+                    .into());
                 }
             }
-            if node.label.is_empty() || graph.find(&node.label).is_some() {
-                return Err(GraphError::InvalidLabel(node.label).into());
+            let external = kind
+                .params
+                .iter()
+                .filter(|p| n.external.contains(p.name))
+                .map(|p| p.name)
+                .collect();
+            if n.label.is_empty() || graph.find(&n.label).is_some() {
+                return Err(GraphError::InvalidLabel(n.label).into());
             }
-            // Re-applied below through `bind`, which checks their inputs agree.
-            bindings
-                .extend(std::mem::take(&mut node.bindings).into_iter().map(|(p, i)| (id, p, i)));
-            graph.nodes.insert(id, node);
+            graph.insert(id, Node { label: n.label, kind, params: n.params, external, ui: n.ui });
         }
-        for Edge { from, to } in file.edges {
-            if graph.edges.contains_key(&to) {
+        for FileEdge { from, to } in file.edges {
+            let (from, to) = (Port(NodeId(from.0), from.1), Port(NodeId(to.0), to.1));
+            if graph.source(&to).is_some() {
                 return Err(LoadError::DuplicateInput(to));
             }
-            graph.connect(registry, from, to)?;
+            graph.connect(from, to)?;
         }
-        let mut project = Project { graph, arguments: ParamMap::new(), ui: file.ui };
-        for (id, param, input) in bindings {
-            project.bind(registry, id, &param, &input)?;
-        }
-        for (input, value) in file.arguments {
-            project.set_argument(registry, &input, value)?;
-        }
-        Ok(project)
+        Ok(Project { graph, ui: file.ui })
     }
 }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use drip::color::{self, D65, REC2020};
 use drip::eval::Evaluator;
 use drip::graph::{NodeId, Port};
-use drip::node::{Evaluated, NodeKind, OutputSpec, Registry};
+use drip::node::{Evaluated, NodeKind, OutputSpec};
 use drip::nodes;
 use drip::project::Project;
 use drip::value::{Camera, Cfa, Mosaic, PortType, Rgb, Value, View};
@@ -149,6 +149,7 @@ fn camera_matrix_is_neutral_preserving_and_ignores_channel_gains() {
 /// A source node emitting a fixed 4 × 2 RGGB mosaic.
 static MOSAIC: NodeKind = NodeKind {
     name: "test.mosaic",
+    label: "mosaic",
     params: &[],
     inputs: &[],
     outputs: &[OutputSpec { name: "mosaic", ty: PortType::Mosaic }],
@@ -166,6 +167,7 @@ static MOSAIC: NodeKind = NodeKind {
 /// A source node emitting the scene-referred pixels given as `pixels`.
 static SCENE: NodeKind = NodeKind {
     name: "test.scene",
+    label: "scene",
     params: &[],
     inputs: &[],
     outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
@@ -184,21 +186,14 @@ static SCENE: NodeKind = NodeKind {
     actions: &[],
 };
 
-fn registry() -> Registry {
-    nodes::registry().with(&MOSAIC).with(&SCENE)
-}
-
 /// Builds source → kinds… and returns the project and the last node.
 fn chain(source: &'static NodeKind, kinds: &[&'static NodeKind]) -> (Project, NodeId) {
-    let reg = registry();
     let mut p = Project::default();
     let mut last = p.graph.add_node(source);
     for kind in kinds {
         let id = p.graph.add_node(kind);
-        let output = reg.get(&p.graph.node(last).unwrap().kind).unwrap().outputs[0].name;
-        p.graph
-            .connect(&reg, Port(last, output.into()), Port(id, kind.inputs[0].name.into()))
-            .unwrap();
+        let output = p.graph.node(last).unwrap().kind.outputs[0].name;
+        p.graph.connect(Port(last, output.into()), Port(id, kind.inputs[0].name.into())).unwrap();
         last = id;
     }
     (p, last)
@@ -206,7 +201,7 @@ fn chain(source: &'static NodeKind, kinds: &[&'static NodeKind]) -> (Project, No
 
 fn evaluate(p: &Project, id: NodeId) -> Evaluated {
     let mut ev = Evaluator::default();
-    ev.evaluate(p, &registry(), 0, &[id]);
+    ev.evaluate(&p.graph, 0, &[id]);
     ev.result(id).unwrap().clone().unwrap()
 }
 
@@ -238,12 +233,12 @@ fn sigmoid_keeps_grey_and_maps_onto_unit_range() {
     assert!(out[1][1] <= 1.0 && out[1][1] > 0.999, "highlights approach 1");
     assert!(out[1][0] < 0.18 && out[1][2] > 0.18, "monotonic around grey");
 
-    p.graph.set_param(&registry(), s, "exposure", json!(1.0)).unwrap();
+    p.graph.set_param(s, "exposure", json!(1.0)).unwrap();
     let out = evaluate(&p, s).outputs[0].rgb().pixels.clone();
     assert!((out[1][0] - 0.18).abs() < 1e-6, "+1 EV brings 0.09 to grey");
 
-    p.graph.set_param(&registry(), s, "exposure", json!(10.0)).unwrap();
-    p.graph.set_param(&registry(), s, "contrast", json!(4.0)).unwrap();
+    p.graph.set_param(s, "exposure", json!(10.0)).unwrap();
+    p.graph.set_param(s, "contrast", json!(4.0)).unwrap();
     let out = evaluate(&p, s).outputs[0].rgb().pixels.clone();
     assert_eq!(out[1][1], 1.0, "overflowing powers saturate instead of becoming NaN");
 }

@@ -24,10 +24,8 @@ pub fn pixel(value: &Value) -> [f32; 3] {
 /// Outputs `[value, ctx.scale, 0]`, so tests can see the scale it ran at.
 pub static CONST: NodeKind = NodeKind {
     name: "test.const",
-    params: &[ParamSpec {
-        name: "value",
-        kind: ParamKind::Float { min: -10.0, max: 10.0, default: 1.0 },
-    }],
+    label: "const",
+    params: &[ParamSpec::new("value", ParamKind::Float { min: -10.0, max: 10.0, default: 1.0 })],
     inputs: &[],
     outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
     eval: |p, _, ctx| {
@@ -41,6 +39,7 @@ pub static CONST: NodeKind = NodeKind {
 
 pub static ADD: NodeKind = NodeKind {
     name: "test.add",
+    label: "add",
     params: &[],
     inputs: &[InputSpec { name: "a", accepts: SCENE }, InputSpec { name: "b", accepts: SCENE }],
     outputs: &[OutputSpec { name: "sum", ty: PortType::SceneRec2020 }],
@@ -54,6 +53,7 @@ pub static ADD: NodeKind = NodeKind {
 /// Identity, but changes the semantic type from scene- to display-referred.
 pub static TONEMAP: NodeKind = NodeKind {
     name: "test.tonemap",
+    label: "tonemap",
     params: &[],
     inputs: &[InputSpec { name: "scene", accepts: SCENE }],
     outputs: &[OutputSpec { name: "display", ty: PortType::DisplayRec2020 }],
@@ -65,6 +65,7 @@ pub static TONEMAP: NodeKind = NodeKind {
 
 pub static FAIL: NodeKind = NodeKind {
     name: "test.fail",
+    label: "fail",
     params: &[],
     inputs: &[InputSpec { name: "image", accepts: SCENE }],
     outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
@@ -75,6 +76,7 @@ pub static FAIL: NodeKind = NodeKind {
 /// A UI-only node: no outputs, presents its input.
 pub static VIEW: NodeKind = NodeKind {
     name: "test.view",
+    label: "view",
     params: &[],
     inputs: &[InputSpec {
         name: "image",
@@ -90,13 +92,14 @@ pub static VIEW: NodeKind = NodeKind {
 /// A sink whose `write` action stores its input pixel at `path`.
 pub static WRITE: NodeKind = NodeKind {
     name: "test.write",
-    params: &[ParamSpec { name: "path", kind: ParamKind::Path { output: true } }],
+    label: "write",
+    params: &[ParamSpec::new("path", ParamKind::Path { output: true }).external()],
     inputs: &[InputSpec { name: "image", accepts: DISPLAY }],
     outputs: &[],
     eval: |_, _, _| Ok(Evaluated::default()),
     actions: &[Action {
         name: "write",
-        run: |p, inputs| {
+        run: |p, inputs, _| {
             let path = p.path("path").ok_or("no path set")?;
             std::fs::write(path, format!("{:?}", pixel(&inputs[0]))).map_err(|e| e.to_string())
         },
@@ -106,10 +109,8 @@ pub static WRITE: NodeKind = NodeKind {
 /// Multiplies its input by `gain`.
 pub static GAIN: NodeKind = NodeKind {
     name: "test.gain",
-    params: &[ParamSpec {
-        name: "gain",
-        kind: ParamKind::Float { min: 0.0, max: 10.0, default: 1.0 },
-    }],
+    label: "gain",
+    params: &[ParamSpec::new("gain", ParamKind::Float { min: 0.0, max: 10.0, default: 1.0 })],
     inputs: &[InputSpec { name: "image", accepts: SCENE }],
     outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
     eval: |p, inputs, _| {
@@ -122,7 +123,8 @@ pub static GAIN: NodeKind = NodeKind {
 /// Outputs the length of the file at `path`, read through the resource store.
 pub static FILE: NodeKind = NodeKind {
     name: "test.file",
-    params: &[ParamSpec { name: "path", kind: ParamKind::Path { output: false } }],
+    label: "file",
+    params: &[ParamSpec::new("path", ParamKind::Path { output: false })],
     inputs: &[],
     outputs: &[OutputSpec { name: "image", ty: PortType::SceneRec2020 }],
     eval: |p, _, ctx| {
@@ -149,7 +151,7 @@ pub const PREVIEW: u8 = 2;
 
 /// Evaluates `id` at preview scale and returns its result.
 pub fn eval<'a>(evaluator: &'a mut Evaluator, project: &Project, id: NodeId) -> &'a NodeResult {
-    evaluator.evaluate(project, &registry(), PREVIEW, &[id]);
+    evaluator.evaluate(&project.graph, PREVIEW, &[id]);
     evaluator.result(id).unwrap()
 }
 

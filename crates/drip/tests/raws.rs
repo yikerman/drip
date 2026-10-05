@@ -13,23 +13,18 @@ fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw/sony-ilce-7rm3.arw")
 }
 
-/// raw.read → white balance → binning → camera to Rec.2020 → kinds…, with
-/// the raw path bound to graph input `raw`.
+/// raw.read → white balance → binning → camera to Rec.2020 → kinds….
 fn pipeline(raw: &Path, tail: &[&'static drip::node::NodeKind]) -> (Project, Vec<NodeId>) {
-    let reg = nodes::registry();
     let mut p = Project::default();
     let read = p.graph.add_node(&nodes::READ);
-    p.bind(&reg, read, "path", "raw").unwrap();
-    p.set_argument(&reg, "raw", json!(raw)).unwrap();
+    p.graph.set_param(read, "path", json!(raw)).unwrap();
     let mut ids = vec![read];
     for kind in
         [&nodes::WHITE_BALANCE, &nodes::BIN_2X2, &nodes::CAMERA_TO_REC2020].iter().chain(tail)
     {
         let (last, id) = (*ids.last().unwrap(), p.graph.add_node(kind));
-        let output = reg.get(&p.graph.node(last).unwrap().kind).unwrap().outputs[0].name;
-        p.graph
-            .connect(&reg, Port(last, output.into()), Port(id, kind.inputs[0].name.into()))
-            .unwrap();
+        let output = p.graph.node(last).unwrap().kind.outputs[0].name;
+        p.graph.connect(Port(last, output.into()), Port(id, kind.inputs[0].name.into())).unwrap();
         ids.push(id);
     }
     (p, ids)
@@ -42,7 +37,7 @@ fn pipeline_matches_libraw() {
     let path = fixture();
     let (p, ids) = pipeline(&path, &[]);
     let mut ev = Evaluator::default();
-    ev.evaluate(&p, &nodes::registry(), 0, &[ids[3]]);
+    ev.evaluate(&p.graph, 0, &[ids[3]]);
     let ours = ev.result(ids[3]).unwrap().as_ref().unwrap().outputs[0].rgb().clone();
     let (width, _, reference) = drip_libraw::reference(&path).unwrap();
 
@@ -81,14 +76,12 @@ fn exports_a_tiff_from_a_raw() {
     let (profile, out) = (dir.join("srgb.icc"), dir.join("out.tif"));
     std::fs::write(&profile, Profile::new_srgb().icc().unwrap()).unwrap();
 
-    let reg = nodes::registry();
     let (mut p, ids) = pipeline(&fixture(), &[&nodes::SIGMOID, &nodes::TIFF]);
     let export = *ids.last().unwrap();
-    p.bind(&reg, export, "path", "out").unwrap();
-    p.set_argument(&reg, "out", json!(out)).unwrap();
-    p.graph.set_param(&reg, export, "profile", json!("file")).unwrap();
-    p.graph.set_param(&reg, export, "profile_file", json!(profile)).unwrap();
-    run_action(&p, &reg, export, "export").unwrap();
+    p.graph.set_param(export, "path", json!(out)).unwrap();
+    p.graph.set_param(export, "profile", json!("file")).unwrap();
+    p.graph.set_param(export, "profile_file", json!(profile)).unwrap();
+    run_action(&p.graph, export, "export").unwrap();
 
     let raw = drip_libraw::decode(&fixture()).unwrap();
     let mut decoder = tiff::decoder::Decoder::new(std::fs::File::open(&out).unwrap()).unwrap();
@@ -104,17 +97,18 @@ fn exports_a_tiff_from_a_raw() {
 }
 
 #[test]
-fn built_in_template_is_a_function_of_raw_and_out() {
-    let reg = nodes::registry();
-    let template = nodes::raw_to_tiff();
-    assert_eq!(template.graph.inputs().into_iter().collect::<Vec<_>>(), ["out", "raw"]);
-    assert_eq!(Project::from_json(&template.to_json(), &reg).unwrap(), template);
+fn built_in_template_takes_the_raw_and_output_paths() {
+    let template = drip::templates::raw_to_tiff();
+    let (raw, export) =
+        (template.graph.find("raw").unwrap(), template.graph.find("export").unwrap());
+    assert_eq!(template.graph.inputs().collect::<Vec<_>>(), [(raw, "path"), (export, "path")]);
+    assert_eq!(Project::from_json(&template.to_json(), &nodes::registry()).unwrap(), template);
 
     let mut p = template;
-    p.set_argument(&reg, "raw", json!(fixture())).unwrap();
-    let preview = p.graph.find("view.preview").unwrap();
+    p.graph.set_param(raw, "path", json!(fixture())).unwrap();
+    let preview = p.graph.find("preview").unwrap();
     let mut ev = Evaluator::default();
-    ev.evaluate(&p, &reg, 3, &[preview]);
+    ev.evaluate(&p.graph, 3, &[preview]);
     let view = ev.result(preview).unwrap().as_ref().unwrap().view.clone();
     let Some(drip::value::View::Image(image)) = view else { panic!("no preview") };
     assert_eq!(image.rgb().scale, 16, "level 3 and the 2x2 debayer");

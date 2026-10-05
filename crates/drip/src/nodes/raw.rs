@@ -11,7 +11,8 @@ use crate::value::{Camera, Cfa, Mosaic, PortType, Value};
 
 pub static READ: NodeKind = NodeKind {
     name: "raw.read",
-    params: &[ParamSpec { name: "path", kind: ParamKind::Path { output: false } }],
+    label: "raw",
+    params: &[ParamSpec::new("path", ParamKind::Path { output: false }).external()],
     inputs: &[],
     outputs: &[
         OutputSpec { name: "mosaic", ty: PortType::Mosaic },

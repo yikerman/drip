@@ -12,7 +12,7 @@ use tiff::encoder::compression::DeflateLevel;
 use tiff::encoder::{Compression, TiffEncoder, TiffValue};
 use tiff::tags::{Tag, Type};
 
-use crate::node::{Action, Evaluated, InputSpec, NodeKind};
+use crate::node::{Action, EvalContext, Evaluated, InputSpec, NodeKind};
 use crate::param::{ParamKind, ParamSpec, Params};
 use crate::profile;
 use crate::value::{PortType, Rgb, Value};
@@ -24,30 +24,22 @@ const PROFILES: &[&str] = &["srgb", "display_p3", "rec2020", "file"];
 
 pub static TIFF: NodeKind = NodeKind {
     name: "export.tiff",
+    label: "export",
     params: &[
-        ParamSpec { name: "path", kind: ParamKind::Path { output: true } },
-        ParamSpec {
-            name: "profile",
-            kind: ParamKind::Choice { options: PROFILES, default: "srgb" },
-        },
-        ParamSpec { name: "profile_file", kind: ParamKind::Path { output: false } },
-        ParamSpec {
-            name: "intent",
-            kind: ParamKind::Choice { options: INTENTS, default: "relative" },
-        },
-        ParamSpec { name: "black_point_compensation", kind: ParamKind::Bool { default: true } },
-        ParamSpec {
-            name: "depth",
-            kind: ParamKind::Choice { options: &["u16", "f32"], default: "u16" },
-        },
-        ParamSpec {
-            name: "compression",
-            kind: ParamKind::Choice { options: &["none", "deflate"], default: "deflate" },
-        },
-        ParamSpec {
-            name: "deflate_level",
-            kind: ParamKind::Choice { options: &["fast", "balanced", "best"], default: "balanced" },
-        },
+        ParamSpec::new("path", ParamKind::Path { output: true }).external(),
+        ParamSpec::new("profile", ParamKind::Choice { options: PROFILES, default: "srgb" }),
+        ParamSpec::new("profile_file", ParamKind::Path { output: false }),
+        ParamSpec::new("intent", ParamKind::Choice { options: INTENTS, default: "relative" }),
+        ParamSpec::new("black_point_compensation", ParamKind::Bool { default: true }),
+        ParamSpec::new("depth", ParamKind::Choice { options: &["u16", "f32"], default: "u16" }),
+        ParamSpec::new(
+            "compression",
+            ParamKind::Choice { options: &["none", "deflate"], default: "deflate" },
+        ),
+        ParamSpec::new(
+            "deflate_level",
+            ParamKind::Choice { options: &["fast", "balanced", "best"], default: "balanced" },
+        ),
     ],
     inputs: &[InputSpec { name: "image", accepts: &[PortType::DisplayRec2020] }],
     outputs: &[],
@@ -55,7 +47,7 @@ pub static TIFF: NodeKind = NodeKind {
     actions: &[Action { name: "export", run: export }],
 };
 
-fn export(p: Params, inputs: &[Value]) -> Result<(), String> {
+fn export(p: Params, inputs: &[Value], _: &EvalContext) -> Result<(), String> {
     let path = p.path("path").ok_or("no output file chosen")?;
     let in_file = |e: &dyn std::fmt::Display, path: &Path| format!("{}: {e}", path.display());
     let (output, icc) = match p.choice("profile") {

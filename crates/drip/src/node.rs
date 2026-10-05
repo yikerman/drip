@@ -1,5 +1,5 @@
 //! Node kinds: the static behavior behind graph nodes (DESIGN N1). A graph node
-//! is plain data naming its kind; everything a kind does lives here.
+//! is data plus a reference to its kind; everything a kind does lives here.
 
 use std::collections::BTreeMap;
 
@@ -10,6 +10,8 @@ use crate::value::{PortType, Value, View};
 pub struct NodeKind {
     /// Stable identifier used in project files, e.g. `raw.read`.
     pub name: &'static str,
+    /// What new nodes are called, numbered when taken: `raw`, `raw 2`, …
+    pub label: &'static str,
     pub params: &'static [ParamSpec],
     pub inputs: &'static [InputSpec],
     pub outputs: &'static [OutputSpec],
@@ -18,6 +20,19 @@ pub struct NodeKind {
     pub eval: fn(Params, &[Value], &EvalContext) -> Result<Evaluated, String>,
     /// Side effects, run only on explicit request (DESIGN U2).
     pub actions: &'static [Action],
+}
+
+/// Kinds are identified by name; their behavior is code and has no equality.
+impl PartialEq for NodeKind {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl std::fmt::Debug for NodeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(self.name)
+    }
 }
 
 impl NodeKind {
@@ -53,7 +68,7 @@ pub struct OutputSpec {
 /// A named side effect. Its inputs are evaluated at full resolution.
 pub struct Action {
     pub name: &'static str,
-    pub run: fn(Params, &[Value]) -> Result<(), String>,
+    pub run: fn(Params, &[Value], &EvalContext) -> Result<(), String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

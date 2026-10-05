@@ -13,6 +13,19 @@ pub type ParamMap = Map<String, Json>;
 pub struct ParamSpec {
     pub name: &'static str,
     pub kind: ParamKind,
+    /// Whether new nodes expose the parameter as an input of their template,
+    /// i.e. expect a value per image (DESIGN F7). Users can change it per node.
+    pub external: bool,
+}
+
+impl ParamSpec {
+    pub const fn new(name: &'static str, kind: ParamKind) -> Self {
+        ParamSpec { name, kind, external: false }
+    }
+
+    pub const fn external(self) -> Self {
+        ParamSpec { external: true, ..self }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -72,7 +85,7 @@ impl ParamKind {
 #[derive(Debug, Clone, Copy)]
 pub struct Params<'a>(pub(crate) &'a ParamMap);
 
-impl Params<'_> {
+impl<'a> Params<'a> {
     pub fn float(&self, name: &str) -> f64 {
         self.0[name].as_f64().expect("validated float")
     }
@@ -85,11 +98,11 @@ impl Params<'_> {
         self.0[name].as_bool().expect("validated bool")
     }
 
-    pub fn choice(&self, name: &str) -> &str {
+    pub fn choice(&self, name: &str) -> &'a str {
         self.0[name].as_str().expect("validated choice")
     }
 
-    pub fn path(&self, name: &str) -> Option<&Path> {
+    pub fn path(&self, name: &str) -> Option<&'a Path> {
         self.0[name].as_str().map(Path::new)
     }
 }

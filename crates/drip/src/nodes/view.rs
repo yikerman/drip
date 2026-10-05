@@ -9,6 +9,7 @@ use crate::value::{Histogram, PortType, Value, View};
 /// Shows a Rec.2020 image; the frontend handles the display transform.
 pub static PREVIEW: NodeKind = NodeKind {
     name: "view.preview",
+    label: "preview",
     params: &[],
     inputs: &[InputSpec {
         name: "image",
@@ -23,6 +24,7 @@ pub static PREVIEW: NodeKind = NodeKind {
 
 pub static HISTOGRAM: NodeKind = NodeKind {
     name: "view.histogram",
+    label: "histogram",
     params: &[],
     inputs: &[InputSpec {
         name: "image",

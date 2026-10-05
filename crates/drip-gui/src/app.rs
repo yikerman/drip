@@ -7,10 +7,10 @@ use std::time::Duration;
 use drip::eval::{Evaluator, run_action};
 use drip::graph::NodeId;
 use drip::node::Registry;
-use drip::nodes;
 use drip::param::ParamKind;
 use drip::project::Project;
 use drip::value::View;
+use drip::{nodes, templates};
 use egui::{CentralPanel, Panel, RichText, Ui};
 
 use crate::editor::Editor;
@@ -42,7 +42,7 @@ struct Status {
 impl App {
     pub fn new(file: Option<PathBuf>, wide_gamut: bool) -> Self {
         let mut app = App {
-            project: nodes::raw_to_tiff(),
+            project: templates::raw_to_tiff(),
             registry: nodes::registry(),
             evaluator: Evaluator::default(),
             file: None,
@@ -80,12 +80,10 @@ impl App {
             .project
             .graph
             .nodes()
-            .filter(|(_, node)| {
-                self.registry.get(&node.kind).is_some_and(|kind| kind.outputs.is_empty())
-            })
+            .filter(|(_, node)| node.kind.outputs.is_empty())
             .map(|(id, _)| id)
             .collect();
-        self.evaluator.evaluate(&self.project, &self.registry, self.level, &sinks);
+        self.evaluator.evaluate(&self.project.graph, self.level, &sinks);
 
         Panel::top("menu").show_separator_line(false).show(ui, |ui| self.menu(ui));
         Panel::bottom("status").show_separator_line(false).show(ui, |ui| self.status_line(ui));
@@ -105,10 +103,13 @@ impl App {
         });
         Panel::bottom("editor").resizable(true).default_size(320.0).show(ui, |ui| {
             let evaluator = &self.evaluator;
-            let error =
-                self.editor.show(ui, &mut self.project, &self.registry, &mut self.selected, |id| {
-                    evaluator.result(id)
-                });
+            let error = self.editor.show(
+                ui,
+                &mut self.project.graph,
+                &self.registry,
+                &mut self.selected,
+                |id| evaluator.result(id),
+            );
             if let Some(error) = error {
                 self.report(Err(error));
             }
@@ -156,7 +157,7 @@ impl App {
     fn menu(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             if ui.button("New").clicked() {
-                self.set_project(nodes::raw_to_tiff(), None);
+                self.set_project(templates::raw_to_tiff(), None);
             }
             if ui.button("Open…").clicked()
                 && let Some(file) =
@@ -242,19 +243,18 @@ impl App {
 
     /// Re-reads every file the project names, recomputing what depends on them.
     fn reload(&mut self) {
-        let graph = &self.project.graph;
-        let literals = graph.nodes().flat_map(|(_, node)| {
-            let kind = self.registry.get(&node.kind);
-            node.params.iter().filter(move |(name, _)| {
-                kind.and_then(|k| k.param(name))
-                    .is_some_and(|spec| matches!(spec.kind, ParamKind::Path { .. }))
+        let paths: Vec<PathBuf> = self
+            .project
+            .graph
+            .nodes()
+            .flat_map(|(_, node)| {
+                let paths = node
+                    .kind
+                    .params
+                    .iter()
+                    .filter(|spec| matches!(spec.kind, ParamKind::Path { .. }));
+                paths.filter_map(|spec| node.params[spec.name].as_str().map(PathBuf::from))
             })
-        });
-        let paths: Vec<PathBuf> = literals
-            .map(|(_, v)| v)
-            .chain(self.project.arguments().values())
-            .filter_map(|v| v.as_str())
-            .map(PathBuf::from)
             .collect();
         for path in &paths {
             self.evaluator.reload(path);
@@ -262,13 +262,12 @@ impl App {
         self.report(Ok(format!("reloaded {} files", paths.len())));
     }
 
-    /// Runs a node action on a snapshot of the project in the background.
+    /// Runs a node action on a snapshot of the graph in the background.
     pub(crate) fn run_action(&mut self, id: NodeId, name: &'static str) {
         let (tx, rx) = mpsc::channel();
-        let project = self.project.clone();
+        let graph = self.project.graph.clone();
         std::thread::spawn(move || {
-            let result =
-                run_action(&project, &nodes::registry(), id, name).map_err(|e| e.to_string());
+            let result = run_action(&graph, id, name).map_err(|e| e.to_string());
             // The receiver is gone only if the app quit; nothing is left to tell.
             let _ = tx.send(result);
         });
@@ -308,8 +307,9 @@ mod tests {
     fn fixture_project(name: &str) -> PathBuf {
         let raw =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw/sony-ilce-7rm3.arw");
-        let mut p = nodes::raw_to_tiff();
-        p.set_argument(&nodes::registry(), "raw", json!(raw)).unwrap();
+        let mut p = templates::raw_to_tiff();
+        let read = p.graph.find("raw").unwrap();
+        p.graph.set_param(read, "path", json!(raw)).unwrap();
         let file =
             std::env::temp_dir().join(format!("drip-gui-{name}-{}.drip", std::process::id()));
         std::fs::write(&file, p.to_json()).unwrap();
@@ -357,10 +357,10 @@ mod tests {
     #[test]
     fn inspector_shows_the_selected_node_and_its_actions() {
         let mut app = App::new(None, true);
-        app.selected = app.project.graph.find("export.tiff");
+        app.selected = app.project.graph.find("export");
         let mut h = harness(app);
         h.run();
-        for label in ["profile", "intent", "depth", "export", "input out"] {
+        for label in ["profile", "intent", "depth", "export", "path (input)", "raw · path"] {
             assert!(h.query_by_label(label).is_some(), "{label}");
         }
     }
