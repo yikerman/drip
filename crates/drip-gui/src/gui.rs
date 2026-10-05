@@ -1,21 +1,27 @@
-//! Node GUIs (DESIGN G13): each node kind draws its own body on the canvas, in
-//! graph units, through a context limited to that node. Kinds without a GUI of
-//! their own get the default, an empty body.
+//! Node GUIs (DESIGN G13). The editor draws every node's frame, with a button
+//! popping out the node's parameters when it has any. Each node kind draws its
+//! own body below that, in graph units, through a context limited to that
+//! node; any part of the body can pop out into a window the kind draws.
+//! Kinds without a GUI of their own get an empty body.
+
+use std::collections::BTreeSet;
 
 use drip::graph::{Graph, Node, NodeId};
 use drip::node::NodeKind;
 use drip::nodes::{HISTOGRAM, PREVIEW};
-use egui::{FontId, Rect, Sense, Stroke, Ui, Vec2, vec2};
+use egui::{FontId, Rect, Sense, Stroke, Ui, UiBuilder, Vec2, vec2};
 use serde_json::{Value as Json, json};
 
-use crate::theme;
 use crate::views::{self, PreparedView};
 use crate::worker::Presentation;
+use crate::{inspector, theme};
 
 /// Width of a node whose body does not set one, in graph units.
 pub const WIDTH: f32 = 160.0;
 /// Space around a node's contents, in graph units.
 pub const PAD: f32 = 6.0;
+/// Side of a pop-out button, in graph units.
+pub const BUTTON: f32 = 20.0;
 
 pub trait NodeGui: Sync {
     /// The size of the node's body, below its ports, in graph units. Its
@@ -26,6 +32,14 @@ pub trait NodeGui: Sync {
 
     /// Draws the body into `ui`, whose max rect has the body's size.
     fn body(&self, _ui: &mut Ui, _node: &mut NodeCx) {}
+
+    /// The initial size of the window the body popped out as `name`, in points.
+    fn window_size(&self, _name: &'static str, _node: &Node) -> Vec2 {
+        vec2(360.0, 320.0)
+    }
+
+    /// Draws the content of the window the body popped out as `name`.
+    fn window(&self, _ui: &mut Ui, _name: &'static str, _node: &mut NodeCx) {}
 }
 
 /// The GUI of nodes of `kind`.
@@ -34,15 +48,77 @@ pub fn of(kind: &NodeKind) -> &'static dyn NodeGui {
     GUIS.iter().find(|(k, _)| *k == kind).map_or(&Plain, |(_, gui)| *gui)
 }
 
+/// A popped-out window: one part of one node.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct Popped {
+    pub node: NodeId,
+    pub part: Part,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Part {
+    /// The node's parameters, the same for every kind.
+    Parameters,
+    /// A part of the node's body, named by its kind's GUI.
+    Gui(&'static str),
+}
+
+impl Part {
+    fn name(self) -> &'static str {
+        match self {
+            Part::Parameters => "parameters",
+            Part::Gui(name) => name,
+        }
+    }
+}
+
+impl Popped {
+    pub fn title(self, node: &Node) -> String {
+        format!("{} {} · Drip", node.label, self.part.name())
+    }
+
+    /// The window's initial size, in points.
+    pub fn size(self, node: &Node) -> Vec2 {
+        match self.part {
+            Part::Parameters => vec2(360.0, 80.0 + 26.0 * node.kind.params.len() as f32),
+            Part::Gui(name) => of(node.kind).window_size(name, node),
+        }
+    }
+
+    /// Draws the window's content.
+    pub fn show(self, ui: &mut Ui, node: &mut NodeCx) {
+        match self.part {
+            Part::Parameters => inspector::node(ui, node),
+            Part::Gui(name) => of(node.node().kind).window(ui, name, node),
+        }
+    }
+}
+
+/// A button over `rect` that pops `part` of the node out, or back in.
+pub fn pop_out(ui: &mut Ui, rect: Rect, node: &mut NodeCx, part: Part) {
+    let popped = node.popped(part);
+    let icon = match part {
+        Part::Parameters => "⚙",
+        Part::Gui(_) => "🗗",
+    };
+    let button = egui::Button::new(icon).frame(false).selected(popped);
+    let hint = if popped { "close its window" } else { "show in its own window" };
+    if ui.put(rect, button).on_hover_text(format!("{}: {hint}", part.name())).clicked() {
+        node.toggle(part);
+    }
+}
+
 struct Plain;
 
 impl NodeGui for Plain {}
 
-/// Draws the node's view at a size the user sets from the body's corner.
+/// Draws the node's view at a size the user sets from the body's corner; the
+/// view pops out into a window filled by it.
 struct Viewer;
 
 /// Default size of a view, in graph units.
 const VIEW: Vec2 = vec2(280.0, 190.0);
+const SHOWN: Part = Part::Gui("view");
 
 impl NodeGui for Viewer {
     fn size(&self, node: &Node) -> Vec2 {
@@ -52,17 +128,32 @@ impl NodeGui for Viewer {
     fn body(&self, ui: &mut Ui, node: &mut NodeCx) {
         let body = ui.max_rect();
         let rect = Rect::from_min_max(body.min + vec2(PAD, 0.0), body.max - vec2(PAD, PAD));
-        if let Some(view) = node.view() {
-            views::draw(
-                ui.painter(),
-                rect,
-                ui.id().with("view"),
-                view,
-                &FontId::proportional(11.0),
-            );
+        if node.popped(SHOWN) {
+            let layout = egui::Layout::centered_and_justified(egui::Direction::TopDown);
+            ui.scope_builder(UiBuilder::new().max_rect(rect).layout(layout), |ui| {
+                ui.weak("shown in its window")
+            });
+        } else if let Some(view) = node.view() {
+            let font = FontId::proportional(11.0);
+            views::draw(ui.painter(), rect, ui.id().with("view"), view, &font);
         }
+        // Over the view, so on a backdrop.
+        let button = Rect::from_min_size(rect.right_top() - vec2(BUTTON, 0.0), Vec2::splat(BUTTON));
+        ui.painter().rect_filled(button, 0.0, theme::DARKER);
+        pop_out(ui, button, node, SHOWN);
         if let Some(size) = resize(ui, body) {
             node.set_ui("size", (size - vec2(0.0, PAD)).max(vec2(80.0, 60.0)));
+        }
+    }
+
+    fn window_size(&self, _name: &'static str, node: &Node) -> Vec2 {
+        pair(&node.ui["size"]).unwrap_or(VIEW)
+    }
+
+    fn window(&self, ui: &mut Ui, _name: &'static str, node: &mut NodeCx) {
+        if let Some(view) = node.view() {
+            let (rect, font) = (ui.available_rect_before_wrap(), FontId::proportional(13.0));
+            views::draw(ui.painter(), rect, ui.id().with("view"), view, &font);
         }
     }
 }
@@ -83,6 +174,8 @@ pub fn resize(ui: &mut Ui, rect: Rect) -> Option<Vec2> {
 /// What one frame of node GUIs reads from the app and reports back.
 pub struct Frame<'a> {
     pub results: &'a dyn Fn(NodeId) -> Option<&'a Presentation>,
+    /// The windows popped out.
+    pub popped: &'a BTreeSet<Popped>,
     /// Disables actions while one runs.
     pub action_running: bool,
     /// An edit the graph refused.
@@ -90,9 +183,27 @@ pub struct Frame<'a> {
     pub changed: bool,
     /// An action the user asked to run.
     pub action: Option<(NodeId, &'static str)>,
+    /// A window the user opened or closed.
+    pub toggled: Option<Popped>,
 }
 
-impl Frame<'_> {
+impl<'a> Frame<'a> {
+    pub fn new(
+        results: &'a dyn Fn(NodeId) -> Option<&'a Presentation>,
+        popped: &'a BTreeSet<Popped>,
+        action_running: bool,
+    ) -> Self {
+        Frame {
+            results,
+            popped,
+            action_running,
+            refused: None,
+            changed: false,
+            action: None,
+            toggled: None,
+        }
+    }
+
     pub fn set_param(&mut self, graph: &mut Graph, id: NodeId, name: &str, value: Json) {
         match graph.set_param(id, name, value) {
             Ok(()) => self.changed = true,
@@ -144,6 +255,16 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
 
     pub fn run(&mut self, action: &'static str) {
         self.frame.action = Some((self.id, action));
+    }
+
+    /// Whether `part` of the node is shown in its own window.
+    pub fn popped(&self, part: Part) -> bool {
+        self.frame.popped.contains(&Popped { node: self.id, part })
+    }
+
+    /// Opens the window of `part`, or closes it if open.
+    pub fn toggle(&mut self, part: Part) {
+        self.frame.toggled = Some(Popped { node: self.id, part });
     }
 }
 

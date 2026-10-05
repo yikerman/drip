@@ -1,15 +1,17 @@
-//! Application state and layout: one project, evaluated at a global detail level.
+//! Application state and layout: one project, evaluated at a global detail
+//! level, in a main window and a window per popped-out part of a node.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use drip::graph::NodeId;
 use drip::node::Registry;
 use drip::project::Project;
 use drip::{nodes, templates};
-use egui::{CentralPanel, Panel, RichText, Ui};
+use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
 
 use crate::editor::Editor;
-use crate::gui::{Frame, NodeCx};
+use crate::gui::{Frame, NodeCx, Popped};
 use crate::worker::{Notice, Worker};
 use crate::{inspector, theme};
 
@@ -30,6 +32,18 @@ pub struct App {
     status: Option<Status>,
     action: Option<&'static str>,
     wide_gamut: bool,
+    /// Parts of nodes shown in their own windows (DESIGN G13); not saved.
+    popped: BTreeSet<Popped>,
+    /// Whether what the windows show changed since the last check.
+    changed: bool,
+}
+
+/// A popped-out window as the app wants it.
+pub struct Window {
+    pub popped: Popped,
+    pub title: String,
+    /// The initial size, in points.
+    pub size: Vec2,
 }
 
 struct Status {
@@ -55,6 +69,8 @@ impl App {
             status: None,
             action: None,
             wide_gamut,
+            popped: BTreeSet::new(),
+            changed: false,
         };
         if let Some(file) = file {
             app.open(file);
@@ -74,12 +90,105 @@ impl App {
             log::info!("{text}");
         }
         self.status = Some(Status { error, text });
+        self.changed = true;
     }
 
+    /// The main window: menu, status line, inspector and editor.
     pub fn ui(&mut self, ui: &mut Ui) {
+        self.poll();
+        Panel::top("menu").show_separator_line(false).show(ui, |ui| self.menu(ui));
+        Panel::bottom("status").show_separator_line(false).show(ui, |ui| self.status_line(ui));
+        let results = |id| self.worker.result(id);
+        let mut frame = Frame::new(&results, &self.popped, self.action.is_some());
+        let graph = &mut self.project.graph;
+        Panel::right("inspector").resizable(true).default_size(320.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                if let Some(id) = self.selected.filter(|id| graph.node(*id).is_some()) {
+                    inspector::node(ui, &mut NodeCx::new(graph, id, &mut frame));
+                    ui.separator();
+                }
+                inspector::inputs(ui, graph, &mut frame);
+            });
+        });
+        CentralPanel::default().show(ui, |ui| {
+            self.editor.show(ui, graph, &self.registry, &mut self.selected, &mut frame);
+        });
+        let Frame { changed, refused, action, toggled, .. } = frame;
+        self.apply(changed, refused, action, toggled);
+    }
+
+    /// A popped-out window.
+    pub fn window(&mut self, ui: &mut Ui, popped: Popped) {
+        self.poll();
+        let results = |id| self.worker.result(id);
+        let mut frame = Frame::new(&results, &self.popped, self.action.is_some());
+        let graph = &mut self.project.graph;
+        CentralPanel::default().show(ui, |ui| {
+            if graph.node(popped.node).is_some() {
+                popped.show(ui, &mut NodeCx::new(graph, popped.node, &mut frame));
+            }
+        });
+        let Frame { changed, refused, action, toggled, .. } = frame;
+        self.apply(changed, refused, action, toggled);
+    }
+
+    pub fn windows(&self) -> Vec<Window> {
+        let window = |popped: Popped| {
+            let node = self.project.graph.node(popped.node).expect("popped nodes exist");
+            Window { popped, title: popped.title(node), size: popped.size(node) }
+        };
+        self.popped.iter().map(|&popped| window(popped)).collect()
+    }
+
+    pub fn close_window(&mut self, popped: Popped) {
+        self.popped.remove(&popped);
+        self.changed = true;
+    }
+
+    /// Whether what the windows show changed since the last call.
+    pub fn take_changed(&mut self) -> bool {
+        std::mem::take(&mut self.changed)
+    }
+
+    /// Applies what a frame's GUIs reported and requests evaluation after edits.
+    fn apply(
+        &mut self,
+        changed: bool,
+        refused: Option<String>,
+        action: Option<(NodeId, &'static str)>,
+        toggled: Option<Popped>,
+    ) {
+        self.dirty |= changed;
+        if let Some(refused) = refused {
+            self.report(Err(refused));
+        }
+        if let Some((id, name)) = action {
+            self.run_action(id, name);
+        }
+        if let Some(popped) = toggled {
+            if !self.popped.remove(&popped) {
+                self.popped.insert(popped);
+            }
+            self.changed = true;
+        }
+        let graph = &self.project.graph;
+        self.popped.retain(|p| graph.node(p.node).is_some());
+        if std::mem::take(&mut self.dirty) {
+            let targets = self.project.graph.nodes().map(|(id, _)| id).collect();
+            if let Err(error) = self.worker.request(&self.project.graph, self.level, targets) {
+                self.report(Err(error));
+            }
+            self.changed = true;
+        }
+    }
+
+    /// Takes the worker's notices.
+    fn poll(&mut self) {
         let mut evaluated = None;
         let mut action_reported = false;
-        for notice in self.worker.poll() {
+        let notices = self.worker.poll();
+        self.changed |= !notices.is_empty();
+        for notice in notices {
             match notice {
                 Notice::Evaluated(result) => evaluated = Some(result),
                 Notice::Action(result) => {
@@ -100,45 +209,6 @@ impl App {
             && let Some(result) = evaluated
         {
             self.report(result.map(|()| "done".into()));
-        }
-
-        Panel::top("menu").show_separator_line(false).show(ui, |ui| self.menu(ui));
-        Panel::bottom("status").show_separator_line(false).show(ui, |ui| self.status_line(ui));
-        let results = |id| self.worker.result(id);
-        let mut frame = Frame {
-            results: &results,
-            action_running: self.action.is_some(),
-            refused: None,
-            changed: false,
-            action: None,
-        };
-        let graph = &mut self.project.graph;
-        Panel::right("inspector").resizable(true).default_size(320.0).show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                if let Some(id) = self.selected.filter(|id| graph.node(*id).is_some()) {
-                    inspector::node(ui, &mut NodeCx::new(graph, id, &mut frame));
-                    ui.separator();
-                }
-                inspector::inputs(ui, graph, &mut frame);
-            });
-        });
-        CentralPanel::default().show(ui, |ui| {
-            self.editor.show(ui, graph, &self.registry, &mut self.selected, &mut frame);
-        });
-        let Frame { changed, refused, action, .. } = frame;
-        self.dirty |= changed;
-        if let Some(refused) = refused {
-            self.report(Err(refused));
-        }
-        if let Some((id, name)) = action {
-            self.run_action(id, name);
-        }
-        if std::mem::take(&mut self.dirty) {
-            let targets = self.project.graph.nodes().map(|(id, _)| id).collect();
-            if let Err(error) = self.worker.request(&self.project.graph, self.level, targets) {
-                self.report(Err(error));
-            }
-            ui.ctx().request_repaint();
         }
     }
 
@@ -235,6 +305,8 @@ impl App {
         self.file = file;
         self.selected = None;
         self.editor = Editor::default();
+        // Node ids are reused across projects.
+        self.popped.clear();
         self.dirty = true;
         self.worker.reset()
     }
@@ -560,5 +632,65 @@ mod tests {
         {
             assert!(h.query_by_label(label).is_some(), "{label}");
         }
+    }
+
+    #[test]
+    fn nodes_with_parameters_and_views_pop_them_out() {
+        use crate::gui::Part;
+        let mut h = harness(App::new(None, true, || {}));
+        h.run();
+        let graph = &h.state().project.graph;
+        let histogram = graph.find("histogram").unwrap();
+        let with_params: Vec<_> =
+            graph.nodes().filter(|(_, n)| !n.kind.params.is_empty()).map(|(id, _)| id).collect();
+        let viewers: Vec<_> = graph
+            .nodes()
+            .filter(|(_, n)| [&nodes::PREVIEW, &nodes::HISTOGRAM].contains(&n.kind))
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(h.get_all_by_label("⚙").count(), with_params.len());
+        assert_eq!(h.get_all_by_label("🗗").count(), viewers.len());
+        // AccessKit bounds ignore the canvas transform, so clicks go by action.
+        let index = |ids: &[NodeId]| ids.iter().position(|&id| id == histogram).unwrap();
+        h.get_all_by_label("⚙").nth(index(&with_params)).unwrap().click_accesskit();
+        h.run();
+        h.get_all_by_label("🗗").nth(index(&viewers)).unwrap().click_accesskit();
+        h.run();
+        let parameters = Popped { node: histogram, part: Part::Parameters };
+        let view = Popped { node: histogram, part: Part::Gui("view") };
+        let titles: Vec<_> = h.state().windows().into_iter().map(|w| (w.popped, w.title)).collect();
+        assert_eq!(
+            titles,
+            [
+                (parameters, "histogram parameters · Drip".into()),
+                (view, "histogram view · Drip".into())
+            ]
+        );
+        assert!(h.query_by_label("shown in its window").is_some());
+        h.state_mut().close_window(view);
+        h.run();
+        assert!(h.query_by_label("shown in its window").is_none());
+
+        // Node ids are reused, so a new project closes every window.
+        h.state_mut().set_project(templates::raw_to_tiff(), None).unwrap();
+        assert!(h.state().windows().is_empty());
+    }
+
+    #[test]
+    fn parameter_windows_show_the_parameters_and_close_with_their_node() {
+        let mut app = App::new(None, true, || {});
+        let export = app.project.graph.find("export").unwrap();
+        let popped = Popped { node: export, part: crate::gui::Part::Parameters };
+        app.popped.insert(popped);
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(360.0, 320.0))
+            .build_ui_state(move |ui, app: &mut App| app.window(ui, popped), app);
+        h.run();
+        for label in ["profile", "intent", "depth", "export"] {
+            assert!(h.query_by_label(label).is_some(), "{label}");
+        }
+        h.state_mut().project.graph.remove_node(export);
+        h.run();
+        assert!(h.state().windows().is_empty());
     }
 }

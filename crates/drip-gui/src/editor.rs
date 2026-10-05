@@ -5,7 +5,7 @@
 //! everything on it is drawn and interacted with in graph units. The editor
 //! draws each node's frame (header, ports, error) and its kind's GUI the body.
 
-use crate::gui::{self, Frame, NodeCx, pair, set_ui};
+use crate::gui::{self, BUTTON, Frame, NodeCx, Part, pair, set_ui};
 use crate::worker::Presentation;
 use drip::eval::NodeError;
 use drip::graph::{Graph, Node, NodeId, Port};
@@ -137,7 +137,7 @@ impl Editor {
                 set_ui(graph, l.id, "pos", pos);
             }
             let node = graph.node(l.id).expect("laid out from the graph");
-            let kind = gui::of(node.kind);
+            let (kind, kind_params) = (gui::of(node.kind), node.kind.params);
             let fill = if *selected == Some(l.id) { theme::LIGHTER } else { theme::DARKER };
             painter.rect_filled(l.rect, 0.0, fill);
             let title = l.rect.min + vec2(8.0, HEADER / 2.0);
@@ -189,8 +189,15 @@ impl Editor {
                 ui.interact(row, ui.id().with((l.id, "error")), Sense::hover())
                     .on_hover_text(error);
             }
-            let body = &mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body));
-            kind.body(body, &mut NodeCx::new(graph, l.id, frame));
+            let mut cx = NodeCx::new(graph, l.id, frame);
+            if !kind_params.is_empty() {
+                let button = Rect::from_min_size(
+                    l.rect.right_top() + vec2(-HEADER, (HEADER - BUTTON) / 2.0),
+                    Vec2::splat(BUTTON),
+                );
+                gui::pop_out(ui, button, &mut cx, Part::Parameters);
+            }
+            kind.body(&mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body)), &mut cx);
         }
 
         if let Some(from) = self.wire.clone() {

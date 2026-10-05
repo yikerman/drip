@@ -7,7 +7,6 @@ Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
 | CLI batch implementation | handoff | deferred | scaffolded; template binding per F4 |
 | GPU computation | user | postponed | Rayon replaces CubeCL; reconsider only with a measured need and one kernel source (E9, E13, E15) |
 | End-to-end UI latency | measurement | open | image evaluation, texture preparation and CPU image retirement now run off-thread; measure remaining driver upload/draw latency at full detail (DESIGN 3.3.6) |
-| Zoom-independent editor text | measurement | deferred | stalls accepted for now; text at every zoom size grows egui's font atlas and stalls frames; options: cached sizes scaled to the exact zoom, or a scaled editor layer |
 | Profiler integration | user | open | Tracy through the `profiling` crate, which egui, epaint, egui-wgpu and wgpu already instrument; the frame log covers coarse timings |
 | Cooperative evaluation cancellation | design | deferred | running evaluations finish before the latest pending request; consider a between-node check only if stale-work latency warrants it (DESIGN 3.3.6) |
 | Full-res region of interest for 1:1 viewing | handoff | deferred | ROI in `EvalContext` (E4) |
@@ -27,4 +26,7 @@ Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
 | Color calibration | user | postponed | beyond the camera's built-in matrix and as-shot white balance (C3) |
 | Undo/redo in the GUI | user | postponed | G4 |
 | Colorimeter check of the wide-gamut display path | user | postponed | screenshots only verify up to sRGB (D5) |
-| Enlarge a preview in its own window | user | postponed | egui-free viewer window sharing the GPU device (G7) |
+| Frame pacing without cross-window stalls | spike | deferred | `Mailbox` where available with Drip limiting each window to the refresh rate, if the `Fifo` stutter from hidden windows shows in use (G13) |
+| Skip redrawing occluded windows | design | deferred | Windows and macOS report `Occluded`; on macOS a hidden `Fifo` window may block up to a second (G13) |
+| Pop-outs above the main window on Windows and macOS | design | deferred | Wayland uses `xdg_toplevel.set_parent` (G13); Windows has owned windows (`with_owner_window`), macOS child windows also move with their parent |
+| Pin button for pop-outs on Windows and macOS | design | deferred | their window managers offer no pin; winit can set always-on-top there but not on Wayland (G13) |

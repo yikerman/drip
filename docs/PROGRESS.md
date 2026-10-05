@@ -2,6 +2,17 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-05: per-node GUI and pop-out windows
+
+- Decided with the user (G13): each node kind gets a frontend GUI drawing real widgets on a transformed canvas, and nodes can pop out into OS windows arranged by the window manager. Zoom is capped at 1; pop-out state is not saved; no docking.
+- Spikes, discarded afterwards: an offscreen render with simulated input confirmed widgets, popups and previews on a transformed egui layer, with two fixes needed (transformed callback rect, inverse-transformed clip). Two windows on one device showed a minimized `Fifo` window holding both to about 31 fps; `Mailbox` on the hidden window avoided it. `Fifo` stays; alternatives are in TODO.
+- `Display` is split into the shared `Gpu` and per-window output. The editor draws on an egui layer transformed for pan and zoom, in graph units; text no longer re-rasterizes per zoom, which ends the font atlas stalls (TODO row removed).
+- `gui::NodeGui` per kind draws the body below the frame; preview and histogram nodes keep their saved size before a result arrives and draw their view. Node GUIs and the inspector edit through `NodeCx`; `App` knows no node kinds.
+- Windows show one part of one node (`gui::Popped`). The frame shows ⚙ on nodes with parameters, popping out the inspector's view of the node; viewer bodies show 🗗 over the view's corner, popping out the view. A first version chose one window per node by kind, which left the histogram's parameters unreachable; the user pointed this out.
+- The shell opens and closes windows to match, and redraws all windows only when the graph, results or pop-outs change (idle with two pop-outs: 9 frames in 8 s).
+- Pop-outs are children of the main window, so KWin keeps them in front of it (the user's choice over always-on-top, which Wayland does not offer). winit has no parent windows on Wayland, so `parent::set_parent` sends `xdg_toplevel.set_parent` on winit's connection; `WAYLAND_DEBUG` showed the request with no protocol error. Windows and macOS are in TODO.
+- Verification: 13 GUI tests (two new: ⚙ and 🗗 counts, opening both histogram windows, closing and project replacement; parameter window content and removal), formatting and clippy pass; offscreen renders of the default template and a live run with the histogram's parameters and view popped out (three scRGB surfaces, both parented) looked right.
+
 ## 2026-10-04: histogram range and labels
 
 - Histogram nodes take `min_ev` and `max_ev` (G12); the plot labels 0 EV, and its labels use the editor's zoomed port font. Projects saved before this lack the two parameters and no longer load (F6, no migration).
