@@ -2,7 +2,7 @@
 //! egui's draw order (nodes and popups cover them) while keeping their full
 //! gamut.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use drip::value::Rgb;
@@ -13,6 +13,8 @@ struct Previews {
     pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
     shown: HashMap<egui::Id, Shown>,
+    /// Previews drawn this frame; the others are freed at its end.
+    used: HashSet<egui::Id>,
     /// The render target's size in pixels, for the viewport.
     screen: [u32; 2],
 }
@@ -53,8 +55,16 @@ pub fn install(device: &wgpu::Device, renderer: &mut egui_wgpu::Renderer) {
         min_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
-    let previews = Previews { pipeline, sampler, shown: HashMap::new(), screen: [1, 1] };
+    let previews =
+        Previews { pipeline, sampler, shown: HashMap::new(), used: HashSet::new(), screen: [1, 1] };
     renderer.callback_resources.insert(previews);
+}
+
+/// Frees the previews not drawn since the last call; called once per frame.
+pub fn end_frame(renderer: &mut egui_wgpu::Renderer) {
+    let previews: &mut Previews = renderer.callback_resources.get_mut().expect("installed");
+    let used = std::mem::take(&mut previews.used);
+    previews.shown.retain(|id, _| used.contains(id));
 }
 
 /// A shape drawing `image` stretched over `rect`, clipped like any other
@@ -81,6 +91,7 @@ impl CallbackTrait for Paint {
     ) -> Vec<wgpu::CommandBuffer> {
         let previews: &mut Previews = resources.get_mut().expect("installed");
         previews.screen = screen.size_in_pixels;
+        previews.used.insert(self.id);
         if !previews.shown.get(&self.id).is_some_and(|s| Arc::ptr_eq(&s.image, &self.image)) {
             let shown = upload(device, queue, previews, &self.image);
             previews.shown.insert(self.id, shown);

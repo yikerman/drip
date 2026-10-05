@@ -248,6 +248,7 @@ impl Display {
                 .forget_lifetime();
             self.egui.render(&mut pass, jobs, &screen);
         }
+        preview::end_frame(&mut self.egui);
         let view = frame.texture.create_view(&Default::default());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
