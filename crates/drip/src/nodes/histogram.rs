@@ -17,7 +17,7 @@ pub static HISTOGRAM: NodeKind = NodeKind {
     params: &[
         ParamSpec::new("min_ev", ParamKind::Int { min: -24, max: -1, default: -12 }),
         ParamSpec::new("max_ev", ParamKind::Int { min: 1, max: 10, default: 4 }),
-        ParamSpec::new("scale", ParamKind::Choice { options: &["linear", "log"], default: "log" }),
+        ParamSpec::new("scale", ParamKind::Choice { options: &["linear", "log"], default: "linear" }),
     ],
     inputs: &[InputSpec {
         name: "image",

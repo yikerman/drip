@@ -283,13 +283,13 @@ fn histogram_bins_by_stops() {
     assert_eq!(h.counts[255], [0, 1, 0], "values beyond the range");
     assert_eq!(h.counts[bin(0.18)][0], 1);
     assert_eq!(h.counts[bin(0.36)][2], 1);
-    assert!(h.log, "log scale by default");
+    assert!(!h.log, "linear scale by default");
 
     p.graph.set_param(id, "min_ev", json!(-2)).unwrap();
     p.graph.set_param(id, "max_ev", json!(1)).unwrap();
-    p.graph.set_param(id, "scale", json!("linear")).unwrap();
+    p.graph.set_param(id, "scale", json!("log")).unwrap();
     let Some(View::Histogram(h)) = evaluate(&p, id).view else { panic!("no histogram") };
-    assert_eq!((h.min_stop, h.max_stop, h.log), (-2.0, 1.0, false));
+    assert_eq!((h.min_stop, h.max_stop, h.log), (-2.0, 1.0, true));
     assert_eq!(h.counts[0], [2, 1, 1], "0.18 and 0.09 now lie below the range");
     assert_eq!(h.counts[((0.36f32.log2() + 2.0) / 3.0 * 256.0) as usize][2], 1);
 }

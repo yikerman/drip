@@ -4,6 +4,12 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: histogram defaults and review
+
+- Default counts to linear; logarithmic counts remain selectable. Existing saved
+  settings are preserved. Reviewed binning and centered plotted samples within
+  their EV bins. Boundary and parameter tests cover both count scales.
+
 ## 2026-10-05: README refresh
 
 - Updated pipeline, preview placement, node organization, pop-out controls and

@@ -61,7 +61,7 @@ pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &PreparedView, fo
 fn histogram(painter: &Painter, rect: Rect, h: &Histogram, font: &FontId) {
     let scale = |n: u32| if h.log { (n as f32).ln_1p() } else { n as f32 };
     let peak = h.counts.iter().flatten().map(|&c| scale(c)).fold(1.0, f32::max);
-    let x = |i: usize| rect.left() + rect.width() * i as f32 / (h.counts.len() - 1) as f32;
+    let x = |i: usize| rect.left() + rect.width() * (i as f32 + 0.5) / h.counts.len() as f32;
     let colors = [
         egui::Color32::from_rgb(110, 20, 20),
         egui::Color32::from_rgb(20, 80, 20),
