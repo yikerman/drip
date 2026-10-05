@@ -1,1 +1,2 @@
 fixtures/raw/*.arw filter=lfs diff=lfs merge=lfs -text
+fixtures/demos/*.png filter=lfs diff=lfs merge=lfs -text

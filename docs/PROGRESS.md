@@ -4,6 +4,19 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: workflow README and demo
+
+- Rewrote the README as a product introduction: photographic workflow first,
+  followed by setup and development links. Kept color coverage concise and
+  retained prototype limits; used darktable, vkdt and Capture One as tone/flow
+  references without copying their prose.
+- Added dependency setup for Fedora, Debian/Ubuntu, Homebrew and Windows MSVC/
+  vcpkg. Checked package names and build-script discovery; macOS and Windows
+  instructions remain unverified on those platforms.
+- Added the user-provided workspace, full-pipeline and pop-out screenshots under
+  fixtures/demos, tracked
+  with Git LFS. Checked the README links and staged LFS pointer.
+
 ## 2026-10-05: scope label glyphs
 
 - Replaced unsupported prime/arrow glyphs in scope labels with ASCII apostrophes
