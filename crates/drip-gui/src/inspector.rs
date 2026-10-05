@@ -4,12 +4,10 @@
 
 use drip::graph::NodeId;
 use drip::param::ParamKind;
-use drip::value::Histogram;
-use egui::{Align2, FontId, Pos2, Sense, Stroke, Ui, vec2};
+use egui::{Sense, Ui};
 use serde_json::{Value as Json, json};
 
 use crate::app::App;
-use crate::theme;
 
 pub fn node(app: &mut App, ui: &mut Ui, id: NodeId) {
     let node = app.project.graph.node(id).expect("selected nodes exist").clone();
@@ -139,46 +137,4 @@ fn edit_text(ui: &mut Ui, id: egui::Id, current: &str) -> Option<String> {
     }
     ui.data_mut(|d| d.remove::<String>(id));
     (editing.is_some() && draft != current).then_some(draft)
-}
-
-/// Each channel's counts per stop, scaled by the square root so that small
-/// populations stay visible; the line marks 1.0 (0 EV).
-pub fn histogram(ui: &mut Ui, h: &Histogram) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 96.0), Sense::hover());
-    let painter = ui.painter_at(rect);
-    let peak = h.counts.iter().flatten().map(|&c| (c as f32).sqrt()).fold(1.0, f32::max);
-    let x = |i: usize| rect.left() + rect.width() * i as f32 / (h.counts.len() - 1) as f32;
-    let colors = [
-        egui::Color32::from_rgb(110, 20, 20),
-        egui::Color32::from_rgb(20, 80, 20),
-        egui::Color32::from_rgb(20, 30, 110),
-    ];
-    for (c, color) in colors.into_iter().enumerate() {
-        let points: Vec<Pos2> = h
-            .counts
-            .iter()
-            .enumerate()
-            .map(|(i, n)| {
-                egui::pos2(x(i), rect.bottom() - rect.height() * (n[c] as f32).sqrt() / peak)
-            })
-            .collect();
-        painter.add(egui::Shape::line(points, Stroke::new(1.0, color)));
-    }
-    let zero = rect.left() + rect.width() * -h.min_stop / (h.max_stop - h.min_stop);
-    painter.vline(zero, rect.y_range(), Stroke::new(1.0, theme::DARKER));
-    let font = FontId::proportional(10.0);
-    painter.text(
-        rect.left_bottom(),
-        Align2::LEFT_BOTTOM,
-        format!("{} EV", h.min_stop),
-        font.clone(),
-        theme::WEAK,
-    );
-    painter.text(
-        rect.right_bottom(),
-        Align2::RIGHT_BOTTOM,
-        format!("+{} EV", h.max_stop),
-        font,
-        theme::WEAK,
-    );
 }

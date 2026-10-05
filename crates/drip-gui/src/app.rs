@@ -9,25 +9,24 @@ use drip::graph::NodeId;
 use drip::node::Registry;
 use drip::param::ParamKind;
 use drip::project::Project;
-use drip::value::View;
 use drip::{nodes, templates};
 use egui::{CentralPanel, Panel, RichText, Ui};
 
-use crate::editor::Editor;
-use crate::{inspector, preview, theme};
+use crate::editor::{Editor, Frame};
+use crate::{inspector, theme};
 
 /// Preview levels never go coarser than 1/256 of the sensor.
 const MAX_LEVEL: u8 = 8;
 
 pub struct App {
     pub(crate) project: Project,
-    pub(crate) registry: Registry,
-    evaluator: Evaluator,
+    registry: Registry,
+    pub(crate) evaluator: Evaluator,
     file: Option<PathBuf>,
     pub(crate) selected: Option<NodeId>,
     editor: Editor,
-    /// The downscale level previews are evaluated at, adapted to the preview
-    /// panel so the image is at least as wide as the panel (DESIGN G2).
+    /// The downscale level the graph is evaluated at, adapted so every image
+    /// view is drawn from at least as many pixels as it shows (DESIGN G2).
     level: u8,
     status: Option<Status>,
     action: Option<mpsc::Receiver<Result<(), String>>>,
@@ -75,15 +74,9 @@ impl App {
 
     pub fn ui(&mut self, ui: &mut Ui) {
         self.poll_action(ui.ctx());
-        // Sinks are what the user looks at (views) or acts on (exports).
-        let sinks: Vec<_> = self
-            .project
-            .graph
-            .nodes()
-            .filter(|(_, node)| node.kind.outputs.is_empty())
-            .map(|(id, _)| id)
-            .collect();
-        self.evaluator.evaluate(&self.project.graph, self.level, &sinks);
+        let evaluator = &self.evaluator;
+        let visible = self.editor.visible(&self.project.graph, |id| evaluator.result(id));
+        self.evaluator.evaluate(&self.project.graph, self.level, &visible);
 
         Panel::top("menu").show_separator_line(false).show(ui, |ui| self.menu(ui));
         Panel::bottom("status").show_separator_line(false).show(ui, |ui| self.status_line(ui));
@@ -95,62 +88,46 @@ impl App {
                     ui.separator();
                 }
                 inspector::inputs(self, ui);
-                if let Some(View::Histogram(h)) = self.view(|v| matches!(v, View::Histogram(_))) {
-                    ui.separator();
-                    inspector::histogram(ui, &h);
-                }
             });
         });
-        Panel::bottom("editor").resizable(true).default_size(320.0).show(ui, |ui| {
+        CentralPanel::default().show(ui, |ui| {
             let evaluator = &self.evaluator;
-            let error = self.editor.show(
+            let results = |id| evaluator.result(id);
+            let mut frame = Frame { results: &results, images: Vec::new(), refused: None };
+            self.editor.show(
                 ui,
                 &mut self.project.graph,
                 &self.registry,
                 &mut self.selected,
-                |id| evaluator.result(id),
+                &mut frame,
             );
-            if let Some(error) = error {
-                self.report(Err(error));
+            let Frame { images, refused, .. } = frame;
+            if let Some(refused) = refused {
+                self.report(Err(refused));
             }
+            self.adapt_level(ui.ctx(), &images);
         });
-        CentralPanel::default().show(ui, |ui| self.preview(ui));
     }
 
-    /// The first view `wanted` accepts, from the selected node if it has one,
-    /// otherwise from the node with the smallest id.
-    fn view(&self, wanted: impl Fn(&View) -> bool) -> Option<View> {
-        let ids = self.selected.into_iter().chain(self.project.graph.nodes().map(|(id, _)| id));
-        ids.filter_map(|id| self.evaluator.result(id).and_then(|r| r.as_ref().ok()?.view.clone()))
-            .find(wanted)
-    }
-
-    fn preview(&mut self, ui: &mut Ui) {
-        let Some(View::Image(value)) = self.view(|v| matches!(v, View::Image(_))) else {
-            ui.centered_and_justified(|ui| ui.weak("no preview"));
-            return;
-        };
-        let image = value.rgb().clone();
-        let space = ui.available_rect_before_wrap();
-        let fit = (space.width() / image.width as f32).min(space.height() / image.height as f32);
-        let rect = egui::Rect::from_center_size(
-            space.center(),
-            egui::vec2(image.width as f32, image.height as f32) * fit,
-        );
-        ui.painter().add(preview::shape(rect, ui.id().with("preview"), image.clone()));
-
-        let panel_px = space.width() * ui.ctx().pixels_per_point();
-        // Finer as soon as the image is narrower than the panel; coarser only
-        // with a margin, since cropping to whole Bayer cells makes each level
-        // slightly less than half the previous and would otherwise oscillate.
-        let ratio = image.width as f32 / panel_px;
-        let shift = if ratio < 1.0 { ratio.log2() } else { (ratio / 1.05).log2().max(0.0) };
-        let shift = shift.floor() as i32;
+    /// Moves to the coarsest level at which every drawn image still has at
+    /// least as many pixels as it shows. Finer as soon as one has fewer;
+    /// coarser only with a margin, since cropping to whole Bayer cells makes
+    /// each level slightly less than half the previous and would oscillate.
+    fn adapt_level(&mut self, ctx: &egui::Context, images: &[(usize, f32)]) {
+        let shift = images
+            .iter()
+            .map(|&(pixels, shown)| {
+                let ratio = pixels as f32 / shown.max(1.0);
+                let shift = if ratio < 1.0 { ratio.log2() } else { (ratio / 1.05).log2().max(0.0) };
+                shift.floor() as i32
+            })
+            .min();
+        let Some(shift) = shift.filter(|s| *s != 0) else { return };
         let level = (i32::from(self.level) + shift).clamp(0, i32::from(MAX_LEVEL)) as u8;
         if level != self.level {
             log::debug!("preview level {} -> {level}", self.level);
             self.level = level;
-            ui.ctx().request_repaint();
+            ctx.request_repaint();
         }
     }
 
@@ -297,6 +274,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use drip::value::View;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
     use serde_json::json;
@@ -320,20 +298,33 @@ mod tests {
         Harness::new_ui_state(|ui, app: &mut App| app.ui(ui), app)
     }
 
+    fn has_view(app: &App, label: &str) -> bool {
+        let id = app.project.graph.find(label).unwrap();
+        app.evaluator.result(id).is_some_and(|r| r.as_ref().is_ok_and(|e| e.view.is_some()))
+    }
+
     #[test]
-    fn opens_a_project_previews_it_and_starts_anew() {
+    fn previews_render_in_their_nodes_and_adapt_resolution() {
         let file = fixture_project("open");
         let mut h = harness(App::new(Some(file.clone()), true));
         h.run();
+        let app = h.state();
+        assert!(app.status.as_ref().is_some_and(|s| !s.error && s.text.starts_with("opened")));
+        assert!(has_view(app, "preview") && has_view(app, "histogram"));
+        let id = app.project.graph.find("preview").unwrap();
+        let Some(View::Image(image)) =
+            app.evaluator.result(id).unwrap().as_ref().unwrap().view.clone()
+        else {
+            panic!("an image")
+        };
         assert!(
-            h.state().status.as_ref().is_some_and(|s| !s.error && s.text.starts_with("opened"))
+            image.rgb().width < 1000,
+            "a view a few hundred points wide needs no full resolution"
         );
-        assert!(h.query_by_label("no preview").is_none());
-        assert!(h.state().level < 6, "the preview level adapts to the panel");
 
         h.get_by_label("New").click();
         h.run();
-        assert!(h.query_by_label("no preview").is_some());
+        assert!(!has_view(h.state(), "preview"), "the new template has no raw file yet");
         std::fs::remove_file(file).unwrap();
     }
 
@@ -355,12 +346,14 @@ mod tests {
     }
 
     #[test]
-    fn inspector_shows_the_selected_node_and_its_actions() {
+    fn inspector_shows_the_selected_node_and_the_inputs() {
         let mut app = App::new(None, true);
         app.selected = app.project.graph.find("export");
         let mut h = harness(app);
         h.run();
-        for label in ["profile", "intent", "depth", "export", "path (input)", "raw · path"] {
+        for label in
+            ["profile", "intent", "depth", "export", "path (input)", "raw · path", "export · path"]
+        {
             assert!(h.query_by_label(label).is_some(), "{label}");
         }
     }

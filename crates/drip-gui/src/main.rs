@@ -11,6 +11,7 @@ mod editor;
 mod inspector;
 mod preview;
 mod theme;
+mod views;
 
 use std::path::PathBuf;
 use std::sync::Arc;
