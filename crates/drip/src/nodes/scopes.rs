@@ -85,6 +85,15 @@ fn position([u, v]: [f32; 2]) -> [f32; 2] {
     [0.5 + (u - white[0]) / (2.0 * RADIUS), 0.5 - (v - white[1]) / (2.0 * RADIUS)]
 }
 
+/// CIE XYZ at Y = 1 for an occupied vectorscope bin's normalized position.
+/// Inverts the u′v′ equations [1] so frontends share the scope's coordinates.
+pub fn vectorscope_xyz([x, y]: [f32; 2]) -> [f64; 3] {
+    let white = white_uv();
+    let u = f64::from(white[0] + (x - 0.5) * (2.0 * RADIUS));
+    let v = f64::from(white[1] - (y - 0.5) * (2.0 * RADIUS));
+    [9.0 * u / (4.0 * v), 1.0, (12.0 - 3.0 * u - 20.0 * v) / (4.0 * v)]
+}
+
 fn vectorscope(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {
     let matrix = color::rgb_to_xyz(REC2020, D65);
     let counts = vector_counts(&inputs[0].rgb().pixels, &matrix);

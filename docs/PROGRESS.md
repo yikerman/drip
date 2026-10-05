@@ -4,6 +4,12 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: vectorscope color
+
+- Color density bins by chromaticity, with white neutrals and brightness tied
+  to count. Colors are clipped sRGB annotations; scope positions are unchanged.
+- Checked neutral, primary and density colors with a targeted numerical test.
+
 ## 2026-10-05: waveform and vectorscope
 
 - Added scope nodes using the existing resizable bodies and pop-out views;

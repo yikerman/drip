@@ -133,6 +133,8 @@ This sequence takes priority over CLI expansion and speculative optimization.
   columns and measure RGB in EV, matching the histogram. Vectorscopes use
   exposure-independent CIE u′v′ centered on D65, with Rec.2020 primary markers;
   omit black and clip negative channels only for this chromaticity visualization.
+  Density colors are sRGB annotations of chromaticity, with brightness indicating
+  count; out-of-gamut colors are clipped without moving their plotted positions.
   These conventions keep scene and display data interpretable without a video
   transfer function or an implicit display-profile conversion.
 

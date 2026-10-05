@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use drip::color::{self, D65, REC709};
+use drip::nodes::scopes::vectorscope_xyz;
 use drip::value::{Histogram, Rgb, Scope, ScopeAxes, View};
 use egui::{Align2, FontId, Painter, Rect, Stroke};
 
@@ -88,6 +90,7 @@ fn histogram(painter: &Painter, rect: Rect, h: &Histogram, font: &FontId) {
 fn scope_mesh(scope: &Scope) -> egui::Mesh {
     let scale = |n: u32| if scope.log { (n as f32).ln_1p() } else { n as f32 };
     let peak = scope.counts.iter().flatten().map(|&n| scale(n)).fold(1.0, f32::max);
+    let xyz_to_srgb = color::inverse(&color::rgb_to_xyz(REC709, D65));
     let mut mesh = egui::Mesh::default();
     let size = scope.size as f32;
     for (i, count) in scope.counts.iter().enumerate() {
@@ -97,12 +100,33 @@ fn scope_mesh(scope: &Scope) -> egui::Mesh {
         let rgb = count.map(|n| (255.0 * scale(n) / peak).round() as u8);
         let color = match scope.axes {
             ScopeAxes::Waveform { .. } => egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]),
-            ScopeAxes::Vectorscope { .. } => egui::Color32::from_gray(rgb[0]),
+            ScopeAxes::Vectorscope { .. } => {
+                let center = [(i % scope.size) as f32 + 0.5, (i / scope.size) as f32 + 0.5];
+                vectorscope_color(center.map(|v| v / size), scale(count[0]) / peak, &xyz_to_srgb)
+            }
         };
         let min = egui::pos2((i % scope.size) as f32 / size, (i / scope.size) as f32 / size);
         mesh.add_colored_rect(Rect::from_min_size(min, egui::vec2(1.0 / size, 1.0 / size)), color);
     }
     mesh
+}
+
+// Scope colors are sRGB UI annotations: clip out-of-gamut components and
+// normalize the peak before encoding. Density scales the visible color, while
+// neutral chromaticities stay white and the plot's geometry stays unchanged.
+fn vectorscope_color(position: [f32; 2], density: f32, xyz_to_srgb: &color::Mat3) -> egui::Color32 {
+    let rgb = color::apply(xyz_to_srgb, vectorscope_xyz(position)).map(|v| v.max(0.0));
+    let peak = rgb.into_iter().fold(0.0, f64::max);
+    let encoded = rgb.map(|v| {
+        let linear = v / peak;
+        let srgb = if linear <= 0.0031308 {
+            12.92 * linear
+        } else {
+            1.055 * linear.powf(1.0 / 2.4) - 0.055
+        };
+        (255.0 * srgb * f64::from(density)).round() as u8
+    });
+    egui::Color32::from_rgb(encoded[0], encoded[1], encoded[2])
 }
 
 fn draw_scope(painter: &Painter, rect: Rect, scope: &Scope, mesh: &egui::Mesh, font: &FontId) {
@@ -150,6 +174,27 @@ mod tests {
     use drip::value::Value;
 
     use super::*;
+
+    #[test]
+    fn vectorscope_colors_preserve_neutrals_primaries_and_density() {
+        let matrix = color::inverse(&color::rgb_to_xyz(REC709, D65));
+        assert_eq!(vectorscope_color([0.5; 2], 1.0, &matrix), egui::Color32::WHITE);
+        assert_eq!(vectorscope_color([0.5; 2], 0.25, &matrix), egui::Color32::from_gray(64));
+        for (channel, [x, y]) in REC709.into_iter().enumerate() {
+            let denominator = -2.0 * x + 12.0 * y + 3.0;
+            let position = [
+                (0.5 + 4.0 * x / denominator - 0.1978300066) as f32,
+                (0.5 - 9.0 * y / denominator + 0.4683199949) as f32,
+            ];
+            let color = vectorscope_color(position, 1.0, &matrix).to_array();
+            assert_eq!(color[channel], 255);
+            for (other, &value) in color[..3].iter().enumerate() {
+                if other != channel {
+                    assert!(value <= 1, "{color:?}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn preparation_reuses_images_and_keeps_destruction_on_its_owner() {

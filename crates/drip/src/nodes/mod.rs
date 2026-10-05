@@ -12,7 +12,7 @@ mod histogram;
 pub use highlights::HIGHLIGHTS;
 mod preview;
 mod raw;
-mod scopes;
+pub mod scopes;
 pub use scopes::{VECTORSCOPE, WAVEFORM};
 pub mod sigmoid;
 mod white_balance;
