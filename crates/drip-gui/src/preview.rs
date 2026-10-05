@@ -87,15 +87,19 @@ pub fn end_frame(renderer: &mut egui_wgpu::Renderer) {
     previews.shown.retain(|id, _| used.contains(id));
 }
 
-/// A shape drawing `image` stretched over `rect`, clipped like any other
-/// shape; `id` names the preview so its texture is reused while the image is
-/// unchanged.
-pub fn shape(rect: egui::Rect, id: egui::Id, image: Arc<Image>) -> egui::Shape {
-    egui_wgpu::Callback::new_paint_callback(rect, Paint { id, rect, image }).into()
+/// Draws `image` stretched over `rect`, clipped like any other shape; `id`
+/// names the preview so its texture is reused while the image is unchanged.
+pub fn draw(painter: &egui::Painter, rect: egui::Rect, id: egui::Id, image: Arc<Image>) {
+    // egui transforms the callback's rect with the painter's layer, but the
+    // shader places the image from its own copy.
+    let to_global = painter.ctx().layer_transform_to_global(painter.layer_id());
+    let paint = Paint { id, rect: to_global.unwrap_or_default() * rect, image };
+    painter.add(egui_wgpu::Callback::new_paint_callback(rect, paint));
 }
 
 struct Paint {
     id: egui::Id,
+    /// Where the image goes, in window points.
     rect: egui::Rect,
     image: Arc<Image>,
 }

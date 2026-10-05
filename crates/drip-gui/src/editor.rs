@@ -1,16 +1,18 @@
-//! The node editor (DESIGN G1, G7): the main canvas. It draws straight from
+//! The node editor (DESIGN G1, G7, G13): the main canvas. It draws straight from
 //! the graph and edits it only through the graph's validated operations. Node
-//! positions and sizes live in each node's opaque `ui` field, in graph units;
-//! the canvas pans and zooms over them. Nodes whose result has a view draw it
-//! in their body and can be resized.
+//! positions and sizes live in each node's opaque `ui` field, in graph units.
+//! The canvas is an egui layer that egui transforms to pan and zoom, so
+//! everything on it is drawn and interacted with in graph units. Nodes whose
+//! result has a view draw it in their body and can be resized.
 
 use crate::views::PreparedView;
 use crate::worker::Presentation;
 use drip::eval::NodeError;
 use drip::graph::{Graph, Node, NodeId, Port};
 use drip::node::Registry;
+use egui::emath::TSTransform;
 use egui::epaint::CubicBezierShape;
-use egui::{Align2, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
+use egui::{Align2, FontId, LayerId, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2, pos2, vec2};
 use serde_json::{Value as Json, json};
 
 use crate::{theme, views};
@@ -22,7 +24,9 @@ const PORT: f32 = 4.0;
 const PAD: f32 = 6.0;
 /// Default size of a node's view, in graph units.
 const VIEW: Vec2 = vec2(280.0, 190.0);
-const ZOOM: (f32, f32) = (0.2, 4.0);
+/// egui rasterizes text once and scales it with the layer, so zooming in past
+/// 1 would blur it.
+const ZOOM: (f32, f32) = (0.2, 1.0);
 /// Space kept around the graph when fitting it into view, in screen points.
 const MARGIN: f32 = 20.0;
 
@@ -70,7 +74,6 @@ impl Editor {
     ) {
         let (area, background) =
             ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-        let painter = ui.painter_at(area);
         let offset = self.offset.get_or_insert_with(|| {
             let (offset, zoom) = fit(graph, area);
             self.zoom = zoom;
@@ -92,62 +95,69 @@ impl Editor {
                 self.zoom = zoom;
             }
         }
-        let (origin, zoom) = (area.min + *offset, self.zoom);
-        let to_screen = |p: Vec2| origin + p * zoom;
+        let zoom = self.zoom;
+        let to_global = TSTransform::new(area.min.to_vec2() + *offset, zoom);
         background.context_menu(|ui| {
             for kind in registry.kinds() {
                 if ui.button(kind.label).clicked() {
-                    let at =
-                        (ui.ctx().pointer_interact_pos().unwrap_or(area.center()) - origin) / zoom;
+                    let pointer = ui.ctx().pointer_interact_pos().unwrap_or(area.center());
                     let id = graph.add_node(kind);
                     frame.changed = true;
-                    set_ui(graph, id, "pos", at);
+                    set_ui(graph, id, "pos", (to_global.inverse() * pointer).to_vec2());
                     *selected = Some(id);
                     ui.close();
                 }
             }
         });
 
+        let layer = LayerId::new(ui.layer_id().order, ui.id().with("canvas"));
+        ui.ctx().set_sublayer(ui.layer_id(), layer);
+        ui.ctx().set_transform_layer(layer, to_global);
+        let visible = to_global.inverse() * area;
+        let ui = &mut ui.new_child(UiBuilder::new().layer_id(layer).max_rect(visible));
+        ui.set_clip_rect(visible);
+        let painter = ui.painter().clone();
+
         let results = frame.results;
-        let layouts: Vec<Layout> = graph
-            .nodes()
-            .map(|(id, node)| layout(id, node, results(id), &to_screen, zoom))
-            .collect();
+        let layouts: Vec<Layout> =
+            graph.nodes().map(|(id, node)| layout(id, node, results(id))).collect();
         let port_pos = |port: &Port, outputs: bool| {
             let layout = layouts.iter().find(|l| l.id == port.0)?;
             let ports = if outputs { &layout.outputs } else { &layout.inputs };
             ports.iter().find(|(name, _)| *name == port.1).map(|(_, pos)| *pos)
         };
 
-        let wire = Stroke::new(1.5 * zoom.sqrt(), theme::TEXT);
+        // Strokes and hit areas are in graph units; these keep their on-screen
+        // size as it was before the canvas was transformed.
+        let wire = Stroke::new(1.5 / zoom.sqrt(), theme::TEXT);
         for (output, input) in graph.edges() {
             if let (Some(from), Some(to)) = (port_pos(output, true), port_pos(input, false)) {
                 painter.add(bezier(from, to, wire));
             }
         }
 
-        let (font, small) = (FontId::proportional(13.0 * zoom), FontId::proportional(11.0 * zoom));
-        let hit = |pos: Pos2| Rect::from_center_size(pos, Vec2::splat(4.0 * PORT * zoom.max(1.0)));
+        let (font, small) = (FontId::proportional(13.0), FontId::proportional(11.0));
+        let hit = |pos: Pos2| Rect::from_center_size(pos, Vec2::splat(4.0 * PORT / zoom));
         for l in &layouts {
             let body = ui.interact(l.rect, ui.id().with(l.id), Sense::click_and_drag());
             if body.clicked() || body.drag_started() {
                 *selected = Some(l.id);
             }
             if body.dragged() {
-                let pos = position(&graph.node(l.id).expect("laid out").ui, l.id)
-                    + body.drag_delta() / zoom;
+                let pos =
+                    position(&graph.node(l.id).expect("laid out").ui, l.id) + body.drag_delta();
                 set_ui(graph, l.id, "pos", pos);
             }
             let node = graph.node(l.id).expect("laid out from the graph");
             let saved_size = view_size(&node.ui);
             let fill = if *selected == Some(l.id) { theme::LIGHTER } else { theme::DARKER };
             painter.rect_filled(l.rect, 0.0, fill);
-            let title = l.rect.min + vec2(8.0, HEADER / 2.0) * zoom;
+            let title = l.rect.min + vec2(8.0, HEADER / 2.0);
             painter.text(title, Align2::LEFT_CENTER, &node.label, font.clone(), theme::TEXT);
             for (name, pos) in &l.inputs {
-                painter.circle_filled(*pos, PORT * zoom, theme::TEXT);
+                painter.circle_filled(*pos, PORT, theme::TEXT);
                 painter.text(
-                    *pos + vec2(8.0 * zoom, 0.0),
+                    *pos + vec2(8.0, 0.0),
                     Align2::LEFT_CENTER,
                     name,
                     small.clone(),
@@ -161,9 +171,9 @@ impl Editor {
                 port.on_hover_text("right-click to disconnect");
             }
             for (name, pos) in &l.outputs {
-                painter.circle_filled(*pos, PORT * zoom, theme::TEXT);
+                painter.circle_filled(*pos, PORT, theme::TEXT);
                 painter.text(
-                    *pos - vec2(8.0 * zoom, 0.0),
+                    *pos - vec2(8.0, 0.0),
                     Align2::RIGHT_CENTER,
                     name,
                     small.clone(),
@@ -185,29 +195,29 @@ impl Editor {
                     theme::ERROR,
                 );
                 let row = Rect::from_min_size(
-                    pos2(l.rect.min.x, at.y - ROW * zoom / 2.0),
-                    vec2(l.rect.width(), ROW * zoom),
+                    pos2(l.rect.min.x, at.y - ROW / 2.0),
+                    vec2(l.rect.width(), ROW),
                 );
                 ui.interact(row, ui.id().with((l.id, "error")), Sense::hover())
                     .on_hover_text(error);
             }
             if let Some((rect, view)) = &l.view {
                 views::draw(&painter, *rect, ui.id().with((l.id, "view")), view, &small);
-                let corner = Rect::from_min_max(l.rect.max - Vec2::splat(10.0 * zoom), l.rect.max);
+                let corner = Rect::from_min_max(l.rect.max - Vec2::splat(10.0), l.rect.max);
                 painter.line_segment(
                     [corner.left_bottom(), corner.right_top()],
-                    Stroke::new(1.0, theme::WEAK),
+                    Stroke::new(1.0 / zoom, theme::WEAK),
                 );
                 let handle = ui.interact(corner, ui.id().with((l.id, "resize")), Sense::drag());
                 if handle.dragged() {
-                    let size = (saved_size + handle.drag_delta() / zoom).max(vec2(80.0, 60.0));
+                    let size = (saved_size + handle.drag_delta()).max(vec2(80.0, 60.0));
                     set_ui(graph, l.id, "size", size);
                 }
             }
         }
 
         if let Some(from) = self.wire.clone() {
-            let pointer = ui.ctx().pointer_latest_pos();
+            let pointer = ui.ctx().pointer_latest_pos().map(|p| to_global.inverse() * p);
             if let (Some(start), Some(end)) = (port_pos(&from, true), pointer) {
                 painter.add(bezier(start, end, wire));
             }
@@ -239,13 +249,7 @@ impl Editor {
 
 /// From the top: header, one row per port pair, an error row if the node
 /// failed, the view if it has one.
-fn layout(
-    id: NodeId,
-    node: &Node,
-    result: Option<&Presentation>,
-    to_screen: &impl Fn(Vec2) -> Pos2,
-    zoom: f32,
-) -> Layout {
+fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> Layout {
     let view = result.and_then(|r| r.as_ref().ok()).and_then(Clone::clone);
     let error = match result {
         Some(Err(NodeError::Upstream(_))) | Some(Ok(_)) | None => None,
@@ -254,11 +258,11 @@ fn layout(
     let size = if view.is_some() { view_size(&node.ui) } else { vec2(WIDTH, 0.0) };
     let ports = HEADER + ROW * node.kind.inputs.len().max(node.kind.outputs.len()) as f32;
     let view_top = ports + if error.is_some() { ROW } else { 0.0 };
-    let pos = position(&node.ui, id);
-    let port = |i: usize, x: f32| to_screen(pos + vec2(x, HEADER + ROW * (i as f32 + 0.5)));
+    let pos = position(&node.ui, id).to_pos2();
+    let port = |i: usize, x: f32| pos + vec2(x, HEADER + ROW * (i as f32 + 0.5));
     Layout {
         id,
-        rect: Rect::from_min_size(to_screen(pos), vec2(size.x, view_top + size.y + PAD) * zoom),
+        rect: Rect::from_min_size(pos, vec2(size.x, view_top + size.y + PAD)),
         inputs: node.kind.inputs.iter().enumerate().map(|(i, p)| (p.name, port(i, 0.0))).collect(),
         outputs: node
             .kind
@@ -267,15 +271,9 @@ fn layout(
             .enumerate()
             .map(|(i, p)| (p.name, port(i, size.x)))
             .collect(),
-        error: error.map(|e| (to_screen(pos + vec2(8.0, ports + ROW / 2.0)), e)),
+        error: error.map(|e| (pos + vec2(8.0, ports + ROW / 2.0), e)),
         view: view.map(|v| {
-            (
-                Rect::from_min_size(
-                    to_screen(pos + vec2(PAD, view_top)),
-                    (size - vec2(2.0 * PAD, 0.0)) * zoom,
-                ),
-                v,
-            )
+            (Rect::from_min_size(pos + vec2(PAD, view_top), size - vec2(2.0 * PAD, 0.0)), v)
         }),
     }
 }

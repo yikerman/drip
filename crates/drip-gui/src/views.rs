@@ -50,7 +50,7 @@ pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &PreparedView, fo
             let fit = (rect.width() / image.width as f32).min(rect.height() / image.height as f32);
             let size = egui::vec2(image.width as f32, image.height as f32) * fit;
             let shown = Rect::from_center_size(rect.center(), size);
-            painter.add(preview::shape(shown, id, image.clone()));
+            preview::draw(painter, shown, id, image.clone());
         }
         PreparedView::Histogram(h) => histogram(painter, rect, h, font),
     }
