@@ -10,6 +10,11 @@ use crate::theme;
 /// Side of a pop-out button.
 pub const BUTTON: f32 = 20.0;
 
+pub fn link(ui: &mut Ui, label: &str, url: &str) -> egui::Response {
+    let text = egui::RichText::new(label).color(ui.visuals().hyperlink_color).underline();
+    ui.hyperlink_to(text, url)
+}
+
 /// One screen point in the units of `ui`, which differ on the zoomed canvas.
 pub fn point(ui: &Ui) -> f32 {
     ui.ctx().layer_transform_to_global(ui.layer_id()).map_or(1.0, |t| 1.0 / t.scaling)

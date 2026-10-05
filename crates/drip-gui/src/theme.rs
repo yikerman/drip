@@ -12,6 +12,7 @@ pub const LIGHTEST: Color32 = Color32::from_gray(150);
 pub const TEXT: Color32 = Color32::from_gray(16);
 pub const WEAK: Color32 = Color32::from_gray(56);
 pub const ERROR: Color32 = Color32::from_rgb(96, 16, 16);
+pub const LINK: Color32 = Color32::from_rgb(0, 32, 80);
 
 pub const BODY_SIZE: f32 = 16.0;
 pub const SMALL_SIZE: f32 = 14.0;
@@ -27,7 +28,7 @@ pub fn apply(ctx: &egui::Context) {
     v.code_bg_color = DARKER;
     v.error_fg_color = ERROR;
     v.warn_fg_color = ERROR;
-    v.hyperlink_color = TEXT;
+    v.hyperlink_color = LINK;
     v.window_stroke = Stroke::NONE;
     v.window_shadow = Shadow::NONE;
     v.popup_shadow = Shadow::NONE;

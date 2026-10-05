@@ -4,6 +4,12 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: reference link visibility
+
+- Node references use a shared link widget with a blue accent and persistent
+  underline, so they are distinguishable from body text before hovering.
+- Inspector/reference tests, GUI clippy and formatting checks passed.
+
 ## 2026-10-05: node documentation
 
 - Added concise technical help for every built-in node, including exposure math,

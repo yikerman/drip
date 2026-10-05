@@ -27,7 +27,7 @@ pub fn show(ui: &mut Ui, kind: &NodeKind) {
         }
     });
     if let Some((name, url)) = doc.and_then(|doc| doc.reference) {
-        ui.hyperlink_to(name, url);
+        crate::widgets::link(ui, name, url);
     }
     ui.add_space(6.0);
 }
