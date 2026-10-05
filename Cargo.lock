@@ -603,7 +603,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "drip"
-version = "0.1.0"
+version = "0.1.0-dev"
 dependencies = [
  "drip-libraw",
  "lcms2",
@@ -617,14 +617,14 @@ dependencies = [
 
 [[package]]
 name = "drip-cli"
-version = "0.1.0"
+version = "0.1.0-dev"
 dependencies = [
  "drip",
 ]
 
 [[package]]
 name = "drip-gui"
-version = "0.1.0"
+version = "0.1.0-dev"
 dependencies = [
  "drip",
  "egui",
@@ -645,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "drip-libraw"
-version = "0.1.0"
+version = "0.1.0-dev"
 dependencies = [
  "cc",
  "pkg-config",

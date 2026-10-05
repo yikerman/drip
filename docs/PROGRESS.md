@@ -4,6 +4,12 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: development version
+
+- Set all four workspace crates and lockfile entries to `0.1.0-dev`.
+  Offline Cargo metadata verified inherited versions; dependency versions did
+  not change. No processing changes.
+
 ## 2026-10-05: v0.1 direction
 
 - User set the milestone order: proven production algorithms and real-RAW
