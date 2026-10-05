@@ -732,26 +732,34 @@ mod tests {
 
     #[test]
     fn parameter_windows_show_the_parameters_and_close_with_their_node() {
-        let mut app = App::new(None, true, || {});
-        let export = app.project.graph.find("export").unwrap();
-        let popped = Popped { node: export, part: crate::node_ui::Part::Parameters };
-        app.popped.insert(popped);
-        // The window opens at the size its content takes, smaller than a
-        // guess yet with every parameter inside.
-        let size = app.window_size(popped, 1.25);
-        assert!(size.x < 360.0 && size.y < 320.0, "{size:?}");
-        let mut h = Harness::builder()
-            .with_size(size)
-            .build_ui_state(move |ui, app: &mut App| app.window(ui, popped), app);
-        h.run();
-        let window = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
-        for label in ["profile", "intent", "depth", "export"] {
-            let rect = h.query_by_label(label).unwrap_or_else(|| panic!("{label}")).rect();
-            assert!(window.contains_rect(rect), "{label} at {rect:?} outside {size:?}");
+        for (name, labels) in [
+            ("export", &["profile", "intent", "depth", "export"][..]),
+            (
+                "sigmoid",
+                &["contrast", "skew", "preserve_hue", "−8 … +8 EV relative to middle grey"][..],
+            ),
+        ] {
+            let mut app = App::new(None, true, || {});
+            let id = app.project.graph.find(name).unwrap();
+            let popped = Popped { node: id, part: crate::node_ui::Part::Parameters };
+            app.popped.insert(popped);
+            // The window opens at the size its content takes, smaller than a
+            // guess yet with every parameter inside.
+            let size = app.window_size(popped, 1.25);
+            assert!(size.x < 360.0 && size.y < 320.0, "{size:?}");
+            let mut h = Harness::builder()
+                .with_size(size)
+                .build_ui_state(move |ui, app: &mut App| app.window(ui, popped), app);
+            h.run();
+            let window = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+            for &label in labels {
+                let rect = h.query_by_label(label).unwrap_or_else(|| panic!("{label}")).rect();
+                assert!(window.contains_rect(rect), "{label} at {rect:?} outside {size:?}");
+            }
+            h.state_mut().project.graph.remove_node(id);
+            h.run();
+            assert!(h.state().windows().is_empty());
         }
-        h.state_mut().project.graph.remove_node(export);
-        h.run();
-        assert!(h.state().windows().is_empty());
     }
 
     #[test]

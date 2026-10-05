@@ -4,6 +4,12 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: sigmoid pop-out sizing
+
+- Bounded the curve plot's preferred width to 320 points so content measurement
+  produces a compact pop-out. Extended the parameter-window layout regression
+  check to sigmoid, including its controls and plot caption.
+
 ## 2026-10-05: highlight reconstruction
 
 - Ported Bayer inpaint opposed to Rust/Rayon with per-color saturation carried

@@ -11,8 +11,11 @@ impl NodeUi for Controls {
     fn controls(&self, ui: &mut Ui, node: &mut NodeCx) {
         inspector::parameters(ui, node);
         let curve = sigmoid::settings(Params::validated(&node.node().params));
-        let (rect, _) =
-            ui.allocate_exact_size(vec2(ui.available_width().max(160.0), 100.0), Sense::hover());
+        // Bound the plot's preferred width when a pop-out measures its contents.
+        let (rect, _) = ui.allocate_exact_size(
+            vec2(ui.available_width().clamp(160.0, 320.0), 100.0),
+            Sense::hover(),
+        );
         let point = |x: f32, y: f32| {
             egui::pos2(rect.left() + x * rect.width(), rect.bottom() - y * rect.height())
         };
