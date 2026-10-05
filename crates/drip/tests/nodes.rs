@@ -365,3 +365,14 @@ fn white_balance_scales_saturation_with_each_channel() {
         }
     }
 }
+
+#[test]
+fn scopes_evaluate_through_the_graph() {
+    for kind in [&nodes::WAVEFORM, &nodes::VECTORSCOPE] {
+        let (p, id) = chain(&SCENE, &[kind]);
+        let Some(View::Scope(scope)) = evaluate(&p, id).view else { panic!("no scope") };
+        assert_eq!(scope.counts.len(), scope.size * scope.size);
+        let expected = if kind == &nodes::WAVEFORM { 6 } else { 2 };
+        assert_eq!(scope.counts.iter().flatten().sum::<u32>(), expected);
+    }
+}

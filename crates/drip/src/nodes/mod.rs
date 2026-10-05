@@ -12,6 +12,8 @@ mod histogram;
 pub use highlights::HIGHLIGHTS;
 mod preview;
 mod raw;
+mod scopes;
+pub use scopes::{VECTORSCOPE, WAVEFORM};
 pub mod sigmoid;
 mod white_balance;
 
@@ -38,6 +40,8 @@ pub fn registry() -> Registry {
         &SIGMOID,
         &PREVIEW,
         &HISTOGRAM,
+        &WAVEFORM,
+        &VECTORSCOPE,
         &TIFF,
     ]
     .into_iter()

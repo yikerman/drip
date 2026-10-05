@@ -6,7 +6,7 @@ use crate::editing::NodeCx;
 use crate::inspector;
 use drip::graph::{Node, NodeId};
 use drip::node::NodeKind;
-use drip::nodes::{HISTOGRAM, PREVIEW};
+use drip::nodes::{HISTOGRAM, PREVIEW, VECTORSCOPE, WAVEFORM};
 use egui::{Rect, Ui, Vec2, vec2};
 use viewer::Viewer;
 
@@ -40,8 +40,13 @@ pub trait NodeUi: Sync {
 
 /// The GUI of nodes of `kind`.
 pub fn of(kind: &NodeKind) -> &'static dyn NodeUi {
-    static GUIS: &[(&NodeKind, &dyn NodeUi)] =
-        &[(&PREVIEW, &Viewer), (&HISTOGRAM, &Viewer), (&drip::nodes::SIGMOID, &sigmoid::Controls)];
+    static GUIS: &[(&NodeKind, &dyn NodeUi)] = &[
+        (&PREVIEW, &Viewer),
+        (&HISTOGRAM, &Viewer),
+        (&WAVEFORM, &Viewer),
+        (&VECTORSCOPE, &Viewer),
+        (&drip::nodes::SIGMOID, &sigmoid::Controls),
+    ];
     GUIS.iter().find(|(k, _)| *k == kind).map_or(&Plain, |(_, gui)| *gui)
 }
 

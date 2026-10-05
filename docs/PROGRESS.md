@@ -4,6 +4,16 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: waveform and vectorscope
+
+- Added scope nodes using the existing resizable bodies and pop-out views;
+  density counting and geometry preparation run off the UI thread.
+- CIE u′v′ math and darktable behavioral references are credited in THIRD_PARTY.
+  Synthetic checks cover exposure, spatial bins, channels and chromaticity.
+- Workspace tests passed, followed by targeted reduction/graph/pop-out checks;
+  formatting and workspace clippy passed. Native scope rendering has not been
+  visually checked.
+
 ## 2026-10-05: histogram defaults and review
 
 - Default counts to linear; logarithmic counts remain selectable. Existing saved

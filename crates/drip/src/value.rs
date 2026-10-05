@@ -124,6 +124,7 @@ pub struct Camera {
 pub enum View {
     Image(Value),
     Histogram(Arc<Histogram>),
+    Scope(Arc<Scope>),
 }
 
 /// Pixel counts per channel over equal steps of log2 value (stops), which
@@ -136,4 +137,26 @@ pub struct Histogram {
     pub counts: Vec<[u32; 3]>,
     /// Whether frontends plot the counts on a log scale rather than linearly.
     pub log: bool,
+}
+
+/// Row-major density bins, top to bottom. Waveforms use RGB counts;
+/// chromaticity uses the first channel only.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Scope {
+    pub size: usize,
+    pub counts: Vec<[u32; 3]>,
+    pub axes: ScopeAxes,
+    pub log: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScopeAxes {
+    Waveform {
+        min_stop: f32,
+        max_stop: f32,
+    },
+    /// Rec.2020 primary markers in normalized plot coordinates; D65 is centered.
+    Vectorscope {
+        primaries: [[f32; 2]; 3],
+    },
 }

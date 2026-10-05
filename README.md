@@ -47,7 +47,11 @@ Exposure adjusts scene brightness independently of sigmoid's contrast, skew and
 hue preservation. Sigmoid's panel plots the same curve used for processing.
 Exports support 16-bit integer or float TIFF, with sRGB, Display P3, Rec.2020 or
 a suitable custom RGB ICC profile. Preview nodes accept scene/display Rec.2020;
-histograms also accept camera RGB.
+histograms and RGB waveforms also accept camera RGB. Add waveform or vectorscope
+nodes from the node menu to inspect exposure across image columns or D65-centered
+u′v′ chromaticity. Waveform levels use EV; vectorscope markers show Rec.2020
+primaries. Black has no chromaticity, and negative channels are clipped for the
+vectorscope visualization only.
 
 [LittleCMS](https://www.littlecms.com/) does the color transforms.
 Backend nodes keep their schemas and algorithms together. Frontend node UIs
@@ -86,7 +90,7 @@ In the GUI:
 - Previews update in the background. The status line shows **evaluating…**
   while the previous completed image remains visible.
 - Select a node to edit its parameters. Use **⚙** to open its parameter window,
-  or **🗗** on a preview/histogram to open its view separately. Closing the view
+  or **🗗** on a preview or scope to open its view separately. Closing the view
   window returns it to the canvas; pop-out state is not saved.
 - Right-click a parameter name to make it a template input or fix its value.
 - Set the raw file and the output path under *inputs*, then press *export*

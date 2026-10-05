@@ -129,6 +129,13 @@ This sequence takes priority over CLI expansion and speculative optimization.
   egui's internal blending remains in gamma space. In-gamut screenshot checks
   passed; actual wide-gamut output still needs instrument verification.
 
+- **Decided:** Scopes inspect the connected node output. Waveforms retain image
+  columns and measure RGB in EV, matching the histogram. Vectorscopes use
+  exposure-independent CIE u′v′ centered on D65, with Rec.2020 primary markers;
+  omit black and clip negative channels only for this chromaticity visualization.
+  These conventions keep scene and display data interpretable without a video
+  transfer function or an implicit display-profile conversion.
+
 ## Editing and persistence
 
 - **Decided:** The node canvas is the main workspace. Nodes own their views;

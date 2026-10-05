@@ -731,6 +731,24 @@ mod tests {
     }
 
     #[test]
+    fn scope_nodes_offer_popouts() {
+        for kind in [&nodes::WAVEFORM, &nodes::VECTORSCOPE] {
+            let mut project = Project::default();
+            let id = project.graph.add_node(kind);
+            let mut app = App::new(None, true, || {});
+            app.set_project(project, None).unwrap();
+            let mut h = harness(app);
+            h.run();
+            h.get_by_label("🗗").click_accesskit();
+            h.run();
+            let windows = h.state().windows();
+            assert_eq!(windows.len(), 1);
+            assert_eq!(windows[0].popped.node, id);
+            assert_eq!(windows[0].title, format!("{} view · Drip", kind.label));
+        }
+    }
+
+    #[test]
     fn parameter_windows_show_the_parameters_and_close_with_their_node() {
         for (name, labels) in [
             ("export", &["profile", "intent", "depth", "export"][..]),
