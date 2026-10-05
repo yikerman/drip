@@ -15,8 +15,8 @@ as the prototype develops; they are not permanent architectural constraints.
 
 1. Build a production-ready processing pipeline using proven algorithms from
    darktable, vkdt or Ansel as references. Adapt source where appropriate, retain
-   attribution and license notices, and validate on real RAWs. Algorithm selection
-   is open; the prototype binning and sigmoid are starting points, not constraints.
+   attribution and license notices, and validate on real RAWs. The first ports are
+   sigmoid, RCD and inpaint opposed; broader photographic validation remains.
 2. Refine UI/UX around that pipeline until real editing flows well.
 3. Verify color handling with the user's SpyderX colorimeter, alongside numerical
    processing and export checks. Instrument measurements validate the display
@@ -169,6 +169,13 @@ These timings include evaluation and cache replacement, but exclude GUI
 preparation/upload/drawing; filesystem caches were uncontrolled. The slower
 Full transition was accepted with CPU work off the UI thread. Reproduce with
 `examples/preview_latency.rs`; measure actual frames before tuning further.
+
+With the new RCD/highlight pipeline, the same release harness and 12 workers
+measured 1.20 s at 1/2 and 2.64 s at Full (seven level-change cycles,
+2026-10-05). These rerun sensor processing and now produce four times as many RGB
+pixels as the old binning pipeline. Exposure/sigmoid edits can reuse upstream
+results; GUI preparation and drawing remain excluded. No optimization was added
+solely to recover the old timings.
 
 ## Reference
 

@@ -13,6 +13,8 @@ limits; implementation details and older experiments remain in Git history.
   graph test showing reconstruction before averaging. The real RAW export test
   now exercises the new full-size default pipeline and embedded ICC profile.
 - Workspace tests (89 total), clippy with warnings denied, and formatting pass.
+  Release level-change medians: 1.20 s at 1/2 and 2.64 s at Full on the Sony
+  fixture with 12 workers, excluding GUI work; details/limits are in DESIGN.
 - Broader photo/camera validation remains in TODO. RCD uses bilinear outer
   borders; opposed includes partial mask cells and complete edge neighborhoods,
   unlike the pinned upstream implementation. Ports retain source citations.
