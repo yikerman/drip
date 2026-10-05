@@ -2,6 +2,12 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: histogram range and labels
+
+- Histogram nodes take `min_ev` and `max_ev` (G12); the plot labels 0 EV, and its labels use the editor's zoomed port font. Projects saved before this lack the two parameters and no longer load (F6, no migration).
+- The empty region above 0 EV is not clipping: the template's histogram reads the sigmoid output, which maps scene values into [0, 1).
+- Verification: workspace tests (including custom bounds), formatting and clippy pass; the user checked the GUI.
+
 ## 2026-10-04: balanced default layout
 
 - The built-in template places a 3:2 preview (672×440) beside the end of the processing chain, the histogram (320×240) beyond it and the exporter under the chain, following the user's arrangement.

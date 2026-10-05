@@ -43,8 +43,8 @@ impl Prepared {
     }
 }
 
-/// Draws `view` fitted into `rect`.
-pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &PreparedView) {
+/// Draws `view` fitted into `rect`, labelling it in `font`.
+pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &PreparedView, font: &FontId) {
     match view {
         PreparedView::Image(image) => {
             let fit = (rect.width() / image.width as f32).min(rect.height() / image.height as f32);
@@ -52,13 +52,13 @@ pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &PreparedView) {
             let shown = Rect::from_center_size(rect.center(), size);
             painter.add(preview::shape(shown, id, image.clone()));
         }
-        PreparedView::Histogram(h) => histogram(painter, rect, h),
+        PreparedView::Histogram(h) => histogram(painter, rect, h, font),
     }
 }
 
 /// Each channel's counts per stop, scaled by the square root so that small
-/// populations stay visible; the line marks 1.0 (0 EV).
-fn histogram(painter: &Painter, rect: Rect, h: &Histogram) {
+/// populations stay visible; the marked line is 1.0 (0 EV).
+fn histogram(painter: &Painter, rect: Rect, h: &Histogram, font: &FontId) {
     let peak = h.counts.iter().flatten().map(|&c| (c as f32).sqrt()).fold(1.0, f32::max);
     let x = |i: usize| rect.left() + rect.width() * i as f32 / (h.counts.len() - 1) as f32;
     let colors = [
@@ -73,9 +73,9 @@ fn histogram(painter: &Painter, rect: Rect, h: &Histogram) {
     }
     let zero = rect.left() + rect.width() * -h.min_stop / (h.max_stop - h.min_stop);
     painter.vline(zero, rect.y_range(), Stroke::new(1.0, theme::LIGHTER));
-    let font = FontId::proportional(10.0);
     let label = |at, align, text: String| painter.text(at, align, text, font.clone(), theme::WEAK);
     label(rect.left_bottom(), Align2::LEFT_BOTTOM, format!("{} EV", h.min_stop));
+    label(egui::pos2(zero + 2.0, rect.top()), Align2::LEFT_TOP, "0 EV".into());
     label(rect.right_bottom(), Align2::RIGHT_BOTTOM, format!("+{} EV", h.max_stop));
 }
 

@@ -192,7 +192,7 @@ impl Editor {
                     .on_hover_text(error);
             }
             if let Some((rect, view)) = &l.view {
-                views::draw(&painter, *rect, ui.id().with((l.id, "view")), view);
+                views::draw(&painter, *rect, ui.id().with((l.id, "view")), view, &small);
                 let corner = Rect::from_min_max(l.rect.max - Vec2::splat(10.0 * zoom), l.rect.max);
                 painter.line_segment(
                     [corner.left_bottom(), corner.right_top()],

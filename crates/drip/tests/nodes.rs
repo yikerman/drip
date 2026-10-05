@@ -281,14 +281,21 @@ fn sigmoid_keeps_grey_and_maps_onto_unit_range() {
 
 #[test]
 fn histogram_bins_by_stops() {
-    let (p, h) = chain(&SCENE, &[&nodes::HISTOGRAM]);
-    let Some(View::Histogram(h)) = evaluate(&p, h).view else { panic!("no histogram") };
+    let (mut p, id) = chain(&SCENE, &[&nodes::HISTOGRAM]);
+    let Some(View::Histogram(h)) = evaluate(&p, id).view else { panic!("no histogram") };
     let bin = |v: f32| ((v.log2() - h.min_stop) / (h.max_stop - h.min_stop) * 256.0) as usize;
     assert_eq!(h.counts.iter().map(|c| c[0] + c[1] + c[2]).sum::<u32>(), 6);
     assert_eq!(h.counts[0], [0, 1, 1], "zero and negative values");
     assert_eq!(h.counts[255], [0, 1, 0], "values beyond the range");
     assert_eq!(h.counts[bin(0.18)][0], 1);
     assert_eq!(h.counts[bin(0.36)][2], 1);
+
+    p.graph.set_param(id, "min_ev", json!(-2)).unwrap();
+    p.graph.set_param(id, "max_ev", json!(1)).unwrap();
+    let Some(View::Histogram(h)) = evaluate(&p, id).view else { panic!("no histogram") };
+    assert_eq!((h.min_stop, h.max_stop), (-2.0, 1.0));
+    assert_eq!(h.counts[0], [2, 1, 1], "0.18 and 0.09 now lie below the range");
+    assert_eq!(h.counts[((0.36f32.log2() + 2.0) / 3.0 * 256.0) as usize][2], 1);
 }
 
 #[test]

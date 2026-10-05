@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::node::{EvalContext, Evaluated, InputSpec, NodeKind};
-use crate::param::Params;
+use crate::param::{ParamKind, ParamSpec, Params};
 use crate::value::{Histogram, PortType, Value, View};
 
 use super::kernels::{self, BINS};
@@ -24,10 +24,15 @@ pub static PREVIEW: NodeKind = NodeKind {
     actions: &[],
 };
 
+/// Counts stops from `min_ev` to `max_ev`. The bounds lie on either side of
+/// 0 EV, so the range is never empty and always shows where 1.0 falls.
 pub static HISTOGRAM: NodeKind = NodeKind {
     name: "view.histogram",
     label: "histogram",
-    params: &[],
+    params: &[
+        ParamSpec::new("min_ev", ParamKind::Int { min: -24, max: -1, default: -12 }),
+        ParamSpec::new("max_ev", ParamKind::Int { min: 1, max: 10, default: 4 }),
+    ],
     inputs: &[InputSpec {
         name: "image",
         accepts: &[PortType::CameraRgb, PortType::SceneRec2020, PortType::DisplayRec2020],
@@ -37,12 +42,10 @@ pub static HISTOGRAM: NodeKind = NodeKind {
     actions: &[],
 };
 
-const STOPS: (f32, f32) = (-12.0, 4.0);
-
-fn histogram(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {
-    let thresholds =
-        std::array::from_fn(|i| 2f32.powf(STOPS.0 + i as f32 * (STOPS.1 - STOPS.0) / BINS as f32));
+fn histogram(p: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {
+    let (min, max) = (p.int("min_ev") as f32, p.int("max_ev") as f32);
+    let thresholds = std::array::from_fn(|i| 2f32.powf(min + i as f32 * (max - min) / BINS as f32));
     let counts = kernels::histogram(&inputs[0].rgb().pixels, &thresholds);
-    let histogram = Histogram { min_stop: STOPS.0, max_stop: STOPS.1, counts };
+    let histogram = Histogram { min_stop: min, max_stop: max, counts };
     Ok(Evaluated { outputs: vec![], view: Some(View::Histogram(Arc::new(histogram))) })
 }
