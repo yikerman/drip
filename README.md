@@ -65,6 +65,8 @@ In the GUI:
   input port to disconnect it.
 - Choose **Preview detail** globally: Full through 1/256, default 1/8. The
   selection is saved with the project; exports always use full detail.
+- Previews update in the background. The status line shows **evaluating…**
+  while the previous completed image remains visible.
 - Select a node to edit its parameters. Right-click a parameter name to bind
   it to a graph input.
 - Set the raw file and the output path under *inputs*, then press *export*

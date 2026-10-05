@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use drip::value::Rgb;
+use crate::worker::Image;
 use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
 
 /// GPU state shared by all previews, kept in egui's callback resources.
@@ -22,7 +22,7 @@ struct Previews {
 /// One preview's texture and placement. Holding the image keeps identity
 /// comparisons by pointer sound.
 struct Shown {
-    image: Arc<Rgb>,
+    image: Arc<Image>,
     group: wgpu::BindGroup,
     rect: wgpu::Buffer,
 }
@@ -70,14 +70,14 @@ pub fn end_frame(renderer: &mut egui_wgpu::Renderer) {
 /// A shape drawing `image` stretched over `rect`, clipped like any other
 /// shape; `id` names the preview so its texture is reused while the image is
 /// unchanged.
-pub fn shape(rect: egui::Rect, id: egui::Id, image: Arc<Rgb>) -> egui::Shape {
+pub fn shape(rect: egui::Rect, id: egui::Id, image: Arc<Image>) -> egui::Shape {
     egui_wgpu::Callback::new_paint_callback(rect, Paint { id, rect, image }).into()
 }
 
 struct Paint {
     id: egui::Id,
     rect: egui::Rect,
-    image: Arc<Rgb>,
+    image: Arc<Image>,
 }
 
 impl CallbackTrait for Paint {
@@ -132,7 +132,7 @@ fn upload(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     previews: &Previews,
-    image: &Arc<Rgb>,
+    image: &Arc<Image>,
 ) -> Shown {
     let size = wgpu::Extent3d {
         width: image.width as u32,
@@ -149,15 +149,9 @@ fn upload(
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    let texels: Vec<u8> = image
-        .pixels
-        .iter()
-        .flat_map(|&[r, g, b]| [r, g, b, 1.0])
-        .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
-        .collect();
     queue.write_texture(
         texture.as_image_copy(),
-        &texels,
+        &image.texels,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(size.width * 8),

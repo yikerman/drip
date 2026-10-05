@@ -2,6 +2,15 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: background previews and evaluation status
+
+- User approved the worker and requested the existing lowercase message style. Added “evaluating…” while preview work is pending, retaining the previous image; current completion shows “done” or the error. Export retains “running export…” and its separate full-detail execution.
+- `drip-gui::worker` owns the existing synchronous evaluator. Requests name target nodes and the global detail level; one request runs while only the latest pending request is retained. Monotonic generations reject stale results, including after project changes that reuse node IDs. Successful parameter/topology edits and visibility changes schedule requests; ordinary canvas/layout edits do not recompute images. Off-screen nodes keep one last presentation so their layout cannot collapse and oscillate the visible target set.
+- Reset/reload/export commands remain ordered. Resource snapshots for export are now taken on the evaluator-owning worker, then executed on the existing independent export thread. The library, node APIs, Rayon kernels and RAW cache policy are unchanged.
+- Moved RGB f32→RGBA f16 preparation off the UI thread. The worker publishes views/errors without intermediate outputs and retains prepared allocations until renderer/UI references are released, then collects them off-thread. Wgpu upload and drawing remain on the render thread. Winit user events wake the window for completion and worker failures; no polling timer or async runtime was added.
+- Verification: all 73 workspace tests, formatting and clippy pass. New tests cover a blocked node with responsive controls and visible lowercase status, retaining the last image, latest-target coalescing, stale project results, error replacement, cache reuse, reload/export ordering, full-detail actions, worker panic notification and prepared-image ownership/bytes. A live Wayland/RTX 3080 smoke run opened the fixture at Full detail, completed background evaluation and rendered without reported GPU validation errors; the run was ended by its eight-second timeout.
+- Remaining work: RAW pyramid simplification (E17), optional cooperative cancellation, and end-to-end driver upload/draw measurements. A running evaluation finishes before pending work starts; the implementation makes no frame-time guarantee for GPU uploads. Design 3.3.6 and TODO record these limits.
+
 ## 2026-10-04: investigate the async worker
 
 - After committing manual global detail as `ec2fa58`, traced evaluation ownership, UI edit paths, presentation data and the window loop. The library API can stay synchronous and unchanged; the adapter belongs in `drip-gui`, with explicit target IDs and the single global preview level.

@@ -64,7 +64,7 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 | E9 | Prioritize interactive responsiveness, cross-platform support and ease of kernel development over peak throughput. Maintain exactly one source implementation of each computational kernel across CPU and GPU backends. | requirement (user, 2026-10-04) | Preview-level transitions currently interrupt interaction. Backend-specific compilation and dispatch may differ; handwritten copies of the algorithm are excluded. |
 | ~~E10~~ | ~~Use CubeCL 0.11.0-pre.4 for the five computational nodes, selecting hardware GPU or native CPU at runtime.~~ | superseded by E15 (user, 2026-10-04) | The implementation was evaluated, then replaced with Rayon for simpler development and better measured host-to-host latency. See 3.3.2–3.3.3. |
 | E11 | Cache a normalized f32 RAW pyramid and metadata per path and resource revision for the application session, including across project changes. Decode and normalize once, release the u16 buffer, then eagerly derive each coarser level by averaging four same-phase Bayer sites with whole-cell cropping. Preview and export share these immutable levels; export snapshots resource revisions and keeps a separate temporary node cache. Explicit reload replaces a resource without changing existing snapshots. | decided (user, 2026-10-04); implemented | The user accepts about 226 MB per 42 MP pyramid (at most 4/3 of the base mosaic), excluding processing intermediates. A level change clones an Arc instead of scanning the sensor. One implementation each for normalization and downsampling; no RAW-specific evaluator logic. Resources loaded first by an export are shared back to the session. Recursive averages agree with independent direct averages within f32 rounding. No eviction in this prototype; first-load work increases. Snapshots retain cached content, not copies of unread files on disk. |
-| E12 | Move interactive evaluation to a persistent worker, retain the last completed preview and coalesce requests so the latest graph/level wins. | tentative; would revise G2 | A faster kernel can still stall a UI frame. Keep the evaluator and its caches alive across requests; discard obsolete results and add cooperative cancellation between nodes or chunks. Resource loading and texture-byte preparation also belong off the UI thread. The proposed ownership and request flow are in 3.3.4. |
+| E12 | Run interactive evaluation and CPU texture preparation on a persistent frontend worker. Retain the last completed preview and coalesce pending node-target requests at the global level. | decided (user, 2026-10-04); implemented | The existing synchronous library evaluator and its one-result-per-node cache stay on the worker. Monotonic request generations reject stale results across edits and project replacement; completion wakes the window loop. See 3.3.6. |
 | E13 | Acceleration is an implementation detail of selected nodes. Preserve existing host-value inputs/outputs, node contracts, evaluator, graph, caches and renderer; ordinary nodes may coexist with accelerated ones. Maintain one kernel source across its execution backends (E9). | requirement (user, 2026-10-04) | The user requires changes to stay inside some nodes and remain transparent to other infrastructure. Backend selection, runtime reuse and temporary buffers belong behind the node implementation. Include allocation, transfers, synchronization and output materialization in performance comparisons. Cross-node device residency, graph fusion and renderer integration are outside this change. |
 | E14 | Preview latency below 300 ms is acceptable; prioritize straightforward development over further throughput tuning. Linux is the first target; Windows/macOS are lower priority. | requirement (user, 2026-10-04) | A future worker can tolerate longer computations while keeping the UI responsive. Initial RAW loading and full-resolution processing are measured separately. |
 
@@ -72,6 +72,8 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 
 | E16 | Preview level is one manually selected global setting; exports always evaluate at level 0. | requirement (user, 2026-10-04); implemented | The GUI offers Full through 1/256, defaults to 1/8 and persists the level in project UI state. All visible targets share one level through the unchanged evaluator API; one cached result per node remains sufficient. |
 | E17 | Remove eager RAW pyramid retention when manual levels are introduced. Keep ordinary dependency-stamp caching. | requirement (user, 2026-10-04); not implemented | Rapid level switching no longer justifies retaining every normalized level. The exact resource lifetime proposal is in 3.3.4; the Rayon commit leaves current caches intact. |
+
+| E18 | Use the existing lowercase status style: “evaluating…” for pending preview work, “running export…” for export, then “done” or the error. | requirement (user, 2026-10-04); implemented | Keep the previous preview available while a new result is computed. Current failures replace the old view with an error. |
 
 ### 3.3.1 Kernel survey (2026-10-04)
 
@@ -164,9 +166,9 @@ none is changed by the Rayon replacement.
 
 ### 3.3.4 Preview level and background evaluation plan (2026-10-04)
 
-**Tentative implementation plan, written after the Rayon commit.** E16–E17
-record the requested behavior; step 1 is implemented, while the remaining design is proposed, not built.
-Keep each implementation step in its own commit.
+**Original implementation plan, written after the Rayon commit.** Steps 1, 3
+and 4 are now implemented; RAW retention changes in step 2 remain pending.
+The resulting worker behavior is recorded in 3.3.6.
 
 **1. Manual global preview level — implemented.** The GUI selector offers
 levels 0–8 (Full through 1/256), default 3 (1/8), saved in `Project::ui` and
@@ -175,8 +177,8 @@ feedback have been removed. Zooming or resizing a view only changes its
 presentation. The GUI calls the existing `evaluate(graph, level, targets)`;
 `EvalContext` passes the level to source nodes. `run_action` continues forcing
 level 0 independently. With the current 2×2 debayer, level 0 still produces
-half the sensor dimensions (C6). The following cache and worker changes remain
-proposals; they are not part of the detail-level implementation.
+half the sensor dimensions (C6). The cache and worker changes were kept separate
+from the detail-level implementation.
 
 **2. Simplify RAW retention.** Remove the normalized `Pyramid` and derive only
 the requested mosaic from decoded data. Keep one current result per node: that
@@ -271,7 +273,7 @@ retirement; the compute-only benchmark cannot establish UI responsiveness.
 
 ### 3.3.5 Worker investigation after manual detail (2026-10-04)
 
-**Tentative; no application worker implemented.** The existing synchronous
+**Investigation preceding the implementation in 3.3.6.** The existing synchronous
 `Evaluator::evaluate(graph, level, targets)` can remain intact. A temporary
 external probe successfully kept an evaluator on a persistent standard thread,
 sent graph snapshots and global levels over channels, and evaluated preview and
@@ -333,6 +335,57 @@ and buffer retirement before claiming that computation is entirely off the UI.
 RAW pyramid removal remains an independent pending change; it is not necessary
 to establish this worker boundary. Do not add cancellation inside kernels or a
 new async runtime in the initial implementation.
+
+### 3.3.6 Implemented preview worker (2026-10-04)
+
+**Decided and implemented.** `drip-gui::worker` owns a persistent evaluator and
+its resource/node caches. The library, node contracts and
+`evaluate(graph, level, targets)` API are unchanged. GUI requests carry an
+immutable graph snapshot, explicit target IDs, the global detail level, and a
+monotonically increasing generation. Generations never reset when a project
+reuses node IDs; a separate project epoch is unnecessary.
+
+The UI sends at most one preview request at a time and retains only the latest
+pending request. Parameter/topology edits and changes to visible targets request
+work; canvas geometry, labels and selection do not themselves invalidate image
+computation. The current evaluation finishes normally, then obsolete completion
+is discarded and the latest pending request runs. There is no cancellation yet.
+The last completed view remains available while the status line says
+“evaluating…”. A current failure publishes the node error instead of keeping an
+old image as if it were current.
+
+Reset, reload and export commands use the same ordered channel. Export snapshots
+the graph at the click and resource revisions when that command is processed,
+after preceding reloads. The existing separate export thread then runs the full-
+detail action and reports completion. The GUI still permits one export at a
+time; preview and export computation can run concurrently. Both reuse the same
+Rayon pool. RAW pyramid retention and resource sharing are unchanged (E17 remains
+pending).
+
+The worker publishes per-node views/errors, not intermediate output values.
+The UI keeps one last presentation per existing node, including off-screen nodes,
+so their geometry stays stable when the requested target set changes. Deleted
+nodes and project resets release those presentations. Images are converted to RGBA f16 before publication. A worker-owned preparation
+cache reuses bytes by source Arc identity and keeps a reference to each image
+until renderer/UI references are released. After a frame drops its previous
+callbacks and textures, a collect command frees unreferenced prepared images
+and their source images on the worker. Wgpu upload, drawing and GPU object
+lifetimes remain on the render thread.
+
+Completion is enqueued before a winit `WorkerReady` user event requests a redraw.
+Polling receivers never blocks the UI, and no periodic completion timer or async
+runtime is needed. Worker panics also notify the window and end the busy state;
+export panics become action errors. Closing the app sends shutdown without
+joining a potentially long RAW decode or kernel on the UI thread.
+
+Validation covers an explicitly blocked node while the UI displays “evaluating…”
+and opens a control, preserving the previous image until completion; latest-only
+pending requests and complete target sets; cache reuse; project reset with reused
+node IDs; ordered reload/export and full-resolution action inputs; worker panic
+notification; exact prepared texels and off-thread allocation ownership. Existing
+real RAW, TIFF and global-detail tests continue to pass. Driver upload/draw latency
+still needs end-to-end measurement; asynchronous CPU work alone does not promise
+a particular frame-time bound.
 
 ### 3.4 UI-only nodes and side effects
 
@@ -399,7 +452,8 @@ Spike done (protocol level, see D2). Still to do in M3: verify what is actually 
 |----|----------|--------|-----------|
 | ~~G1~~ | ~~Custom node editor in a bottom panel, with a separate preview panel and histogram in the sidebar.~~ | superseded by G7 (user, 2026-10-04) | |
 | ~~G2~~ | ~~Evaluate visible nodes synchronously, adapting resolution to drawn image size; export on a background thread.~~ | superseded by G8 (user, 2026-10-04) | Automatic detail changes interrupted interaction. |
-| G8 | Evaluate visible target nodes and their ancestors at the manually selected global preview level. Interactive evaluation remains synchronous for now; export runs separately at level 0. | decided (user, 2026-10-04); implemented | Detail is independent of canvas zoom and node size. The evaluator API and one-result-per-node cache remain unchanged. The proposed worker is separate (E12, 3.3.4). |
+| ~~G8~~ | ~~Evaluate visible targets synchronously at a manual global level; export separately at level 0.~~ | superseded by G9 (user, 2026-10-04) | Detail selection remains; evaluation moves off the UI. |
+| G9 | Evaluate visible node targets on a persistent worker at the global preview level. Render the last completed presentation and show lowercase activity messages. Export retains its separate full-detail action thread. | decided (user, 2026-10-04); implemented | Image computation, texture-byte preparation and CPU image retirement are off-thread; the renderer owns GPU upload/drawing. See E12, E18 and 3.3.6. |
 | G3 | Logging uses the `log` facade in the library and `env_logger` in the frontends. Frontends also show warnings and errors in the window. | decided (user, 2026-10-04) | The standard, minimal choice. |
 | G4 | Undo/redo is postponed. | decided (user, 2026-10-04) | Not needed for the prototype (TODO). |
 | G5 | One minimal UI style in `theme.rs`: everything on middle grey (sRGB 118, 18% linear), dark text, no shadows, rounding or borders. Fills distinguish elements; color is reserved for errors and histogram channels. | decided (user, 2026-10-04) | A neutral surround is standard for judging color. Decoration distracts from the image. |

@@ -25,9 +25,8 @@ pub fn node(app: &mut App, ui: &mut Ui, id: NodeId) {
                 ui.label(text).interact(Sense::click()).on_hover_text("right-click to change");
             if let Some(value) =
                 edit_value(ui, egui::Id::new((id, spec.name)), &spec.kind, &node.params[spec.name])
-                && let Err(e) = app.project.graph.set_param(id, spec.name, value)
             {
-                app.report(Err(e.to_string()));
+                app.set_param(id, spec.name, value);
             }
             name.context_menu(|ui| {
                 let toggle = if external { "Fix in template" } else { "Make template input" };
@@ -64,9 +63,8 @@ pub fn inputs(app: &mut App, ui: &mut Ui) {
             let kind = node.kind.param(param).expect("listed").kind;
             let value = node.params[param].clone();
             if let Some(value) = edit_value(ui, egui::Id::new(("input", id, param)), &kind, &value)
-                && let Err(e) = app.project.graph.set_param(id, param, value)
             {
-                app.report(Err(e.to_string()));
+                app.set_param(id, param, value);
             }
             ui.end_row();
         }

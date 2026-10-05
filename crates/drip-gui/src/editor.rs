@@ -4,10 +4,10 @@
 //! the canvas pans and zooms over them. Nodes whose result has a view draw it
 //! in their body and can be resized.
 
-use drip::eval::{NodeError, NodeResult};
+use crate::worker::{PreparedView, Presentation};
+use drip::eval::NodeError;
 use drip::graph::{Graph, Node, NodeId, Port};
 use drip::node::Registry;
-use drip::value::View;
 use egui::epaint::CubicBezierShape;
 use egui::{Align2, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use serde_json::{Value as Json, json};
@@ -43,9 +43,10 @@ impl Default for Editor {
 
 /// What one frame of the editor reads from evaluation and reports back.
 pub struct Frame<'a> {
-    pub results: &'a dyn Fn(NodeId) -> Option<&'a NodeResult>,
+    pub results: &'a dyn Fn(NodeId) -> Option<&'a Presentation>,
     /// An edit the graph refused.
     pub refused: Option<String>,
+    pub changed: bool,
 }
 
 /// Where a node and its parts are on screen.
@@ -55,16 +56,16 @@ struct Layout {
     inputs: Vec<(&'static str, Pos2)>,
     outputs: Vec<(&'static str, Pos2)>,
     error: Option<(Pos2, String)>,
-    view: Option<(Rect, View)>,
+    view: Option<(Rect, PreparedView)>,
 }
 
 impl Editor {
     /// The nodes inside last frame's canvas, or all of them before the first
-    /// frame: what the app evaluates (DESIGN G2).
+    /// frame: what the app requests from the worker (DESIGN G9).
     pub fn visible<'a>(
         &self,
         graph: &Graph,
-        results: impl Fn(NodeId) -> Option<&'a NodeResult>,
+        results: impl Fn(NodeId) -> Option<&'a Presentation>,
     ) -> Vec<NodeId> {
         let (Some(area), Some(offset)) = (self.area, self.offset) else {
             return graph.nodes().map(|(id, _)| id).collect();
@@ -113,6 +114,7 @@ impl Editor {
                     let at =
                         (ui.ctx().pointer_interact_pos().unwrap_or(area.center()) - origin) / zoom;
                     let id = graph.add_node(kind);
+                    frame.changed = true;
                     set_ui(graph, id, "pos", at);
                     *selected = Some(id);
                     ui.close();
@@ -168,6 +170,7 @@ impl Editor {
                 let port = ui.interact(hit(*pos), ui.id().with((l.id, name, 0)), Sense::click());
                 if port.secondary_clicked() {
                     graph.disconnect(&Port(l.id, (*name).into()));
+                    frame.changed = true;
                 }
                 port.on_hover_text("right-click to disconnect");
             }
@@ -228,10 +231,11 @@ impl Editor {
                     .iter()
                     .flat_map(|l| l.inputs.iter().map(move |(name, pos)| (l.id, *name, *pos)));
                 let target = pointer.and_then(|p| inputs.find(|(_, _, pos)| hit(*pos).contains(p)));
-                if let Some((id, name, _)) = target
-                    && let Err(e) = graph.connect(from, Port(id, name.into()))
-                {
-                    frame.refused = Some(e.to_string());
+                if let Some((id, name, _)) = target {
+                    match graph.connect(from, Port(id, name.into())) {
+                        Ok(()) => frame.changed = true,
+                        Err(e) => frame.refused = Some(e.to_string()),
+                    }
                 }
             }
         }
@@ -241,6 +245,7 @@ impl Editor {
             && !ui.ctx().egui_wants_keyboard_input()
         {
             graph.remove_node(id);
+            frame.changed = true;
             *selected = None;
         }
     }
@@ -251,11 +256,11 @@ impl Editor {
 fn layout(
     id: NodeId,
     node: &Node,
-    result: Option<&NodeResult>,
+    result: Option<&Presentation>,
     to_screen: &impl Fn(Vec2) -> Pos2,
     zoom: f32,
 ) -> Layout {
-    let view = result.and_then(|r| r.as_ref().ok()).and_then(|e| e.view.clone());
+    let view = result.and_then(|r| r.as_ref().ok()).and_then(Clone::clone);
     let error = match result {
         Some(Err(NodeError::Upstream(_))) | Some(Ok(_)) | None => None,
         Some(Err(e)) => Some(e.to_string()),

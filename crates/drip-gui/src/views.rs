@@ -1,21 +1,21 @@
 //! Drawing node views (DESIGN U1) into a rectangle of the editor.
 
-use drip::value::{Histogram, View};
+use crate::worker::PreparedView;
+use drip::value::Histogram;
 use egui::{Align2, FontId, Painter, Rect, Stroke};
 
 use crate::{preview, theme};
 
 /// Draws `view` fitted into `rect`.
-pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &View) {
+pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &PreparedView) {
     match view {
-        View::Image(value) => {
-            let image = value.rgb();
+        PreparedView::Image(image) => {
             let fit = (rect.width() / image.width as f32).min(rect.height() / image.height as f32);
             let size = egui::vec2(image.width as f32, image.height as f32) * fit;
             let shown = Rect::from_center_size(rect.center(), size);
             painter.add(preview::shape(shown, id, image.clone()));
         }
-        View::Histogram(h) => histogram(painter, rect, h),
+        PreparedView::Histogram(h) => histogram(painter, rect, h),
     }
 }
 

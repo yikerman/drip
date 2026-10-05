@@ -12,6 +12,7 @@ mod inspector;
 mod preview;
 mod theme;
 mod views;
+mod worker;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,7 +20,7 @@ use std::time::Instant;
 
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
 use app::App;
@@ -28,13 +29,17 @@ use display::Display;
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let file = std::env::args_os().nth(1).map(PathBuf::from);
-    let event_loop = EventLoop::new().expect("an event loop");
-    if let Err(e) = event_loop.run_app(&mut Shell { file, running: None }) {
+    let event_loop = EventLoop::<WorkerReady>::with_user_event().build().expect("an event loop");
+    let wake = event_loop.create_proxy();
+    if let Err(e) = event_loop.run_app(&mut Shell { file, running: None, wake }) {
         log::error!("{e}");
     }
 }
 
+struct WorkerReady;
+
 struct Shell {
+    wake: EventLoopProxy<WorkerReady>,
     file: Option<PathBuf>,
     running: Option<Running>,
 }
@@ -48,7 +53,7 @@ struct Running {
     repaint_at: Option<Instant>,
 }
 
-impl ApplicationHandler for Shell {
+impl ApplicationHandler<WorkerReady> for Shell {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.running.is_some() {
             return;
@@ -75,9 +80,18 @@ impl ApplicationHandler for Shell {
             None,
             Some(display.max_texture_side()),
         );
-        let app = App::new(self.file.take(), display.wide_gamut);
+        let wake = self.wake.clone();
+        let app = App::new(self.file.take(), display.wide_gamut, move || {
+            let _ = wake.send_event(WorkerReady);
+        });
         window.request_redraw();
         self.running = Some(Running { window, display, egui, app, repaint_at: None });
+    }
+
+    fn user_event(&mut self, _: &ActiveEventLoop, _: WorkerReady) {
+        if let Some(running) = &self.running {
+            running.window.request_redraw();
+        }
     }
 
     fn new_events(&mut self, _: &ActiveEventLoop, cause: StartCause) {
@@ -129,6 +143,8 @@ impl Running {
         self.egui.handle_platform_output(&self.window, output.platform_output);
         let jobs = ctx.tessellate(output.shapes, output.pixels_per_point);
         self.display.render(&jobs, output.textures_delta, output.pixels_per_point);
+        drop(jobs);
+        self.app.after_frame();
 
         let delay = output.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.repaint_delay);
         self.repaint_at = match delay {

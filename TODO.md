@@ -6,9 +6,9 @@ Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
 |------|--------|--------|-------|
 | CLI batch implementation | handoff | deferred | scaffolded; template binding per F4 |
 | GPU computation | user | postponed | Rayon replaces CubeCL; reconsider only with a measured need and one kernel source (E9, E13, E15) |
-| End-to-end UI latency | measurement | open | Rayon level-0 evaluation is about 162 ms, excluding texture preparation/upload/drawing; evaluation still blocks the UI (E12, DESIGN 3.3.3) |
+| End-to-end UI latency | measurement | open | image evaluation, texture preparation and CPU image retirement now run off-thread; measure remaining driver upload/draw latency at full detail (DESIGN 3.3.6) |
 | Simplify RAW retention | user | planned; not implemented | remove eager normalized pyramid; proposed decoded-data retention for active project and export, with explicit reload (E17, DESIGN 3.3.4) |
-| Background evaluation | user | investigated; implementation proposed | keep existing global-level evaluator API; explicit target requests, latest pending target set, winit completion wake-up, ordered export/reload; move texture packing (118 ms at Full) and buffer retirement off UI (E12, DESIGN 3.3.4–3.3.5) |
+| Cooperative evaluation cancellation | design | deferred | running evaluations finish before the latest pending request; consider a between-node check only if stale-work latency warrants it (DESIGN 3.3.6) |
 | Full-res region of interest for 1:1 viewing | handoff | deferred | ROI in `EvalContext` (E4) |
 | EXIF passthrough | handoff | deferred | `RawMetadata` travels the graph (P3) |
 | Soft-proofing | handoff | deferred | extra transform in the display path |

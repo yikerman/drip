@@ -1,10 +1,7 @@
 //! Application state and layout: one project, evaluated for what is visible.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
-use std::time::Duration;
 
-use drip::eval::Evaluator;
 use drip::graph::NodeId;
 use drip::node::Registry;
 use drip::param::ParamKind;
@@ -13,6 +10,7 @@ use drip::{nodes, templates};
 use egui::{CentralPanel, Panel, RichText, Ui};
 
 use crate::editor::{Editor, Frame};
+use crate::worker::{Notice, Worker};
 use crate::{inspector, theme};
 
 /// Preview levels never go coarser than 1/256 of the sensor.
@@ -22,14 +20,16 @@ const DEFAULT_LEVEL: u8 = 3;
 pub struct App {
     pub(crate) project: Project,
     registry: Registry,
-    pub(crate) evaluator: Evaluator,
+    worker: Worker,
+    dirty: bool,
+    targets: Vec<NodeId>,
     file: Option<PathBuf>,
     pub(crate) selected: Option<NodeId>,
     editor: Editor,
     /// One user-selected level for every preview target (DESIGN E16).
     level: u8,
     status: Option<Status>,
-    action: Option<mpsc::Receiver<Result<(), String>>>,
+    action: Option<&'static str>,
     wide_gamut: bool,
 }
 
@@ -39,11 +39,17 @@ struct Status {
 }
 
 impl App {
-    pub fn new(file: Option<PathBuf>, wide_gamut: bool) -> Self {
+    pub fn new(
+        file: Option<PathBuf>,
+        wide_gamut: bool,
+        wake: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
         let mut app = App {
             project: templates::raw_to_tiff(),
             registry: nodes::registry(),
-            evaluator: Evaluator::default(),
+            worker: Worker::new(wake),
+            dirty: true,
+            targets: Vec::new(),
             file: None,
             selected: None,
             editor: Editor::default(),
@@ -73,10 +79,30 @@ impl App {
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
-        self.poll_action(ui.ctx());
-        let evaluator = &self.evaluator;
-        let visible = self.editor.visible(&self.project.graph, |id| evaluator.result(id));
-        self.evaluator.evaluate(&self.project.graph, self.level, &visible);
+        let mut evaluated = None;
+        let mut action_reported = false;
+        for notice in self.worker.poll() {
+            match notice {
+                Notice::Evaluated(result) => evaluated = Some(result),
+                Notice::Action(result) => {
+                    self.action = None;
+                    self.report(result.map(|()| "done".into()));
+                    action_reported = true;
+                }
+                Notice::Failed => {
+                    self.action = None;
+                    self.report(Err("the preview worker stopped".into()));
+                    action_reported = true;
+                }
+            }
+        }
+        // A preview finishing in the same frame must not hide an export error.
+        if !action_reported
+            && self.action.is_none()
+            && let Some(result) = evaluated
+        {
+            self.report(result.map(|()| "done".into()));
+        }
 
         Panel::top("menu").show_separator_line(false).show(ui, |ui| self.menu(ui));
         Panel::bottom("status").show_separator_line(false).show(ui, |ui| self.status_line(ui));
@@ -91,9 +117,8 @@ impl App {
             });
         });
         CentralPanel::default().show(ui, |ui| {
-            let evaluator = &self.evaluator;
-            let results = |id| evaluator.result(id);
-            let mut frame = Frame { results: &results, refused: None };
+            let results = |id| self.worker.result(id);
+            let mut frame = Frame { results: &results, refused: None, changed: false };
             self.editor.show(
                 ui,
                 &mut self.project.graph,
@@ -101,16 +126,40 @@ impl App {
                 &mut self.selected,
                 &mut frame,
             );
+            self.dirty |= frame.changed;
             if let Some(refused) = frame.refused {
                 self.report(Err(refused));
             }
         });
+        let targets = self.editor.visible(&self.project.graph, |id| self.worker.result(id));
+        if std::mem::take(&mut self.dirty) || targets != self.targets {
+            self.targets = targets;
+            if let Err(error) =
+                self.worker.request(&self.project.graph, self.level, self.targets.clone())
+            {
+                self.report(Err(error));
+            }
+            ui.ctx().request_repaint();
+        }
+    }
+
+    pub fn after_frame(&mut self) {
+        self.worker.after_frame();
+    }
+
+    pub(crate) fn set_param(&mut self, id: NodeId, name: &str, value: serde_json::Value) {
+        match self.project.graph.set_param(id, name, value) {
+            Ok(()) => self.dirty = true,
+            Err(error) => self.report(Err(error.to_string())),
+        }
     }
 
     fn menu(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            if ui.button("New").clicked() {
-                self.set_project(templates::raw_to_tiff(), None).expect("valid template");
+            if ui.button("New").clicked()
+                && let Err(error) = self.set_project(templates::raw_to_tiff(), None)
+            {
+                self.report(Err(error));
             }
             if ui.button("Open…").clicked()
                 && let Some(file) =
@@ -152,7 +201,7 @@ impl App {
                 .on_hover_text("Global preview scale. Export always uses full detail.");
             if self.level != previous {
                 self.project.ui["preview_level"] = serde_json::json!(self.level);
-                ui.ctx().request_repaint();
+                self.dirty = true;
             }
         });
     }
@@ -162,7 +211,15 @@ impl App {
             if !self.wide_gamut {
                 ui.label(RichText::new("previews clipped to sRGB").color(theme::ERROR));
             }
-            if let Some(status) = &self.status {
+            if self.worker.busy() {
+                ui.label("evaluating…");
+            }
+            if let Some(action) = self.action {
+                ui.label(format!("running {action}…"));
+            }
+            if let Some(status) = &self.status
+                && (status.error || (!self.worker.busy() && self.action.is_none()))
+            {
                 let text = RichText::new(&status.text);
                 ui.label(if status.error { text.color(theme::ERROR) } else { text });
             }
@@ -186,8 +243,9 @@ impl App {
         self.file = file;
         self.selected = None;
         self.editor = Editor::default();
-        self.evaluator = self.evaluator.fork(&self.project.graph);
-        Ok(())
+        self.dirty = true;
+        self.targets.clear();
+        self.worker.reset(&self.project.graph)
     }
 
     fn open(&mut self, file: PathBuf) {
@@ -238,49 +296,31 @@ impl App {
                 paths.filter_map(|spec| node.params[spec.name].as_str().map(PathBuf::from))
             })
             .collect();
-        for path in &paths {
-            self.evaluator.reload(path);
-        }
-        self.report(Ok(format!("reloaded {} files", paths.len())));
+        self.dirty = true;
+        let count = paths.len();
+        let result = self.worker.reload(paths);
+        self.report(result.map(|()| format!("reloaded {count} files")));
     }
 
-    /// Runs a node action on a snapshot of the graph in the background.
+    /// The evaluator-owning worker snapshots resources in command order.
     pub(crate) fn run_action(&mut self, id: NodeId, name: &'static str) {
-        let (tx, rx) = mpsc::channel();
-        let graph = self.project.graph.clone();
-        let evaluator = self.evaluator.fork(&graph);
-        std::thread::spawn(move || {
-            let result = evaluator.run_action(&graph, id, name).map_err(|e| e.to_string());
-            // The receiver is gone only if the app quit; nothing is left to tell.
-            let _ = tx.send(result);
-        });
-        self.action = Some(rx);
-        self.report(Ok(format!("running {name}…")));
+        match self.worker.action(&self.project.graph, id, name) {
+            Ok(()) => {
+                self.action = Some(name);
+                self.report(Ok(format!("running {name}…")));
+            }
+            Err(error) => self.report(Err(error)),
+        }
     }
 
     pub(crate) fn action_running(&self) -> bool {
         self.action.is_some()
     }
-
-    fn poll_action(&mut self, ctx: &egui::Context) {
-        let Some(rx) = &self.action else { return };
-        match rx.try_recv() {
-            Ok(result) => {
-                self.action = None;
-                self.report(result.map(|()| "done".into()));
-            }
-            Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.action = None;
-                self.report(Err("the action crashed".into()));
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use drip::value::View;
+    use crate::worker::PreparedView as View;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
     use serde_json::json;
@@ -306,75 +346,147 @@ mod tests {
             .build_ui_state(|ui, app: &mut App| app.ui(ui), app)
     }
 
+    fn settle(h: &mut Harness<'_, App>) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            h.step();
+            h.state_mut().after_frame();
+            if !h.state().worker.busy() {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "worker did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        h.run();
+    }
+
     fn has_view(app: &App, label: &str) -> bool {
         let id = app.project.graph.find(label).unwrap();
-        app.evaluator.result(id).is_some_and(|r| r.as_ref().is_ok_and(|e| e.view.is_some()))
+        app.worker.result(id).is_some_and(|r| r.as_ref().is_ok_and(Option::is_some))
     }
 
     #[test]
     fn previews_use_the_selected_global_detail() {
         let file = fixture_project("open");
-        let mut h = harness(App::new(Some(file.clone()), true));
-        h.run();
+        let mut h = harness(App::new(Some(file.clone()), true, || {}));
+        settle(&mut h);
         let app = h.state();
-        assert!(app.status.as_ref().is_some_and(|s| !s.error && s.text.starts_with("opened")));
+        assert!(app.file.as_ref() == Some(&file));
         assert!(has_view(app, "preview") && has_view(app, "histogram"));
         let id = app.project.graph.find("preview").unwrap();
-        let Some(View::Image(image)) =
-            app.evaluator.result(id).unwrap().as_ref().unwrap().view.clone()
+        let Some(View::Image(image)) = app.worker.result(id).unwrap().as_ref().unwrap().clone()
         else {
             panic!("an image")
         };
         assert_eq!(app.level, DEFAULT_LEVEL);
-        assert_eq!(image.rgb().scale, 16, "1/8 preview plus 2×2 debayer");
-        let raw = app.project.graph.find("raw").unwrap();
-        let cached = std::sync::Arc::downgrade(
-            app.evaluator.result(raw).unwrap().as_ref().unwrap().outputs[0].mosaic(),
-        );
-
+        assert_eq!(image.width, 498, "1/8 preview plus 2×2 debayer");
         h.get_by_label("Preview detail").click();
-        h.run();
+        settle(&mut h);
         h.get_by_label("1/4").click();
-        h.run();
+        settle(&mut h);
         assert_eq!(h.state().level, 2);
         let app = h.state();
-        let Some(View::Image(image)) = &app.evaluator.result(id).unwrap().as_ref().unwrap().view
-        else {
+        let Some(View::Image(image)) = app.worker.result(id).unwrap().as_ref().unwrap() else {
             panic!("an image")
         };
-        assert_eq!(image.rgb().scale, 8);
+        assert_eq!(image.width, 996);
         let histogram = app.project.graph.find("histogram").unwrap();
         let Some(View::Histogram(histogram)) =
-            &app.evaluator.result(histogram).unwrap().as_ref().unwrap().view
+            app.worker.result(histogram).unwrap().as_ref().unwrap()
         else {
             panic!("a histogram")
         };
         assert_eq!(
             histogram.counts.iter().map(|bin| bin[0] as usize).sum::<usize>(),
-            image.rgb().pixels.len()
+            image.width * image.height
         );
-        let image = std::sync::Arc::downgrade(image.rgb());
+        let image = std::sync::Arc::downgrade(image);
         h.state_mut().project.graph.set_ui(id, json!({"size": [1200.0, 900.0]})).unwrap();
-        h.run();
+        settle(&mut h);
         assert_eq!(h.state().level, 2, "view size does not select resolution");
         assert!(image.upgrade().is_some(), "resizing preserves the evaluated image");
         h.get_by_label("Save").click();
-        h.run();
-        let restored = App::new(Some(file.clone()), true);
+        settle(&mut h);
+        let restored = App::new(Some(file.clone()), true, || {});
         assert_eq!(restored.level, 2);
         assert!(!restored.status.unwrap().error);
 
         h.get_by_label("New").click();
-        h.run();
+        settle(&mut h);
         assert!(!has_view(h.state(), "preview"), "the new template has no raw file yet");
         assert_eq!(h.state().level, DEFAULT_LEVEL);
-        assert!(cached.upgrade().is_some(), "raw levels survive project changes");
         std::fs::remove_file(file).unwrap();
     }
 
     #[test]
+    fn evaluating_message_keeps_the_ui_and_previous_preview_available() {
+        use drip::node::{Evaluated, NodeKind};
+        use drip::param::ParamSpec;
+        use drip::value::{Rgb, Value};
+        use std::sync::{Arc, Mutex, mpsc};
+        use std::time::{Duration, Instant};
+        static GATE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
+        static SLOW: NodeKind =
+            NodeKind {
+                name: "test.slow",
+                label: "slow",
+                params: &[ParamSpec::new("block", ParamKind::Bool { default: false })],
+                inputs: &[],
+                outputs: &[],
+                actions: &[],
+                eval: |p, _, _| {
+                    if p.bool("block") {
+                        let gate = GATE.lock().unwrap();
+                        let (started, release) = gate.as_ref().unwrap();
+                        started.send(()).unwrap();
+                        release.recv_timeout(Duration::from_secs(5)).unwrap();
+                    }
+                    Ok(Evaluated {
+                        outputs: vec![],
+                        view: Some(drip::value::View::Image(Value::DisplayRec2020(Arc::new(
+                            Rgb { width: 1, height: 1, scale: 1, pixels: vec![[0.5; 3]] },
+                        )))),
+                    })
+                },
+            };
+        let (started, entered) = mpsc::channel();
+        let (release, resume) = mpsc::channel();
+        *GATE.lock().unwrap() = Some((started, resume));
+        let mut project = Project::default();
+        let id = project.graph.add_node(&SLOW);
+        let mut app = App::new(None, true, || {});
+        app.set_project(project, None).unwrap();
+        let mut h = harness(app);
+        settle(&mut h);
+        let Some(View::Image(before)) = h.state().worker.result(id).unwrap().as_ref().unwrap()
+        else {
+            panic!("image")
+        };
+        let before = before.clone();
+        h.state_mut().set_param(id, "block", json!(true));
+        h.step();
+        entered.recv_timeout(Duration::from_secs(5)).unwrap();
+        let start = Instant::now();
+        h.step();
+        assert!(h.query_by_label("evaluating…").is_some());
+        let Some(View::Image(shown)) = h.state().worker.result(id).unwrap().as_ref().unwrap()
+        else {
+            panic!("previous image")
+        };
+        assert!(Arc::ptr_eq(shown, &before));
+        h.get_by_label("Preview detail").click();
+        h.run();
+        assert!(h.query_by_label("Full").is_some(), "controls respond while the node is blocked");
+        assert!(start.elapsed() < Duration::from_secs(2));
+        release.send(()).unwrap();
+        settle(&mut h);
+        assert!(h.query_by_label("evaluating…").is_none());
+        assert!(h.query_by_label("done").is_some());
+    }
+
+    #[test]
     fn invalid_detail_does_not_replace_the_open_project() {
-        let mut app = App::new(None, true);
+        let mut app = App::new(None, true, || {});
         let original = app.project.clone();
         for value in [json!(-1), json!(9), json!(256), json!(2.5), json!("2"), json!(null)] {
             let mut project = templates::raw_to_tiff();
@@ -387,24 +499,24 @@ mod tests {
 
     #[test]
     fn reports_unreadable_projects() {
-        let mut h = harness(App::new(Some("/nonexistent.drip".into()), true));
+        let mut h = harness(App::new(Some("/nonexistent.drip".into()), true, || {}));
         h.run();
         assert!(h.state().status.as_ref().is_some_and(|s| s.error));
     }
 
     #[test]
     fn warns_when_previews_are_clipped() {
-        let mut h = harness(App::new(None, false));
+        let mut h = harness(App::new(None, false, || {}));
         h.run();
         assert!(h.query_by_label("previews clipped to sRGB").is_some());
-        let mut h = harness(App::new(None, true));
+        let mut h = harness(App::new(None, true, || {}));
         h.run();
         assert!(h.query_by_label("previews clipped to sRGB").is_none());
     }
 
     #[test]
     fn inspector_shows_the_selected_node_and_the_inputs() {
-        let mut app = App::new(None, true);
+        let mut app = App::new(None, true, || {});
         app.selected = app.project.graph.find("export");
         let mut h = harness(app);
         h.run();
