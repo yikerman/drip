@@ -129,6 +129,8 @@ This sequence takes priority over CLI expansion and speculative optimization.
   egui's internal blending remains in gamma space. In-gamut screenshot checks
   passed; actual wide-gamut output still needs instrument verification.
 
+- **Decided:** Diagnostic scopes use a black plotting area and light labels,
+  distinct from the image preview’s middle-grey surround.
 - **Decided:** Scopes inspect the connected node output. Waveforms retain image
   columns and measure RGB in EV, matching the histogram. Vectorscopes use
   exposure-independent CIE u′v′ centered on D65, with Rec.2020 primary markers;

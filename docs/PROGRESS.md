@@ -4,6 +4,13 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: shared scope presentation
+
+- Histogram now shares the scopes’ black background. Consolidated clipping,
+  labels, normalized coordinates, count scaling, RGB colors and EV positioning.
+  Increased label and histogram trace contrast for the black plotting area.
+- All 17 GUI tests, formatting and GUI clippy passed.
+
 ## 2026-10-05: default probes
 
 - New projects include histogram, waveform and vectorscope after sigmoid, beside
