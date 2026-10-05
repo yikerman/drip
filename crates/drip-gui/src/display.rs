@@ -26,11 +26,11 @@ pub struct Gpu {
 }
 
 impl Gpu {
-    /// Picks an adapter that can present to `window`; the app's other windows
-    /// are on the same display.
-    pub fn new(window: Arc<Window>) -> Result<Self, String> {
+    /// Picks an adapter that can present to `window` and sets up the window's
+    /// display; the app's other windows are on the same display.
+    pub fn new(window: Arc<Window>) -> Result<(Self, Display), String> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let surface = instance.create_surface(window).map_err(|e| e.to_string())?;
+        let surface = instance.create_surface(window.clone()).map_err(|e| e.to_string())?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             compatible_surface: Some(&surface),
             ..Default::default()
@@ -39,7 +39,9 @@ impl Gpu {
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                 .map_err(|e| e.to_string())?;
-        Ok(Gpu { instance, adapter, device, queue })
+        let gpu = Gpu { instance, adapter, device, queue };
+        let display = Display::with_surface(&gpu, window, surface)?;
+        Ok((gpu, display))
     }
 
     pub fn max_texture_side(&self) -> usize {
@@ -64,9 +66,17 @@ pub struct Display {
 
 impl Display {
     pub fn new(gpu: &Gpu, window: Arc<Window>) -> Result<Self, String> {
-        let Gpu { instance, adapter, device, queue } = gpu;
+        let surface = gpu.instance.create_surface(window.clone()).map_err(|e| e.to_string())?;
+        Self::with_surface(gpu, window, surface)
+    }
+
+    fn with_surface(
+        gpu: &Gpu,
+        window: Arc<Window>,
+        surface: wgpu::Surface<'static>,
+    ) -> Result<Self, String> {
+        let Gpu { adapter, device, queue, .. } = gpu;
         let size = window.inner_size();
-        let surface = instance.create_surface(window.clone()).map_err(|e| e.to_string())?;
         let caps = surface.get_capabilities(adapter);
 
         let scrgb =

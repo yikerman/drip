@@ -77,15 +77,15 @@ impl ApplicationHandler<WorkerReady> for Shell {
             .with_title("Drip")
             .with_inner_size(LogicalSize::new(1600, 1000));
         let window = Arc::new(event_loop.create_window(attributes).expect("a window"));
-        let main = Gpu::new(window.clone()).and_then(|gpu| Ok((Pane::new(&gpu, window)?, gpu)));
-        let (main, gpu) = match main {
-            Ok(main) => main,
+        let (gpu, display) = match Gpu::new(window.clone()) {
+            Ok(output) => output,
             Err(e) => {
                 log::error!("cannot set up the display: {e}");
                 event_loop.exit();
                 return;
             }
         };
+        let main = Pane::new(&gpu, window, display);
         let wake = self.wake.clone();
         let app = App::new(self.file.take(), main.display.wide_gamut, move || {
             let _ = wake.send_event(WorkerReady);
@@ -208,12 +208,12 @@ impl Pane {
         gpu: &Gpu,
         attributes: WindowAttributes,
     ) -> Result<Self, String> {
-        let window = event_loop.create_window(attributes).map_err(|e| e.to_string())?;
-        Pane::new(gpu, Arc::new(window))
+        let window = Arc::new(event_loop.create_window(attributes).map_err(|e| e.to_string())?);
+        let display = Display::new(gpu, window.clone())?;
+        Ok(Pane::new(gpu, window, display))
     }
 
-    fn new(gpu: &Gpu, window: Arc<Window>) -> Result<Self, String> {
-        let display = Display::new(gpu, window.clone())?;
+    fn new(gpu: &Gpu, window: Arc<Window>, display: Display) -> Self {
         let ctx = egui::Context::default();
         theme::apply(&ctx);
         let egui = egui_winit::State::new(
@@ -225,7 +225,7 @@ impl Pane {
             Some(gpu.max_texture_side()),
         );
         window.request_redraw();
-        Ok(Pane { window, display, egui, repaint_at: None })
+        Pane { window, display, egui, repaint_at: None }
     }
 
     fn frame(&mut self, content: impl FnMut(&mut egui::Ui)) {
