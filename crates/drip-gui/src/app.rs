@@ -8,7 +8,8 @@ use drip::project::Project;
 use drip::{nodes, templates};
 use egui::{CentralPanel, Panel, RichText, Ui};
 
-use crate::editor::{Editor, Frame};
+use crate::editor::Editor;
+use crate::gui::{Frame, NodeCx};
 use crate::worker::{Notice, Worker};
 use crate::{inspector, theme};
 
@@ -103,40 +104,35 @@ impl App {
 
         Panel::top("menu").show_separator_line(false).show(ui, |ui| self.menu(ui));
         Panel::bottom("status").show_separator_line(false).show(ui, |ui| self.status_line(ui));
+        let results = |id| self.worker.result(id);
+        let mut frame = Frame {
+            results: &results,
+            action_running: self.action.is_some(),
+            refused: None,
+            changed: false,
+            action: None,
+        };
+        let graph = &mut self.project.graph;
         Panel::right("inspector").resizable(true).default_size(320.0).show(ui, |ui| {
-            let mut frame =
-                inspector::Frame { action_running: self.action.is_some(), ..Default::default() };
             egui::ScrollArea::vertical().show(ui, |ui| {
-                let graph = &mut self.project.graph;
                 if let Some(id) = self.selected.filter(|id| graph.node(*id).is_some()) {
-                    inspector::node(ui, graph, id, &mut frame);
+                    inspector::node(ui, &mut NodeCx::new(graph, id, &mut frame));
                     ui.separator();
                 }
                 inspector::inputs(ui, graph, &mut frame);
             });
-            self.dirty |= frame.changed;
-            if let Some(refused) = frame.refused {
-                self.report(Err(refused));
-            }
-            if let Some((id, name)) = frame.action {
-                self.run_action(id, name);
-            }
         });
         CentralPanel::default().show(ui, |ui| {
-            let results = |id| self.worker.result(id);
-            let mut frame = Frame { results: &results, refused: None, changed: false };
-            self.editor.show(
-                ui,
-                &mut self.project.graph,
-                &self.registry,
-                &mut self.selected,
-                &mut frame,
-            );
-            self.dirty |= frame.changed;
-            if let Some(refused) = frame.refused {
-                self.report(Err(refused));
-            }
+            self.editor.show(ui, graph, &self.registry, &mut self.selected, &mut frame);
         });
+        let Frame { changed, refused, action, .. } = frame;
+        self.dirty |= changed;
+        if let Some(refused) = refused {
+            self.report(Err(refused));
+        }
+        if let Some((id, name)) = action {
+            self.run_action(id, name);
+        }
         if std::mem::take(&mut self.dirty) {
             let targets = self.project.graph.nodes().map(|(id, _)| id).collect();
             if let Err(error) = self.worker.request(&self.project.graph, self.level, targets) {

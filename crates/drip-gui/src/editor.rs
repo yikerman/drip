@@ -2,10 +2,10 @@
 //! the graph and edits it only through the graph's validated operations. Node
 //! positions and sizes live in each node's opaque `ui` field, in graph units.
 //! The canvas is an egui layer that egui transforms to pan and zoom, so
-//! everything on it is drawn and interacted with in graph units. Nodes whose
-//! result has a view draw it in their body and can be resized.
+//! everything on it is drawn and interacted with in graph units. The editor
+//! draws each node's frame (header, ports, error) and its kind's GUI the body.
 
-use crate::views::PreparedView;
+use crate::gui::{self, Frame, NodeCx, pair, set_ui};
 use crate::worker::Presentation;
 use drip::eval::NodeError;
 use drip::graph::{Graph, Node, NodeId, Port};
@@ -13,17 +13,13 @@ use drip::node::Registry;
 use egui::emath::TSTransform;
 use egui::epaint::CubicBezierShape;
 use egui::{Align2, FontId, LayerId, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2, pos2, vec2};
-use serde_json::{Value as Json, json};
+use serde_json::Value as Json;
 
-use crate::{theme, views};
+use crate::theme;
 
-const WIDTH: f32 = 160.0;
 const HEADER: f32 = 22.0;
 const ROW: f32 = 18.0;
 const PORT: f32 = 4.0;
-const PAD: f32 = 6.0;
-/// Default size of a node's view, in graph units.
-const VIEW: Vec2 = vec2(280.0, 190.0);
 /// egui rasterizes text once and scales it with the layer, so zooming in past
 /// 1 would blur it.
 const ZOOM: (f32, f32) = (0.2, 1.0);
@@ -45,14 +41,6 @@ impl Default for Editor {
     }
 }
 
-/// What one frame of the editor reads from evaluation and reports back.
-pub struct Frame<'a> {
-    pub results: &'a dyn Fn(NodeId) -> Option<&'a Presentation>,
-    /// An edit the graph refused.
-    pub refused: Option<String>,
-    pub changed: bool,
-}
-
 /// Where a node and its parts are on screen.
 struct Layout {
     id: NodeId,
@@ -60,7 +48,7 @@ struct Layout {
     inputs: Vec<(&'static str, Pos2)>,
     outputs: Vec<(&'static str, Pos2)>,
     error: Option<(Pos2, String)>,
-    view: Option<(Rect, PreparedView)>,
+    body: Rect,
 }
 
 impl Editor {
@@ -149,7 +137,7 @@ impl Editor {
                 set_ui(graph, l.id, "pos", pos);
             }
             let node = graph.node(l.id).expect("laid out from the graph");
-            let saved_size = view_size(&node.ui);
+            let kind = gui::of(node.kind);
             let fill = if *selected == Some(l.id) { theme::LIGHTER } else { theme::DARKER };
             painter.rect_filled(l.rect, 0.0, fill);
             let title = l.rect.min + vec2(8.0, HEADER / 2.0);
@@ -201,19 +189,8 @@ impl Editor {
                 ui.interact(row, ui.id().with((l.id, "error")), Sense::hover())
                     .on_hover_text(error);
             }
-            if let Some((rect, view)) = &l.view {
-                views::draw(&painter, *rect, ui.id().with((l.id, "view")), view, &small);
-                let corner = Rect::from_min_max(l.rect.max - Vec2::splat(10.0), l.rect.max);
-                painter.line_segment(
-                    [corner.left_bottom(), corner.right_top()],
-                    Stroke::new(1.0 / zoom, theme::WEAK),
-                );
-                let handle = ui.interact(corner, ui.id().with((l.id, "resize")), Sense::drag());
-                if handle.dragged() {
-                    let size = (saved_size + handle.drag_delta()).max(vec2(80.0, 60.0));
-                    set_ui(graph, l.id, "size", size);
-                }
-            }
+            let body = &mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body));
+            kind.body(body, &mut NodeCx::new(graph, l.id, frame));
         }
 
         if let Some(from) = self.wire.clone() {
@@ -248,21 +225,19 @@ impl Editor {
 }
 
 /// From the top: header, one row per port pair, an error row if the node
-/// failed, the view if it has one.
+/// failed, the body its kind's GUI draws.
 fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> Layout {
-    let view = result.and_then(|r| r.as_ref().ok()).and_then(Clone::clone);
     let error = match result {
         Some(Err(NodeError::Upstream(_))) | Some(Ok(_)) | None => None,
         Some(Err(e)) => Some(e.to_string()),
     };
-    let size = if view.is_some() { view_size(&node.ui) } else { vec2(WIDTH, 0.0) };
-    let ports = HEADER + ROW * node.kind.inputs.len().max(node.kind.outputs.len()) as f32;
-    let view_top = ports + if error.is_some() { ROW } else { 0.0 };
+    let size = gui::of(node.kind).size(node);
+    let body_top = ports(node) + if error.is_some() { ROW } else { 0.0 };
     let pos = position(&node.ui, id).to_pos2();
     let port = |i: usize, x: f32| pos + vec2(x, HEADER + ROW * (i as f32 + 0.5));
     Layout {
         id,
-        rect: Rect::from_min_size(pos, vec2(size.x, view_top + size.y + PAD)),
+        rect: Rect::from_min_size(pos, vec2(size.x, body_top + size.y)),
         inputs: node.kind.inputs.iter().enumerate().map(|(i, p)| (p.name, port(i, 0.0))).collect(),
         outputs: node
             .kind
@@ -271,11 +246,14 @@ fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> Layout {
             .enumerate()
             .map(|(i, p)| (p.name, port(i, size.x)))
             .collect(),
-        error: error.map(|e| (pos + vec2(8.0, ports + ROW / 2.0), e)),
-        view: view.map(|v| {
-            (Rect::from_min_size(pos + vec2(PAD, view_top), size - vec2(2.0 * PAD, 0.0)), v)
-        }),
+        error: error.map(|e| (pos + vec2(8.0, ports(node) + ROW / 2.0), e)),
+        body: Rect::from_min_size(pos + vec2(0.0, body_top), size),
     }
+}
+
+/// The height of a node's header and port rows.
+fn ports(node: &Node) -> f32 {
+    HEADER + ROW * node.kind.inputs.len().max(node.kind.outputs.len()) as f32
 }
 
 /// A node's saved position, or a spot derived from its id for nodes never placed.
@@ -284,34 +262,10 @@ fn position(ui: &Json, id: NodeId) -> Vec2 {
         .unwrap_or_else(|| vec2(40.0 + 200.0 * (id.0 % 5) as f32, 40.0 + 140.0 * (id.0 / 5) as f32))
 }
 
-/// The saved size of a node that has a view, in graph units.
-fn view_size(ui: &Json) -> Vec2 {
-    pair(&ui["size"]).unwrap_or(VIEW)
-}
-
-fn pair(value: &Json) -> Option<Vec2> {
-    match value.as_array()?.iter().map(|v| v.as_f64()).collect::<Option<Vec<_>>>()?.as_slice() {
-        [x, y] => Some(vec2(*x as f32, *y as f32)),
-        _ => None,
-    }
-}
-
-/// Sets `key` in a node's ui object, keeping the rest of it.
-fn set_ui(graph: &mut Graph, id: NodeId, key: &str, value: Vec2) {
-    let mut ui = graph.node(id).expect("node exists").ui.clone();
-    if !ui.is_object() {
-        ui = json!({});
-    }
-    ui[key] = json!([value.x, value.y]);
-    graph.set_ui(id, ui).expect("node exists");
-}
-
-/// A node's rectangle in graph units, with room for a view when it has a
-/// saved size.
+/// A node's rectangle in graph units, without an error row.
 fn bounds(id: NodeId, node: &Node) -> Rect {
-    let ports = HEADER + ROW * node.kind.inputs.len().max(node.kind.outputs.len()) as f32;
-    let size = pair(&node.ui["size"]).unwrap_or(vec2(WIDTH, 0.0));
-    Rect::from_min_size(position(&node.ui, id).to_pos2(), vec2(size.x, ports + size.y + PAD))
+    let size = gui::of(node.kind).size(node);
+    Rect::from_min_size(position(&node.ui, id).to_pos2(), vec2(size.x, ports(node) + size.y))
 }
 
 /// The offset and zoom that center the whole graph in `area`, zooming out as

@@ -9,6 +9,7 @@
 mod app;
 mod display;
 mod editor;
+mod gui;
 mod inspector;
 mod preview;
 mod theme;
