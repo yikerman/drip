@@ -9,6 +9,7 @@ fn main() {
     let include_paths = find_libraw();
     cc::Build::new()
         .file("shim/shim.c")
+        .std("c11")
         .includes(include_paths.iter().map(|p| p.join("libraw")))
         .includes(include_paths)
         .compile("drip_libraw_shim");
