@@ -33,7 +33,7 @@ impl NodeUi for Viewer {
                 ui.weak("shown in its window")
             });
         } else if let Some(view) = node.view() {
-            let font = FontId::proportional(11.0);
+            let font = FontId::proportional(theme::SMALL_SIZE);
             views::draw(ui.painter(), rect, ui.id().with("view"), view, &font);
         }
         // Over the view, so on a backdrop.
@@ -51,7 +51,8 @@ impl NodeUi for Viewer {
 
     fn window(&self, ui: &mut Ui, _name: &'static str, node: &mut NodeCx) {
         if let Some(view) = node.view() {
-            let (rect, font) = (ui.available_rect_before_wrap(), FontId::proportional(13.0));
+            let (rect, font) =
+                (ui.available_rect_before_wrap(), FontId::proportional(theme::BODY_SIZE));
             views::draw(ui.painter(), rect, ui.id().with("view"), view, &font);
         }
     }

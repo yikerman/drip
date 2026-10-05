@@ -4,6 +4,11 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: readable default typography
+
+- Increased shared body/button text to 16 points and secondary text to 14,
+  including canvas and histogram labels. Layout dimensions remain unchanged.
+
 ## 2026-10-05: sigmoid pop-out sizing
 
 - Bounded the curve plot's preferred width to 320 points so content measurement

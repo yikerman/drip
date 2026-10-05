@@ -2,7 +2,7 @@
 //! grey, the standard surround for judging color, with no shadows, rounding or
 //! strokes beyond what is needed to tell elements apart.
 
-use egui::{Color32, CornerRadius, Shadow, Stroke, Visuals};
+use egui::{Color32, CornerRadius, FontId, Shadow, Stroke, TextStyle, Visuals};
 
 /// sRGB 118 is 18% linear reflectance.
 pub const GREY: Color32 = Color32::from_gray(118);
@@ -12,6 +12,9 @@ pub const LIGHTEST: Color32 = Color32::from_gray(150);
 pub const TEXT: Color32 = Color32::from_gray(16);
 pub const WEAK: Color32 = Color32::from_gray(56);
 pub const ERROR: Color32 = Color32::from_rgb(96, 16, 16);
+
+pub const BODY_SIZE: f32 = 16.0;
+pub const SMALL_SIZE: f32 = 14.0;
 
 pub fn apply(ctx: &egui::Context) {
     let mut v = Visuals::light();
@@ -51,4 +54,14 @@ pub fn apply(ctx: &egui::Context) {
     // Separators between panels are the only lines left.
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, DARKER);
     ctx.set_visuals(v);
+    ctx.all_styles_mut(|style| {
+        style.text_styles = [
+            (TextStyle::Heading, FontId::proportional(22.0)),
+            (TextStyle::Body, FontId::proportional(BODY_SIZE)),
+            (TextStyle::Button, FontId::proportional(BODY_SIZE)),
+            (TextStyle::Small, FontId::proportional(SMALL_SIZE)),
+            (TextStyle::Monospace, FontId::monospace(BODY_SIZE)),
+        ]
+        .into();
+    });
 }

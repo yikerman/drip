@@ -228,7 +228,8 @@ impl Editor {
 
 /// Paints a node's frame: its fill, label, ports and error.
 fn paint(painter: &Painter, l: &Layout, label: &str, selected: bool) {
-    let (font, small) = (FontId::proportional(13.0), FontId::proportional(11.0));
+    let (font, small) =
+        (FontId::proportional(theme::BODY_SIZE), FontId::proportional(theme::SMALL_SIZE));
     let fill = if selected { theme::LIGHTER } else { theme::DARKER };
     painter.rect_filled(l.rect, 0.0, fill);
     let title = l.rect.min + vec2(8.0, HEADER / 2.0);
