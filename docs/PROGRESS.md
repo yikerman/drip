@@ -4,6 +4,12 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: scope label glyphs
+
+- Replaced unsupported prime/arrow glyphs in scope labels with ASCII apostrophes
+  and plain “image x”. User screenshot exposed missing glyphs in the UI font.
+- Formatting and diff checks passed; no processing changes.
+
 ## 2026-10-05: shared scope presentation
 
 - Histogram now shares the scopes’ black background. Consolidated clipping,

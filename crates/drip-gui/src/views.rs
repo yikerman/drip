@@ -185,7 +185,7 @@ fn draw_scope(painter: &Painter, rect: Rect, scope: &Scope, mesh: &egui::Mesh, f
             plot.label(rect.left_top(), Align2::LEFT_TOP, &format!("+{max_stop} EV"));
             plot.label(egui::pos2(rect.left(), zero), Align2::LEFT_BOTTOM, "0 EV");
             plot.label(rect.left_bottom(), Align2::LEFT_BOTTOM, &format!("{min_stop} EV"));
-            plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, "image x →");
+            plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, "image x");
         }
         ScopeAxes::Vectorscope { primaries } => {
             painter.hline(rect.x_range(), rect.center().y, Stroke::new(0.5, theme::LIGHTER));
@@ -196,7 +196,7 @@ fn draw_scope(painter: &Painter, rect: Rect, scope: &Scope, mesh: &egui::Mesh, f
                 painter.circle_stroke(at(point), 3.0, Stroke::new(1.0, theme::LIGHTER));
                 plot.label(at(point) + egui::vec2(4.0, 0.0), Align2::LEFT_CENTER, name);
             }
-            plot.label(rect.left_top(), Align2::LEFT_TOP, "u′v′ · D65");
+            plot.label(rect.left_top(), Align2::LEFT_TOP, "u'v' · D65");
             plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, "Rec.2020");
         }
     }
