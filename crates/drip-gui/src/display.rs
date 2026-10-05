@@ -294,6 +294,9 @@ impl Display {
         }
         commands.push(encoder.finish());
         self.gpu.queue.submit(commands);
+        // On Wayland, winit then holds back redraws until the compositor asks
+        // for a frame, so frames never pile up waiting for a free image.
+        self.window.pre_present_notify();
         self.gpu.queue.present(frame);
     }
 }
