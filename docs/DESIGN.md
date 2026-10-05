@@ -49,6 +49,18 @@ This sequence takes priority over CLI expansion and speculative optimization.
   explicit action, so cache hits, preview refreshes and preview detail cannot
   accidentally control whether or how an export runs.
 
+## Node organization
+
+- **Decided:** Each backend node owns its schema, adapter and algorithm. Split
+  substantial algorithms into local modules; keep small nodes in one file.
+  Kernels take concrete data/settings and use Rust/Rayon, independent of the
+  graph. Optional frontend node UIs reuse schema controls and shared editing;
+  nodes without custom presentation require no frontend registration.
+- **Decided:** Adapt darktable's sigmoid, RCD and inpaint-opposed algorithms in
+  that order, with upstream attribution and independent/reference tests. Keep
+  existing decoding, camera conversion and output paths; separate exposure from
+  tone mapping. Scope initially remains Bayer.
+
 ## Responsiveness and resource costs
 
 - **Requirement:** Prioritize responsiveness, portability and easy development

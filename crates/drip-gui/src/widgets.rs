@@ -3,7 +3,8 @@
 
 use egui::{Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
-use crate::gui::{NodeCx, Part};
+use crate::editing::NodeCx;
+use crate::node_ui::Part;
 use crate::theme;
 
 /// Side of a pop-out button.

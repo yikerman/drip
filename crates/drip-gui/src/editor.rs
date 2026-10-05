@@ -5,7 +5,8 @@
 //! everything on it is drawn and interacted with in graph units. The editor
 //! draws each node's frame (header, ports, error) and its kind's GUI the body.
 
-use crate::gui::{self, Edit, Frame, NodeCx, Part, pair};
+use crate::editing::{Edit, Frame, NodeCx, pair};
+use crate::node_ui::{self, Part};
 use crate::widgets::{self, BUTTON};
 use crate::worker::Presentation;
 use drip::eval::NodeError;
@@ -99,7 +100,7 @@ impl Editor {
                 frame.edit(graph, Edit::Ui(l.id, "pos", pos));
             }
             let node = graph.node(l.id).expect("laid out from the graph");
-            let (kind, kind_params) = (gui::of(node.kind), node.kind.params);
+            let (kind, kind_params) = (node_ui::of(node.kind), node.kind.params);
             paint(&painter, l, &node.label, *selected == Some(l.id));
             for (name, pos) in &l.inputs {
                 let port = ui.interact(hit(*pos), ui.id().with((l.id, name, 0)), Sense::click());
@@ -250,7 +251,7 @@ fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> Layout {
         Some(Err(NodeError::Upstream(_))) | Some(Ok(_)) | None => None,
         Some(Err(e)) => Some(e.to_string()),
     };
-    let size = gui::of(node.kind).size(node);
+    let size = node_ui::of(node.kind).size(node);
     let body_top = ports(node) + if error.is_some() { ROW } else { 0.0 };
     let pos = position(&node.ui, id).to_pos2();
     let port = |i: usize, x: f32| pos + vec2(x, HEADER + ROW * (i as f32 + 0.5));
@@ -283,7 +284,7 @@ fn position(ui: &Json, id: NodeId) -> Vec2 {
 
 /// A node's rectangle in graph units, without an error row.
 fn bounds(id: NodeId, node: &Node) -> Rect {
-    let size = gui::of(node.kind).size(node);
+    let size = node_ui::of(node.kind).size(node);
     Rect::from_min_size(position(&node.ui, id).to_pos2(), vec2(size.x, ports(node) + size.y))
 }
 

@@ -9,9 +9,10 @@
 
 mod app;
 mod display;
+mod editing;
 mod editor;
-mod gui;
 mod inspector;
+mod node_ui;
 mod parent;
 mod preview;
 mod theme;
@@ -31,7 +32,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 
 use app::App;
 use display::{Display, Gpu};
-use gui::Popped;
+use node_ui::Popped;
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();

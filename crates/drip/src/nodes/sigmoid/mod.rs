@@ -6,7 +6,7 @@ use crate::node::{EvalContext, Evaluated, InputSpec, NodeKind, OutputSpec};
 use crate::param::{ParamKind, ParamSpec, Params};
 use crate::value::{PortType, Rgb, Value};
 
-use super::kernels;
+mod algorithm;
 
 /// Scene middle grey, mapped to the same display value.
 const GREY: f32 = 0.18;
@@ -37,7 +37,7 @@ fn sigmoid(p: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, St
     let k = GREY.powf(c) * (1.0 / GREY - 1.0);
     let offset = c * exposure * std::f32::consts::LN_2 - k.ln();
     let input = inputs[0].rgb();
-    let pixels = kernels::sigmoid(&input.pixels, c, offset);
+    let pixels = algorithm::sigmoid(&input.pixels, c, offset);
     let image = Rgb { pixels, ..**input };
     Ok(Evaluated { outputs: vec![Value::DisplayRec2020(Arc::new(image))], view: None })
 }

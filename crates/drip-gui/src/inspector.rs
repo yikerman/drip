@@ -7,7 +7,7 @@ use drip::param::ParamKind;
 use egui::{Sense, Ui};
 use serde_json::{Value as Json, json};
 
-use crate::gui::{Edit, Frame, NodeCx};
+use crate::editing::{Edit, Frame, NodeCx};
 
 /// A node's label, kind, parameters and actions.
 pub fn node(ui: &mut Ui, cx: &mut NodeCx) {

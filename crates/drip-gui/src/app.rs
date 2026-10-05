@@ -10,8 +10,9 @@ use drip::project::Project;
 use drip::{nodes, templates};
 use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
 
+use crate::editing::{Frame, NodeCx, Report};
 use crate::editor::Editor;
-use crate::gui::{self, Frame, NodeCx, Popped, Report};
+use crate::node_ui::{self, Popped};
 use crate::worker::{Notice, Worker};
 use crate::{inspector, theme};
 
@@ -150,7 +151,7 @@ impl App {
             Some(pixels_per_point);
         ctx.run_ui(input, |ui| self.window(ui, popped)).textures_delta.clear();
         let node = self.project.graph.node(popped.node).expect("popped nodes exist");
-        gui::fitted(&ctx).unwrap_or_else(|| popped.size(node))
+        node_ui::fitted(&ctx).unwrap_or_else(|| popped.size(node))
     }
 
     pub fn close_window(&mut self, popped: Popped) {
@@ -423,10 +424,10 @@ mod tests {
 
     /// A parameter edit as the inspector reports it.
     fn set_param(h: &mut Harness<'_, App>, id: NodeId, name: &str, value: serde_json::Value) {
-        edit(h.state_mut(), gui::Edit::Param(id, name, value));
+        edit(h.state_mut(), crate::editing::Edit::Param(id, name, value));
     }
 
-    fn edit(app: &mut App, edit: gui::Edit<'_>) {
+    fn edit(app: &mut App, edit: crate::editing::Edit<'_>) {
         let results = |id| app.worker.result(id);
         let mut frame = Frame::new(&results, &app.popped, app.action.is_some());
         frame.edit(&mut app.project.graph, edit);
@@ -439,14 +440,14 @@ mod tests {
         settle(&mut h);
         let app = h.state_mut();
         let id = app.project.graph.find("sigmoid").unwrap();
-        let popped = Popped { node: id, part: gui::Part::Parameters };
+        let popped = Popped { node: id, part: node_ui::Part::Parameters };
         app.popped.insert(popped);
         app.take_redraw();
 
         for change in [
-            gui::Edit::Label(id, "tone"),
-            gui::Edit::External(id, "contrast", true),
-            gui::Edit::Ui(id, "pos", egui::vec2(40.0, 50.0)),
+            crate::editing::Edit::Label(id, "tone"),
+            crate::editing::Edit::External(id, "contrast", true),
+            crate::editing::Edit::Ui(id, "pos", egui::vec2(40.0, 50.0)),
         ] {
             edit(app, change);
             assert!(app.take_redraw(), "other windows must see the shared edit");
@@ -455,12 +456,12 @@ mod tests {
         assert_eq!(app.windows()[0].title, "tone parameters · Drip");
         assert!(app.project.graph.inputs().any(|input| input == (id, "contrast")));
 
-        edit(app, gui::Edit::Label(id, ""));
+        edit(app, crate::editing::Edit::Label(id, ""));
         assert_eq!(app.project.graph.node(id).unwrap().label, "tone");
         assert!(app.status.as_ref().unwrap().error);
         assert!(!app.worker.busy());
 
-        edit(app, gui::Edit::Param(id, "contrast", json!(2.0)));
+        edit(app, crate::editing::Edit::Param(id, "contrast", json!(2.0)));
         assert!(app.take_redraw());
         assert!(app.worker.busy(), "processing edits must request evaluation");
     }
@@ -689,7 +690,7 @@ mod tests {
 
     #[test]
     fn nodes_with_parameters_and_views_pop_them_out() {
-        use crate::gui::Part;
+        use crate::node_ui::Part;
         let mut h = harness(App::new(None, true, || {}));
         h.run();
         let graph = &h.state().project.graph;
@@ -733,7 +734,7 @@ mod tests {
     fn parameter_windows_show_the_parameters_and_close_with_their_node() {
         let mut app = App::new(None, true, || {});
         let export = app.project.graph.find("export").unwrap();
-        let popped = Popped { node: export, part: crate::gui::Part::Parameters };
+        let popped = Popped { node: export, part: crate::node_ui::Part::Parameters };
         app.popped.insert(popped);
         // The window opens at the size its content takes, smaller than a
         // guess yet with every parameter inside.

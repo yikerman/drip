@@ -4,6 +4,12 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: node organization
+
+- Moved kernels beside their backend nodes and split frontend editing from node
+  presentation. Existing behavior and tests retained; no new processing yet.
+- Validation: workspace tests and clippy across all targets, formatting.
+
 ## 2026-10-05: development version
 
 - Set all four workspace crates and lockfile entries to `0.1.0-dev`.
