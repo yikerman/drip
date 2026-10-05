@@ -201,8 +201,21 @@ these ownership boundaries:
 | Existing export worker | Immutable graph/resource snapshot, full-resolution evaluation, encoding and file writes; at most one export |
 | Renderer | Texture upload, GPU objects and drawing |
 
-The frontend requests work; preview, histogram and export nodes never invoke
-the evaluator. Preserve the existing visible-node target policy, including
+Every evaluation request names its target node(s). The graph snapshot supplies
+their definitions and connections; the level specifies how to evaluate them.
+For example, requesting a preview targets that preview node, requesting a
+histogram targets that histogram node, and export names an export node plus its
+action. A batch of preview/histogram targets evaluates the union of their
+ancestors once, sharing upstream results. An empty target set does no work.
+
+The worker request therefore carries `(graph, targets, level, epoch, generation)`;
+its presentation results are keyed by `NodeId`. Coalescing replaces the complete
+latest target set, not just the last individually requested node. Export is a
+separate `(graph, node_id, action)` command whose upstream evaluation uses level
+0. Neither a graph nor a resolution alone identifies an evaluation request.
+
+The frontend submits these requests; preview, histogram and export nodes never
+invoke the evaluator. Preserve the existing visible-node target policy, including
 ordinary processing nodes so their errors remain visible. The library still
 walks only target ancestors. Changing which nodes count as targets is a separate
 product decision, unnecessary for the worker.

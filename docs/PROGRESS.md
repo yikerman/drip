@@ -2,6 +2,11 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: clarify evaluation targets
+
+- User emphasized that evaluation is always against a particular node. Made target identity explicit in the worker plan: a request names target NodeIds, while the graph supplies dependencies and the level controls resolution. Batching targets shares their upstream work; coalescing must preserve the complete desired target set. Export names its node and action separately and forces level 0.
+- Documentation only; no evaluator or scheduling changes. Diff checks pass. The architecture remains a plan for review.
+
 ## 2026-10-04: plan preview and worker architecture
 
 - After committing the Rayon replacement as `c6857e5`, inspected the frontend/evaluator boundary and recorded a separate tentative plan in DESIGN 3.3.4. No processing, level, cache or scheduling code changed in this step.

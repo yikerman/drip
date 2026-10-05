@@ -9,7 +9,7 @@ Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
 | End-to-end UI latency | measurement | open | Rayon level-0 evaluation is about 162 ms, excluding texture preparation/upload/drawing; evaluation still blocks the UI (E12, DESIGN 3.3.3) |
 | Manual global preview level | user | planned; not implemented | selector and persistence; remove automatic adaptation; export stays at level 0 (E16, DESIGN 3.3.4) |
 | Simplify RAW retention | user | planned; not implemented | remove eager normalized pyramid; proposed decoded-data retention for active project and export, with explicit reload (E17, DESIGN 3.3.4) |
-| Background evaluation | user | proposed; not implemented | persistent preview worker, latest pending request, stale-result rejection, ordered export/reload; move texture packing and buffer retirement off UI (E12, DESIGN 3.3.4) |
+| Background evaluation | user | proposed; not implemented | persistent worker with explicit node targets, latest pending target set, stale-result rejection, ordered export/reload; move texture packing and buffer retirement off UI (E12, DESIGN 3.3.4) |
 | Full-res region of interest for 1:1 viewing | handoff | deferred | ROI in `EvalContext` (E4) |
 | EXIF passthrough | handoff | deferred | `RawMetadata` travels the graph (P3) |
 | Soft-proofing | handoff | deferred | extra transform in the display path |
