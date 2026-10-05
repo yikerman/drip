@@ -6,6 +6,8 @@ use crate::node::{EvalContext, Evaluated, InputSpec, NodeKind};
 use crate::param::Params;
 use crate::value::{Histogram, PortType, Value, View};
 
+use super::kernels::{self, BINS};
+
 /// Shows a Rec.2020 image; the frontend handles the display transform.
 pub static PREVIEW: NodeKind = NodeKind {
     name: "view.preview",
@@ -35,19 +37,12 @@ pub static HISTOGRAM: NodeKind = NodeKind {
     actions: &[],
 };
 
-const BINS: usize = 256;
 const STOPS: (f32, f32) = (-12.0, 4.0);
 
 fn histogram(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {
-    let mut counts = vec![[0; 3]; BINS];
-    let per_stop = BINS as f32 / (STOPS.1 - STOPS.0);
-    for pixel in &inputs[0].rgb().pixels {
-        for (c, v) in pixel.iter().enumerate() {
-            // log2 gives -inf for 0 and NaN for negatives; both cast to bin 0.
-            let bin = ((v.log2() - STOPS.0) * per_stop) as usize;
-            counts[bin.min(BINS - 1)][c] += 1;
-        }
-    }
+    let thresholds =
+        std::array::from_fn(|i| 2f32.powf(STOPS.0 + i as f32 * (STOPS.1 - STOPS.0) / BINS as f32));
+    let counts = kernels::histogram(&inputs[0].rgb().pixels, &thresholds);
     let histogram = Histogram { min_stop: STOPS.0, max_stop: STOPS.1, counts };
     Ok(Evaluated { outputs: vec![], view: Some(View::Histogram(Arc::new(histogram))) })
 }

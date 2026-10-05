@@ -5,9 +5,9 @@ Ideas not yet implemented. Design references point to `docs/DESIGN.md`.
 | Idea | Source | Status | Notes |
 |------|--------|--------|-------|
 | CLI batch implementation | handoff | deferred | scaffolded; template binding per F4 |
-| One-source CPU/GPU kernel experiment | user | proposed | CubeCL first candidate; verify platform builds, single-worker/parallel CPU, GPU, numerical behavior, JIT latency and wgpu buffer sharing; no duplicate kernels (E9, E10) |
-| GPU processing | handoff | deferred | depends on the kernel experiment; keep intermediate buffers on device through preview drawing |
-| Background evaluation | user | proposed | persistent worker, retain last preview, coalesce requests and discard obsolete results; cancellation between nodes/chunks (E12, revises G2 if agreed) |
+| GPU computation | user | postponed | Rayon replaces CubeCL; reconsider only with a measured need and one kernel source (E9, E13, E15) |
+| End-to-end UI latency | measurement | open | Rayon level-0 evaluation is about 162 ms, excluding texture preparation/upload/drawing; evaluation still blocks the UI (E12, DESIGN 3.3.3) |
+| Preview level, evaluation and worker architecture | user | plan next | manual global level, full-resolution export, reconsider RAW pyramid retention, then persistent worker; no implementation in the Rayon change (E12) |
 | Full-res region of interest for 1:1 viewing | handoff | deferred | ROI in `EvalContext` (E4) |
 | EXIF passthrough | handoff | deferred | `RawMetadata` travels the graph (P3) |
 | Soft-proofing | handoff | deferred | extra transform in the display path |

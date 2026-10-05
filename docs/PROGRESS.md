@@ -2,6 +2,52 @@
 
 Newest first. Each entry: what happened, what is verified, what is next.
 
+## 2026-10-04: replace CubeCL with Rayon
+
+- User selected Rayon and requested replacing the current CubeCL commit. White balance, debayer, color matrix, sigmoid and histogram now use one ordinary Rust implementation each, with Rayon's shared CPU pool. Removed CubeCL, the dispatch/transfer layer and compiler dependencies; restored MSRV 1.92. No experiment files or second kernel versions remain. GPU computation is postponed (E15).
+- The histogram's initial per-pixel array fold was costly: the first 12-worker level-0 measurement was 352 ms. Accumulating in place per chunk reduced the final complete graph median to 162 ms. Production kernel/dispatch code is about 105 lines instead of 390; the stripped benchmark is 0.84 MiB instead of 105.3 MiB.
+- Identical release benchmark, Sony fixture, Ryzen 5600G/12 threads and RTX 3080/Vulkan, seven warm level 3/2/1/0 cycles: Rayon 12 workers 53/9/37/162 ms; Rayon 1 worker 61/55/244/1038 ms; saved CubeCL 0.11 CPU binary 51/24/130/582 ms; GPU 53/28/123/623 ms. Initial RAW+runtime evaluations were 458/480/619/1067 ms respectively, with uncontrolled filesystem/driver caches. GUI conversion/upload/drawing are excluded. RAW cache and evaluator are identical in all comparisons.
+- Correctness and validation: all 67 workspace tests pass; 21 kernel/node tests also pass with one Rayon worker. Covers f64 numerical references, exact histogram boundaries, concurrent calls, real LibRaw comparison and TIFF export. Workspace formatting and clippy with warnings denied pass.
+- Scope remains node internals only. The latest user instruction defers preview-level, evaluation, cache and async changes until after this implementation; next is a separate architecture plan. Current automatic level selection and RAW pyramid retention remain in place.
+
+## 2026-10-04: upgrade CubeCL to 0.11 prerelease
+
+- Upgraded and pinned CubeCL to `0.11.0-pre.4` as requested. Compute, GUI and egui now resolve to one wgpu version, 30.0.1. Adapted the wrapper to runtime-independent `Client`/`BufferArg` APIs, slice kernel arguments and explicit resource server types; kernel formulas, tolerances and host-valued node boundaries are unchanged. Raised workspace MSRV to Rust 1.95, required by the prerelease.
+- The CPU backend now uses Pliron with LLVM 23.1 instead of the previous MLIR backend. Direct input-buffer writes remain to avoid allocating temporary host vectors. The stripped Linux compute benchmark is 106 MiB (previously 112 MiB), with no dynamic LLVM dependency.
+- Verification: all 67 workspace tests pass with CPU and with GPU selected; 21 kernel/node checks pass with one CPU worker. Workspace clippy with warnings denied, formatting and diff checks pass. This includes real RAW/LibRaw comparisons, export, histogram boundaries, extreme finite sigmoid inputs and concurrent evaluations.
+- Release fixture medians at levels 3/2/1/0: CPU 44/25/121/555 ms; GPU 56/31/133/638 ms. First RAW+runtime evaluation was 0.66 s CPU / 0.79 s GPU, with uncontrolled filesystem/compiler caches. Levels 1–3 remain below 300 ms; full resolution remains above it. The cold dependency rebuild took several minutes; benchmark timings were collected after builds/tests finished.
+- Amends the production integration commit at the user's request. No experiment files or additional kernel versions were introduced. Windows/macOS packaging and full-resolution latency remain in TODO.
+
+## 2026-10-04: integrate CubeCL inside existing nodes
+
+- User approved the runtime/compiler footprint, lowered the Windows/macOS priority, and set 300 ms as acceptable preview latency. Integrated pinned CubeCL 0.10.0 into `drip`; removed `experiments/` and its independent package. White balance, 2×2 debayering, camera-to-Rec.2020, sigmoid and histogram now each have one CPU/GPU kernel source. RAW preparation, graph/evaluator/cache contracts, host values, renderer and export implementation are unchanged.
+- `DRIP_COMPUTE=auto` prefers a hardware wgpu/WGSL adapter, with CPU fallback; `cpu`, `cpu1`, and `gpu` allow explicit selection. Buffer sizes exceeding device binding limits also select the same CPU kernel. Runtime resources are reused. Direct writes to fresh CubeCL allocations remove redundant host upload copies; output is copied once into each node's host value. No cross-node device residency or fusion.
+- Histogram bin edges are shared host-generated thresholds so CPU/GPU agree exactly at boundaries. The stable sigmoid is tested against an independent f64 curve across 25 parameter combinations and extreme finite values, with 2e-6 absolute tolerance. Added checks for all Bayer phases, odd crops, dispatch/SIMD tails, empty images and concurrent evaluations.
+- Release fixture measurements (Ryzen 5600G, 12 threads; RTX 3080/Vulkan), seven warm cycles through levels 3/2/1/0: CPU medians 44/36/133/525 ms; GPU 49/38/138/618 ms. The preceding committed Rust implementation, rebuilt separately with the same benchmark, measured 58/50/235/1001 ms. These include node transfers, allocations and cache replacement, excluding GUI texture upload/drawing. Levels 1–3 meet 300 ms; full resolution remains above it. First RAW+runtime evaluation was 1.13 s CPU / 0.69 s GPU, with uncontrolled caches. Reproduction is `examples/preview_latency.rs`.
+- Verification: all 67 workspace tests pass with CPU and with GPU selected; all 21 kernel/node tests also pass with one CPU worker. Automatic fallback was exercised with only a software adapter available. Workspace fmt and clippy with warnings denied pass.
+- The stripped Linux compute benchmark is 112 MiB, with no dynamic LLVM/MLIR dependency. Windows/macOS packaging, other GPU vendors, and device-loss recovery remain unverified. Updated DESIGN E10/E14, usage and TODO; the preliminary experiment was not committed.
+
+## 2026-10-04: acceleration scope clarified
+
+- User requires acceleration to stay inside selected nodes and remain transparent to other infrastructure. Recorded E13: preserve host-value inputs/outputs, evaluator, graph, caches and renderer, with one source per accelerated kernel across backends. Mixed ordinary/accelerated nodes are expected.
+- Revised the current plan and experiment conclusion: the existing tone-map wrapper has not shown a consistent whole-node gain. That measurement does not rule out faster isolated nodes. Optimize internal copies/runtime reuse and measure complete calls; cross-node device residency and renderer integration are outside this change. Background evaluation remains a separate proposal.
+- Documentation only; no processing changes or commits.
+
+## 2026-10-04: CubeCL distribution follow-up
+
+- User instructed not to commit experiments. Removed experiment commit `e77bf15` from the branch while preserving its files and documentation uncommitted; the RAW-cache commit `1a5928c` remains.
+- Inspected the installed Tracel LLVM/MLIR build scripts: LLVM/MLIR link statically. The combined Linux binary has no dynamic LLVM/MLIR dependency; a stripped copy passed CPU checks with no compiler tools on PATH. Its stripped size is 115 MiB, versus 8.4 MiB for the wgpu-only experiment. These are harness sizes, not final application estimates. Existing LibRaw/LittleCMS/system dependencies remain dynamic.
+- Distribution remains unverified on clean Windows/macOS machines. The CPU JIT needs a signed macOS/Apple-silicon check against Apple's executable-memory requirements. Native per-target CI builds, ordinary-driver GPU checks and same-source CPU fallback remain proposed. Details were in the uncommitted experiment report, since replaced by DESIGN 3.3.2; no application changes or new commits at that point.
+
+## 2026-10-04: one-source CubeCL kernel experiment
+
+- Committed the prior RAW-cache work as `1a5928c` after the user's reminder. Read CubeCL 0.10.0's book, examples, CPU compiler/runner, wgpu runtime, memory and profiling code; the inspected tag is `7cf203735e095e640a2c03b2400d0faa03196bb4`.
+- Added the independent `experiments/cubecl` package, with a pinned dependency/lockfile, one sigmoid kernel, a harness calling the existing production node as the oracle, reproduction commands and retained measurement logs. No application code or normal-workspace dependencies changed. The kernel uses logarithmic algebra to avoid relying on infinities under WGSL's finite-math rules.
+- Correctness passed on Linux Ryzen 5 5600G with 1/12 CPU workers and RTX 3080 through both WGSL and direct SPIR-V on Vulkan. Checked 25 parameter combinations, empty/odd/tail lengths, negative/zero/subnormal/extreme finite values, and Sony fixture scene RGB at levels 3/2/1/0. Maximum error: 7.75e-7 synthetic, 1.79e-7 fixture, against tolerance 2e-6. Native wgpu writes into CubeCL buffers also passed on both GPU routes.
+- Release medians at 664k RGB pixels: existing Rust node about 12 ms; resident CubeCL CPU 1/12 workers 10.0/2.2 ms; resident GPU about 0.11 ms including synchronization (device timestamps 0.026 ms). Complete host-slice→host-Vec calls took 13–24 ms, erasing the gain. Full-size GPU host latency varied substantially; the report keeps those results separate from device timings and does not claim application speedups.
+- Initialization took roughly 0.25–0.35 s, plus CPU first-use work about 0.25 s or GPU first-use work 0.003–0.020 s, with driver/compilation caches uncontrolled. First combined dependency build succeeded in about 88 s with the automatically provisioned LLVM bundle. CubeCL's CPU `CUBE_COUNT` builtin was unsupported; its one-dimensional form worked without dependency patches.
+- Format and clippy checks cover the experiment's GPU and CPU configurations. The standalone CPU-only build also works. Remaining adoption questions: Windows/macOS packaging, other vendors, CFA/reduction kernels and retaining buffers through the pipeline/preview. CubeCL uses wgpu 29 while Drip/egui use 30. Tentatively prefer WGSL for the next experiment; no production backend selected (E10, DESIGN 3.3.2).
+
 ## 2026-10-04: cache RAW pyramids for the session
 
 - Implemented E11 after user approval: normalize each RAW once, eagerly build the Bayer-preserving pyramid and release the decoded u16 buffer. The generic resource store shares each file revision across evaluators; export snapshots retain their cached content through reload. The GUI retains resources across project changes. Evaluation stamps, ordering and node-result caching are unchanged.

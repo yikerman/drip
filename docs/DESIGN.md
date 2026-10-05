@@ -62,25 +62,102 @@ Each entry gives its rationale. Superseded entries are struck through and stay i
 | E6 | The interactive session keeps one node-result cache at preview scale. Full-resolution export has no persistent node-result cache: within one run each node is evaluated once, and its outputs are held until their last consumer has run. Resources are shared with preview (E11). | decided | A 45 MP 3-channel f32 image takes about 540 MB, so caching every node at full resolution isn't viable. Resource retention is separate from intermediate image lifetimes. |
 | ~~E7~~ | ~~LibRaw's decode (scale-independent and expensive) is memoized in a session resource cache keyed by path. It is not node state.~~ | superseded by E11 (user, 2026-10-04) | The normalized pyramid replaces the decoded u16 buffer, also removing repeated normalization and binning. |
 | E9 | Prioritize interactive responsiveness, cross-platform support and ease of kernel development over peak throughput. Maintain exactly one source implementation of each computational kernel across CPU and GPU backends. | requirement (user, 2026-10-04) | Preview-level transitions currently interrupt interaction. Backend-specific compilation and dispatch may differ; handwritten copies of the algorithm are excluded. |
-| E10 | Evaluate CubeCL for shared CPU/GPU kernels before selecting a processing backend; ordinary Rust with Rayon remains the simpler CPU-only option. | tentative | CubeCL supplies a Rust kernel DSL and CPU and wgpu runtimes [2], but its CPU compiler adds LLVM/JIT dependencies [3], [4]. A spike must establish builds on Linux, Windows and macOS, single-worker and parallel execution, numerical behavior, first-use latency and sharing GPU buffers with the existing wgpu renderer. See the survey below. |
+| ~~E10~~ | ~~Use CubeCL 0.11.0-pre.4 for the five computational nodes, selecting hardware GPU or native CPU at runtime.~~ | superseded by E15 (user, 2026-10-04) | The implementation was evaluated, then replaced with Rayon for simpler development and better measured host-to-host latency. See 3.3.2–3.3.3. |
 | E11 | Cache a normalized f32 RAW pyramid and metadata per path and resource revision for the application session, including across project changes. Decode and normalize once, release the u16 buffer, then eagerly derive each coarser level by averaging four same-phase Bayer sites with whole-cell cropping. Preview and export share these immutable levels; export snapshots resource revisions and keeps a separate temporary node cache. Explicit reload replaces a resource without changing existing snapshots. | decided (user, 2026-10-04); implemented | The user accepts about 226 MB per 42 MP pyramid (at most 4/3 of the base mosaic), excluding processing intermediates. A level change clones an Arc instead of scanning the sensor. One implementation each for normalization and downsampling; no RAW-specific evaluator logic. Resources loaded first by an export are shared back to the session. Recursive averages agree with independent direct averages within f32 rounding. No eviction in this prototype; first-load work increases. Snapshots retain cached content, not copies of unread files on disk. |
 | E12 | Move interactive evaluation to a persistent worker, retain the last completed preview and coalesce requests so the latest graph/level wins. | tentative; would revise G2 | A faster kernel can still stall a UI frame. Keep the evaluator and its caches alive across requests; discard obsolete results and add cooperative cancellation between nodes or chunks. Resource loading and kernel compilation also belong off the UI thread. |
+| E13 | Acceleration is an implementation detail of selected nodes. Preserve existing host-value inputs/outputs, node contracts, evaluator, graph, caches and renderer; ordinary nodes may coexist with accelerated ones. Maintain one kernel source across its execution backends (E9). | requirement (user, 2026-10-04) | The user requires changes to stay inside some nodes and remain transparent to other infrastructure. Backend selection, runtime reuse and temporary buffers belong behind the node implementation. Include allocation, transfers, synchronization and output materialization in performance comparisons. Cross-node device residency, graph fusion and renderer integration are outside this change. |
+| E14 | Preview latency below 300 ms is acceptable; prioritize straightforward development over further throughput tuning. Linux is the first target; Windows/macOS are lower priority. | requirement (user, 2026-10-04) | A future worker can tolerate longer computations while keeping the UI responsive. Initial RAW loading and full-resolution processing are measured separately. |
+
+| E15 | Use Rayon for white balance, 2×2 debayering, camera-to-Rec.2020, sigmoid and histogram. Remove CubeCL and postpone GPU computation. | decided (user, 2026-10-04); implemented | Ordinary Rust parallel iterators use one algorithm with one or multiple CPU workers. No JIT, compute device, runtime buffers or host transfers; graph and node contracts remain unchanged. Measured latency is lower than CubeCL on the test machine (3.3.3). |
 
 ### 3.3.1 Kernel survey (2026-10-04)
 
-This is a source/documentation survey, not a backend performance comparison. No new processing dependency has been selected.
+This initial survey informed the CubeCL trial (E10), subsequently replaced with Rayon (E15). Measurements follow in 3.3.2–3.3.3.
 
 | Approach | One kernel source? | Execution and development cost |
 |----------|--------------------|--------------------------------|
 | Rust functions with Rayon | Yes, for CPU execution | Serial iteration or parallel iteration calls the same function; a Rayon pool can have one or multiple workers [5]. Small change to the current code, ordinary debugging and no GPU runtime. It does not provide GPU compilation. |
-| CubeCL | Yes, CPU and GPU | `#[cube]` functions compile through an intermediate representation to backend code. GPU targets include Vulkan/SPIR-V, Metal and WebGPU through wgpu [2]. CPU uses LLVM-based compilation and workers [3], [4]. The v0.10.0 runner dispatches one task per cube unit, so a one-unit launch is a candidate for single-worker execution, to verify in a spike [8]. This is a restricted Rust DSL, not arbitrary Rust/Vec/iterator code. The project describes its API as alpha; pin and test a version rather than assuming development-branch documentation matches the release. |
+| CubeCL | Yes, CPU and GPU | `#[cube]` functions compile through an intermediate representation to backend code. GPU targets include Vulkan/SPIR-V, Metal and WebGPU through wgpu [2]. CPU uses LLVM-based compilation and workers [3], [4]. The v0.11.0-pre.4 thread pool dispatches one task per cube unit; a one-unit launch selects one kernel worker [8]. This is a restricted Rust DSL, not arbitrary Rust/Vec/iterator code. The project describes its API as alpha; pin and test a version rather than assuming development-branch documentation matches the release. |
 | rust-gpu, optionally with krnl | Shared Rust arithmetic is possible | Compile GPU-compatible Rust to SPIR-V and call shared functions from CPU loops. GPU entry points, buffers and scheduling still need integration; reductions and synchronization are harder to share than pixel functions. rust-gpu requires a particular nightly toolchain [6]. krnl's example shares the arithmetic but supplies separate CPU iteration and GPU dispatch [7]. More integration work than the CubeCL runtime approach. |
 | Handwritten WGSL with wgpu | GPU source only | Portable GPU execution, but a separately maintained Rust CPU kernel violates E9. A software GPU adapter is not a substitute for a straightforward native CPU backend. |
 | OpenCL from Rust | A shared OpenCL kernel, not a Rust kernel | Supports CPU/GPU devices where implementations exist, but Rust host bindings do not turn Rust functions into OpenCL kernels. Apple deprecated OpenCL in macOS 10.14 and recommends Metal [9], making it a poor fit for the platform priority. |
 
-Vulkan and OpenCL are execution APIs; SPIR-V is an intermediate representation, not a competing runtime [10]. For Drip, the source language and runtime should be selected together. GPU processing also needs buffers to remain on the device between nodes and through preview drawing; downloading each node into today's CPU `Vec` values would add avoidable transfers. Headless processing must remain in the library, independent of the GUI.
+Vulkan and OpenCL are execution APIs; SPIR-V is an intermediate representation, not a competing runtime [10]. For Drip, the source language and runtime should be selected together. Under E13, accelerated nodes consume and return existing CPU values. Transfers are part of their cost; a candidate must save enough computation to outweigh that cost. Cross-node device residency is not a prerequisite or part of this change. Headless processing remains in the library, independent of the GUI.
 
-The first CubeCL experiment should include a pixel map, CFA downsampling and histogram reduction, with one source per operation. Use synthetic expected values and cross-backend comparisons, not a second production implementation. Measure compilation, transfers and end-to-end evaluation separately. Single-thread control and renderer interoperability remain unverified.
+The trial covered pixel maps, CFA processing and histogram reduction. Tests use independent expected values, without a second production implementation.
+
+### 3.3.2 CubeCL trial (2026-10-04, superseded)
+
+CubeCL 0.11.0-pre.4 was integrated into five nodes with one kernel source and
+host-valued boundaries. CPU and wgpu/WGSL backends passed the numerical tests.
+A wrapper handled backend selection, dispatch, transfers and readback. The CPU
+backend brought a JIT compiler and statically linked LLVM; the stripped Linux
+benchmark was 105.3 MiB. Linux CPU and RTX 3080/Vulkan were tested;
+Windows/macOS packaging and other GPU vendors were not verified.
+
+The trial demonstrated that this architecture works, but the Rayon comparison
+below showed lower complete-call latency with much less code. CubeCL, its
+wrapper and its dependencies have been removed, along with the experiments
+folder. Historical measurements remain in PROGRESS; no alternate production
+kernels are retained. A future GPU proposal must still satisfy E9 and E13.
+
+### 3.3.3 Rayon inside processing nodes (2026-10-04)
+
+**Decided:** the five computational nodes call ordinary Rust kernels in
+`crates/drip/src/nodes/kernels.rs`. Indexed parallel iterators produce their
+output Vec directly. Histogram chunks accumulate private counters in place,
+then reduce them with exact integer addition; comparing bin edges avoids log
+rounding at boundaries. Chunking also avoids copying the 3 KiB accumulator
+through a per-pixel fold. Sigmoid retains the stable logarithmic formula so
+extreme finite inputs do not overflow intermediate powers.
+
+Rayon's shared pool executes the same implementation with one or multiple
+workers [5], [15]. There is no CPU/GPU dispatch wrapper, JIT, unsafe buffer
+transport or duplicate serial implementation. The production kernel/dispatch
+code shrinks from about 390 lines to about 105 (excluding tests). Nodes still
+consume and return existing host values. RAW preparation, evaluation, caches,
+GUI rendering and export scheduling are unchanged. The processing library no
+longer depends on CubeCL or wgpu; GUI wgpu remains. Workspace MSRV returns to
+1.92.
+
+Release measurements on the 7968×5320 Sony fixture, Ryzen 5 5600G (12 logical
+CPUs), RTX 3080/Vulkan. The same `preview_latency` benchmark warms shapes and
+cycles levels 3/2/1/0 seven times. All columns include complete graph evaluation
+of preview and histogram, allocations and replacement of previous values,
+including transfers for CubeCL. They exclude GUI texture preparation, upload
+and drawing. These runs retain the same RAW pyramid cache for a fair comparison.
+
+| Preview level | Output RGB pixels | Rayon, 1 worker | Rayon, 12 workers | CubeCL CPU | CubeCL GPU |
+|---------------|-------------------|-----------------|-------------------|------------|------------|
+| 3 | 165,336 | 60.7 ms | 53.2 ms | 51.2 ms | 53.3 ms |
+| 2 | 662,340 | 55.4 ms | 9.0 ms | 24.2 ms | 28.0 ms |
+| 1 | 2,649,360 | 244.2 ms | 36.6 ms | 129.7 ms | 123.3 ms |
+| 0 | 10,597,440 | 1,037.7 ms | 161.9 ms | 582.3 ms | 623.3 ms |
+
+These are medians, not latency guarantees. Level 3 follows level 0 and includes
+releasing much larger previous values, explaining its higher time than level 2.
+The Rayon 12-worker level-0 range was 159.5–177.9 ms. Initial level-3 evaluation,
+including RAW decode/pyramid construction and pool startup, was 458 ms (Rayon),
+619 ms (CubeCL CPU), and 1,067 ms (CubeCL GPU). Filesystem and driver/JIT caches
+were uncontrolled; these are not cold-disk measurements. The stripped Rayon
+benchmark is 0.84 MiB; these executable sizes are not GUI installer sizes.
+
+Verification covers all Bayer phases and odd crops, empty images, concurrent
+calls, uneven lengths, matrix values against f64 references, 25 sigmoid parameter
+combinations and extreme finite inputs (2e-6 absolute tolerance), and every
+histogram edge plus adjacent f32 values (exact counts). Workspace tests also
+check the real RAW pipeline against LibRaw and TIFF output. Kernel/node tests
+run with one worker as well as the default pool.
+
+```sh
+RAYON_NUM_THREADS=12 cargo run --release -p drip --example preview_latency -- fixtures/raw/sony-ilce-7rm3.arw
+RAYON_NUM_THREADS=1 cargo run --release -p drip --example preview_latency -- fixtures/raw/sony-ilce-7rm3.arw
+# Add DRIP_BENCH_TRACE=1 for individual node wall times.
+```
+
+GPU computation is postponed. Preview-level policy, cache simplification and
+background evaluation will be planned separately after this implementation;
+none is changed by the Rayon replacement.
 
 ### 3.4 UI-only nodes and side effects
 
@@ -167,9 +244,9 @@ Spike done (protocol level, see D2). Still to do in M3: verify what is actually 
 
 [2] Tracel, "CubeCL," project documentation. [Online]. Available: https://github.com/tracel-ai/cubecl. Accessed: Oct. 4, 2026.
 
-[3] Tracel, "CPU runtime for CubeCL," v0.10.0, dependency manifest. [Online]. Available: https://github.com/tracel-ai/cubecl/blob/v0.10.0/crates/cubecl-cpu/Cargo.toml. Accessed: Oct. 4, 2026.
+[3] Tracel, "CPU runtime for CubeCL," v0.11.0-pre.4, dependency manifest. [Online]. Available: https://docs.rs/crate/cubecl-cpu/0.11.0-pre.4/source/Cargo.toml. Accessed: Oct. 4, 2026.
 
-[4] Tracel, "LLVM Compiler," development-branch documentation. [Online]. Available: https://github.com/tracel-ai/cubecl/blob/main/crates/cubecl-llvm/README.md. Accessed: Oct. 4, 2026.
+[4] Tracel, "LLVM Compiler," v0.11.0-pre.4, dependency manifest. [Online]. Available: https://docs.rs/crate/cubecl-llvm/0.11.0-pre.4/source/Cargo.toml. Accessed: Oct. 4, 2026.
 
 [5] Rayon contributors, "ThreadPoolBuilder," API documentation. [Online]. Available: https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html. Accessed: Oct. 4, 2026.
 
@@ -177,8 +254,18 @@ Spike done (protocol level, see D2). Still to do in M3: verify what is actually 
 
 [7] C. R. Earp, "krnl: Safe, portable, high performance compute (GPGPU) kernels." [Online]. Available: https://github.com/charles-r-earp/krnl. Accessed: Oct. 4, 2026.
 
-[8] Tracel, "KernelRunner," CubeCL v0.10.0 source. [Online]. Available: https://github.com/tracel-ai/cubecl/blob/v0.10.0/crates/cubecl-cpu/src/compute/runner.rs. Accessed: Oct. 4, 2026.
+[8] Tracel, "CPU thread pool," CubeCL v0.11.0-pre.4 source. [Online]. Available: https://docs.rs/crate/cubecl-cpu/0.11.0-pre.4/source/src/compute/threadpool/mod.rs. Accessed: Oct. 4, 2026.
 
 [9] Apple, "Transition to Metal." [Online]. Available: https://developer.apple.com/opencl/. Accessed: Oct. 4, 2026.
 
 [10] Khronos Group, "SPIR-V." [Online]. Available: https://www.khronos.org/spirv/. Accessed: Oct. 4, 2026.
+
+[11] W3C, "WebGPU Shading Language," sec. 15.7, "Floating Point Evaluation." [Online]. Available: https://www.w3.org/TR/WGSL/#floating-point-evaluation. Accessed: Oct. 4, 2026.
+
+[12] Tracel, "CubeCL wgpu runtime," v0.11.0-pre.4. [Online]. Available: https://docs.rs/crate/cubecl-wgpu/0.11.0-pre.4/source/src/runtime.rs. Accessed: Oct. 4, 2026.
+
+[13] Tracel, "Tracel LLVM," build and distribution documentation. [Online]. Available: https://github.com/tracel-ai/tracel-llvm. Accessed: Oct. 4, 2026.
+
+[14] Apple, "Porting just-in-time compilers to Apple silicon." [Online]. Available: https://developer.apple.com/documentation/apple-silicon/porting-just-in-time-compilers-to-apple-silicon. Accessed: Oct. 4, 2026.
+
+[15] Rayon contributors, “ParallelIterator,” Rayon 1.12.0 API documentation. [Online]. Available: https://docs.rs/rayon/1.12.0/rayon/iter/trait.ParallelIterator.html. Accessed: Oct. 4, 2026.

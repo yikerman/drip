@@ -8,6 +8,8 @@ use crate::node::{EvalContext, Evaluated, InputSpec, NodeKind, OutputSpec};
 use crate::param::Params;
 use crate::value::{Mosaic, PortType, Rgb, Value};
 
+use super::kernels;
+
 const MOSAIC: &[PortType] = &[PortType::Mosaic];
 
 fn single(output: Value) -> Result<Evaluated, String> {
@@ -28,10 +30,8 @@ pub static WHITE_BALANCE: NodeKind = NodeKind {
 fn white_balance(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {
     let m = inputs[0].mosaic();
     let wb = m.camera.white_balance;
-    let data = (0..m.height)
-        .flat_map(|row| (0..m.width).map(move |col| (row, col)))
-        .map(|(row, col)| m.data[row * m.width + col] * wb[m.cfa.color(row, col) as usize])
-        .collect();
+    let gains: Vec<_> = m.cfa.colors.iter().map(|&c| wb[c as usize]).collect();
+    let data = kernels::white_balance(&m.data, m.width, m.cfa.size, &gains);
     single(Value::Mosaic(Arc::new(Mosaic {
         data,
         camera: m.camera.clone(),
@@ -55,20 +55,9 @@ pub static BIN_2X2: NodeKind = NodeKind {
 fn bin_2x2(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Evaluated, String> {
     let m = inputs[0].mosaic();
     let (width, height) = (m.width / 2, m.height / 2);
-    let pixels = (0..height)
-        .flat_map(|y| (0..width).map(move |x| (y, x)))
-        .map(|(y, x)| {
-            let (mut sum, mut count) = ([0.0; 3], [0.0; 3]);
-            for (row, col) in [(0, 0), (0, 1), (1, 0), (1, 1)].map(|(r, c)| (2 * y + r, 2 * x + c))
-            {
-                // The second green (3) joins the first.
-                let channel = [0, 1, 2, 1][m.cfa.color(row, col) as usize];
-                sum[channel] += m.data[row * m.width + col];
-                count[channel] += 1.0;
-            }
-            std::array::from_fn(|c| sum[c] / count[c])
-        })
-        .collect();
+    // The second green (3) joins the first.
+    let colors: Vec<u32> = m.cfa.colors.iter().map(|&c| [0, 1, 2, 1][c as usize]).collect();
+    let pixels = kernels::debayer(&m.data, m.width, m.height, m.cfa.size, &colors);
     single(Value::CameraRgb(
         Arc::new(Rgb { width, height, scale: m.scale * 2, pixels }),
         m.camera.clone(),
@@ -92,5 +81,6 @@ fn camera_to_rec2020(_: Params, inputs: &[Value], _: &EvalContext) -> Result<Eva
     let m =
         color::camera_to_rgb(&color::to_f64(&camera.xyz_to_cam), &color::rgb_to_xyz(REC2020, D65));
     let m = color::to_f32(&m.expect("raw.read rejects degenerate matrices"));
-    single(Value::SceneRec2020(Arc::new(image.map(|p| color::apply_f32(&m, p)))))
+    let pixels = kernels::matrix(&image.pixels, &m);
+    single(Value::SceneRec2020(Arc::new(Rgb { pixels, ..**image })))
 }

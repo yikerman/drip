@@ -6,7 +6,7 @@ built and tuned interactively in a GUI and reusable as a template for batch
 processing.
 
 Status: early prototype. Linux on Wayland is the primary platform; Windows and
-macOS build but are not tested.
+macOS packaging is not yet verified.
 
 ## Goals
 
@@ -69,6 +69,20 @@ In the GUI:
   on the export node.
 
 Set `RUST_LOG=debug` to see evaluation timings.
+
+Pixel-processing nodes use ordinary Rust kernels with Rayon CPU parallelism.
+Each kernel has one implementation. Set `RAYON_NUM_THREADS=1` to use one worker,
+or another positive count to limit the pool; the default uses available CPU
+parallelism. GPU computation is postponed. The GUI still uses wgpu for drawing.
+
+To measure complete preview evaluation without drawing:
+
+```sh
+RAYON_NUM_THREADS=12 cargo run --release -p drip --example preview_latency -- photo.arw
+```
+
+See [the compute measurements](docs/DESIGN.md#333-rayon-inside-processing-nodes-2026-10-04)
+for tested hardware, numerical tolerances and latency limits.
 
 ## License
 

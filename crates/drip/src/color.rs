@@ -78,11 +78,6 @@ pub fn inverse(m: &Mat3) -> Mat3 {
     std::array::from_fn(|i| std::array::from_fn(|j| cofactor(m, j, i) / det))
 }
 
-/// `m` applied to a pixel, in f32 as the pipeline stores pixels.
-pub fn apply_f32(m: &[[f32; 3]; 3], p: [f32; 3]) -> [f32; 3] {
-    m.map(|row| row[0] * p[0] + row[1] * p[1] + row[2] * p[2])
-}
-
 pub fn to_f32(m: &Mat3) -> [[f32; 3]; 3] {
     m.map(|row| row.map(|v| v as f32))
 }

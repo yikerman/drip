@@ -2,6 +2,7 @@
 
 mod color;
 mod export;
+mod kernels;
 mod raw;
 mod tone;
 mod view;
