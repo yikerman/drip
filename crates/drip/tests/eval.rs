@@ -3,9 +3,9 @@ mod common;
 use common::*;
 use drip::eval::{Evaluator, NodeError, run_action};
 use drip::image::{DisplayRec2020, SceneRec2020, ThreeChannelMatrix};
-use drip::node::{EvalContext, NodeKernel, TypedAction};
+use drip::node::{EvalContext, Evaluated, NodeKernel, NodeKind, TypedAction};
 use drip::param::Params;
-use drip::ports::Read;
+use drip::ports::{Optional, Read};
 use drip::project::Project;
 use drip::view::View;
 use serde_json::json;
@@ -88,6 +88,44 @@ fn unconnected_input_is_an_error() {
     let mut p = Project::default();
     let add = p.graph.add_node(&ADD);
     assert_eq!(eval(&mut Evaluator::default(), &p, add), &Err(NodeError::MissingInput("a")));
+}
+
+/// `base`, plus `offset` when connected.
+static OFFSET: NodeKind =
+    NodeKind::new::<OffsetKernel>("test.offset", "offset", &[], &["base", "offset"], &["image"]);
+struct OffsetKernel;
+impl NodeKernel for OffsetKernel {
+    type Inputs = (Read<SceneRec2020>, Optional<Read<SceneRec2020>>);
+    type Outputs = (std::sync::Arc<SceneRec2020>,);
+
+    fn eval(
+        _: Params<'_>,
+        (base, offset): (&SceneRec2020, Option<&SceneRec2020>),
+        _: &EvalContext<'_>,
+    ) -> Result<Evaluated<Self::Outputs>, String> {
+        let (a, b) = (base.rgb().pixels[0], offset.map_or([0.0; 3], |o| o.rgb().pixels[0]));
+        Ok(Evaluated::new((scene([a[0] + b[0], a[1] + b[1], a[2] + b[2]]),)))
+    }
+}
+
+#[test]
+fn optional_inputs_may_stay_unconnected_but_not_fail() {
+    let mut p = Project::default();
+    let g = &mut p.graph;
+    let (c, fail, offset) = (g.add_node(&CONST), g.add_node(&FAIL), g.add_node(&OFFSET));
+    g.connect(port(c, "image"), port(offset, "base")).unwrap();
+    let mut ev = Evaluator::default();
+    assert_eq!(output(eval(&mut ev, &p, offset)), [1.0, 4.0, 0.0]);
+
+    p.graph.connect(port(c, "image"), port(offset, "offset")).unwrap();
+    assert_eq!(output(eval(&mut ev, &p, offset)), [2.0, 8.0, 0.0]);
+
+    p.graph.connect(port(c, "image"), port(fail, "image")).unwrap();
+    p.graph.connect(port(fail, "image"), port(offset, "offset")).unwrap();
+    assert_eq!(eval(&mut ev, &p, offset), &Err(NodeError::Upstream(fail)));
+
+    p.graph.disconnect(&port(offset, "base"));
+    assert_eq!(eval(&mut ev, &p, offset), &Err(NodeError::MissingInput("base")));
 }
 
 #[test]

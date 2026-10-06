@@ -70,6 +70,9 @@ This sequence takes priority over CLI expansion and speculative optimization.
   Preview presentation requires linear Rec.2020 because the shader assumes it.
   Associated input-borrow families take inspiration from
   [higher](https://github.com/bodil/higher); no dependency is needed.
+- **Decided (2026-10-05):** Inputs may be declared optional in the kernel
+  signature and arrive as `None` while unconnected. A connected optional source
+  that fails still blocks the node, so a broken upstream is never silently ignored.
 
 - **Decided:** Each backend node owns its schema, adapter and algorithm. Split
   substantial algorithms into local modules; keep small nodes in one file.

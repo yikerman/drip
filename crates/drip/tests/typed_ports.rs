@@ -73,7 +73,8 @@ fn capabilities_preserve_semantics_and_share_pixels() {
     let scene = Arc::new(SceneRec2020::from(data.clone()));
     let display = Arc::new(DisplayRec2020::from(data.clone()));
     let outputs = (scene.clone(), display.clone()).erase();
-    let (scene_ref, display_ref) = <(Read<SceneRec2020>, Read<DisplayRec2020>)>::read(&outputs);
+    let slots: Vec<_> = outputs.iter().cloned().map(Some).collect();
+    let (scene_ref, display_ref) = <(Read<SceneRec2020>, Read<DisplayRec2020>)>::read(&slots);
     assert!(std::ptr::eq(scene_ref, &*scene));
     assert!(std::ptr::eq(display_ref, &*display));
     assert_ne!(outputs[0], outputs[1], "identical storage has different semantic types");

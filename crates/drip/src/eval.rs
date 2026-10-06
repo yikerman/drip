@@ -143,18 +143,25 @@ impl Cache {
         (node.kind.eval)(Params(&node.params), &inputs, ctx).map_err(NodeError::Failed)
     }
 
-    /// The values on node `id`'s inputs, from its sources' cached results.
-    fn inputs(&self, graph: &Graph, id: NodeId) -> Result<Vec<Value>, NodeError> {
+    /// The values on node `id`'s inputs, from its sources' cached results;
+    /// `None` for an unconnected optional input.
+    fn inputs(&self, graph: &Graph, id: NodeId) -> Result<Vec<Option<Value>>, NodeError> {
         let kind = graph.node(id).expect("in graph").kind;
         kind.inputs()
             .map(|spec| {
-                let source = graph.source(&Port(id, spec.name.into()));
-                let source = source.ok_or(NodeError::MissingInput(spec.name))?;
+                let Some(source) = graph.source(&Port(id, spec.name.into())) else {
+                    let optional = spec.requirement.optional;
+                    return if optional {
+                        Ok(None)
+                    } else {
+                        Err(NodeError::MissingInput(spec.name))
+                    };
+                };
                 let Ok(evaluated) = &self.0[&source.0].result else {
                     return Err(NodeError::Upstream(source.0));
                 };
                 let index = graph.node(source.0).expect("in graph").kind.output_index(&source.1);
-                Ok(evaluated.outputs[index.expect("validated edge")].clone())
+                Ok(Some(evaluated.outputs[index.expect("validated edge")].clone()))
             })
             .collect()
     }

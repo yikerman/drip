@@ -69,8 +69,8 @@ where
     pub run: TypedActionFn<K>,
 }
 
-type Evaluate = fn(Params<'_>, &[Value], &EvalContext<'_>) -> Result<Evaluated, String>;
-type RunAction = fn(usize, Params<'_>, &[Value], &EvalContext<'_>) -> Result<(), String>;
+type Evaluate = fn(Params<'_>, &[Option<Value>], &EvalContext<'_>) -> Result<Evaluated, String>;
+type RunAction = fn(usize, Params<'_>, &[Option<Value>], &EvalContext<'_>) -> Result<(), String>;
 
 pub struct NodeKind {
     pub name: &'static str,
@@ -185,7 +185,7 @@ impl Action {
     pub fn run(
         &self,
         params: Params<'_>,
-        inputs: &[Value],
+        inputs: &[Option<Value>],
         ctx: &EvalContext<'_>,
     ) -> Result<(), String> {
         (self.run)(self.index, params, inputs, ctx)
@@ -210,7 +210,7 @@ impl Evaluated<()> {
 
 fn evaluate<K>(
     params: Params<'_>,
-    inputs: &[Value],
+    inputs: &[Option<Value>],
     ctx: &EvalContext<'_>,
 ) -> Result<Evaluated, String>
 where
@@ -222,7 +222,7 @@ where
 fn run_action<K>(
     index: usize,
     params: Params<'_>,
-    inputs: &[Value],
+    inputs: &[Option<Value>],
     ctx: &EvalContext<'_>,
 ) -> Result<(), String>
 where

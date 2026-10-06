@@ -11,7 +11,7 @@ pub fn show(ui: &mut Ui, kind: &NodeKind) {
     }
     egui::Grid::new(("node help", kind.name)).num_columns(2).show(ui, |ui| {
         for input in kind.inputs() {
-            ui.weak("input");
+            ui.weak(if input.requirement.optional { "optional input" } else { "input" });
             ui.label(ports::label(input.requirement.name));
             ui.end_row();
         }
