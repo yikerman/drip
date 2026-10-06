@@ -18,12 +18,24 @@ fn select_supported_format_and_encoding_together() {
         (Rgb10a2Unorm, Spaces::BT2100_PQ),
         (Bgra8UnormSrgb, Spaces::SRGB),
         (Bgra8Unorm, Spaces::SRGB),
-        (CANVAS, Spaces::EXTENDED_SRGB_LINEAR),
+        (CANVAS, Spaces::EXTENDED_SRGB_LINEAR | Spaces::PASS_THROUGH),
     ]);
-    let output = Output::choose(&caps).unwrap();
+    let output = Output::choose(&caps, Space::PassThrough).unwrap();
+    assert_eq!(output.color_space, Space::PassThrough);
+    assert_eq!(output.format, CANVAS);
+    assert_eq!(output.fragment(), "linear");
+    assert!(output.wide_gamut());
+
+    let output = Output::choose(&caps, Space::ExtendedSrgbLinear).unwrap();
     assert_eq!(output.color_space, Space::ExtendedSrgbLinear);
     assert_eq!(output.format, CANVAS);
     assert!(output.wide_gamut());
+
+    // Failed or unsupported managed Wayland setup must not retry driver scRGB.
+    let output = Output::choose(&caps, Space::Srgb).unwrap();
+    assert_eq!(output.color_space, Space::Srgb);
+    assert_eq!(output.format, Bgra8Unorm);
+    assert!(!output.wide_gamut());
 
     let caps = capabilities(
         &caps.format_capabilities[..3]
@@ -31,15 +43,29 @@ fn select_supported_format_and_encoding_together() {
             .map(|f| (f.format, f.color_spaces))
             .collect::<Vec<_>>(),
     );
-    let output = Output::choose(&caps).unwrap();
+    let output = Output::choose(&caps, Space::ExtendedSrgbLinear).unwrap();
     assert_eq!(output.color_space, Space::Srgb);
     assert_eq!(output.format, Bgra8Unorm);
     assert!(!output.wide_gamut());
 
-    let output = Output::choose(&capabilities(&[(Bgra8UnormSrgb, Spaces::SRGB)])).unwrap();
+    let output =
+        Output::choose(&capabilities(&[(Bgra8UnormSrgb, Spaces::SRGB)]), Space::ExtendedSrgbLinear)
+            .unwrap();
     assert_eq!(output.fragment(), "srgb_linear");
-    assert!(Output::choose(&capabilities(&[(CANVAS, Spaces::EXTENDED_SRGB)])).is_none());
-    assert!(Output::choose(&capabilities(&[(Rgb10a2Unorm, Spaces::BT2100_PQ)])).is_none());
+    assert!(
+        Output::choose(
+            &capabilities(&[(CANVAS, Spaces::EXTENDED_SRGB)]),
+            Space::ExtendedSrgbLinear
+        )
+        .is_none()
+    );
+    assert!(
+        Output::choose(
+            &capabilities(&[(Rgb10a2Unorm, Spaces::BT2100_PQ)]),
+            Space::ExtendedSrgbLinear
+        )
+        .is_none()
+    );
 }
 
 // This checks the real preview + composite shaders, including FP16 storage.
@@ -136,6 +162,7 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
     );
     for output in [
         Output { format: CANVAS, color_space: Space::ExtendedSrgbLinear },
+        Output { format: CANVAS, color_space: Space::PassThrough },
         Output { format: wgpu::TextureFormat::Rgba8Unorm, color_space: Space::Srgb },
         Output { format: wgpu::TextureFormat::Rgba8UnormSrgb, color_space: Space::Srgb },
     ] {

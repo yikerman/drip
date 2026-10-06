@@ -152,22 +152,23 @@ This sequence takes priority over CLI expansion and speculative optimization.
   keep provenance explicit rather than hiding it in image types. Orientation is
   omitted because exported pixels are unrotated; LibRaw's normalized make is used.
 - **Decided:** Composite egui and previews in an FP16 extended-sRGB canvas,
-  then decode to `ExtendedSrgbLinear` for presentation. Preserve negative and
-  above-one coordinates. Reference white is 1.0 on the verified Mesa/Wayland
-  path [11], without the former universal 203/80 gain. Other platform and driver
-  white conventions still need verification.
-- **Decided:** Use stock wgpu and leave surface descriptions to the driver.
-  Mesa requests perceptual intent; this limitation is accepted for now because
-  wgpu exposes no intent selector. Strict relative-colorimetric presentation
-  would require application-owned Wayland descriptions and Vulkan passthrough
-  [11, 12]. The isolated Rec.2020 PoC established feasibility, but no dependency
-  patch or direct color-management protocol integration is part of the app.
-- **Decided:** Fall back to sRGB with a visible warning when FP16 extended-linear
-  output is unavailable. The D65 matrix/shaper conversion is checked against
-  LittleCMS relative-colorimetric output. Format selection accounts for hardware
-  sRGB encoding to avoid applying the transfer twice. Encoded `ExtendedSrgb`
-  output is omitted: Intel/Mesa/KWin does not advertise it. Physical gamut
-  accuracy remains subject to instrument measurements.
+  then decode to linear BT.709. Preserve negative and above-one coordinates.
+- **Decided:** On Wayland, use Vulkan passthrough and an application-owned
+  description: BT.709, extended linear, luminances (0, 80, 80) cd/m², relative
+  intent when supported, otherwise perceptual [11, 12]. This fixes reference
+  white at 1.0 despite differing Mesa/NVIDIA scRGB conventions. The pinned
+  wgpu patch is documented in THIRD_PARTY.md [13].
+- **Requirement:** Use sRGB fallback when managed Wayland output is unavailable.
+  The D65 matrix/shaper conversion is tested against LittleCMS relative output,
+  including hardware-sRGB targets. Physical gamut accuracy needs measurement.
+- **Open:** The current description omits target primaries, so its target volume
+  defaults to BT.709. Extended coordinates outside that volume have undefined
+  colorimetry [11]. Declare the intended target volume with the required
+  compositor capabilities, or change the presentation encoding.
+- **Tentative:** Present linear Rec.2020 through passthrough: convert the composed
+  canvas in the final shader and declare Rec.2020 primaries. This avoids the
+  extended-target capability needed by a BT.709 container. Keep sRGB fallback.
+  Values outside the SDR Rec.2020 volume still need a defined presentation policy.
 
 - **Decided:** Diagnostic scopes use a black plotting area and light labels,
   distinct from the image preview’s middle-grey surround.

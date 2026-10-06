@@ -21,3 +21,8 @@ undocumented_unsafe_blocks = "warn"
 # Image processing at opt-level 0 is too slow to test or use on real raws.
 [profile.dev]
 opt-level = 1
+
+# wgpu 30.0.1 with `SurfaceColorSpace::PassThrough` (gfx-rs/wgpu#10545). See
+# "Patched dependencies" in THIRD_PARTY.md before changing or removing it.
+[patch.crates-io]
+wgpu = { git = "https://github.com/yikerman/wgpu", rev = "e74560774b6029e893dab73961c2dbc57797cd78" }

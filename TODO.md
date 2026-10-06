@@ -8,7 +8,9 @@ for now. Revisit performance work when measurements or usage justify it.
 |------|--------|---------------------------|
 | Production pipeline validation | Next | Sigmoid, RCD and inpaint opposed are implemented; judge detail, highlights and color on varied real photos before calling the pipeline production-ready. |
 | Editing UI/UX | Planned | Refine the workflow around the production pipeline. |
-| Display portability and intent | Next | Verify reference white on NVIDIA, other compositors and Windows/macOS. Stock wgpu leaves rendering intent to the driver (perceptual on Mesa); revisit passthrough if strict relative colorimetry is required. |
+| Wayland description correctness | Next | Declare a Rec.2020 target volume with extended-target support, or present in linear Rec.2020. Decide before implementation. |
+| Display portability | Next | Verify the owned Wayland description on Intel/Mesa and other compositors, and reference white on X11, Windows and macOS, where the driver still describes extended-linear output. |
+| Drop the wgpu fork | Deferred | Remove the patch once a wgpu release has `SurfaceColorSpace::PassThrough` (gfx-rs/wgpu#10545); steps are in THIRD_PARTY.md. |
 | SpyderX color verification | Planned | Measure display output and check the complete color path before release. |
 | Packaging and v0.1 | Planned | Follow processing, workflow and color verification. |
 | Static minimal LibRaw build | Planned | Vendor the needed decoder features for controlled builds. |

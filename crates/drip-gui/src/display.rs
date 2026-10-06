@@ -1,16 +1,29 @@
 //! Each window composites egui and previews in an FP16 extended-sRGB canvas.
-//! Presentation decodes it to extended linear BT.709, with sRGB as fallback.
-//! The driver declares the surface color space and the compositor maps it to
-//! the display. Rendering intent is driver-controlled.
+//! Presentation decodes it to extended linear BT.709 with white at 1.0, with
+//! sRGB as fallback, and the compositor maps it to the display. On Wayland Drip
+//! describes the output itself through pass-through; elsewhere the driver does.
 
 mod output;
 #[cfg(test)]
 mod tests;
+#[cfg(target_os = "linux")]
+mod wayland;
+#[cfg(not(target_os = "linux"))]
+mod wayland {
+    pub struct Description;
+
+    impl Description {
+        pub fn new(_: &winit::window::Window) -> Option<Self> {
+            None
+        }
+    }
+}
 
 use output::Output;
 
 use std::sync::Arc;
 
+use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
 use crate::preview;
@@ -62,6 +75,7 @@ pub struct Display {
     composite: wgpu::RenderPipeline,
     composite_group: wgpu::BindGroup,
     pub egui: egui_wgpu::Renderer,
+    _description: Option<wayland::Description>,
 }
 
 impl Display {
@@ -79,10 +93,28 @@ impl Display {
         let size = window.inner_size();
         let caps = surface.get_capabilities(adapter);
 
-        let output = Output::choose(&caps).ok_or("no usable surface color space")?;
+        // A description must not be attached unless pass-through keeps the
+        // driver from attaching its own.
+        let description = caps
+            .color_spaces(CANVAS)
+            .contains(wgpu::SurfaceColorSpaces::PASS_THROUGH)
+            .then(|| wayland::Description::new(&window))
+            .flatten();
+        let preferred = if description.is_some() {
+            wgpu::SurfaceColorSpace::PassThrough
+        } else if matches!(
+            window.window_handle().map_err(|e| e.to_string())?.as_raw(),
+            RawWindowHandle::Wayland(_)
+        ) {
+            // Driver-owned scRGB has inconsistent reference white on Wayland.
+            wgpu::SurfaceColorSpace::Srgb
+        } else {
+            wgpu::SurfaceColorSpace::ExtendedSrgbLinear
+        };
+        let output = Output::choose(&caps, preferred).ok_or("no usable surface color space")?;
         let Output { format, color_space } = output;
         if !output.wide_gamut() {
-            log::warn!("the display offers no extended-sRGB output; using sRGB");
+            log::warn!("extended output unavailable or undescribed; using sRGB");
         }
         log::info!("presenting {format:?} in {color_space:?} on {}", adapter.get_info().name);
         let config = wgpu::SurfaceConfiguration {
@@ -134,6 +166,7 @@ impl Display {
             composite,
             composite_group,
             egui,
+            _description: description,
         })
     }
 

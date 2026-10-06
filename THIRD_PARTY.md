@@ -30,15 +30,25 @@ here when introduced.
 | [Rayon contributors](https://github.com/rayon-rs/rayon) | CPU parallelism | MIT OR Apache-2.0 |
 | [image-rs contributors](https://github.com/image-rs/image-tiff) (`tiff`) | TIFF encoding | MIT |
 | [Emil Ernerfeldt and egui contributors](https://github.com/emilk/egui) (`egui`, `egui-winit`, `egui-wgpu`) | GUI and renderer integration | MIT OR Apache-2.0 |
-| [gfx-rs contributors](https://github.com/gfx-rs/wgpu) (`wgpu`) | GPU rendering | MIT OR Apache-2.0 |
+| [gfx-rs contributors](https://github.com/gfx-rs/wgpu) (`wgpu`, patched below) | GPU rendering | MIT OR Apache-2.0 |
 | [rust-windowing contributors](https://github.com/rust-windowing/winit) (`winit`) | Windows and input events | Apache-2.0 |
-| [Smithay contributors](https://github.com/Smithay/wayland-rs) (`wayland-client`, `wayland-protocols`) | Wayland pop-out parenting | MIT |
+| [Smithay contributors](https://github.com/Smithay/wayland-rs) (`wayland-client`, `wayland-protocols`) | Wayland pop-out parenting and surface color descriptions | MIT |
 | [PolyMeilex and rfd contributors](https://github.com/PolyMeilex/rfd) | Native file dialogs | MIT |
 | [Serde contributors](https://github.com/serde-rs/serde) (`serde`, `serde_json`) | Project serialization | MIT OR Apache-2.0 |
 | [David Tolnay and thiserror contributors](https://github.com/dtolnay/thiserror) | Error definitions | MIT OR Apache-2.0 |
 | [Rust log contributors](https://github.com/rust-lang/log), [env_logger contributors](https://github.com/rust-cli/env_logger) | Logging | MIT OR Apache-2.0 |
 | [half-rs contributors](https://github.com/VoidStarKat/half-rs) (`half`) | Half-float texture preparation | MIT OR Apache-2.0 |
 | [Joshua Barretto and pollster contributors](https://github.com/zesterer/pollster) | Blocking GPU initialization | MIT OR Apache-2.0 |
+
+## Patched dependencies
+
+wgpu is pinned to [yikerman/wgpu `e74560774b6029e893dab73961c2dbc57797cd78`](https://github.com/yikerman/wgpu/commit/e74560774b6029e893dab73961c2dbc57797cd78),
+a `PassThrough` addition to v30.0.1 (`40f4a34e`) for egui-wgpu 0.36 compatibility
+[13]. The fork retains wgpu's MIT OR Apache-2.0 licensing
+([MIT](https://github.com/yikerman/wgpu/blob/e74560774b6029e893dab73961c2dbc57797cd78/LICENSE.MIT),
+[Apache-2.0](https://github.com/yikerman/wgpu/blob/e74560774b6029e893dab73961c2dbc57797cd78/LICENSE.APACHE)).
+Remove the workspace `[patch.crates-io]` override when upgrading to a compatible
+release with passthrough support.
 
 ## Build and test dependencies
 
@@ -112,3 +122,7 @@ MIT license in the protocol source. No implementation copied.
 https://docs.vulkan.org/spec/latest/chapters/VK_KHR_surface/wsi.html.
 Accessed Oct. 5, 2026. `VK_COLOR_SPACE_PASS_THROUGH_EXT` permits application-owned
 Wayland color management without conflicting with WSI surface ownership.
+
+[13] Yi Cao, “Expose Vulkan passthrough for application-managed Wayland color
+descriptions,” gfx-rs/wgpu issue #10545, Oct. 2026. [Online]. Available:
+https://github.com/gfx-rs/wgpu/issues/10545.

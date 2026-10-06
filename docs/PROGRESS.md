@@ -4,6 +4,32 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: Wayland setup cleanup
+
+- Failed or unsupported managed Wayland setup now selects sRGB, avoiding the
+  driver-dependent scRGB reference white. Other backends retain their selection.
+- Initialization releases temporary protocol objects and owns the color surface
+  before the final flush. Registry cleanup uses wl_fixes where available.
+- GUI tests (23), clippy and formatting passed. A temporary harness ran three
+  normal window lifecycles and three with an injected final-flush failure on
+  Intel/KWin. The latter selected sRGB without the previous duplicate-description
+  error. Traces confirmed registry destruction in both runs.
+- Target-volume correction remains open for discussion. No shader changes.
+
+## 2026-10-05: owned Wayland surface description
+
+- NVIDIA 615.71.09/KWin 6.7.5 declares scRGB luminances (0, 80, 203), unlike
+  Mesa's defaults. Added the pinned wgpu passthrough patch and an explicit
+  BT.709/ext-linear (0, 80, 80) description. NVIDIA trace confirmed Drip alone
+  owns the description. The previous implementation session reported GUI tests,
+  shader readback, clippy and formatting passing.
+- Review found an incomplete target-volume declaration, the wrong fallback
+  after managed setup fails, and missing initialization/registry cleanup.
+  Documentation was condensed; implementation remains unchanged as requested.
+- Review verification: 23 GUI tests, Intel shader readback, clippy and formatting
+  passed. Three managed-window lifecycles completed normally. An isolated final-
+  flush failure reproduced the duplicate-description protocol error.
+
 ## 2026-10-05: display output cleanup
 
 - Removed the universal 203/80 gain and composite uniform buffer. The FP16

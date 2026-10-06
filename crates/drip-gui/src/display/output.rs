@@ -9,9 +9,12 @@ pub(super) struct Output {
 }
 
 impl Output {
-    pub fn choose(caps: &SurfaceCapabilities) -> Option<Self> {
-        if caps.color_spaces(CANVAS).contains(wgpu::SurfaceColorSpaces::EXTENDED_SRGB_LINEAR) {
-            return Some(Self { format: CANVAS, color_space: Space::ExtendedSrgbLinear });
+    /// Try the backend's preferred FP16 encoding, otherwise use bounded sRGB.
+    pub fn choose(caps: &SurfaceCapabilities, preferred: Space) -> Option<Self> {
+        if preferred != Space::Srgb
+            && caps.color_spaces(CANVAS).contains(preferred.to_color_spaces()?)
+        {
+            return Some(Self { format: CANVAS, color_space: preferred });
         }
         // Prefer an encoded target; an sRGB texture needs shader decoding to
         // compensate for its automatic encoding on write.
@@ -30,10 +33,10 @@ impl Output {
 
     pub fn fragment(self) -> &'static str {
         match self.color_space {
-            Space::ExtendedSrgbLinear => "linear",
+            Space::ExtendedSrgbLinear | Space::PassThrough => "linear",
             Space::Srgb if self.format.is_srgb() => "srgb_linear",
             Space::Srgb => "srgb",
-            _ => unreachable!("only extended-sRGB and sRGB outputs are selected"),
+            _ => unreachable!("only pass-through, extended-sRGB and sRGB outputs are selected"),
         }
     }
 }
