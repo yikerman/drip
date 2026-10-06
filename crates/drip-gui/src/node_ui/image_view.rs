@@ -52,7 +52,7 @@ impl ViewState {
     }
 }
 
-pub(super) fn show(ui: &mut Ui, image: &Arc<Image>) {
+pub(super) fn show(ui: &mut Ui, image: &Arc<Image>, interpolation: bool) {
     let id = ui.id().with("image view");
     let mut state = ui.data_mut(|data| data.get_temp::<ViewState>(id).unwrap_or_default());
     ui.horizontal_wrapped(|ui| {
@@ -115,7 +115,7 @@ pub(super) fn show(ui: &mut Ui, image: &Arc<Image>) {
     let rect = state.rect(area, size);
     // Align the origin to the render target so integer zooms align pixel grids.
     let rect = Rect::from_min_size((rect.min.to_vec2() * ppp).round().to_pos2() / ppp, size);
-    image::draw(&ui.painter().with_clip_rect(area), rect, id, image.clone());
+    image::draw(&ui.painter().with_clip_rect(area), rect, id, image.clone(), interpolation);
     ui.data_mut(|data| data.insert_temp(id, state));
 }
 

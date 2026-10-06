@@ -56,7 +56,7 @@ fn popup_controls_wheel_and_primary_drag_share_navigation_state() {
         .with_max_steps(100)
         .build_ui_state(
             move |ui, state: &mut ViewState| {
-                show(ui, &image);
+                show(ui, &image, false);
                 *state = ui.data(|data| data.get_temp(ui.id().with("image view")).unwrap());
             },
             ViewState::default(),

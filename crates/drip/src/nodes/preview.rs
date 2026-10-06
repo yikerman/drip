@@ -20,6 +20,7 @@ pub static PREVIEW: NodeKind = NodeKind::new::<Preview>(
     "view",
     "Preview",
     &[
+        ParamSpec::new("interpolation", ParamKind::Bool { default: false }),
         ParamSpec::new(
             "mode",
             ParamKind::Choice { options: &["none", "softproof", "gamutcheck"], default: "none" },
@@ -42,7 +43,7 @@ impl NodeKernel for Preview {
         (image,): (&dyn RgbIn<Rec2020>,),
         _: &EvalContext<'_>,
     ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-        let view = if p.choice("mode") == "none" {
+        let mut view = if p.choice("mode") == "none" {
             PreviewImage::new(image)
         } else {
             let output = profile::Output::load(p)?;
@@ -54,6 +55,7 @@ impl NodeKernel for Preview {
             let proof = DisplayRec2020::from(Arc::new(Rgb { pixels, ..**input }));
             PreviewImage::new(&proof)
         };
+        view.interpolation = p.bool("interpolation");
         Ok(Evaluated { outputs: (), view: Some(View::Image(view)) })
     }
 }

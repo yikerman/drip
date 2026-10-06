@@ -39,6 +39,10 @@ fn none_reuses_scene_and_display_pixels_without_loading_a_profile() {
     for input in [&scene as &dyn RgbIn<Rec2020>, &display] {
         let shown = preview(input, json!({ "profile": "file" })).unwrap();
         assert!(Arc::ptr_eq(shown.rgb(), &rgb));
+        assert!(!shown.interpolation);
+        let interpolated = preview(input, json!({ "interpolation": true })).unwrap();
+        assert!(interpolated.interpolation);
+        assert!(Arc::ptr_eq(interpolated.rgb(), &rgb));
     }
 }
 
@@ -197,6 +201,7 @@ fn proof_settings_round_trip_as_ordinary_node_parameters() {
     let mut project = Project::default();
     let id = project.graph.add_node(&PREVIEW);
     for (name, value) in [
+        ("interpolation", json!(true)),
         ("mode", json!("softproof")),
         ("profile", json!("file")),
         ("profile_file", json!("proof.icc")),

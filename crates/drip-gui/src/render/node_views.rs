@@ -15,7 +15,8 @@ use crate::theme;
 /// A view in the form the UI thread draws without further CPU work.
 #[derive(Clone)]
 pub enum PreparedView {
-    Image(Arc<Image>),
+    /// Packed pixels and the bilinear sampling flag, independent of the pixel cache.
+    Image(Arc<Image>, bool),
     Histogram(Arc<Histogram>),
     Scope(Arc<Scope>, Arc<egui::Mesh>),
 }
@@ -33,11 +34,11 @@ impl Prepared {
             View::Image(value) => {
                 let source = value.rgb();
                 if let Some((_, image)) = self.0.iter().find(|(rgb, _)| Arc::ptr_eq(rgb, source)) {
-                    return PreparedView::Image(image.clone());
+                    return PreparedView::Image(image.clone(), value.interpolation);
                 }
                 let image = Arc::new(Image::new(source));
                 self.0.push((source.clone(), image.clone()));
-                PreparedView::Image(image)
+                PreparedView::Image(image, value.interpolation)
             }
         }
     }
@@ -51,11 +52,11 @@ impl Prepared {
 /// Draws `view` fitted into `rect`, labelling it in `font`.
 pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &PreparedView, font: &FontId) {
     match view {
-        PreparedView::Image(image) => {
+        PreparedView::Image(image, interpolation) => {
             let fit = (rect.width() / image.width as f32).min(rect.height() / image.height as f32);
             let size = egui::vec2(image.width as f32, image.height as f32) * fit;
             let shown = Rect::from_center_size(rect.center(), size);
-            image::draw(painter, shown, id, image.clone());
+            image::draw(painter, shown, id, image.clone(), *interpolation);
         }
         PreparedView::Histogram(h) => histogram(painter, rect, h, font),
         PreparedView::Scope(scope, mesh) => draw_scope(painter, rect, scope, mesh, font),
@@ -236,10 +237,14 @@ mod tests {
         let source =
             Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[-1.0, 0.5, 2.0]] });
         let raw = Arc::downgrade(&source);
-        let view = View::Image(PreviewImage::new(&DisplayRec2020::from(source)));
+        let mut value = PreviewImage::new(&DisplayRec2020::from(source));
+        let view = View::Image(value.clone());
         let mut prepared = Prepared::default();
-        let PreparedView::Image(first) = prepared.view(&view) else { panic!("image") };
-        let PreparedView::Image(second) = prepared.view(&view) else { panic!("image") };
+        let PreparedView::Image(first, false) = prepared.view(&view) else { panic!("image") };
+        drop(view);
+        value.interpolation = true;
+        let view = View::Image(value);
+        let PreparedView::Image(second, true) = prepared.view(&view) else { panic!("image") };
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(
             first.texels,

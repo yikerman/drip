@@ -50,12 +50,14 @@ pub enum ScopeAxes {
 /// erased only at this presentation boundary. Cannot be used as an export input.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewImage {
+    /// Bilinear display sampling when true, nearest-neighbor otherwise.
+    pub interpolation: bool,
     data: Arc<Rgb>,
 }
 
 impl PreviewImage {
     pub fn new(image: &dyn RgbIn<Rec2020>) -> Self {
-        Self { data: image.rgb().clone() }
+        Self { data: image.rgb().clone(), interpolation: false }
     }
     pub fn rgb(&self) -> &Arc<Rgb> {
         &self.data

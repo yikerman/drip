@@ -33,7 +33,7 @@ impl Image {
 /// GPU state shared by all previews, kept in egui's callback resources.
 struct Previews {
     pipeline: wgpu::RenderPipeline,
-    sampler: wgpu::Sampler,
+    samplers: [wgpu::Sampler; 2],
     shown: HashMap<egui::Id, Shown>,
     /// Previews drawn this frame; the others are freed at its end.
     used: HashSet<egui::Id>,
@@ -45,7 +45,7 @@ struct Previews {
 /// comparisons by pointer sound.
 struct Shown {
     image: Arc<Image>,
-    group: wgpu::BindGroup,
+    groups: [wgpu::BindGroup; 2],
     rect: wgpu::Buffer,
 }
 
@@ -78,13 +78,20 @@ pub fn install(device: &wgpu::Device, renderer: &mut egui_wgpu::Renderer) {
         multiview_mask: None,
         cache: None,
     });
-    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
-        ..Default::default()
+    let samplers = [wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear].map(|filter| {
+        device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: filter,
+            min_filter: filter,
+            ..Default::default()
+        })
     });
-    let previews =
-        Previews { pipeline, sampler, shown: HashMap::new(), used: HashSet::new(), screen: [1, 1] };
+    let previews = Previews {
+        pipeline,
+        samplers,
+        shown: HashMap::new(),
+        used: HashSet::new(),
+        screen: [1, 1],
+    };
     renderer.callback_resources.insert(previews);
 }
 
@@ -97,15 +104,22 @@ pub fn end_frame(renderer: &mut egui_wgpu::Renderer) {
 
 /// Draws `image` stretched over `rect`, clipped like any other shape; `id`
 /// names the preview so its texture is reused while the image is unchanged.
-pub fn draw(painter: &egui::Painter, rect: egui::Rect, id: egui::Id, image: Arc<Image>) {
+pub fn draw(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    id: egui::Id,
+    image: Arc<Image>,
+    interpolation: bool,
+) {
     // egui transforms the callback's rect with the painter's layer, but the
     // shader places the image from its own copy.
     let to_global = painter.ctx().layer_transform_to_global(painter.layer_id());
-    let paint = Paint { id, rect: to_global.unwrap_or_default() * rect, image };
+    let paint = Paint { id, rect: to_global.unwrap_or_default() * rect, image, interpolation };
     painter.add(egui_wgpu::Callback::new_paint_callback(rect, paint));
 }
 
 struct Paint {
+    interpolation: bool,
     id: egui::Id,
     /// Where the image goes, in window points.
     rect: egui::Rect,
@@ -155,7 +169,11 @@ impl CallbackTrait for Paint {
         let [w, h] = previews.screen.map(|v| v as f32);
         pass.set_viewport(0.0, 0.0, w, h, 0.0, 1.0);
         pass.set_pipeline(&previews.pipeline);
-        pass.set_bind_group(0, &previews.shown[&self.id].group, &[]);
+        pass.set_bind_group(
+            0,
+            &previews.shown[&self.id].groups[usize::from(self.interpolation)],
+            &[],
+        );
         pass.draw(0..6, 0..1);
     }
 }
@@ -198,20 +216,22 @@ fn upload(
         mapped_at_creation: false,
     });
     let view = texture.create_view(&Default::default());
-    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("preview"),
-        layout: &previews.pipeline.get_bind_group_layout(0),
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&previews.sampler),
-            },
-            wgpu::BindGroupEntry { binding: 2, resource: rect.as_entire_binding() },
-        ],
+    let groups = previews.samplers.each_ref().map(|sampler| {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("preview"),
+            layout: &previews.pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+                wgpu::BindGroupEntry { binding: 2, resource: rect.as_entire_binding() },
+            ],
+        })
     });
-    Shown { image: image.clone(), group, rect }
+    Shown { image: image.clone(), groups, rect }
 }

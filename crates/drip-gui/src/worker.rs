@@ -403,7 +403,8 @@ mod tests {
     }
 
     fn pixel(worker: &Worker, id: NodeId) -> [f32; 4] {
-        let Some(PreparedView::Image(image)) = worker.result(id).unwrap().as_ref().unwrap() else {
+        let Some(PreparedView::Image(image, _)) = worker.result(id).unwrap().as_ref().unwrap()
+        else {
             panic!("image");
         };
         std::array::from_fn(|c| {

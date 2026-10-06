@@ -3,6 +3,16 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-06: preview interpolation parameter
+
+- Added a saved Preview `interpolation` checkbox, off by default. Node and
+  pop-out share nearest-neighbor or bilinear sampling at every zoom level.
+  Sampling metadata stays separate from cached pixels and uploaded textures.
+- Validation: GUI compilation and all 26 library unit tests passed. GUI tests
+  passed 45 cases, including image preparation/cache reuse and pop-out navigation;
+  two file-writing cases and the RAW corpus export failed on `/tmp` disk quota.
+  The GPU test remained ignored; appearance has not been checked live.
+
 ## 2026-10-06: Nikon Z demo
 
 - Added `fixtures/raw/pixls/nikon-z6ii.nef`: CC0 raw.pixls.us sample #4160,

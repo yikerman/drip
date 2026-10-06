@@ -519,7 +519,7 @@ mod tests {
             assert!(has_view(app, name), "{name}");
         }
         let id = app.project.graph.find("Preview").unwrap();
-        let Some(View::Image(image)) = app.worker.result(id).unwrap().as_ref().unwrap().clone()
+        let Some(View::Image(image, _)) = app.worker.result(id).unwrap().as_ref().unwrap().clone()
         else {
             panic!("an image")
         };
@@ -527,7 +527,8 @@ mod tests {
         assert_eq!(image.width, 3984, "1/2 preview with full-size RCD");
         h.get_by_label("Invalidate cache").click();
         settle(&mut h);
-        let Some(View::Image(refreshed)) = h.state().worker.result(id).unwrap().as_ref().unwrap()
+        let Some(View::Image(refreshed, _)) =
+            h.state().worker.result(id).unwrap().as_ref().unwrap()
         else {
             panic!("an image")
         };
@@ -539,7 +540,7 @@ mod tests {
         settle(&mut h);
         assert_eq!(h.state().level, 2);
         let app = h.state();
-        let Some(View::Image(image)) = app.worker.result(id).unwrap().as_ref().unwrap() else {
+        let Some(View::Image(image, _)) = app.worker.result(id).unwrap().as_ref().unwrap() else {
             panic!("an image")
         };
         assert_eq!(image.width, 1992);
@@ -684,7 +685,7 @@ mod tests {
         app.set_project(project, None).unwrap();
         let mut h = harness(app);
         settle(&mut h);
-        let Some(View::Image(before)) = h.state().worker.result(id).unwrap().as_ref().unwrap()
+        let Some(View::Image(before, _)) = h.state().worker.result(id).unwrap().as_ref().unwrap()
         else {
             panic!("image")
         };
@@ -695,7 +696,7 @@ mod tests {
         let start = Instant::now();
         h.step();
         assert!(h.query_by_label("evaluating…").is_some());
-        let Some(View::Image(shown)) = h.state().worker.result(id).unwrap().as_ref().unwrap()
+        let Some(View::Image(shown, _)) = h.state().worker.result(id).unwrap().as_ref().unwrap()
         else {
             panic!("previous image")
         };

@@ -159,6 +159,12 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
   [drawing](../crates/drip-gui/src/render/node_views.rs) define the coordinates
   and annotation colors. Scopes use black; image previews use middle grey.
 
+- **Decided:** Preview stores an `interpolation` parameter, off by default for
+  discrete pixel inspection. Both the node and pop-out use nearest-neighbor
+  sampling when off and bilinear sampling when on, for enlargement and reduction.
+  Sampling is presentation metadata; prepared pixels and GPU textures remain
+  shared across sampling choices.
+
 - **Decided:** Preview offers normal, softproof and gamutcheck modes, sharing
   profile settings and ICC conversion with export. Softproof simulates bounded
   output; gamutcheck marks out-of-gamut colors in cyan. Both run on the worker

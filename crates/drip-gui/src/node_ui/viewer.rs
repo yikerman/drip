@@ -52,8 +52,8 @@ impl NodeUi for Viewer {
 
     fn window(&self, ui: &mut Ui, _name: &'static str, node: &mut NodeCx) {
         if let Some(view) = node.view() {
-            if let node_views::PreparedView::Image(image) = view {
-                super::image_view::show(ui, image);
+            if let node_views::PreparedView::Image(image, interpolation) = view {
+                super::image_view::show(ui, image, *interpolation);
                 return;
             }
             let (rect, font) =
