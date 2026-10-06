@@ -15,6 +15,7 @@ fn decodes_a_bayer_raw() {
     assert!(raw.as_shot[..3].iter().all(|&m| m > 0.0));
     assert!(raw.xyz_to_cam.iter().flatten().any(|&v| v != 0.0));
     assert_eq!((raw.metadata.make.as_str(), raw.metadata.model.as_str()), ("Sony", "ILCE-7RM3"));
+    assert_eq!(raw.metadata.datetime, "2026:05:25 08:35:00", "EXIF wall-clock time");
 }
 
 #[test]

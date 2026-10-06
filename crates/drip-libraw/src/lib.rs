@@ -27,6 +27,7 @@ struct Info {
     aperture: f32,
     focal_len: f32,
     timestamp: c_longlong,
+    datetime: [c_char; 20],
 }
 
 unsafe extern "C" {
@@ -99,6 +100,8 @@ pub struct Metadata {
     pub focal_length: f32,
     /// Unix time.
     pub timestamp: i64,
+    /// Capture time as the camera's EXIF `YYYY:MM:DD HH:MM:SS`; empty if unknown.
+    pub datetime: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,7 +164,7 @@ pub fn decode(path: &Path) -> Result<Raw, Error> {
     let c = &info.cblack;
     let (rows, cols) = (c[4] as usize, c[5] as usize);
     let text = |s: &[c_char]| {
-        // SAFETY: the shim NUL-terminates both strings within their arrays.
+        // SAFETY: the shim NUL-terminates its strings within their arrays.
         unsafe { CStr::from_ptr(s.as_ptr()) }.to_string_lossy().trim().to_owned()
     };
     Ok(Raw {
@@ -183,6 +186,7 @@ pub fn decode(path: &Path) -> Result<Raw, Error> {
             aperture: info.aperture,
             focal_length: info.focal_len,
             timestamp: info.timestamp,
+            datetime: text(&info.datetime),
         },
     })
 }

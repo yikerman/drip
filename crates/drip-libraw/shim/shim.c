@@ -2,9 +2,12 @@
  * whose layout changes between releases; it sees only drip_raw_info below,
  * which this file fills by name against the headers it is compiled with. */
 
+#define _POSIX_C_SOURCE 200809L /* localtime_r under -std=c11 */
+
 #include <libraw.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define DRIP_CBLACK_SIZE 4104
 #define DRIP_NOT_BAYER (-100000)
@@ -21,7 +24,21 @@ typedef struct {
   char make[64], model[64];
   float iso_speed, shutter, aperture, focal_len;
   long long timestamp;
+  char datetime[20]; /* EXIF "YYYY:MM:DD HH:MM:SS", empty if unknown */
 } drip_raw_info;
+
+/* LibRaw reads the zone-less EXIF capture time with mktime(), so localtime()
+ * recovers the camera's wall-clock time (except within a repeated DST hour). */
+static void exif_datetime(time_t timestamp, char out[20]) {
+  struct tm t;
+#ifdef _WIN32
+  int ok = !localtime_s(&t, &timestamp);
+#else
+  int ok = localtime_r(&timestamp, &t) != NULL;
+#endif
+  if (!timestamp || !ok || !strftime(out, 20, "%Y:%m:%d %H:%M:%S", &t))
+    out[0] = 0;
+}
 
 static int is_bayer(libraw_data_t *lr) {
   return lr->rawdata.raw_image && lr->idata.filters > 1000 && lr->idata.colors == 3 &&
@@ -60,6 +77,7 @@ int drip_raw_open(const char *path, void **handle, drip_raw_info *info) {
   info->aperture = lr->other.aperture;
   info->focal_len = lr->other.focal_len;
   info->timestamp = lr->other.timestamp;
+  exif_datetime(lr->other.timestamp, info->datetime);
   *handle = lr;
   return 0;
 }
