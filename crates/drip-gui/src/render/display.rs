@@ -43,8 +43,8 @@ mod wayland {
     pub struct Description;
 
     impl Description {
-        pub fn new(_: &winit::window::Window) -> Option<Self> {
-            None
+        pub fn new(_: &winit::window::Window) -> Result<Self, String> {
+            Err("Wayland color management unavailable on this platform".into())
         }
     }
 }
@@ -83,6 +83,14 @@ impl Gpu {
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                 .map_err(|e| e.to_string())?;
+        let info = adapter.get_info();
+        log::info!(
+            "GPU adapter={} backend={:?} driver={} {}",
+            info.name,
+            info.backend,
+            info.driver,
+            info.driver_info
+        );
         let gpu = Gpu { instance, adapter, device, queue };
         let display = Display::with_surface(&gpu, window, surface)?;
         Ok((gpu, display))
@@ -124,10 +132,11 @@ impl Display {
         let presentation = Presentation::new(&window, &caps)?;
         let output = presentation.output;
         let (format, color_space) = (output.format, output.color_space);
-        if !output.wide_gamut() {
-            log::warn!("extended output unavailable or undescribed; using sRGB");
-        }
-        log::info!("presenting {format:?} in {color_space:?} on {}", adapter.get_info().name);
+        log::info!(
+            "window={:?} presenting format={format:?} color_space={color_space:?} adapter={}",
+            window.id(),
+            adapter.get_info().name
+        );
         let config = wgpu::SurfaceConfiguration {
             format,
             color_space,
@@ -182,16 +191,23 @@ impl Display {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => Some(frame),
             wgpu::CurrentSurfaceTexture::Lost => {
-                log::warn!("the surface was lost; recreating it");
+                log::warn!("window={:?} surface lost; recreating it", self.window.id());
                 match self.gpu.instance.create_surface(self.window.clone()) {
                     Ok(surface) => self.surface = surface,
-                    Err(e) => log::error!("cannot recreate the surface: {e}"),
+                    Err(e) => {
+                        log::error!("window={:?} cannot recreate surface: {e}", self.window.id())
+                    }
                 }
                 self.surface.configure(&self.gpu.device, &self.config);
                 None
             }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                log::error!("window={:?} surface texture validation failed", self.window.id());
+                self.surface.configure(&self.gpu.device, &self.config);
+                None
+            }
             other => {
-                log::debug!("skipping a frame: {other:?}");
+                log::trace!("window={:?} skipping frame: {other:?}", self.window.id());
                 self.surface.configure(&self.gpu.device, &self.config);
                 None
             }

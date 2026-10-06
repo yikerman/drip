@@ -1,7 +1,7 @@
 //! Scene-to-display mapping; algorithm settings also serve frontend curve plots.
 
 use crate::image::{DisplayRec2020, Rgb, SceneRec2020, ThreeChannelMatrix};
-use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
 use crate::param::{ParamKind, ParamSpec, Params};
 use crate::ports::Read;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ impl NodeKernel for SigmoidNode {
         p: Params<'_>,
         (image,): (&SceneRec2020,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let input = image.rgb();
         let pixels = settings(p).process(&input.pixels);
         Ok(Evaluated {

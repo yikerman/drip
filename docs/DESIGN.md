@@ -176,3 +176,28 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
 
 - **Open:** AGPL-3.0-or-later is recorded, but the original `-only` versus
   `-or-later` choice remains unconfirmed.
+
+## Logging
+
+- **Decided:** Keep `log` with frontend-owned stderr configuration. Default to
+  `warn,drip=info,drip_gui=info`; library kernels return errors without reporting
+  them at warning/error level. UI status updates do not imply log events.
+
+| Level | Events |
+|-------|--------|
+| Error | Failed explicit open/save/action, stopped worker, unusable display/window. |
+| Warn | Newly failed live preview, display fallback/recovery, unavailable parenting. |
+| Info | Startup/version, GPU/output selection, project open/save, action start/completion. |
+| Debug | Evaluation outcomes/timings, resource loads, cache invalidation, window lifecycle, incomplete configuration and refused edits. |
+| Trace | Cache hits, coalesced/discarded requests, frame timings/skips and repaint scheduling. |
+
+- **Decided:** Missing configuration is typed separately from failed processing.
+  Report each changed root failure only after accepting the current preview;
+  cached errors and upstream symptoms do not repeat warnings. Project reset
+  clears this history. Explicit actions report failure at error level regardless
+  of category, retaining the originating node for failed dependencies.
+
+- **Decided:** Include node/kind and preview level in computation records,
+  generation in worker records, window ID in presentation records, and destination
+  and elapsed time in action records. Display selection owns the single fallback
+  warning, including the underlying protocol/capability reason.

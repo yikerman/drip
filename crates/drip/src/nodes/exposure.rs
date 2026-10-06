@@ -1,7 +1,7 @@
 //! Scene-linear exposure, independent of the display transform.
 
 use crate::image::{Rgb, SceneRec2020, ThreeChannelMatrix};
-use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
 use crate::param::{ParamKind, ParamSpec, Params};
 use crate::ports::Read;
 use rayon::prelude::*;
@@ -24,7 +24,7 @@ impl NodeKernel for Exposure {
         p: Params<'_>,
         (input,): (&SceneRec2020,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let image = input.rgb();
         let gain = (p.float("ev") as f32).exp2();
         let pixels = image.pixels.par_iter().map(|p| p.map(|v| v * gain)).collect();

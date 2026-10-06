@@ -6,7 +6,7 @@ use drip_libraw::Raw;
 
 use crate::color::{self, D65, REC2020};
 use crate::image::{Camera, Cfa, Mosaic, RawMetadata};
-use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
 use crate::param::{ParamKind, ParamSpec, Params};
 
 pub static READ: NodeKind = NodeKind::new::<ReadRaw>(
@@ -26,8 +26,8 @@ impl NodeKernel for ReadRaw {
         p: Params<'_>,
         (): (),
         ctx: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
-        let path = p.path("path").ok_or("no raw file chosen")?;
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+        let path = p.path("path").ok_or(KernelError::Incomplete("no raw file chosen"))?;
         let raw = ctx.resources().load(path, |path| {
             drip_libraw::decode(path).map_err(|e| format!("{}: {e}", path.display()))
         })?;

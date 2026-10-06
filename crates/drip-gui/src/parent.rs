@@ -27,11 +27,14 @@ pub fn set_parent(child: &Window, parent: &Window) {
         let id = unsafe { ObjectId::from_ptr(XdgToplevel::interface(), proxy) }.ok()?;
         XdgToplevel::from_id(&conn, id).ok()
     };
+    let window = child.id();
     if let (Some(child), Some(parent)) = (toplevel(child), toplevel(parent)) {
         child.set_parent(Some(&parent));
         if let Err(e) = conn.flush() {
-            log::warn!("cannot keep a window above the main window: {e}");
+            log::warn!("window={window:?} cannot keep window above main window: {e}");
         }
+    } else {
+        log::warn!("window={window:?} cannot obtain Wayland toplevels for parenting");
     }
 }
 

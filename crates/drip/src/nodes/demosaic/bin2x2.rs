@@ -1,7 +1,7 @@
 //! Half-size Bayer cell averaging.
 
 use crate::image::{CameraRgb, Mosaic, Rgb};
-use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
 use crate::param::Params;
 use crate::ports::Read;
 use rayon::prelude::*;
@@ -20,7 +20,7 @@ impl NodeKernel for Bin2x2 {
         _: Params<'_>,
         (input,): (&Mosaic,),
         ctx: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let m = super::preview(input, ctx);
         let (width, height) = (m.width / 2, m.height / 2);
         // The second green (3) joins the first.

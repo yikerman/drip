@@ -9,8 +9,8 @@
 //!
 //!     drip-gui [project.drip]
 //!
-//! Logging goes to stderr; `RUST_LOG=debug` shows evaluation and frame
-//! timings, `RUST_LOG=frame=debug` frame timings alone.
+//! Logging goes to stderr. `RUST_LOG=warn,drip=debug,drip_gui=debug` shows
+//! processing diagnostics; `RUST_LOG=warn,drip_gui::frame=trace` shows frame timings.
 
 mod app;
 mod editing;
@@ -24,6 +24,7 @@ mod widgets;
 mod worker;
 
 use std::path::PathBuf;
+use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -37,14 +38,27 @@ use app::App;
 use node_ui::Popped;
 use render::display::{Display, Gpu};
 
-fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+fn main() -> ExitCode {
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("warn,drip=info,drip_gui=info"),
+    )
+    .init();
+    log::info!("Drip {} starting", env!("CARGO_PKG_VERSION"));
     let file = std::env::args_os().nth(1).map(PathBuf::from);
-    let event_loop = EventLoop::<WorkerReady>::with_user_event().build().expect("an event loop");
+    let event_loop = match EventLoop::<WorkerReady>::with_user_event().build() {
+        Ok(event_loop) => event_loop,
+        Err(error) => {
+            log::error!("cannot create event loop: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let wake = event_loop.create_proxy();
-    if let Err(e) = event_loop.run_app(&mut Shell { file, running: None, wake }) {
-        log::error!("{e}");
+    let mut shell = Shell { file, running: None, wake, failed: false };
+    if let Err(e) = event_loop.run_app(&mut shell) {
+        log::error!("event loop failed: {e}");
+        return ExitCode::FAILURE;
     }
+    if shell.failed { ExitCode::FAILURE } else { ExitCode::SUCCESS }
 }
 
 struct WorkerReady;
@@ -53,6 +67,7 @@ struct Shell {
     wake: EventLoopProxy<WorkerReady>,
     file: Option<PathBuf>,
     running: Option<Running>,
+    failed: bool,
 }
 
 struct Running {
@@ -80,11 +95,20 @@ impl ApplicationHandler<WorkerReady> for Shell {
         let attributes = Window::default_attributes()
             .with_title("Drip")
             .with_inner_size(LogicalSize::new(1600, 1000));
-        let window = Arc::new(event_loop.create_window(attributes).expect("a window"));
+        let window = match event_loop.create_window(attributes) {
+            Ok(window) => Arc::new(window),
+            Err(error) => {
+                log::error!("cannot open main window: {error}");
+                self.failed = true;
+                event_loop.exit();
+                return;
+            }
+        };
         let (gpu, display) = match Gpu::new(window.clone()) {
             Ok(output) => output,
             Err(e) => {
-                log::error!("cannot set up the display: {e}");
+                log::error!("cannot set up display window={:?}: {e}", window.id());
+                self.failed = true;
                 event_loop.exit();
                 return;
             }
@@ -182,7 +206,7 @@ impl ApplicationHandler<WorkerReady> for Shell {
                             r.windows.push((w.popped, pane));
                         }
                         Err(e) => {
-                            log::error!("cannot open a window: {e}");
+                            log::error!("cannot open window node={:?}: {e}", w.popped.node);
                             r.app.close_window(w.popped);
                         }
                     }
@@ -234,6 +258,7 @@ impl Pane {
             None,
             Some(gpu.max_texture_side()),
         );
+        log::debug!("opened window={:?}", window.id());
         window.request_redraw();
         Pane { window, display, egui, repaint_at: None }
     }
@@ -252,14 +277,16 @@ impl Pane {
         let total = start.elapsed();
         // Render includes waiting for a surface texture, which can block on
         // vsync. egui rebuilds its font atlas once it passes 80% full.
-        log::debug!(
-            target: "frame",
-            "{total:.1?}: ui {ui:.1?}, tessellate {tessellate:.1?}, render {:.1?}; font atlas {:.1}% full",
+        log::trace!(
+            target: "drip_gui::frame",
+            "window={:?} {total:.1?}: ui {ui:.1?}, tessellate {tessellate:.1?}, render {:.1?}; font atlas {:.1}% full",
+            self.window.id(),
             total - ui - tessellate,
             ctx.fonts(|f| f.font_atlas_fill_ratio()) * 100.0,
         );
 
         let delay = output.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.repaint_delay);
+        log::trace!(target: "drip_gui::frame", "window={:?} repaint_delay={delay:?}", self.window.id());
         self.repaint_at = match delay {
             Some(delay) if delay.is_zero() => {
                 self.window.request_redraw();
@@ -268,5 +295,11 @@ impl Pane {
             Some(delay) => Instant::now().checked_add(delay),
             None => None,
         };
+    }
+}
+
+impl Drop for Pane {
+    fn drop(&mut self) {
+        log::debug!("closed window={:?}", self.window.id());
     }
 }

@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 /// ```compile_fail,E0308
 /// use std::sync::Arc;
 /// use drip::image::{DisplayRec2020, SceneRec2020, ThreeChannelMatrix};
-/// use drip::node::{EvalContext, Evaluated, NodeKernel};
+/// use drip::node::{EvalContext, Evaluated, KernelError, NodeKernel};
 /// use drip::param::Params;
 /// use drip::ports::Read;
 /// struct IncorrectExposure;
@@ -34,7 +34,7 @@ use std::collections::BTreeMap;
 ///     type Inputs = (Read<SceneRec2020>,);
 ///     type Outputs = (Arc<SceneRec2020>,);
 ///     fn eval(_: Params<'_>, (image,): (&SceneRec2020,), _: &EvalContext<'_>)
-///         -> Result<Evaluated<Self::Outputs>, String>
+///         -> Result<Evaluated<Self::Outputs>, KernelError>
 ///     {
 ///         let display = Arc::new(DisplayRec2020::from(image.rgb().clone()));
 ///         Ok(Evaluated::new((display,)))
@@ -50,7 +50,28 @@ pub trait NodeKernel: Sized + 'static {
         params: Params<'_>,
         inputs: <Self::Inputs as InputTuple>::Borrowed<'_>,
         ctx: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String>;
+    ) -> Result<Evaluated<Self::Outputs>, KernelError>;
+}
+
+/// Incomplete configuration is normal while editing; failed processing is not.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum KernelError {
+    #[error("{0}")]
+    Incomplete(&'static str),
+    #[error("{0}")]
+    Failed(String),
+}
+
+impl From<String> for KernelError {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
+impl From<&str> for KernelError {
+    fn from(message: &str) -> Self {
+        Self::Failed(message.into())
+    }
 }
 
 // K: node kernel (also used by the adapters below).
@@ -58,7 +79,7 @@ type TypedActionFn<K> = for<'params, 'inputs, 'context, 'resources> fn(
     Params<'params>,
     <<K as NodeKernel>::Inputs as InputTuple>::Borrowed<'inputs>,
     &'context EvalContext<'resources>,
-) -> Result<(), String>;
+) -> Result<(), KernelError>;
 
 /// Actions use exactly their owning kernel's inputs; the tuple is declared once.
 pub struct TypedAction<K>
@@ -69,8 +90,10 @@ where
     pub run: TypedActionFn<K>,
 }
 
-type Evaluate = fn(Params<'_>, &[Option<Value>], &EvalContext<'_>) -> Result<Evaluated, String>;
-type RunAction = fn(usize, Params<'_>, &[Option<Value>], &EvalContext<'_>) -> Result<(), String>;
+type Evaluate =
+    fn(Params<'_>, &[Option<Value>], &EvalContext<'_>) -> Result<Evaluated, KernelError>;
+type RunAction =
+    fn(usize, Params<'_>, &[Option<Value>], &EvalContext<'_>) -> Result<(), KernelError>;
 
 pub struct NodeKind {
     /// Stable type identity used by registries, evaluation and project files.
@@ -95,14 +118,14 @@ impl NodeKind {
     /// compilation; types and the evaluator always come from the same kernel.
     ///
     /// ```compile_fail,E0080
-    /// use drip::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+    /// use drip::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
     /// use drip::param::Params;
     /// struct Empty;
     /// impl NodeKernel for Empty {
     ///     type Inputs = ();
     ///     type Outputs = ();
     ///     fn eval(_: Params<'_>, (): (), _: &EvalContext<'_>)
-    ///         -> Result<Evaluated<()>, String> { Ok(Evaluated::default()) }
+    ///         -> Result<Evaluated<()>, KernelError> { Ok(Evaluated::default()) }
     /// }
     /// static INVALID: NodeKind = NodeKind::new::<Empty>(
     ///     "empty", "test", "Empty", &[], &[], &["undeclared output"],
@@ -193,7 +216,7 @@ impl Action {
         params: Params<'_>,
         inputs: &[Option<Value>],
         ctx: &EvalContext<'_>,
-    ) -> Result<(), String> {
+    ) -> Result<(), KernelError> {
         (self.run)(self.index, params, inputs, ctx)
     }
 }
@@ -218,7 +241,7 @@ fn evaluate<K>(
     params: Params<'_>,
     inputs: &[Option<Value>],
     ctx: &EvalContext<'_>,
-) -> Result<Evaluated, String>
+) -> Result<Evaluated, KernelError>
 where
     K: NodeKernel,
 {
@@ -230,7 +253,7 @@ fn run_action<K>(
     params: Params<'_>,
     inputs: &[Option<Value>],
     ctx: &EvalContext<'_>,
-) -> Result<(), String>
+) -> Result<(), KernelError>
 where
     K: NodeKernel,
 {

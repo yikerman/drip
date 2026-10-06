@@ -5,7 +5,10 @@ use crate::image::SceneRec2020;
 use crate::project::Project;
 use serde_json::json;
 
-fn preview(image: &dyn RgbIn<Rec2020>, params: serde_json::Value) -> Result<PreviewImage, String> {
+fn preview(
+    image: &dyn RgbIn<Rec2020>,
+    params: serde_json::Value,
+) -> Result<PreviewImage, KernelError> {
     let mut graph = Graph::default();
     let id = graph.add_node(&PREVIEW);
     for (name, value) in params.as_object().unwrap() {
@@ -76,7 +79,7 @@ fn active_modes_report_missing_profiles() {
     let input = DisplayRec2020::from(image(vec![[0.18; 3]]));
     for mode in ["softproof", "gamutcheck"] {
         let error = preview(&input, json!({ "mode": mode, "profile": "file" })).unwrap_err();
-        assert_eq!(error, "no output profile file chosen");
+        assert_eq!(error, KernelError::Incomplete("no output profile file chosen"));
     }
 }
 

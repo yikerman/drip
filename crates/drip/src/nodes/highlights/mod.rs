@@ -1,7 +1,7 @@
 //! Sensor-space highlight repair before preview reduction and demosaicing.
 
 use crate::image::Mosaic;
-use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
 use crate::param::{ParamKind, ParamSpec, Params};
 use crate::ports::Read;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ impl NodeKernel for ReconstructHighlights {
         p: Params<'_>,
         (input,): (&Mosaic,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let data = opposed::process(input, p.float("threshold") as f32);
         Ok(Evaluated::new((Arc::new(Mosaic {
             data,

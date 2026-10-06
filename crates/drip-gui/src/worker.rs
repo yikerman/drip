@@ -3,9 +3,11 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, mpsc};
 use std::thread;
+use std::time::Instant;
 
 use drip::eval::{Evaluator, NodeError};
 use drip::graph::{Graph, NodeId};
+use drip::param::ParamKind;
 
 use crate::render::node_views::{Prepared, PreparedView};
 
@@ -29,7 +31,7 @@ enum Command {
 }
 
 enum Event {
-    Evaluated { generation: u64, views: Snapshot },
+    Evaluated { generation: u64, level: u8, views: Snapshot, failures: BTreeMap<NodeId, Failure> },
     Action(Result<(), String>),
     Stopped,
 }
@@ -38,6 +40,21 @@ pub enum Notice {
     Evaluated(Result<(), String>),
     Action(Result<(), String>),
     Failed,
+}
+
+#[derive(Clone, PartialEq)]
+struct Failure {
+    kind: &'static str,
+    error: NodeError,
+}
+
+impl Failure {
+    fn level(&self) -> log::Level {
+        match self.error {
+            NodeError::MissingInput(_) | NodeError::Incomplete(_) => log::Level::Debug,
+            _ => log::Level::Warn,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -61,6 +78,7 @@ pub struct Worker {
     in_flight: bool,
     pending: Option<Request>,
     views: Snapshot,
+    failures: BTreeMap<NodeId, Failure>,
     collect: bool,
     failed: bool,
 }
@@ -87,6 +105,7 @@ impl Worker {
             in_flight: false,
             pending: None,
             views: Snapshot::new(),
+            failures: BTreeMap::new(),
             collect: false,
             failed: false,
         }
@@ -108,6 +127,14 @@ impl Worker {
     ) -> Result<(), String> {
         self.generation += 1;
         self.views.retain(|id, _| graph.node(*id).is_some());
+        self.failures.retain(|id, _| graph.node(*id).is_some());
+        if let Some(previous) = &self.pending {
+            log::trace!(
+                "coalesced preview generation={} into generation={}",
+                previous.generation,
+                self.generation
+            );
+        }
         self.collect = true;
         self.pending =
             Some(Request { generation: self.generation, graph: graph.clone(), level, targets });
@@ -119,6 +146,8 @@ impl Worker {
         self.generation += 1;
         self.pending = None;
         self.views.clear();
+        self.failures.clear();
+        log::debug!("reset preview generation={}", self.generation);
         self.collect = true;
         self.send(Command::Reset)
     }
@@ -126,6 +155,7 @@ impl Worker {
     pub fn invalidate(&mut self) -> Result<(), String> {
         self.generation += 1;
         self.pending = None;
+        log::debug!("invalidating node and resource caches generation={}", self.generation);
         self.send(Command::Invalidate)
     }
 
@@ -137,15 +167,31 @@ impl Worker {
         let mut notices = Vec::new();
         while let Ok(event) = self.events.try_recv() {
             match event {
-                Event::Evaluated { generation, views } => {
+                Event::Evaluated { generation, level, views, failures } => {
                     self.in_flight = false;
                     self.collect = true;
                     if generation == self.generation {
-                        let error = views
-                            .values()
-                            .find_map(|view| view.as_ref().err().map(ToString::to_string));
+                        for (id, failure) in &failures {
+                            if self.failures.get(id) != Some(failure) {
+                                log::log!(
+                                    failure.level(),
+                                    "preview generation={generation} level={level} node={id:?} kind={}: {}",
+                                    failure.kind,
+                                    failure.error
+                                );
+                            }
+                        }
+                        let error = failures.iter().next().map(|(id, failure)| {
+                            format!("{id:?} ({}): {}", failure.kind, failure.error)
+                        });
+                        self.failures = failures;
                         self.views = views;
                         notices.push(Notice::Evaluated(error.map_or(Ok(()), Err)));
+                    } else {
+                        log::trace!(
+                            "discarded preview generation={generation} current={}",
+                            self.generation
+                        );
                     }
                 }
                 Event::Action(result) => {
@@ -154,6 +200,7 @@ impl Worker {
                     }
                 }
                 Event::Stopped => {
+                    log::error!("preview worker stopped");
                     self.failed = true;
                     self.in_flight = false;
                     self.pending = None;
@@ -162,6 +209,7 @@ impl Worker {
             }
         }
         if self.start().is_err() && !self.failed {
+            log::error!("preview worker disconnected");
             self.failed = true;
             self.in_flight = false;
             self.pending = None;
@@ -209,7 +257,27 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
     for command in commands {
         match command {
             Command::Evaluate(request) => {
-                evaluator.evaluate(&request.graph, request.level, &request.targets);
+                let start = Instant::now();
+                log::debug!(
+                    "preview started generation={} level={} targets={}",
+                    request.generation,
+                    request.level,
+                    request.targets.len()
+                );
+                let computed = evaluator.evaluate(&request.graph, request.level, &request.targets);
+                let evaluated = start.elapsed();
+                let failures: BTreeMap<_, _> = evaluator
+                    .failures(&request.graph, &request.targets)
+                    .map(|(id, error)| {
+                        (
+                            id,
+                            Failure {
+                                kind: request.graph.node(id).expect("evaluated node").kind.id,
+                                error: error.clone(),
+                            },
+                        )
+                    })
+                    .collect();
                 let views = request
                     .targets
                     .iter()
@@ -223,17 +291,53 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
                         (id, result)
                     })
                     .collect();
-                notify.send(Event::Evaluated { generation: request.generation, views });
+                log::debug!(
+                    "preview finished generation={} level={} recomputed={} failures={} evaluate={evaluated:.1?} prepare={:.1?}",
+                    request.generation,
+                    request.level,
+                    computed.len(),
+                    failures.len(),
+                    start.elapsed() - evaluated
+                );
+                notify.send(Event::Evaluated {
+                    generation: request.generation,
+                    level: request.level,
+                    views,
+                    failures,
+                });
             }
             Command::Reset | Command::Invalidate => evaluator = Evaluator::default(),
             Command::Action { graph, id, name } => {
                 let evaluator = evaluator.fork();
                 let notify = notify.clone();
                 thread::spawn(move || {
+                    let node = graph.node(id).expect("action node");
+                    let destinations: Vec<_> = node
+                        .kind
+                        .params
+                        .iter()
+                        .filter(|p| matches!(p.kind, ParamKind::Path { output: true }))
+                        .map(|p| (&p.name, &node.params[p.name]))
+                        .collect();
+                    let context = format!(
+                        "node={id:?} kind={} action={name} destinations={destinations:?}",
+                        node.kind.id
+                    );
+                    let start = Instant::now();
+                    log::info!("action started {context}");
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         evaluator.run_action(&graph, id, name).map_err(|e| e.to_string())
                     }))
                     .unwrap_or_else(|_| Err("the action crashed".into()));
+                    match &result {
+                        Ok(()) => {
+                            log::info!("action completed {context} elapsed={:.1?}", start.elapsed())
+                        }
+                        Err(error) => log::error!(
+                            "action failed {context} elapsed={:.1?}: {error}",
+                            start.elapsed()
+                        ),
+                    }
                     notify.send(Event::Action(result));
                 });
             }
@@ -246,7 +350,7 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
 #[cfg(test)]
 mod tests {
     use drip::image::{DisplayRec2020, ThreeChannelMatrix};
-    use drip::node::{EvalContext, NodeKernel, TypedAction};
+    use drip::node::{EvalContext, KernelError, NodeKernel, TypedAction};
     use drip::param::Params;
     use drip::ports::Read;
 
@@ -309,6 +413,109 @@ mod tests {
     }
 
     #[test]
+    fn preview_logs_only_changed_root_failures_at_their_severity() {
+        use std::cell::RefCell;
+        thread_local! {
+            static RECORDS: RefCell<Vec<(log::Level, String)>> = const { RefCell::new(Vec::new()) };
+        }
+        struct Capture;
+        impl log::Log for Capture {
+            fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+                true
+            }
+            fn log(&self, record: &log::Record<'_>) {
+                let text = record.args().to_string();
+                if text.starts_with("preview generation=") {
+                    RECORDS.with_borrow_mut(|records| records.push((record.level(), text)));
+                }
+            }
+            fn flush(&self) {}
+        }
+        log::set_logger(&Capture).unwrap();
+        log::set_max_level(log::LevelFilter::Trace);
+
+        static SOURCE: NodeKind = NodeKind::new::<Source>(
+            "test.diagnostics",
+            "test",
+            "diagnostics",
+            &[ParamSpec::new(
+                "state",
+                ParamKind::Choice {
+                    options: &["incomplete", "failed", "ok"],
+                    default: "incomplete",
+                },
+            )],
+            &[],
+            &["image"],
+        );
+        struct Source;
+        impl NodeKernel for Source {
+            type Inputs = ();
+            type Outputs = (Arc<DisplayRec2020>,);
+            fn eval(
+                p: Params<'_>,
+                (): (),
+                _: &EvalContext<'_>,
+            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+                match p.choice("state") {
+                    "incomplete" => Err(KernelError::Incomplete("choose a file")),
+                    "failed" => Err("decode failed".into()),
+                    _ => Ok(image(1.0, 1)),
+                }
+            }
+        }
+        let (mut graph, source, preview, histogram) = graph(&SOURCE);
+        let mut worker = Worker::new(|| {});
+        let mut evaluate = |graph: &Graph| {
+            worker.request(graph, 1, vec![preview, histogram]).unwrap();
+            let notices = wait(&mut worker);
+            let logs = RECORDS.with_borrow_mut(std::mem::take);
+            (notices, logs)
+        };
+        for (state, expected) in [
+            ("incomplete", Some(log::Level::Debug)),
+            ("incomplete", None),
+            ("failed", Some(log::Level::Warn)),
+            ("failed", None),
+            ("ok", None),
+            ("failed", Some(log::Level::Warn)),
+        ] {
+            graph.set_param(source, "state", json!(state)).unwrap();
+            let (notices, logs) = evaluate(&graph);
+            if let Some(expected) = expected {
+                assert_eq!(logs.len(), 1, "{logs:?}");
+                assert_eq!(logs[0].0, expected);
+                assert!(logs[0].1.contains(&format!("node={source:?} kind=test.diagnostics")));
+                assert!(logs[0].1.contains("level=1"));
+            } else {
+                assert!(logs.is_empty(), "{logs:?}");
+            }
+            if state != "ok" {
+                assert!(notices.iter().any(|notice| matches!(notice,
+                    Notice::Evaluated(Err(error)) if error.contains("test.diagnostics")
+                        && !error.contains("upstream"))));
+            }
+        }
+        worker.reset().unwrap();
+        worker.request(&graph, 1, vec![preview]).unwrap();
+        wait(&mut worker);
+        assert_eq!(
+            RECORDS.with_borrow_mut(std::mem::take).len(),
+            1,
+            "reset clears failure history"
+        );
+
+        graph.set_param(source, "state", json!("ok")).unwrap();
+        graph.disconnect(&Port(preview, "image".into()));
+        worker.request(&graph, 1, vec![preview, histogram]).unwrap();
+        wait(&mut worker);
+        let logs = RECORDS.with_borrow_mut(std::mem::take);
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].0, log::Level::Debug);
+        assert!(logs[0].1.contains("not connected"));
+    }
+
+    #[test]
     fn latest_targets_win_and_project_reset_rejects_old_results() {
         static GATE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
         static CALLS: Mutex<Vec<f32>> = Mutex::new(Vec::new());
@@ -332,7 +539,7 @@ mod tests {
                 p: Params<'_>,
                 (): (),
                 ctx: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, String> {
+            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
                 let value = p.float("value") as f32;
                 CALLS.lock().unwrap().push(value);
                 if p.bool("block") {
@@ -433,7 +640,7 @@ mod tests {
                 p: Params<'_>,
                 (): (),
                 ctx: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, String> {
+            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
                 let value = ctx.resources().load(p.path("path").unwrap(), |path| {
                     std::fs::read_to_string(path).map_err(|e| e.to_string())
                 })?;
@@ -458,14 +665,14 @@ mod tests {
                 run: |p, (input0,), ctx| {
                     assert_eq!(ctx.scale(), 1);
                     std::fs::write(p.path("path").unwrap(), format!("{:?}", input0.rgb().pixels[0]))
-                        .map_err(|e| e.to_string())
+                        .map_err(|e| KernelError::Failed(e.to_string()))
                 },
             }];
             fn eval(
                 _: Params<'_>,
                 _: (&DisplayRec2020,),
                 _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, String> {
+            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
                 Ok(Evaluated::default())
             }
         }
@@ -530,7 +737,7 @@ mod tests {
                 _: Params<'_>,
                 (): (),
                 _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, String> {
+            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
                 panic!("test worker failure")
             }
         }

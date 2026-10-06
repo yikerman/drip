@@ -77,17 +77,12 @@ impl App {
         app
     }
 
-    /// Shows `result` in the status line and the log.
+    /// Shows `result` in the status line; event owners choose what to log.
     fn report(&mut self, result: Result<String, String>) {
         let (error, text) = match result {
             Ok(text) => (false, text),
             Err(text) => (true, text),
         };
-        if error {
-            log::error!("{text}");
-        } else {
-            log::info!("{text}");
-        }
         self.status = Some(Status { error, text });
         self.redraw = true;
     }
@@ -169,6 +164,7 @@ impl App {
         self.redraw |= report.redraw;
         self.dirty |= report.edited;
         if let Some(refused) = report.refused {
+            log::debug!("graph edit refused: {refused}");
             self.report(Err(refused));
         }
         if let Some((id, name)) = report.action {
@@ -271,6 +267,7 @@ impl App {
                 .response
                 .on_hover_text("Global preview scale. Export always uses full detail.");
             if self.level != previous {
+                log::debug!("preview level changed from {previous} to {}", self.level);
                 self.project.ui["preview_level"] = serde_json::json!(self.level);
                 self.dirty = true;
             }
@@ -326,8 +323,14 @@ impl App {
             .and_then(|text| Project::from_json(&text, &self.registry).map_err(|e| e.to_string()))
             .and_then(|project| self.set_project(project, Some(file.clone())));
         match loaded {
-            Ok(()) => self.report(Ok(format!("opened {}", file.display()))),
-            Err(e) => self.report(Err(format!("{}: {e}", file.display()))),
+            Ok(()) => {
+                log::info!("opened project {}", file.display());
+                self.report(Ok(format!("opened {}", file.display())));
+            }
+            Err(e) => {
+                log::error!("cannot open project {}: {e}", file.display());
+                self.report(Err(format!("{}: {e}", file.display())));
+            }
         }
     }
 
@@ -353,6 +356,10 @@ impl App {
         let result = std::fs::write(file, project.to_json());
         let saved = result.is_ok();
         let shown = file.display();
+        match &result {
+            Ok(()) => log::info!("saved project {shown}"),
+            Err(error) => log::error!("cannot save project {shown}: {error}"),
+        }
         self.report(result.map(|()| format!("saved {shown}")).map_err(|e| format!("{shown}: {e}")));
         saved
     }
@@ -370,7 +377,10 @@ impl App {
                 self.action = Some(name);
                 self.report(Ok(format!("running {name}…")));
             }
-            Err(error) => self.report(Err(error)),
+            Err(error) => {
+                log::error!("cannot start action node={id:?} action={name}: {error}");
+                self.report(Err(error));
+            }
         }
     }
 }
@@ -378,7 +388,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use drip::image::DisplayRec2020;
-    use drip::node::{EvalContext, NodeKernel};
+    use drip::node::{EvalContext, KernelError, NodeKernel};
     use drip::param::Params;
     use drip::view::PreviewImage;
 
@@ -564,7 +574,7 @@ mod tests {
                 _: Params<'_>,
                 (): (),
                 _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, String> {
+            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
                 CALLS.fetch_add(1, Ordering::SeqCst);
                 Ok(Evaluated::default())
             }
@@ -622,7 +632,7 @@ mod tests {
                 p: Params<'_>,
                 (): (),
                 _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, String> {
+            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
                 if p.bool("block") {
                     let gate = GATE.lock().unwrap();
                     let (started, release) = gate.as_ref().unwrap();

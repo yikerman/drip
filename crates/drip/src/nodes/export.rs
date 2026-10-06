@@ -11,7 +11,7 @@ use tiff::encoder::{Compression, DirectoryEncoder, Rational, TiffEncoder, TiffKi
 use tiff::tags::{Tag, Type};
 
 use crate::image::{DisplayRec2020, RawMetadata, Rgb, ThreeChannelMatrix};
-use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind, TypedAction};
+use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind, TypedAction};
 use crate::param::{ParamKind, ParamSpec, Params};
 use crate::ports::{Optional, Read};
 use crate::profile;
@@ -48,7 +48,7 @@ impl NodeKernel for TiffExport {
         _: Params<'_>,
         _: (&DisplayRec2020, Option<&RawMetadata>),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<()>, String> {
+    ) -> Result<Evaluated<()>, KernelError> {
         Ok(Evaluated::default())
     }
 }
@@ -57,8 +57,8 @@ fn export(
     p: Params,
     (input, metadata): (&DisplayRec2020, Option<&RawMetadata>),
     _: &EvalContext,
-) -> Result<(), String> {
-    let path = p.path("path").ok_or("no output file chosen")?;
+) -> Result<(), KernelError> {
+    let path = p.path("path").ok_or(KernelError::Incomplete("no output file chosen"))?;
     let in_file = |e: &dyn std::fmt::Display, path: &Path| format!("{}: {e}", path.display());
     let output = profile::Output::load(p)?;
     let compression = match (p.choice("compression"), p.choice("deflate_level")) {
@@ -77,7 +77,7 @@ fn export(
         encode(&mut tiff).map_err(|e| e.to_string())?;
         std::fs::write(path, bytes.into_inner()).map_err(|e| in_file(&e, path))
     };
-    match p.choice("depth") {
+    Ok(match p.choice("depth") {
         "u16" => {
             // LittleCMS saturates out-of-range values when encoding to 16 bit.
             let pixels: Vec<[u16; 3]> = output.convert(PixelFormat::RGB_16, &image.pixels)?;
@@ -90,7 +90,7 @@ fn export(
             let data = pixels.as_flattened();
             write(&|tiff| write_image::<RGB32Float>(tiff, image, &output.icc, metadata, data))
         }
-    }
+    }?)
 }
 
 type Tiff<'a> = TiffEncoder<&'a mut Cursor<Vec<u8>>>;

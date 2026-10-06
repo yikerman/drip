@@ -2,7 +2,7 @@
 
 use crate::color::{self, D65, REC2020};
 use crate::image::{CameraRgb, Rgb, SceneRec2020, ThreeChannelMatrix};
-use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
 use crate::param::Params;
 use crate::ports::Read;
 use rayon::prelude::*;
@@ -25,7 +25,7 @@ impl NodeKernel for CameraToRec2020 {
         _: Params<'_>,
         (camera_rgb,): (&CameraRgb,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let image = camera_rgb.rgb();
         let camera = &camera_rgb.camera;
         let m = color::camera_to_rgb(

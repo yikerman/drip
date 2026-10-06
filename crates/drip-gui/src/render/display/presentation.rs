@@ -14,25 +14,35 @@ pub(super) struct Presentation {
 
 impl Presentation {
     pub fn new(window: &Window, caps: &SurfaceCapabilities) -> Result<Self, String> {
-        // Never attach our description unless passthrough prevents the driver
-        // from attaching its own color-management object to this window.
-        let description = caps
-            .color_spaces(CANVAS)
-            .contains(wgpu::SurfaceColorSpaces::PASS_THROUGH)
-            .then(|| wayland::Description::new(window))
-            .flatten();
-        let preferred = if description.is_some() {
-            Space::PassThrough
-        } else if matches!(
+        let is_wayland = matches!(
             window.window_handle().map_err(|e| e.to_string())?.as_raw(),
             RawWindowHandle::Wayland(_)
-        ) {
-            // Driver-owned Wayland scRGB has inconsistent reference white.
-            Space::Srgb
+        );
+        let (preferred, description, fallback) = if is_wayland {
+            // Never attach our description unless passthrough prevents the driver
+            // from attaching its own color-management object to this window.
+            let described =
+                if caps.color_spaces(CANVAS).contains(wgpu::SurfaceColorSpaces::PASS_THROUGH) {
+                    wayland::Description::new(window)
+                } else {
+                    Err("FP16 passthrough unavailable".into())
+                };
+            match described {
+                Ok(description) => (Space::PassThrough, Some(description), None),
+                // Driver-owned Wayland scRGB has inconsistent reference white.
+                Err(reason) => (Space::Srgb, None, Some(reason)),
+            }
         } else {
-            Space::ExtendedSrgbLinear
+            (Space::ExtendedSrgbLinear, None, None)
         };
         let output = Output::choose(caps, preferred).ok_or("no usable surface color space")?;
+        if !output.wide_gamut() {
+            log::warn!(
+                "window={:?} using sRGB: {}",
+                window.id(),
+                fallback.as_deref().unwrap_or("FP16 extended-linear output unavailable")
+            );
+        }
         Ok(Self { output, _description: description })
     }
 }

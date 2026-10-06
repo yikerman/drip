@@ -1,7 +1,7 @@
 //! The built-in nodes on synthetic data with independently known results.
 
 use drip::image::{DisplayRec2020, LinearThreeChannelMatrix, SceneRec2020};
-use drip::node::{EvalContext, NodeKernel};
+use drip::node::{EvalContext, KernelError, NodeKernel};
 use drip::param::Params;
 use drip::ports::Read;
 use std::sync::Arc;
@@ -199,7 +199,7 @@ impl NodeKernel for MosaicKernel {
         _: Params<'_>,
         (): (),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let camera =
             Arc::new(Camera { xyz_to_cam: [[0.0; 3]; 3], white_balance: [2.0, 1.0, 4.0, 3.0] });
         let cfa = Cfa { size: 2, colors: vec![0, 1, 3, 2] };
@@ -221,7 +221,7 @@ impl NodeKernel for SceneKernel {
         _: Params<'_>,
         (): (),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let pixels = vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]];
         Ok(Evaluated {
             outputs: (Arc::new(SceneRec2020::from(Arc::new(Rgb {
@@ -343,7 +343,7 @@ fn highlights_reconstruct_before_preview_averaging() {
             _: Params<'_>,
             (): (),
             _: &EvalContext<'_>,
-        ) -> Result<Evaluated<Self::Outputs>, String> {
+        ) -> Result<Evaluated<Self::Outputs>, KernelError> {
             let cfa = Cfa { size: 2, colors: vec![0, 1, 3, 2] };
             let mut data: Vec<_> =
                 (0..64).map(|i| if cfa.color(i / 8, i % 8) == 0 { 0.2 } else { 2.0 }).collect();

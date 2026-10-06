@@ -3,7 +3,7 @@ mod common;
 use common::*;
 use drip::eval::{Evaluator, NodeError, run_action};
 use drip::image::{DisplayRec2020, SceneRec2020, ThreeChannelMatrix};
-use drip::node::{EvalContext, Evaluated, NodeKernel, NodeKind, TypedAction};
+use drip::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind, TypedAction};
 use drip::param::Params;
 use drip::ports::{Optional, Read};
 use drip::project::Project;
@@ -111,7 +111,7 @@ impl NodeKernel for OffsetKernel {
         _: Params<'_>,
         (base, offset): (&SceneRec2020, Option<&SceneRec2020>),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let (a, b) = (base.rgb().pixels[0], offset.map_or([0.0; 3], |o| o.rgb().pixels[0]));
         Ok(Evaluated::new((scene([a[0] + b[0], a[1] + b[1], a[2] + b[2]]),)))
     }
@@ -176,6 +176,37 @@ fn action_errors_are_reported() {
     assert_eq!(run_action(&p.graph, w, "write"), Err(NodeError::MissingInput("image")));
     p.graph.connect(port(t, "display"), port(w, "image")).unwrap();
     assert_eq!(run_action(&p.graph, w, "write"), Err(NodeError::Failed("no path set".into())));
+}
+
+#[test]
+fn actions_preserve_root_failures_after_releasing_intermediates() {
+    let mut p = Project::default();
+    let g = &mut p.graph;
+    let (c, f, t, w) =
+        (g.add_node(&CONST), g.add_node(&FAIL), g.add_node(&TONEMAP), g.add_node(&WRITE));
+    g.connect(port(c, "image"), port(f, "image")).unwrap();
+    g.connect(port(f, "image"), port(t, "scene")).unwrap();
+    g.connect(port(t, "display"), port(w, "image")).unwrap();
+    assert_eq!(
+        run_action(&p.graph, w, "write"),
+        Err(NodeError::AtNode {
+            node: f,
+            kind: "test.fail",
+            source: Box::new(NodeError::Failed("boom".into())),
+        })
+    );
+}
+
+#[test]
+fn an_unconfigured_raw_is_incomplete_instead_of_a_processing_failure() {
+    let mut graph = drip::graph::Graph::default();
+    let raw = graph.add_node(&drip::nodes::READ);
+    let mut evaluator = Evaluator::default();
+    evaluator.evaluate(&graph, 1, &[raw]);
+    assert_eq!(
+        evaluator.result(raw).unwrap().as_ref().unwrap_err(),
+        &NodeError::Incomplete("no raw file chosen")
+    );
 }
 
 #[test]
@@ -273,7 +304,7 @@ mod release {
             _: Params<'_>,
             (): (),
             _: &EvalContext<'_>,
-        ) -> Result<Evaluated<Self::Outputs>, String> {
+        ) -> Result<Evaluated<Self::Outputs>, KernelError> {
             let image =
                 Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[1.0, 2.0, 3.0]] });
             *PROBED.lock().unwrap() = Some(Arc::downgrade(&image));
@@ -300,7 +331,7 @@ mod release {
             _: Params<'_>,
             _: (&DisplayRec2020,),
             _: &EvalContext<'_>,
-        ) -> Result<Evaluated<Self::Outputs>, String> {
+        ) -> Result<Evaluated<Self::Outputs>, KernelError> {
             Ok(Evaluated::default())
         }
     }

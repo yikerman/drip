@@ -1,7 +1,7 @@
 //! Histogram evaluation and its integer reduction.
 
 use crate::image::LinearThreeChannelMatrix;
-use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
 use crate::param::Params;
 use crate::ports::Read;
 use crate::view::{Histogram, View};
@@ -30,7 +30,7 @@ impl NodeKernel for HistogramNode {
         p: Params<'_>,
         (image,): (&dyn LinearThreeChannelMatrix,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let (min, max) = (p.int("min_ev") as f32, p.int("max_ev") as f32);
         let thresholds =
             std::array::from_fn(|i| 2f32.powf(min + i as f32 * (max - min) / BINS as f32));

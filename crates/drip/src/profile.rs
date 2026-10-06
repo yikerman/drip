@@ -7,6 +7,7 @@ use lcms2::{
 };
 
 use crate::color::{D65, P3, REC709, REC2020};
+use crate::node::KernelError;
 use crate::param::{ParamKind, ParamSpec, Params};
 
 pub(crate) const PROFILE: ParamSpec = ParamSpec::new(
@@ -34,10 +35,12 @@ pub(crate) struct Output {
 }
 
 impl Output {
-    pub fn load(p: Params<'_>) -> Result<Self, String> {
+    pub fn load(p: Params<'_>) -> Result<Self, KernelError> {
         let (profile, icc) = match p.choice("profile") {
             "file" => {
-                let file = p.path("profile_file").ok_or("no output profile file chosen")?;
+                let file = p
+                    .path("profile_file")
+                    .ok_or(KernelError::Incomplete("no output profile file chosen"))?;
                 let in_file = |e| format!("{}: {e}", file.display());
                 let icc = std::fs::read(file).map_err(|e| in_file(e.to_string()))?;
                 (output_profile(&icc).map_err(in_file)?, icc)

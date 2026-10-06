@@ -26,9 +26,23 @@ impl Resources {
         let mut loaded = file.lock().expect("not poisoned");
         let key = TypeId::of::<T>();
         if let Some(value) = loaded.get(&key) {
+            log::trace!(
+                "resource cache=hit path={} type={}",
+                path.display(),
+                std::any::type_name::<T>()
+            );
             return Ok(value.clone().downcast().expect("keyed by type"));
         }
-        let value = Arc::new(load(path)?);
+        let start = std::time::Instant::now();
+        let result = load(path);
+        log::debug!(
+            "resource path={} type={} outcome={} elapsed={:.1?}",
+            path.display(),
+            std::any::type_name::<T>(),
+            if result.is_ok() { "ok" } else { "failed" },
+            start.elapsed()
+        );
+        let value = Arc::new(result?);
         loaded.insert(key, value.clone());
         Ok(value)
     }

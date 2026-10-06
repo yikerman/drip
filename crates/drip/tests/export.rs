@@ -1,7 +1,7 @@
 //! TIFF export, read back and checked against independently computed values.
 
 use drip::image::{DisplayRec2020, RawMetadata};
-use drip::node::{EvalContext, NodeKernel};
+use drip::node::{EvalContext, KernelError, NodeKernel};
 use drip::param::Params;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -36,7 +36,7 @@ impl NodeKernel for DisplayKernel {
         _: Params<'_>,
         (): (),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let image = Rgb { width: 2, height: 2, scale: 1, pixels: PIXELS.to_vec() };
         Ok(Evaluated { outputs: (Arc::new(DisplayRec2020::from(Arc::new(image))),), view: None })
     }
@@ -53,7 +53,7 @@ impl NodeKernel for MetadataKernel {
         _: Params<'_>,
         (): (),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         Ok(Evaluated::new((Arc::new(RawMetadata {
             make: "Sony".into(),
             model: "ILCE-7RM3".into(),
@@ -205,8 +205,22 @@ fn unusable_profiles_are_rejected() {
     std::fs::write(&garbage, b"not a profile").unwrap();
     let message = failure(json!({ "profile": "file", "profile_file": garbage }));
     assert!(message.contains("not an ICC profile"), "{message}");
-    assert_eq!(failure(json!({ "profile": "file" })), "no output profile file chosen");
+    assert_eq!(
+        export(&out, json!({ "profile": "file" })),
+        Err(NodeError::Incomplete("no output profile file chosen"))
+    );
     assert!(!out.exists(), "nothing written on failure");
+}
+
+#[test]
+fn an_export_without_a_destination_is_incomplete() {
+    let mut p = Project::default();
+    let (src, tiff) = (p.graph.add_node(&DISPLAY), p.graph.add_node(&nodes::TIFF));
+    p.graph.connect(Port(src, "image".into()), Port(tiff, "image".into())).unwrap();
+    assert_eq!(
+        run_action(&p.graph, tiff, "export"),
+        Err(NodeError::Incomplete("no output file chosen"))
+    );
 }
 
 #[test]

@@ -2,7 +2,7 @@
 //! interpolation, after sensor-space processing such as highlight reconstruction.
 
 use crate::image::{CameraRgb, Mosaic, Rgb};
-use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
 use crate::param::Params;
 use crate::ports::Read;
 use std::sync::Arc;
@@ -28,7 +28,7 @@ impl NodeKernel for RcdDemosaic {
         _: Params<'_>,
         (input,): (&Mosaic,),
         ctx: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let mosaic = preview(input, ctx);
         let pixels = rcd::process(&mosaic);
         let image = Rgb { width: mosaic.width, height: mosaic.height, scale: mosaic.scale, pixels };

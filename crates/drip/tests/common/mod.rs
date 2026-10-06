@@ -4,7 +4,7 @@
 use drip::image::{
     DisplayRec2020, LinearThreeChannelMatrix, Rec2020, RgbIn, SceneRec2020, ThreeChannelMatrix,
 };
-use drip::node::{EvalContext, NodeKernel, TypedAction};
+use drip::node::{EvalContext, KernelError, NodeKernel, TypedAction};
 use drip::param::Params;
 use drip::ports::Read;
 use drip::view::PreviewImage;
@@ -50,7 +50,7 @@ impl NodeKernel for ConstKernel {
         p: Params<'_>,
         (): (),
         ctx: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         Ok(Evaluated {
             outputs: (scene([p.float("value") as f32, ctx.scale() as f32, 0.0]),),
             view: None,
@@ -69,7 +69,7 @@ impl NodeKernel for AddKernel {
         _: Params<'_>,
         (input0, input1): (&SceneRec2020, &SceneRec2020),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let (a, b) = (input0.rgb().pixels[0], input1.rgb().pixels[0]);
         Ok(Evaluated { outputs: (scene([a[0] + b[0], a[1] + b[1], a[2] + b[2]]),), view: None })
     }
@@ -93,7 +93,7 @@ impl NodeKernel for TonemapKernel {
         _: Params<'_>,
         (input0,): (&SceneRec2020,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         Ok(Evaluated {
             outputs: (Arc::new(DisplayRec2020::from(input0.rgb().clone())),),
             view: None,
@@ -112,7 +112,7 @@ impl NodeKernel for FailKernel {
         _: Params<'_>,
         _: (&SceneRec2020,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         Err("boom".into())
     }
 }
@@ -129,7 +129,7 @@ impl NodeKernel for ViewKernel {
         _: Params<'_>,
         (input0,): (&dyn RgbIn<Rec2020>,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         Ok(Evaluated { outputs: (), view: Some(View::Image(PreviewImage::new(input0))) })
     }
 }
@@ -151,14 +151,15 @@ impl NodeKernel for WriteKernel {
         name: "write",
         run: |p, (input0,), _| {
             let path = p.path("path").ok_or("no path set")?;
-            std::fs::write(path, format!("{:?}", input0.rgb().pixels[0])).map_err(|e| e.to_string())
+            std::fs::write(path, format!("{:?}", input0.rgb().pixels[0]))
+                .map_err(|e| KernelError::Failed(e.to_string()))
         },
     }];
     fn eval(
         _: Params<'_>,
         _: (&DisplayRec2020,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         Ok(Evaluated::default())
     }
 }
@@ -181,7 +182,7 @@ impl NodeKernel for GainKernel {
         p: Params<'_>,
         (input0,): (&SceneRec2020,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let g = p.float("gain") as f32;
         Ok(Evaluated { outputs: (scene(input0.rgb().pixels[0].map(|c| c * g)),), view: None })
     }
@@ -205,7 +206,7 @@ impl NodeKernel for FileKernel {
         p: Params<'_>,
         (): (),
         ctx: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let len = ctx.resources().load(p.path("path").ok_or("no path set")?, |path| {
             std::fs::read(path).map(|bytes| bytes.len()).map_err(|e| e.to_string())
         })?;

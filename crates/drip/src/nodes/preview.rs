@@ -5,7 +5,7 @@ use std::sync::Arc;
 use lcms2::{Flags, Intent, PixelFormat, Profile, ThreadContext, Transform};
 
 use crate::image::{DisplayRec2020, Rec2020, Rgb, RgbIn};
-use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
 use crate::param::{ParamKind, ParamSpec, Params};
 use crate::ports::Read;
 use crate::profile;
@@ -41,7 +41,7 @@ impl NodeKernel for Preview {
         p: Params<'_>,
         (image,): (&dyn RgbIn<Rec2020>,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let view = if p.choice("mode") == "none" {
             PreviewImage::new(image)
         } else {

@@ -9,7 +9,7 @@ use drip::image::{
     ColorspaceRgbMatrix, DisplayRec2020, LinearRgbColorSpace, LinearThreeChannelMatrix, Rec2020,
     Rgb, RgbIn, SceneRec2020, ThreeChannelMatrix,
 };
-use drip::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+use drip::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
 use drip::nodes;
 use drip::param::Params;
 use drip::ports::{Input, InputTuple, OutputTuple, Read};
@@ -61,7 +61,7 @@ impl NodeKernel for P3Source {
         _: Params<'_>,
         (): (),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         Ok(Evaluated::new((Arc::new(LinearP3(pixels())),)))
     }
 }

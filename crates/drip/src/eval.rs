@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::graph::{Graph, NodeId, Port};
-use crate::node::{EvalContext, Evaluated};
+use crate::node::{EvalContext, Evaluated, KernelError};
 use crate::param::Params;
 use crate::resource::Resources;
 use crate::value::Value;
@@ -29,10 +29,23 @@ pub enum NodeError {
     MissingInput(&'static str),
     #[error("upstream node {0:?} failed")]
     Upstream(NodeId),
+    #[error("{0}")]
+    Incomplete(&'static str),
+    #[error("node {node:?} ({kind}): {source}")]
+    AtNode { node: NodeId, kind: &'static str, source: Box<NodeError> },
     #[error("no action `{0}`")]
     UnknownAction(String),
     #[error("{0}")]
     Failed(String),
+}
+
+impl From<KernelError> for NodeError {
+    fn from(error: KernelError) -> Self {
+        match error {
+            KernelError::Incomplete(message) => Self::Incomplete(message),
+            KernelError::Failed(message) => Self::Failed(message),
+        }
+    }
 }
 
 pub type NodeResult = Result<Evaluated, NodeError>;
@@ -70,6 +83,19 @@ impl Evaluator {
         self.cache.0.get(&id).map(|entry| &entry.result)
     }
 
+    /// Root failures among these targets and their dependencies, including cached
+    /// failures. Frontends compare accepted snapshots before reporting changes.
+    pub fn failures<'a>(
+        &'a self,
+        graph: &Graph,
+        targets: &[NodeId],
+    ) -> impl Iterator<Item = (NodeId, &'a NodeError)> {
+        graph.upstream_order(targets).into_iter().filter_map(move |id| {
+            let error = self.result(id)?.as_ref().err()?;
+            (!matches!(error, NodeError::Upstream(_))).then_some((id, error))
+        })
+    }
+
     /// Consumes this evaluator for a full-resolution action, releasing
     /// intermediates after their last consumer. Fork first to keep a preview cache.
     pub fn run_action(mut self, graph: &Graph, id: NodeId, name: &str) -> Result<(), NodeError> {
@@ -78,14 +104,20 @@ impl Evaluator {
         self.cache = Cache::default();
         let targets: Vec<_> = sources(graph, id).collect();
         self.run(graph, 0, &targets, true);
+        if let Some((id, error)) = self.failures(graph, &targets).next() {
+            return Err(NodeError::AtNode {
+                node: id,
+                kind: graph.node(id).expect("evaluated node").kind.id,
+                source: Box::new(error.clone()),
+            });
+        }
         let inputs = self.cache.inputs(graph, id)?;
         let ctx = EvalContext { level: 0, resources: &self.resources };
-        action.run(Params(&node.params), &inputs, &ctx).map_err(NodeError::Failed)
+        action.run(Params(&node.params), &inputs, &ctx).map_err(NodeError::from)
     }
 
-    /// With `release`, a result is dropped once its last consumer in this run
-    /// has been computed (unless it is a target), bounding memory for one-off
-    /// full-resolution runs.
+    /// With `release`, successful results retire after their last consumer
+    /// (unless targeted), bounding image memory for full-resolution actions.
     fn run(&mut self, graph: &Graph, level: u8, targets: &[NodeId], release: bool) -> Vec<NodeId> {
         let ctx = EvalContext { level, resources: &self.resources };
         let order = graph.upstream_order(targets);
@@ -104,15 +136,31 @@ impl Evaluator {
                 let start = std::time::Instant::now();
                 let result = self.cache.compute(graph, &ctx, id);
                 let kind = graph.node(id).expect("in graph").kind.id;
-                log::debug!("evaluated {kind} {id:?} at level {level} in {:.1?}", start.elapsed());
+                log::debug!(
+                    "node={id:?} kind={kind} level={level} outcome={} elapsed={:.1?}",
+                    match &result {
+                        Ok(_) => "ok",
+                        Err(NodeError::MissingInput(_) | NodeError::Incomplete(_)) => "incomplete",
+                        Err(NodeError::Upstream(_)) => "blocked",
+                        Err(_) => "failed",
+                    },
+                    start.elapsed()
+                );
                 self.cache.0.insert(id, Entry { stamp, result });
                 computed.push(id);
+            } else {
+                log::trace!("node={id:?} level={level} cache=hit");
             }
             if release {
                 for source in sources(graph, id) {
                     let left = pending.get_mut(&source).expect("counted above");
                     *left -= 1;
-                    if *left == 0 && !targets.contains(&source) {
+                    // Failed entries retain root causes for action diagnostics;
+                    // successful image payloads still retire at their last consumer.
+                    if *left == 0
+                        && !targets.contains(&source)
+                        && self.cache.0[&source].result.is_ok()
+                    {
                         self.cache.0.remove(&source);
                     }
                 }
@@ -140,7 +188,7 @@ impl Cache {
     fn compute(&self, graph: &Graph, ctx: &EvalContext, id: NodeId) -> NodeResult {
         let node = graph.node(id).expect("in graph");
         let inputs = self.inputs(graph, id)?;
-        (node.kind.eval)(Params(&node.params), &inputs, ctx).map_err(NodeError::Failed)
+        (node.kind.eval)(Params(&node.params), &inputs, ctx).map_err(NodeError::from)
     }
 
     /// The values on node `id`'s inputs, from its sources' cached results;

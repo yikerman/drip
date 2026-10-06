@@ -3,6 +3,21 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-05: logging levels and failure context
+
+- Separated UI status from logging. Default output covers session/file actions,
+  display setup and failures; evaluation/resource diagnostics use debug, with
+  cache/frame/scheduling detail at trace under module targets.
+
+- Added typed incomplete configuration for RAW/profile/output paths. Accepted
+  previews report changed root failures once, including node and generation;
+  actions retain dependency causes and log destination, outcome and duration.
+  Display fallback emits one warning with its protocol/capability cause.
+
+- Validation: 134 workspace tests and three doctests passed; clippy with warnings
+  denied, formatting and diff checks passed. The GPU-only test remains ignored;
+  live display fallback and native window failure paths were not exercised.
+
 ## 2026-10-05: documentation spacing
 
 - Added visible line breaks to node help and paragraph spacing to project docs.

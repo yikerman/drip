@@ -226,6 +226,9 @@ See [DESIGN](docs/DESIGN.md) for decisions and
 cargo test --workspace
 ```
 
+Logs go to stderr: `RUST_LOG=warn,drip=debug` for diagnostics,
+`RUST_LOG=warn,drip_gui::frame=trace` for frame timings.
+
 ## License
 
 AGPL-3.0-or-later; see [LICENSE](LICENSE).

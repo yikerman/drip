@@ -13,7 +13,7 @@ use rayon::prelude::*;
 use crate::color::REC2020;
 use crate::color::{self, D65};
 use crate::image::{ColorspaceRgbMatrix, LinearThreeChannelMatrix, Rgb};
-use crate::node::{EvalContext, Evaluated, NodeKernel, NodeKind};
+use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
 use crate::param::Params;
 use crate::ports::Read;
 use crate::view::{Scope, ScopeAxes, View};
@@ -38,7 +38,7 @@ impl NodeKernel for Waveform {
         p: Params<'_>,
         (image,): (&dyn LinearThreeChannelMatrix,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let (min, max) = (p.int("min_ev") as f32, p.int("max_ev") as f32);
         let counts = waveform_counts(image.rgb(), min, max);
         scope(
@@ -60,7 +60,7 @@ impl NodeKernel for Vectorscope {
         _: Params<'_>,
         (image,): (&dyn ColorspaceRgbMatrix,),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, String> {
+    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
         let space = image.color_space();
         let matrix = &space.to_xyz_d65;
         let counts = vector_counts(&image.rgb().pixels, matrix);
@@ -144,7 +144,7 @@ fn vector_counts(pixels: &[[f32; 3]], matrix: &color::Mat3) -> Vec<[u32; 3]> {
         )
 }
 
-fn scope(counts: Vec<[u32; 3]>, axes: ScopeAxes, log: bool) -> Result<Evaluated<()>, String> {
+fn scope(counts: Vec<[u32; 3]>, axes: ScopeAxes, log: bool) -> Result<Evaluated<()>, KernelError> {
     Ok(Evaluated {
         outputs: (),
         view: Some(View::Scope(Arc::new(Scope { size: SIZE, counts, axes, log }))),
