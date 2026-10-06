@@ -77,6 +77,22 @@ fn popup_controls_wheel_and_primary_drag_share_navigation_state() {
     });
     h.run();
     assert!(h.state().zoom.unwrap() > 1.0);
+    let dropdown = h.get_by_role(egui::accesskit::Role::ComboBox).rect().center();
+    for (delta, zoom) in [(-1.0, 2.0), (1.0, 1.0)] {
+        h.event(Event::PointerMoved(dropdown));
+        h.event(Event::MouseWheel {
+            unit: MouseWheelUnit::Line,
+            delta: vec2(0.0, delta),
+            phase: TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        h.run();
+        assert_eq!(
+            h.state().zoom,
+            Some(zoom),
+            "dropdown moves from custom zoom to adjacent preset"
+        );
+    }
     for button in [PointerButton::Secondary, PointerButton::Primary] {
         let before = h.state().center;
         h.event(Event::PointerMoved(pointer));

@@ -56,25 +56,24 @@ pub(super) fn show(ui: &mut Ui, image: &Arc<Image>) {
     let id = ui.id().with("image view");
     let mut state = ui.data_mut(|data| data.get_temp::<ViewState>(id).unwrap_or_default());
     ui.horizontal_wrapped(|ui| {
-        egui::ComboBox::from_id_salt(id.with("zoom"))
-            .width(75.0)
-            .selected_text(
-                state.zoom.map_or_else(|| "Fit".into(), |z| format!("{:.0}%", z * 100.0)),
-            )
-            .show_ui(ui, |ui| {
-                if ui.selectable_label(state.zoom.is_none(), "Fit").clicked() {
-                    state = ViewState::default();
-                }
-                for percent in [25, 50, 100, 200, 400] {
-                    ui.selectable_value(
-                        &mut state.zoom,
-                        Some(percent as f32 / 100.0),
-                        format!("{percent}%"),
-                    );
-                }
-            })
-            .response
-            .on_hover_text("100%: one rendered image pixel per display pixel");
+        let mut options = vec![None, Some(0.25), Some(0.5), Some(1.0), Some(2.0), Some(4.0)];
+        // Wheel zoom can land between presets; list it in order so dropdown
+        // scrolling moves to the adjacent preset in either direction.
+        if !options.contains(&state.zoom) {
+            options.push(state.zoom);
+            options.sort_by(|a, b| a.partial_cmp(b).expect("finite zoom"));
+        }
+        crate::widgets::dropdown(
+            ui,
+            egui::ComboBox::from_id_salt(id.with("zoom")).width(75.0),
+            &mut state.zoom,
+            &options,
+            |zoom| zoom.map_or_else(|| "Fit".into(), |z| format!("{:.0}%", z * 100.0)),
+        )
+        .on_hover_text("100%: one rendered image pixel per display pixel");
+        if state.zoom.is_none() {
+            state.center = pos2(0.5, 0.5);
+        }
         let detail = if image.scale == 1 {
             "Full detail".into()
         } else {

@@ -10,6 +10,46 @@ use crate::theme;
 /// Side of a pop-out button.
 pub const BUTTON: f32 = 20.0;
 
+/// A dropdown whose wheel navigation follows menu order and stops at either end.
+pub fn dropdown<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    combo: egui::ComboBox,
+    value: &mut T,
+    options: &[T],
+    label: impl Fn(T) -> String,
+) -> egui::Response {
+    let previous = *value;
+    let mut selected = options.iter().position(|option| option == value).expect("listed value");
+    let mut response = combo.show_index(ui, &mut selected, options.len(), |i| label(options[i]));
+    let steps = scroll_steps(ui, &response);
+    selected = (selected as f64 - steps).clamp(0.0, (options.len() - 1) as f64) as usize;
+    *value = options[selected];
+    if *value != previous {
+        response.mark_changed();
+        ui.ctx().request_repaint();
+    }
+    response
+}
+
+pub fn scroll_steps(ui: &mut Ui, response: &egui::Response) -> f64 {
+    let id = response.id.with("scroll");
+    if !response.hovered() {
+        ui.data_mut(|data| data.remove::<f64>(id));
+        return 0.0;
+    }
+    let delta = ui.input_mut(|input| std::mem::take(&mut input.smooth_scroll_delta.y));
+    let line = ui.ctx().options(|options| options.input_options.line_scroll_speed);
+    // egui smooths wheel input across frames; retain only the unfinished step,
+    // never a second copy of the control's value.
+    ui.data_mut(|data| {
+        let remainder = data.get_temp_mut_or_default::<f64>(id);
+        *remainder += f64::from(delta / line);
+        let steps = remainder.round();
+        *remainder -= steps;
+        steps
+    })
+}
+
 pub fn link(ui: &mut Ui, label: &str, url: &str) -> egui::Response {
     let text = egui::RichText::new(label).color(ui.visuals().hyperlink_color).underline();
     ui.hyperlink_to(text, url)

@@ -167,6 +167,34 @@ fn numeric_readout_menu_resets_without_restoring_its_edit_buffer() {
 }
 
 #[test]
+fn dropdown_wheel_follows_menu_order_and_stops_at_ends() {
+    let kind = ParamKind::Choice { options: &["first", "second", "third"], default: "first" };
+    let mut h = harness(kind, json!("first"));
+    let pos = h.get_by_role(egui::accesskit::Role::ComboBox).rect().center();
+    for (delta, expected) in [
+        (-1.0, "second"),
+        (-10.0, "third"),
+        (-1.0, "third"),
+        (1.0, "second"),
+        (10.0, "first"),
+        (1.0, "first"),
+    ] {
+        scroll(&mut h, pos, MouseWheelUnit::Line, delta);
+        assert_eq!(h.state().value, json!(expected));
+        assert_eq!(h.state().offset, 0.0);
+        assert!(!egui::Popup::is_any_open(&h.ctx));
+    }
+    let line = h.ctx.options(|options| options.input_options.line_scroll_speed);
+    for _ in 0..10 {
+        scroll(&mut h, pos, MouseWheelUnit::Point, -line / 10.0);
+    }
+    assert_eq!(h.state().value, json!("second"));
+    scroll(&mut h, Pos2::new(150.0, 100.0), MouseWheelUnit::Line, -1.0);
+    assert_eq!(h.state().value, json!("second"));
+    assert!(h.state().offset > 0.0);
+}
+
+#[test]
 fn small_trackpad_deltas_accumulate_into_integer_steps() {
     let mut h = harness(ParamKind::Int { min: -24, max: -1, default: -12 }, json!(-10));
     let pos = h.state().rect.left_center() + vec2(30.0, 0.0);

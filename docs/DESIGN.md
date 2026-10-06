@@ -176,6 +176,10 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
   and reduction explicitly; zoom does not change processing detail. Wheel zoom
   anchors at the pointer, left drag pans, and image edges bound navigation.
 
+- **Decided:** All dropdowns share wheel navigation in menu order: down selects
+  the next option, up the previous, stopping at either end. Dropdowns and sliders
+  share fractional scroll accumulation and consume scrolling over the control.
+
 - **Decided:** The graph is the sole editable state. Shared
   [editing](../crates/drip-gui/src/editing.rs) determines redraw/evaluation effects;
   presentation edits do not reprocess images.

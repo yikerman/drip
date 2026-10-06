@@ -5,6 +5,7 @@ use egui::{PointerButton, Sense, Ui};
 use serde_json::{Value as Json, json};
 
 use crate::editing::NodeCx;
+use crate::widgets::{dropdown, scroll_steps};
 
 /// A node's name, kind, parameters and actions, without inspector help.
 pub fn panel(ui: &mut Ui, cx: &mut NodeCx) {
@@ -91,19 +92,15 @@ pub fn edit_value(ui: &mut Ui, id: egui::Id, kind: &ParamKind, value: &Json) -> 
             (response, Some(json!(v)))
         }
         ParamKind::Choice { options, .. } => {
-            let current = value.as_str().expect("validated choice");
-            let mut chosen = None;
-            let response = egui::ComboBox::from_id_salt(id)
-                .selected_text(current)
-                .show_ui(ui, |ui| {
-                    for option in options {
-                        if ui.selectable_label(*option == current, *option).clicked() {
-                            chosen = Some(json!(option));
-                        }
-                    }
-                })
-                .response;
-            (response, chosen)
+            let mut current = value.as_str().expect("validated choice");
+            let response = dropdown(
+                ui,
+                egui::ComboBox::from_id_salt(id),
+                &mut current,
+                options,
+                str::to_owned,
+            );
+            (response, Some(json!(current)))
         }
         ParamKind::Path { output } => {
             let path = value.as_str().map(std::path::Path::new);
@@ -171,25 +168,6 @@ fn reset_action(ui: &mut Ui, kind: &ParamKind) -> Option<Json> {
     ui.button("Reset to default").clicked().then(|| {
         ui.close();
         kind.default_value()
-    })
-}
-
-fn scroll_steps(ui: &mut Ui, response: &egui::Response) -> f64 {
-    let id = response.id.with("scroll");
-    if !response.hovered() {
-        ui.data_mut(|data| data.remove::<f64>(id));
-        return 0.0;
-    }
-    let delta = ui.input_mut(|input| std::mem::take(&mut input.smooth_scroll_delta.y));
-    let line = ui.ctx().options(|options| options.input_options.line_scroll_speed);
-    // egui smooths wheel input across frames; retain only the unfinished step,
-    // never a second copy of the parameter value.
-    ui.data_mut(|data| {
-        let remainder = data.get_temp_mut_or_default::<f64>(id);
-        *remainder += f64::from(delta / line);
-        let steps = remainder.round();
-        *remainder -= steps;
-        steps
     })
 }
 

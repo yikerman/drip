@@ -164,6 +164,10 @@ In parameter panels, scroll over a slider to adjust it: up increases, down
 decreases. Each scroll line changes a floating-point value by 1% of its range,
 or an integer by one. The panel stays still while scrolling over a slider.
 
+Scroll over a dropdown to change its selection: down selects the next option,
+up the previous, stopping at either end. This also works for **Preview detail**
+and the preview pop-out's zoom selector.
+
 Right-click a slider, checkbox, dropdown or filename and choose **Reset to default**
 to restore its node-defined default (or clear a path). These gestures also work
 in pop-outs and template inputs. The parameter name's menu also offers reset.

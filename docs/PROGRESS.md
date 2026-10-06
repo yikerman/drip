@@ -3,6 +3,21 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-05: dropdown wheel navigation
+
+- Shared dropdowns across parameters, Preview detail and pop-out zoom. Wheel
+  navigation follows menu order and stops at either end. Reused slider scroll
+  accumulation so small trackpad deltas work without scrolling the parent panel.
+
+- Custom preview zooms appear between presets, allowing scrolling to either
+  neighboring preset. Existing parameter reset menus remain available.
+
+- Validation: 47 GUI tests passed, covering bounded dropdown navigation,
+  trackpad accumulation, parent scrolling, parameter reset, project detail
+  updates and custom zoom selection. Clippy with warnings denied, formatting
+  and diff checks passed. The GPU-only test remains ignored; live gestures
+  were not checked.
+
 ## 2026-10-05: preview pop-out navigation
 
 - Added Fit and percentage presets, pointer-centered wheel zoom and left-drag

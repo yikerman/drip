@@ -256,16 +256,14 @@ impl App {
                 if level == 0 { "Full".to_owned() } else { format!("1/{}", 1u32 << level) }
             };
             let previous = self.level;
-            egui::ComboBox::from_label("Preview detail")
-                .width(64.0)
-                .selected_text(label(self.level))
-                .show_ui(ui, |ui| {
-                    for level in 0..=MAX_LEVEL {
-                        ui.selectable_value(&mut self.level, level, label(level));
-                    }
-                })
-                .response
-                .on_hover_text("Global preview scale. Export always uses full detail.");
+            crate::widgets::dropdown(
+                ui,
+                egui::ComboBox::from_label("Preview detail").width(64.0),
+                &mut self.level,
+                &(0..=MAX_LEVEL).collect::<Vec<_>>(),
+                label,
+            )
+            .on_hover_text("Global preview scale. Export always uses full detail.");
             if self.level != previous {
                 log::debug!("preview level changed from {previous} to {}", self.level);
                 self.project.ui["preview_level"] = serde_json::json!(self.level);
@@ -399,6 +397,30 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn detail_dropdown_scroll_updates_the_project_and_stops_at_ends() {
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(1600.0, 100.0))
+            .with_step_dt(1.0 / 60.0)
+            .with_max_steps(100)
+            .build_ui_state(|ui, app: &mut App| app.menu(ui), App::new(None, true, || {}));
+        let pos = h.get_by_label("Preview detail").rect().center();
+        for (delta, level) in [(-1.0, 2), (1.0, 1), (10.0, 0), (-20.0, MAX_LEVEL)] {
+            h.state_mut().dirty = false;
+            h.event(egui::Event::PointerMoved(pos));
+            h.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, delta),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+            h.run();
+            assert_eq!(h.state().level, level);
+            assert_eq!(h.state().project.ui["preview_level"], json!(level));
+            assert!(h.state().dirty);
+        }
+    }
 
     /// The built-in template applied to the fixture raw, saved to a temp file.
     fn fixture_project(name: &str) -> PathBuf {
