@@ -3,6 +3,23 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-06: pointer-leave scroll handling
+
+- Reproduced the image pop-out panic with wheel scrolling followed by
+  `PointerGone`, both in one frame and on successive frames. egui retains the
+  interaction position for hit-testing on the leave frame while clearing the
+  hover position; residual smoothed scrolling reached an invalid `expect`.
+- Image zoom now requires `hover_pos` before consuming scroll. Shared dropdown
+  and numeric scrolling also requires a hover position and clears its fractional
+  remainder when absent. This prevents the extra selection step reproduced on
+  pointer-leave. Other Drip pointer-position users already handle absence.
+- Added headless regression tests for both event timings, checking unchanged
+  zoom/center and dropdown selection on leave and normal scrolling beforehand.
+- Validation: all 49 GUI tests passed; the opt-in GPU test remained ignored.
+  Clippy with warnings denied, formatting and diff checks passed.
+- The subsequent NVIDIA/Wayland segmentation fault is not reproduced by these
+  tests; panic-time native teardown remains tracked separately in TODO.
+
 ## 2026-10-06: preview interpolation parameter
 
 - Added a saved Preview `interpolation` checkbox, off by default. Node and

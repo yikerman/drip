@@ -204,6 +204,10 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
 - **Open:** AGPL-3.0-or-later is recorded, but the original `-only` versus
   `-or-later` choice remains unconfirmed.
 
+- **Decided:** Image zoom and control wheel edits require a hovered response with
+  an available pointer position. egui can retain hover hit-testing on the frame
+  the pointer leaves; stop edits then and clear control scroll remainders.
+
 ## Logging
 
 - **Decided:** Keep `log` with frontend-owned stderr configuration. Default to

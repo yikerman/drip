@@ -8,6 +8,7 @@ robustness and performance when usage or measurements justify it.
 | Production pipeline validation | Next | Cross-camera contract tests are in place; judge detail, highlights and color against measured/reference evidence. |
 | Broader RAW support / correct unpacking | Open | Investigate metadata extraction for Canon EOS D30 (`canon-eos-d30.crw`, raw.pixls.us #1307): unusable as-shot WB; Samsung GX-1L (`samsung-gx-1l.pef`, #8115): unusable WB and zero camera matrix. Samples removed from the active corpus until supported. |
 | DNG camera matrix unpacking | Open | Sigma fp 8-bit (`sigma-fp.dng`, raw.pixls.us #7280) and 14-bit (`sigma-fp-14bit-3-2.dng`, #7273) contain nonzero ColorMatrix1/2 tags, but LibRaw 0.22.2 returns zero `cam_xyz` after unpack. Investigate correct extraction; samples removed from the active corpus. |
+| Panic-time native teardown | Open | User observed a segmentation fault after the image-view Rust panic on NVIDIA/Wayland. The triggering panic is fixed; investigate unwind-time surface/connection destruction separately. Native failure not reproduced by headless tests. |
 | Editing UI/UX | Planned | Refine workflows around the production pipeline. |
 | Dedicated node picker | Deferred | Replace the canvas Add node menu using the kinds' category and name metadata. |
 | Display portability | Next | Verify current output on NVIDIA, other compositors and macOS; Windows remains best effort and untested. |

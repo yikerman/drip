@@ -90,14 +90,13 @@ pub(super) fn show(ui: &mut Ui, image: &Arc<Image>, interpolation: bool) {
     let pixels = vec2(image.width as f32, image.height as f32);
     let ppp = ui.ctx().pixels_per_point();
     state.constrain(area, pixels * state.scale(area, pixels, ppp));
-    if response.hovered() {
+    if let Some(pointer) = response.hover_pos() {
         let scroll = ui.input_mut(|input| {
             let scroll = input.smooth_scroll_delta.y;
             input.smooth_scroll_delta.y = 0.0;
             scroll
         });
         if scroll != 0.0 {
-            let pointer = response.hover_pos().expect("hovered image");
             state.zoom_at(area, pixels, ppp, pointer, (scroll * 0.002).exp());
             ui.ctx().request_repaint();
         }

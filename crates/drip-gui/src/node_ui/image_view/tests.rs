@@ -124,3 +124,37 @@ fn popup_controls_wheel_and_primary_drag_share_navigation_state() {
     assert_eq!(h.state().zoom, None);
     assert_eq!(h.state().center, pos2(0.5, 0.5));
 }
+
+#[test]
+fn pointer_leave_stops_image_scroll_zoom() {
+    for same_frame in [false, true] {
+        let image = Arc::new(Image { width: 1000, height: 800, scale: 1, texels: vec![] });
+        let mut h = Harness::builder()
+            .with_size(vec2(500.0, 400.0))
+            .with_step_dt(1.0 / 60.0)
+            .build_ui_state(
+                move |ui, state: &mut ViewState| {
+                    show(ui, &image, false);
+                    *state = ui.data(|data| data.get_temp(ui.id().with("image view")).unwrap());
+                },
+                ViewState::default(),
+            );
+        h.event(Event::PointerMoved(pos2(220.0, 180.0)));
+        h.step();
+        h.input_mut().events.push(Event::MouseWheel {
+            unit: MouseWheelUnit::Line,
+            delta: vec2(0.0, 3.0),
+            phase: TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        if !same_frame {
+            h.step();
+            assert!(h.state().zoom.is_some(), "scroll zooms while the pointer is present");
+        }
+        let before = *h.state();
+        h.input_mut().events.push(Event::PointerGone);
+        h.step();
+        assert_eq!(h.state().zoom, before.zoom);
+        assert_eq!(h.state().center, before.center);
+    }
+}

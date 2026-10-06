@@ -33,7 +33,7 @@ pub fn dropdown<T: Copy + PartialEq>(
 
 pub fn scroll_steps(ui: &mut Ui, response: &egui::Response) -> f64 {
     let id = response.id.with("scroll");
-    if !response.hovered() {
+    if response.hover_pos().is_none() {
         ui.data_mut(|data| data.remove::<f64>(id));
         return 0.0;
     }
@@ -85,3 +85,6 @@ pub fn resize(ui: &mut Ui, corner: Pos2, size: Vec2) -> Option<Vec2> {
     let handle = ui.interact(corner, ui.id().with("resize"), Sense::drag());
     handle.dragged().then(|| size + handle.drag_delta())
 }
+
+#[cfg(test)]
+mod tests;
