@@ -25,6 +25,8 @@ use crate::theme;
 const HEADER: f32 = 22.0;
 const ROW: f32 = 18.0;
 const PORT: f32 = 4.0;
+/// Wire hit radius in screen points, independent of canvas zoom.
+const WIRE_HIT: f32 = 6.0;
 /// egui rasterizes text once and scales it with the layer, so text blurs past
 /// 1; previews draw at their own resolution and stay sharp.
 const ZOOM: (f32, f32) = (0.2, 2.0);
@@ -36,8 +38,20 @@ pub struct Editor {
     /// the graph has been fitted into view.
     offset: Option<Vec2>,
     zoom: f32,
-    /// The output a wire is being dragged from.
-    wire: Option<Port>,
+    /// The port awaiting an opposite-direction endpoint on the next right-click.
+    wire: Option<Endpoint>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Direction {
+    Input,
+    Output,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Endpoint {
+    port: Port,
+    direction: Direction,
 }
 
 impl Default for Editor {
@@ -65,7 +79,13 @@ impl Editor {
         selected: &mut Option<NodeId>,
         frame: &mut Frame,
     ) {
-        let (mut canvas, to_global) = self.canvas(ui, graph, registry, selected, frame);
+        if self.wire.is_some()
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.wire = None;
+        }
+        let (mut canvas, to_global) = self.canvas(ui, graph, selected);
+        let background = canvas.response();
         let zoom = to_global.scaling;
         let ui = &mut canvas;
         let painter = ui.painter().clone();
@@ -83,25 +103,43 @@ impl Editor {
         // on-screen size.
         let point = widgets::point(ui);
         let wire = Stroke::new(1.5 * zoom.sqrt() * point, theme::TEXT);
-        for (output, input) in graph.edges() {
-            if let (Some(from), Some(to)) = (port_pos(output, true), port_pos(input, false)) {
-                painter.add(bezier(from, to, wire));
+        let wires: Vec<_> = graph
+            .edges()
+            .filter_map(|(output, input)| {
+                Some((
+                    input.clone(),
+                    bezier(port_pos(output, true)?, port_pos(input, false)?, wire),
+                ))
+            })
+            .collect();
+        // Hit-test only the background: nodes, ports and controls retain priority.
+        let hovered_wire =
+            background.hover_pos().filter(|_| self.wire.is_none()).and_then(|pointer| {
+                wires
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (_, curve))| (i, wire_distance(curve, pointer, point)))
+                    .filter(|(_, distance)| *distance <= WIRE_HIT * point)
+                    .min_by(|(_, a), (_, b)| a.total_cmp(b))
+                    .map(|(i, _)| i)
+            });
+        let disconnect = hovered_wire.map(|i| wires[i].0.clone());
+        for (i, (_, mut curve)) in wires.into_iter().enumerate() {
+            if hovered_wire == Some(i) {
+                curve.stroke.width += 2.0 * point;
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             }
+            painter.add(curve);
         }
 
         let hit = |pos: Pos2| Rect::from_center_size(pos, Vec2::splat(16.0 * point));
+        let mut navigate = None;
         for l in &layouts {
             let body = ui.interact(l.rect, ui.id().with(l.id), Sense::click_and_drag());
             if body.clicked() || body.drag_started_by(PointerButton::Secondary) {
                 *selected = Some(l.id);
             }
-            if body.dragged_by(PointerButton::Primary)
-                && ui.input(|i| i.pointer.delta()) != Vec2::ZERO
-            {
-                *self.offset.as_mut().expect("canvas initialized") +=
-                    ui.input(|i| i.pointer.delta());
-                ui.ctx().request_repaint();
-            }
+            self.pan(&body);
             if body.dragged_by(PointerButton::Secondary) {
                 let pos =
                     position(&graph.node(l.id).expect("laid out").ui, l.id) + body.drag_delta();
@@ -130,24 +168,51 @@ impl Editor {
             let descriptor = node.kind;
             let (kind, kind_params) = (node_ui::of(node.kind), node.kind.params);
             paint(&painter, l, node, *selected == Some(l.id));
-            for ((name, pos), spec) in l.inputs.iter().zip(descriptor.inputs()) {
-                let port = ui.interact(hit(*pos), ui.id().with((l.id, name, 0)), Sense::click());
-                if port.secondary_clicked() {
-                    frame.edit(graph, Edit::Disconnect(Port(l.id, (*name).into())));
+            let inputs =
+                l.inputs.iter().zip(descriptor.inputs()).map(|((name, pos), spec)| {
+                    (Direction::Input, *name, *pos, spec.requirement.name)
+                });
+            let outputs = l
+                .outputs
+                .iter()
+                .zip(descriptor.outputs())
+                .map(|((name, pos), spec)| (Direction::Output, *name, *pos, spec.ty.name));
+            for (direction, name, pos, contract) in inputs.chain(outputs) {
+                let endpoint = Endpoint { port: Port(l.id, name.into()), direction };
+                let response = ui
+                    .interact(
+                        hit(pos),
+                        ui.id().with((l.id, name, direction)),
+                        Sense::click_and_drag(),
+                    )
+                    .on_hover_text(node_ui::ports::label(contract));
+                self.pan(&response);
+                if response.secondary_clicked() {
+                    egui::Popup::close_all(ui.ctx());
+                    self.connect(endpoint.clone(), graph, frame);
                 }
-                port.on_hover_text(format!(
-                    "{}\nright-click to disconnect",
-                    node_ui::ports::label(spec.requirement.name)
-                ));
-            }
-            for ((name, pos), spec) in l.outputs.iter().zip(descriptor.outputs()) {
-                if ui
-                    .interact(hit(*pos), ui.id().with((l.id, name, 1)), Sense::drag())
-                    .on_hover_text(node_ui::ports::label(spec.ty.name))
-                    .drag_started()
-                {
-                    self.wire = Some(Port(l.id, (*name).into()));
-                }
+                theme::menu(&response).show(|ui| {
+                    let peers = graph.edges().filter_map(|(output, input)| match direction {
+                        Direction::Input => (input == &endpoint.port).then_some(output),
+                        Direction::Output => (output == &endpoint.port).then_some(input),
+                    });
+                    let mut empty = true;
+                    for peer in peers {
+                        empty = false;
+                        let node = graph.node(peer.0).expect("connected node");
+                        if ui.button(format!("{} · {}", node.label, peer.1)).clicked() {
+                            navigate = Some(peer.0);
+                            ui.close();
+                        }
+                    }
+                    if empty {
+                        let text = match direction {
+                            Direction::Input => "No source",
+                            Direction::Output => "No destinations",
+                        };
+                        ui.add_enabled(false, egui::Button::new(text));
+                    }
+                });
             }
             if let Some((at, error)) = &l.error {
                 let row = Rect::from_min_size(
@@ -166,23 +231,47 @@ impl Editor {
                 widgets::pop_out(ui, button, &mut cx, Part::Parameters);
             }
             kind.body(&mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body)), &mut cx);
+            if body.hovered() {
+                painter.rect_stroke(
+                    l.rect,
+                    0.0,
+                    Stroke::new(point, theme::TEXT),
+                    egui::StrokeKind::Inside,
+                );
+            }
         }
 
-        if let Some(from) = self.wire.clone() {
-            let pointer = ui.ctx().pointer_latest_pos().map(|p| to_global.inverse() * p);
-            if let (Some(start), Some(end)) = (port_pos(&from, true), pointer) {
-                painter.add(bezier(start, end, wire));
+        if let Some(id) = navigate {
+            *selected = Some(id);
+            let rect = layouts.iter().find(|l| l.id == id).expect("connected node").rect;
+            let visible = ui.clip_rect();
+            if !visible.contains_rect(rect) {
+                *self.offset.as_mut().expect("canvas initialized") +=
+                    (visible.center() - rect.center()) * zoom;
             }
-            if ui.input(|i| i.pointer.any_released()) {
-                self.wire = None;
-                let mut inputs = layouts
-                    .iter()
-                    .flat_map(|l| l.inputs.iter().map(move |(name, pos)| (l.id, *name, *pos)));
-                let target = pointer.and_then(|p| inputs.find(|(_, _, pos)| hit(*pos).contains(p)));
-                if let Some((id, name, _)) = target {
-                    frame.edit(graph, Edit::Connect(from, Port(id, name.into())));
+            ui.ctx().request_repaint();
+        }
+
+        if background.secondary_clicked() && self.wire.is_some() {
+            self.wire = None;
+        } else if background.secondary_clicked()
+            && let Some(input) = disconnect
+        {
+            frame.edit(graph, Edit::Disconnect(input));
+        } else {
+            theme::context_menu(&background).show(|ui| {
+                for kind in registry.kinds() {
+                    if ui.button(kind.label).clicked() {
+                        let pointer = ui
+                            .ctx()
+                            .pointer_interact_pos()
+                            .unwrap_or(to_global * background.rect.center());
+                        let pos = (to_global.inverse() * pointer).to_vec2();
+                        *selected = frame.edit(graph, Edit::Add(kind, pos));
+                        ui.close();
+                    }
                 }
-            }
+            });
         }
 
         if let Some(id) = *selected
@@ -192,18 +281,56 @@ impl Editor {
             frame.edit(graph, Edit::Remove(id));
             *selected = None;
         }
+
+        if self.wire.as_ref().is_some_and(|from| graph.node(from.port.0).is_none()) {
+            self.wire = None;
+        }
+        if let Some(from) = &self.wire {
+            let pointer = ui.ctx().pointer_latest_pos().map(|p| to_global.inverse() * p);
+            let output = from.direction == Direction::Output;
+            if let (Some(start), Some(end)) = (port_pos(&from.port, output), pointer) {
+                let (start, end) = if output { (start, end) } else { (end, start) };
+                painter.add(bezier(start, end, wire));
+            }
+        }
     }
 
-    /// The canvas: a layer over the editor's area under the current pan and
-    /// zoom, and the transform into it. Its background pans, zooms, deselects
-    /// and adds nodes.
+    fn pan(&mut self, response: &egui::Response) {
+        let delta = response.ctx.input(|i| i.pointer.delta());
+        if response.dragged_by(PointerButton::Primary) && delta != Vec2::ZERO {
+            *self.offset.as_mut().expect("canvas initialized") += delta;
+            response.ctx.request_repaint();
+        }
+    }
+
+    fn connect(&mut self, target: Endpoint, graph: &mut Graph, frame: &mut Frame) {
+        let Some(from) = &self.wire else {
+            self.wire = Some(target);
+            return;
+        };
+        if from.direction == target.direction {
+            frame.report.refused = Some(match from.direction {
+                Direction::Input => "Choose an output port".into(),
+                Direction::Output => "Choose an input port".into(),
+            });
+            return;
+        }
+        let (output, input) = match from.direction {
+            Direction::Output => (&from.port, &target.port),
+            Direction::Input => (&target.port, &from.port),
+        };
+        frame.edit(graph, Edit::Connect(output.clone(), input.clone()));
+        if graph.source(input) == Some(output) {
+            self.wire = None;
+        }
+    }
+
+    /// Builds the canvas layer and handles background panning, zoom and selection.
     fn canvas(
         &mut self,
         ui: &mut Ui,
-        graph: &mut Graph,
-        registry: &Registry,
+        graph: &Graph,
         selected: &mut Option<NodeId>,
-        frame: &mut Frame,
     ) -> (Ui, TSTransform) {
         let (area, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
         let offset = self.offset.get_or_insert_with(|| {
@@ -239,17 +366,6 @@ impl Editor {
             }
         }
         let to_global = TSTransform::new(area.min.to_vec2() + *offset, self.zoom);
-        theme::context_menu(&background).show(|ui| {
-            for kind in registry.kinds() {
-                if ui.button(kind.label).clicked() {
-                    let pointer = ui.ctx().pointer_interact_pos().unwrap_or(area.center());
-                    let pos = (to_global.inverse() * pointer).to_vec2();
-                    *selected = frame.edit(graph, Edit::Add(kind, pos));
-                    ui.close();
-                }
-            }
-        });
-
         ui.ctx().set_transform_layer(layer, to_global);
         let visible = to_global.inverse() * area;
         canvas.set_clip_rect(visible);
@@ -357,6 +473,22 @@ fn bezier(from: Pos2, to: Pos2, stroke: Stroke) -> CubicBezierShape {
     )
 }
 
+fn wire_distance(curve: &CubicBezierShape, pointer: Pos2, point: f32) -> f32 {
+    if !curve.logical_bounding_rect().expand(WIRE_HIT * point).contains(pointer) {
+        return f32::INFINITY;
+    }
+    curve
+        .flatten(Some(0.25 * point))
+        .windows(2)
+        .map(|segment| {
+            let delta = segment[1] - segment[0];
+            let direction = delta.normalized();
+            let along = (pointer - segment[0]).dot(direction).clamp(0.0, delta.length());
+            pointer.distance(segment[0] + direction * along)
+        })
+        .fold(f32::INFINITY, f32::min)
+}
+
 fn elide(text: &str, chars: usize) -> String {
     if text.chars().count() <= chars {
         text.into()
@@ -366,170 +498,4 @@ fn elide(text: &str, chars: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use egui::{
-        Event, Modifiers,
-        PointerButton::{Primary, Secondary},
-    };
-    use egui_kittest::{Harness, kittest::Queryable};
-    use serde_json::json;
-
-    struct Scene {
-        editor: Editor,
-        graph: Graph,
-        node: NodeId,
-        selected: Option<NodeId>,
-        origin: Pos2,
-        edited: bool,
-    }
-
-    impl Scene {
-        fn node_point(&self) -> Pos2 {
-            let node = self.graph.node(self.node).unwrap();
-            self.origin
-                + self.editor.offset.unwrap()
-                + (position(&node.ui, self.node) + vec2(40.0, 10.0)) * self.editor.zoom
-        }
-    }
-
-    fn harness(zoom: f32) -> Harness<'static, Scene> {
-        let mut graph = Graph::default();
-        let node = graph.add_node(&drip::nodes::EXPOSURE);
-        graph.set_ui(node, json!({"pos": [100.0, 100.0]})).unwrap();
-        let scene = Scene {
-            editor: Editor { offset: Some(vec2(20.0, 20.0)), zoom, wire: None },
-            graph,
-            node,
-            selected: None,
-            origin: Pos2::ZERO,
-            edited: false,
-        };
-        Harness::builder().with_size(vec2(1000.0, 700.0)).with_step_dt(1.0 / 60.0).build_ui_state(
-            |ui, s: &mut Scene| {
-                theme::apply(ui.ctx());
-                let popped = Default::default();
-                let mut frame = Frame::new(&|_| None, &popped, false);
-                egui::Panel::right("inspector").default_size(250.0).show(ui, |ui| {
-                    if let Some(id) = s.selected {
-                        crate::inspector::selected_node(
-                            ui,
-                            &mut NodeCx::new(&mut s.graph, id, &mut frame),
-                        );
-                    }
-                });
-                egui::CentralPanel::default().show(ui, |ui| {
-                    s.origin = ui.available_rect_before_wrap().min;
-                    s.editor.show(
-                        ui,
-                        &mut s.graph,
-                        &drip::nodes::registry(),
-                        &mut s.selected,
-                        &mut frame,
-                    );
-                });
-                s.edited |= frame.report.edited;
-            },
-            scene,
-        )
-    }
-
-    fn pointer(h: &mut Harness<'_, Scene>, pos: Pos2, button: PointerButton, pressed: bool) {
-        h.event(Event::PointerMoved(pos));
-        h.event(Event::PointerButton { pos, button, pressed, modifiers: Modifiers::NONE });
-        h.run();
-    }
-
-    fn drag(h: &mut Harness<'_, Scene>, pos: Pos2, button: PointerButton, delta: Vec2) {
-        pointer(h, pos, button, true);
-        h.event(Event::PointerMoved(pos + delta));
-        h.run();
-        pointer(h, pos + delta, button, false);
-    }
-
-    #[test]
-    fn left_drag_pans_over_background_and_nodes_without_editing() {
-        for zoom in [0.5, 1.0, 2.0] {
-            for on_node in [false, true] {
-                let mut h = harness(zoom);
-                h.run();
-                let graph = h.state().graph.clone();
-                let offset = h.state().editor.offset.unwrap();
-                let pos = if on_node { h.state().node_point() } else { pos2(40.0, 40.0) };
-                let delta = vec2(50.0, 30.0);
-                drag(&mut h, pos, Primary, delta);
-                assert_eq!(h.state().editor.offset.unwrap(), offset + delta);
-                assert_eq!(h.state().graph, graph);
-                assert_eq!(h.state().selected, None);
-                assert!(!h.state().edited);
-            }
-        }
-    }
-
-    #[test]
-    fn right_drag_moves_only_nodes_without_opening_menus() {
-        for zoom in [0.5, 1.0, 2.0] {
-            let mut h = harness(zoom);
-            h.run();
-            let offset = h.state().editor.offset;
-            let pos = h.state().node_point();
-            let delta = vec2(50.0, 30.0);
-            drag(&mut h, pos, Secondary, delta);
-            let s = h.state();
-            assert_eq!(
-                position(&s.graph.node(s.node).unwrap().ui, s.node),
-                vec2(100.0, 100.0) + delta / zoom
-            );
-            assert_eq!(s.editor.offset, offset);
-            assert!(!s.edited);
-            assert!(h.query_by_label("Rename").is_none());
-            let graph = s.graph.clone();
-            drag(&mut h, pos2(40.0, 40.0), Secondary, delta);
-            assert_eq!(h.state().graph, graph);
-            assert_eq!(h.state().editor.offset, offset);
-            assert!(h.query_by_label(drip::nodes::EXPOSURE.label).is_none());
-        }
-    }
-
-    #[test]
-    fn click_selection_and_node_menu_actions() {
-        let mut h = harness(1.0);
-        h.run();
-        let node = h.state().node;
-        let pos = h.state().node_point();
-        pointer(&mut h, pos, Primary, true);
-        pointer(&mut h, pos, Primary, false);
-        assert_eq!(h.state().selected, Some(node));
-        assert!(h.query_by_label("ev").is_some());
-        pointer(&mut h, pos2(40.0, 40.0), Primary, true);
-        pointer(&mut h, pos2(40.0, 40.0), Primary, false);
-        assert_eq!(h.state().selected, None);
-
-        pointer(&mut h, pos, Secondary, true);
-        pointer(&mut h, pos, Secondary, false);
-        h.get_by_label("Rename").click();
-        h.run();
-        assert_eq!(h.state().selected, Some(node));
-        h.key_press_modifiers(Modifiers::COMMAND, egui::Key::A);
-        h.event(Event::Text("renamed".into()));
-        h.key_press(egui::Key::Enter);
-        h.run();
-        assert_eq!(h.state().graph.node(node).unwrap().label, "renamed");
-        assert!(!h.state().edited);
-
-        pointer(&mut h, pos, Secondary, true);
-        pointer(&mut h, pos, Secondary, false);
-        h.get_by_label("Delete").click();
-        h.run();
-        assert!(h.state().graph.node(node).is_none());
-        assert_eq!(h.state().selected, None);
-        assert!(h.state().edited);
-
-        pointer(&mut h, pos2(40.0, 40.0), Secondary, true);
-        pointer(&mut h, pos2(40.0, 40.0), Secondary, false);
-        h.get_by_label(drip::nodes::EXPOSURE.label).click();
-        h.run();
-        assert_eq!(h.state().graph.nodes().count(), 1);
-        assert!(h.state().selected.is_some());
-    }
-}
+mod tests;

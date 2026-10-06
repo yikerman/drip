@@ -1,5 +1,5 @@
 //! Neutral UI on middle grey, the standard surround for judging color, with
-//! lighter context menus and no shadows, rounding or strokes beyond what is
+//! lighter menus and no shadows, rounding or strokes beyond what is
 //! needed to tell elements apart.
 
 use egui::{Color32, CornerRadius, FontId, Shadow, Stroke, TextStyle, Visuals};
@@ -18,10 +18,15 @@ pub const BODY_SIZE: f32 = 16.0;
 pub const SMALL_SIZE: f32 = 14.0;
 
 pub fn context_menu(response: &egui::Response) -> egui::Popup<'_> {
-    let frame = egui::Frame::menu(&response.ctx.global_style())
-        .fill(LIGHTEST)
-        .stroke(Stroke::new(1.0, WEAK));
-    egui::Popup::context_menu(response).frame(frame)
+    egui::Popup::context_menu(response).frame(menu_frame(response))
+}
+
+pub fn menu(response: &egui::Response) -> egui::Popup<'_> {
+    egui::Popup::menu(response).frame(menu_frame(response))
+}
+
+fn menu_frame(response: &egui::Response) -> egui::Frame {
+    egui::Frame::menu(&response.ctx.global_style()).fill(LIGHTEST).stroke(Stroke::new(1.0, WEAK))
 }
 
 pub fn apply(ctx: &egui::Context) {

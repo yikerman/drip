@@ -45,7 +45,7 @@ Drip supports wide-gamut previews and ICC-managed TIFF export, with
 floating-point processing in linear Rec.2020. Color handling is part of the
 workflow from camera conversion through display and export.
 
-## Try it
+## Build & install
 
 Drip is an early **0.1.0-dev** prototype for Bayer RAW photos, developed on Linux
 with Wayland. You'll need to build it from source; Windows and macOS packaging
@@ -109,11 +109,25 @@ match the build scripts but haven't been tested on Windows.
 
 </details>
 
-From the Drip checkout, fetch the fixtures and start the editor:
+From the Drip checkout, fetch the fixtures and build the editor:
 
 ```sh
 git lfs install
 git lfs pull
+cargo build --release -p drip-gui
+```
+
+To install `drip-gui` in Cargo's binary directory (`~/.cargo/bin` by default):
+
+```sh
+cargo install --path crates/drip-gui --locked
+```
+
+## Usage
+
+Launch the installed editor with `drip-gui`, or run it from the checkout:
+
+```sh
 cargo run --release -p drip-gui
 ```
 
@@ -122,8 +136,35 @@ or use its gear button to open the controls in a separate window. The pop-out
 button on previews and scopes opens their views separately.
 The inspector describes the selected node's operation, assumptions and input/output types.
 
-Drag the canvas to pan, scroll to zoom, and right-click to add nodes. Connect
-them by dragging between ports. Right-click an input port to disconnect it.
+Canvas gestures separate **navigation on the left button** from **modification
+on the right button**. Exploring the graph should preserve its nodes and wiring.
+Moving a node changes its layout, so it uses the right button too.
+
+| Context | Left click | Left drag | Right click | Right drag |
+|---------|------------|-----------|-------------|------------|
+| Empty canvas | Clear selection | Pan canvas | Add node menu | No action |
+| Node body | Select and show inspector | Pan canvas | Rename / Delete menu | Move node |
+| Input port | Show source menu | Pan canvas | Start or complete a connection | No action |
+| Output port | Show destinations menu | Pan canvas | Start or complete a connection | No action |
+| Wire | Clear selection | Pan canvas | Disconnect highlighted wire | No action |
+
+Scroll to zoom around the pointer. A port's navigation menu lists connected
+`node · port` entries; choose one to select that node and bring it into view.
+Opening the menu preserves selection. Hover over a port to see its type.
+Buttons, menu items and parameter controls use ordinary left-click operation;
+drag a view's corner handle to resize it.
+
+Node bodies gain a thin border on hover. Wires thicken when targeted; their hit
+band stays narrow at every zoom level. Nodes, ports and controls take priority
+over wires. At a crossing, the nearest wire is highlighted and right-click removes
+only that connection.
+
+To connect nodes, right-click a port, move to a compatible port in the opposite
+direction, then right-click again. You can start at either an input or an output.
+An input keeps its current source until a valid replacement is committed; an
+output can feed multiple inputs. Invalid targets leave the connection pending
+and report the reason. **Escape** or **right-click on empty canvas** cancels the
+temporary wire without changing existing connections or opening the Add node menu.
 
 Set an output path and press **export** in the export node's panel when you're
 ready. Save your work as a `.drip` project, or use **Save template** to reuse the

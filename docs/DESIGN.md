@@ -86,7 +86,18 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
   The mouse wheel zooms around the pointer in both contexts. Rename selects
   the node and focuses its existing label field in the inspector.
 
-- **Decided:** Right-click menus use a lighter neutral fill and a dark border
+- **Decided:** Input and output ports share navigation and connection gestures.
+  Left-click lists connected peers; choosing one selects its node and pans it
+  into view only when needed. Right-click starts or completes a connection from
+  either direction. Invalid targets preserve the pending wire and current graph;
+  Escape or right-click on the background cancels. Port inspection stays local
+  to these menus and type tooltips; the sidebar retains node selection.
+- **Decided:** Right-click directly disconnects the hovered wire. A six-screen-point
+  hit radius follows the drawn curve, with nearest-wire selection at crossings.
+  Hit testing uses only canvas background input so nodes, ports and controls take
+  priority. Hover thickens the targeted wire and outlines node bodies. The full
+  gesture table and usage instructions are in [README](../README.md#usage).
+- **Decided:** Navigation and right-click menus use a lighter neutral fill and a dark border
   to separate them from the middle-grey workspace; styling is shared in
   [theme](../crates/drip-gui/src/theme.rs).
 - **Decided:** Use one extended-linear BT.709 output pipeline with an SDR Rec.2020

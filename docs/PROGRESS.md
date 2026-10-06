@@ -3,6 +3,22 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-05: port navigation and connection gestures
+
+- Unified input/output port behavior: left-click opens connected-node navigation,
+  left-drag pans, and right-click starts/completes a connection. Invalid targets
+  preserve existing wiring; Escape/background right-click cancels the pending wire.
+- Right-click disconnects the nearest hovered wire through a constant screen-space
+  hit band. Nodes and controls retain input priority; wires thicken and node
+  bodies gain a thin border on hover.
+- Split README setup into Build & install and Usage, documenting the gesture
+  rationale, navigation, connection, cancellation and disconnection behavior.
+- Validation: all 36 GUI tests passed, including port navigation, connection
+  cancellation/rejection, wire hit bands at three zoom levels, crossings and
+  node/port input priority. The GPU-only test remained ignored. Clippy with
+  warnings denied, formatting and diff checks passed. Live GUI appearance and
+  gestures have not been checked.
+
 ## 2026-10-05: canvas and node gestures
 
 - Implemented the agreed interaction table: left-drag pans over background and
