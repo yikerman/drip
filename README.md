@@ -175,6 +175,13 @@ preview and its pop-out.
 
 Gamutcheck is an approximate warning near the gamut boundary.
 
+In the preview pop-out, scroll to zoom around the pointer and left-drag to pan.
+The zoom selector offers **Fit**, **25%**, **50%**, **100%**, **200%** and **400%**.
+Fit follows the window size; fixed percentages account for desktop scaling.
+At 100%, one rendered image pixel occupies one display pixel. The dimensions and
+detail label describe that rendered image; choose **Full** Preview detail for
+full-resolution inspection.
+
 Node bodies gain a thin border on hover. Wires thicken when targeted; their hit
 band stays narrow at every zoom level. Nodes, ports and controls take priority
 over wires. At a crossing, the nearest wire is highlighted and right-click removes

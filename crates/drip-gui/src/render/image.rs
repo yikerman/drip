@@ -13,6 +13,8 @@ use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
 pub struct Image {
     pub width: usize,
     pub height: usize,
+    /// Sensor pixels per image pixel along each axis.
+    pub scale: u32,
     pub texels: Vec<u8>,
 }
 
@@ -24,7 +26,7 @@ impl Image {
             .flat_map(|&[r, g, b]| [r, g, b, 1.0])
             .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
             .collect();
-        Image { width: rgb.width, height: rgb.height, texels }
+        Image { width: rgb.width, height: rgb.height, scale: rgb.scale, texels }
     }
 }
 

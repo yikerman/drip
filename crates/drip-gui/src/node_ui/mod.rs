@@ -2,6 +2,7 @@
 
 mod documentation;
 pub mod help;
+mod image_view;
 pub mod parameters;
 pub mod ports;
 mod sigmoid;

@@ -52,6 +52,10 @@ impl NodeUi for Viewer {
 
     fn window(&self, ui: &mut Ui, _name: &'static str, node: &mut NodeCx) {
         if let Some(view) = node.view() {
+            if let node_views::PreparedView::Image(image) = view {
+                super::image_view::show(ui, image);
+                return;
+            }
             let (rect, font) =
                 (ui.available_rect_before_wrap(), FontId::proportional(theme::BODY_SIZE));
             node_views::draw(ui.painter(), rect, ui.id().with("view"), view, &font);

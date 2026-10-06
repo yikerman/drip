@@ -3,6 +3,20 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-05: preview pop-out navigation
+
+- Added Fit and percentage presets, pointer-centered wheel zoom and left-drag
+  panning to image pop-outs. Pixel zoom follows each window's desktop scale;
+  rendered dimensions and reduction clarify the active preview detail.
+
+- Navigation reuses the color-managed texture and stays local to the pop-out.
+  Image updates retain the viewed location; zoom does not trigger processing.
+
+- Validation: 45 GUI tests passed, including desktop-scale geometry, pointer
+  anchoring, pan bounds and pop-out gestures. Clippy with warnings denied,
+  formatting and diff checks passed. The GPU-only test remains ignored;
+  live window interaction and moving between monitors were not checked.
+
 ## 2026-10-05: logging levels and failure context
 
 - Separated UI status from logging. Default output covers session/file actions,

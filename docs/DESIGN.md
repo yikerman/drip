@@ -170,6 +170,12 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
   inspector, outside pop-outs. Frontend labels describe backend contracts rather
   than redefining compatibility; see [node UI](../crates/drip-gui/src/node_ui/).
 
+- **Decided:** Preview pop-outs own temporary zoom and pan state. Fit follows
+  window size; percentages map rendered image pixels to render-target pixels,
+  accounting for the window's current desktop scale. Show rendered dimensions
+  and reduction explicitly; zoom does not change processing detail. Wheel zoom
+  anchors at the pointer, left drag pans, and image edges bound navigation.
+
 - **Decided:** The graph is the sole editable state. Shared
   [editing](../crates/drip-gui/src/editing.rs) determines redraw/evaluation effects;
   presentation edits do not reprocess images.
