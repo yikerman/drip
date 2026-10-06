@@ -8,7 +8,7 @@ for now. Revisit performance work when measurements or usage justify it.
 |------|--------|---------------------------|
 | Production pipeline validation | Next | Sigmoid, RCD and inpaint opposed are implemented; judge detail, highlights and color on varied real photos before calling the pipeline production-ready. |
 | Editing UI/UX | Planned | Refine the workflow around the production pipeline. |
-| Explicit Wayland display encoding | Next | Replace the incorrect universal 203/80 gain. Investigate wgpu passthrough support and an application-owned image description; verify Mesa and NVIDIA with reference patches. |
+| Display portability and intent | Next | Verify reference white on NVIDIA, other compositors and Windows/macOS. Stock wgpu leaves rendering intent to the driver (perceptual on Mesa); revisit passthrough if strict relative colorimetry is required. |
 | SpyderX color verification | Planned | Measure display output and check the complete color path before release. |
 | Packaging and v0.1 | Planned | Follow processing, workflow and color verification. |
 | Static minimal LibRaw build | Planned | Vendor the needed decoder features for controlled builds. |

@@ -633,6 +633,7 @@ dependencies = [
  "egui_kittest",
  "env_logger",
  "half",
+ "lcms2",
  "log",
  "pollster 1.0.1",
  "rfd",

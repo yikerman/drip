@@ -29,3 +29,4 @@ workspace = true
 
 [dev-dependencies]
 egui_kittest = "0.36"
+lcms2 = "6.2"

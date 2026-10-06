@@ -151,23 +151,23 @@ This sequence takes priority over CLI expansion and speculative optimization.
   and writes make/model and an Exif IFD with capture settings and time. Edges
   keep provenance explicit rather than hiding it in image types. Orientation is
   omitted because exported pixels are unrotated; LibRaw's normalized make is used.
-- **Decided:** Let the compositor perform the display transform via scRGB.
-  Owning the surface is why we use winit + wgpu + egui directly. Manually tagging
-  a Rec.2020 surface relied on undocumented WSI behavior and saved no conversion.
-  Extended values must survive the preview path.
-- **Open (2026-10-05):** The unconditional 203/80 output gain is wrong on
-  Mesa 26.2.3/Wayland: its linear BT.709 description uses reference white at 1.0.
-  Windows-scRGB has different reference-white semantics [11]. The earlier
-  NVIDIA result does not establish a portable scaling rule.
-- **Tentative:** Use Vulkan `PASS_THROUGH_EXT` and own the Wayland image
-  description [11, 12]: linear Rec.2020, explicit black and reference white,
-  with white at pixel value 1.0. This leaves monitor transforms to the compositor
-  without driver-specific gain. wgpu 30 does not expose passthrough and needs
-  an extension. Select by advertised capabilities; unsupported systems need a
-  fallback policy. NVIDIA and other compositors still need live verification.
-- **Decided:** Fall back to sRGB with a visible warning when scRGB is unavailable.
-  egui's internal blending remains in gamma space. In-gamut screenshot checks
-  passed; actual wide-gamut output still needs instrument verification.
+- **Decided:** Composite egui and previews in an FP16 extended-sRGB canvas,
+  then decode to `ExtendedSrgbLinear` for presentation. Preserve negative and
+  above-one coordinates. Reference white is 1.0 on the verified Mesa/Wayland
+  path [11], without the former universal 203/80 gain. Other platform and driver
+  white conventions still need verification.
+- **Decided:** Use stock wgpu and leave surface descriptions to the driver.
+  Mesa requests perceptual intent; this limitation is accepted for now because
+  wgpu exposes no intent selector. Strict relative-colorimetric presentation
+  would require application-owned Wayland descriptions and Vulkan passthrough
+  [11, 12]. The isolated Rec.2020 PoC established feasibility, but no dependency
+  patch or direct color-management protocol integration is part of the app.
+- **Decided:** Fall back to sRGB with a visible warning when FP16 extended-linear
+  output is unavailable. The D65 matrix/shaper conversion is checked against
+  LittleCMS relative-colorimetric output. Format selection accounts for hardware
+  sRGB encoding to avoid applying the transfer twice. Encoded `ExtendedSrgb`
+  output is omitted: Intel/Mesa/KWin does not advertise it. Physical gamut
+  accuracy remains subject to instrument measurements.
 
 - **Decided:** Diagnostic scopes use a black plotting area and light labels,
   distinct from the image preview’s middle-grey surround.

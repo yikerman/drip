@@ -4,6 +4,28 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: display output cleanup
+
+- Removed the universal 203/80 gain and composite uniform buffer. The FP16
+  extended-sRGB canvas decodes to extended-linear output with white at 1.0.
+  sRGB fallback selects a supported format/color-space pair and handles both
+  encoded and hardware-sRGB targets.
+- Kept stock wgpu. Mesa's perceptual rendering intent is accepted for now.
+  The live Intel LNL/Mesa 26.2.3/KWin capability check rejected `ExtendedSrgb`,
+  so encoded output support was removed at the user's request.
+- GUI tests passed. An explicitly run Intel GPU test checks the actual preview
+  and composite shaders against an independently derived color matrix, including
+  negative/above-one coordinates. Both sRGB target formats agree with LittleCMS
+  relative-colorimetric RGB16 output within one 8-bit code value.
+- A live window using the updated display/preview modules rendered successfully.
+  Its 118-grey UI patch captured as 117, matching the explicitly tagged reference
+  instead of the previous 179. In-gamut image patches differed from that relative-
+  intent, zero-black reference by up to four codes; the descriptions differ in
+  intent and black level. Screenshots are not a physical colorimetric test.
+- GUI build, clippy with warnings denied, and formatting checks passed. Other
+  drivers/platforms remain unverified. Standalone presentation experiments stay
+  outside the repository.
+
 ## 2026-10-05: Wayland brightness diagnosis
 
 - Intel LNL/Mesa 26.2.3 presents FP16 extended-linear sRGB. A live Wayland trace

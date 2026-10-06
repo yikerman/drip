@@ -1,12 +1,7 @@
-// Copies the gamma-encoded canvas egui and the previews were drawn into onto
-// the swapchain. In scRGB mode, decodes the extended sRGB encoding (sign
-// preserving, so values outside [0, 1] survive) to linear and scales SDR
-// white to the compositor's reference white; otherwise clamps to sRGB.
-
-struct Params { mode: u32, white: f32 }
+// Decode the extended-sRGB canvas for linear output, with reference white
+// at 1.0. Negative and above-one coordinates preserve the preview's gamut.
 
 @group(0) @binding(0) var canvas: texture_2d<f32>;
-@group(0) @binding(1) var<uniform> params: Params;
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
@@ -22,10 +17,23 @@ fn decode(v: vec3<f32>) -> vec3<f32> {
 }
 
 @fragment
-fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let c = textureLoad(canvas, vec2<i32>(pos.xy), 0).rgb;
-    if params.mode == 0u {
-        return vec4<f32>(decode(c) * params.white, 1.0);
-    }
-    return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+fn linear(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    return vec4(decode(textureLoad(canvas, vec2<i32>(pos.xy), 0).rgb), 1.0);
+}
+
+// Rec.2020 -> BT.709 was applied by the preview shader. Both spaces use D65
+// and zero black, so the matrix/shaper relative-colorimetric sRGB conversion
+// ends with destination clipping. Tested against LittleCMS's RGB16 output.
+fn bounded(pos: vec4<f32>) -> vec3<f32> {
+    return clamp(textureLoad(canvas, vec2<i32>(pos.xy), 0).rgb, vec3(0.0), vec3(1.0));
+}
+
+@fragment
+fn srgb(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    return vec4(bounded(pos), 1.0);
+}
+
+@fragment
+fn srgb_linear(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    return vec4(decode(bounded(pos)), 1.0);
 }
