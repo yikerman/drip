@@ -100,7 +100,7 @@ pub(super) fn of(kind: &NodeKind) -> Option<&'static Documentation> {
             Documentation::new(
                 "Preview linear Rec.2020 without tone mapping.\n\n\
                  Softproof simulates the selected profile and intent.\n\
-                 Gamutcheck marks out-of-gamut colors in cyan.",
+                 Gamutcheck highlights possible gamut clipping in cyan.",
             )
             .result("view", "image preview"),
         ),

@@ -157,6 +157,10 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
   output; gamutcheck marks out-of-gamut colors in cyan. Both run on the worker
   and use the existing display path. Proof edits leave upstream processing cached.
 
+- **Decided:** Feed Lab to LittleCMS's gamut checker to improve sampling near
+  black. Its boundary remains approximate. Preview and export share parallel ICC
+  conversion through Rayon, with LittleCMS's mutable pixel cache disabled.
+
 - **Decided:** The canvas is the main workspace. Parameters and views can pop
   out into OS windows above the main window; the WM arranges them. No docking or
   persisted pop-out state. Scale canvas text with its layer to avoid atlas churn,

@@ -173,6 +173,8 @@ intent, or `gamutcheck` to mark out-of-gamut colors in cyan. Match the profile,
 intent and black-point compensation to Export. These modes affect only the
 preview and its pop-out.
 
+Gamutcheck is an approximate warning near the gamut boundary.
+
 Node bodies gain a thin border on hover. Wires thicken when targeted; their hit
 band stays narrow at every zoom level. Nodes, ports and controls take priority
 over wires. At a crossing, the nearest wire is highlighted and right-click removes

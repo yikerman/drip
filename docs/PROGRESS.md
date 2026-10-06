@@ -18,6 +18,24 @@ unimplemented work in [TODO](../TODO.md); older experiments remain in Git histor
   denied, formatting and diff checks passed. The GPU-only test remains ignored;
   live display fallback and native window failure paths were not exercised.
 
+## 2026-10-05: gamut-check sampling and parallel ICC conversion
+
+- Feed Lab into LittleCMS's native gamut checker to improve sampling near black.
+  Preview and export share parallel ICC conversion with the mutable pixel cache
+  disabled. Softproof retains its bounded device-RGB round trip.
+
+- On the Sony fixture at half detail (3984 × 2660, LittleCMS 2.16, 12 workers),
+  release gamutcheck fell from 2.8–3.0 s to 0.68–0.69 s; softproof fell from
+  3.5–3.6 s to 0.51–0.57 s. These exclude upstream processing and GUI presentation.
+  Cyan coverage fell from 24.7% to 3.9%. The native mask remains approximate near
+  the boundary; it does not test exact RGB coordinate bounds.
+
+- Validation: 137 workspace tests and three doctests passed. Preview tests also
+  passed with bundled LittleCMS 2.19, covering dark colors, round-trip agreement
+  away from the sampled boundary and identical output across worker counts.
+  Clippy with warnings denied, formatting and diff checks passed. The GPU-only
+  test remains ignored; live GUI behavior was not checked.
+
 ## 2026-10-05: documentation spacing
 
 - Added visible line breaks to node help and paragraph spacing to project docs.

@@ -5,6 +5,7 @@ use lcms2::{
     CIExyY, CIExyYTRIPLE, ColorSpaceSignature, Flags, Intent, Locale, MLU, PixelFormat, Profile,
     ProfileClassSignature, Tag, TagSignature, ToneCurve, Transform,
 };
+use rayon::prelude::*;
 
 use crate::color::{D65, P3, REC709, REC2020};
 use crate::node::KernelError;
@@ -66,24 +67,43 @@ impl Output {
     }
 
     /// Converts linear Rec.2020 to the selected device encoding.
-    pub fn convert<O: lcms2::Pod + Default>(
+    pub fn convert<O: lcms2::Pod + Default + Send>(
         &self,
         format: PixelFormat,
         pixels: &[[f32; 3]],
     ) -> Result<Vec<[O; 3]>, String> {
-        let transform = Transform::new_flags(
+        let transform = Transform::new_flags_context(
+            lcms2::GlobalContext::new(),
             &rec2020_linear(),
             PixelFormat::RGB_FLT,
             &self.profile,
             format,
             self.intent,
-            self.flags,
+            self.flags | Flags::NO_CACHE,
         )
         .map_err(|e| e.to_string())?;
-        let mut result = vec![[O::default(); 3]; pixels.len()];
-        transform.transform_pixels(pixels, &mut result);
-        Ok(result)
+        Ok(convert_pixels(pixels, |input, output| transform.transform_pixels(input, output)))
     }
+}
+
+// Bound per-job work while giving Rayon enough chunks to balance the workers.
+const PIXEL_CHUNK: usize = 16 * 1024;
+
+/// The caller supplies a Sync transform (LCMS requires NO_CACHE).
+pub(crate) fn convert_pixels<I: Sync, O: Default + Clone + Send>(
+    pixels: &[I],
+    convert: impl Fn(&[I], &mut [O]) + Sync,
+) -> Vec<O> {
+    let mut result = vec![O::default(); pixels.len()];
+    pixels
+        .par_chunks(PIXEL_CHUNK)
+        .zip(result.par_chunks_mut(PIXEL_CHUNK))
+        .for_each(|(input, output)| convert(input, output));
+    result
+}
+
+pub(crate) fn convert_in_place<T: Send>(pixels: &mut [T], convert: impl Fn(&mut [T]) + Sync) {
+    pixels.par_chunks_mut(PIXEL_CHUNK).for_each(&convert);
 }
 
 /// Constructs the built-in profile selected by the output parameter schema.

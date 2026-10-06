@@ -128,3 +128,16 @@ Wayland color management without conflicting with WSI surface ownership.
 [13] Yi Cao, “Expose Vulkan passthrough for application-managed Wayland color
 descriptions,” gfx-rs/wgpu issue #10545, Oct. 2026. [Online]. Available:
 https://github.com/gfx-rs/wgpu/issues/10545.
+
+[14] darktable developers, “Output color profile,” `src/iop/colorout.c`.
+[Online]. Available:
+https://github.com/darktable-org/darktable/blob/master/src/iop/colorout.c.
+Accessed Oct. 5, 2026. Reference for Lab-input proofing and parallel LittleCMS
+conversion; no implementation copied. Drip retains its bounded RGB round trip
+for softproof instead of modifying the target profile's tone curves.
+
+[15] M. Maria Saguer and Little CMS contributors, “GamutSampler,”
+`src/cmsgmt.c`, Little CMS 2.16. [Online]. Available:
+https://github.com/mm2/Little-CMS/blob/lcms2.16/src/cmsgmt.c.
+Round-trip criterion used to validate gamut warnings; MIT
+[license](https://github.com/mm2/Little-CMS/blob/lcms2.16/COPYING).
