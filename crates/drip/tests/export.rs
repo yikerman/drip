@@ -7,14 +7,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use drip::color::{self, D65, P3, REC2020};
-use drip::eval::{NodeError, run_action};
+use drip::eval::{Evaluator, NodeError, run_action};
 use drip::graph::{NodeId, Port};
 use drip::image::Rgb;
 use drip::node::{Evaluated, NodeKind};
 use drip::nodes;
 use drip::profile;
 use drip::project::Project;
-use lcms2::{CIExyY, InfoType, Locale, Profile, ToneCurve};
+use drip::view::View;
+use lcms2::{CIExyY, InfoType, Intent, Locale, PixelFormat, Profile, ToneCurve, Transform};
 use serde_json::json;
 use tiff::decoder::ifd::Value;
 use tiff::decoder::{Decoder, DecodingResult};
@@ -206,6 +207,67 @@ fn unusable_profiles_are_rejected() {
     assert!(message.contains("not an ICC profile"), "{message}");
     assert_eq!(failure(json!({ "profile": "file" })), "no output profile file chosen");
     assert!(!out.exists(), "nothing written on failure");
+}
+
+#[test]
+fn softproof_matches_bounded_export_and_only_recomputes_the_preview() {
+    let scratch = Scratch::new("proof");
+    let custom = scratch.profile("linear.icc", &profile::rec2020_linear());
+    let path = scratch.0.join("proof.tif");
+    let mut project = Project::default();
+    let source = project.graph.add_node(&DISPLAY);
+    let preview = project.graph.add_node(&nodes::PREVIEW);
+    let tiff = project.graph.add_node(&nodes::TIFF);
+    for node in [preview, tiff] {
+        project.graph.connect(Port(source, "image".into()), Port(node, "image".into())).unwrap();
+    }
+    set(&mut project, tiff, json!({ "path": path }));
+    let mut evaluator = Evaluator::default();
+    evaluator.evaluate(&project.graph, 0, &[preview]);
+    set(&mut project, preview, json!({ "mode": "softproof" }));
+
+    for target in ["srgb", "display_p3", "rec2020", "file"] {
+        for intent in ["perceptual", "relative", "saturation", "absolute"] {
+            for bpc in [false, true] {
+                for node in [preview, tiff] {
+                    set(
+                        &mut project,
+                        node,
+                        json!({
+                            "profile": target, "profile_file": custom,
+                            "intent": intent, "black_point_compensation": bpc,
+                        }),
+                    );
+                }
+                assert_eq!(evaluator.evaluate(&project.graph, 0, &[preview]), [preview]);
+                let result = evaluator.result(preview).unwrap().as_ref().unwrap();
+                let Some(View::Image(shown)) = &result.view else { panic!("image") };
+
+                run_action(&project.graph, tiff, "export").unwrap();
+                let (data, icc, _) = read(&path);
+                let DecodingResult::U16(data) = data else { panic!("16-bit export") };
+                let encoded = data.as_chunks::<3>().0;
+                let display = Transform::new(
+                    &Profile::new_icc(&icc).unwrap(),
+                    PixelFormat::RGB_16,
+                    &profile::rec2020_linear(),
+                    PixelFormat::RGB_FLT,
+                    Intent::RelativeColorimetric,
+                )
+                .unwrap();
+                let mut expected = vec![[0.0f32; 3]; encoded.len()];
+                display.transform_pixels(encoded, &mut expected);
+                for (&got, &want) in
+                    shown.rgb().pixels.as_flattened().iter().zip(expected.as_flattened())
+                {
+                    assert!(
+                        (got - want).abs() < 0.0002,
+                        "{target}, {intent}, BPC {bpc}: {got} vs {want}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]

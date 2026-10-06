@@ -1,11 +1,89 @@
-//! Built-in ICC output profiles, so the common cases need no
-//! profile file. Each is a matrix/shaper profile on D65 primaries.
+//! ICC output configuration shared by export and preview proofing.
+//! Built-in profiles are matrix/shaper profiles on D65 primaries.
 
-use lcms2::{CIExyY, CIExyYTRIPLE, Locale, MLU, Profile, Tag, TagSignature, ToneCurve};
+use lcms2::{
+    CIExyY, CIExyYTRIPLE, ColorSpaceSignature, Flags, Intent, Locale, MLU, PixelFormat, Profile,
+    ProfileClassSignature, Tag, TagSignature, ToneCurve, Transform,
+};
 
 use crate::color::{D65, P3, REC709, REC2020};
+use crate::param::{ParamKind, ParamSpec, Params};
 
-/// Constructs the built-in profile selected by the export parameter schema.
+pub(crate) const PROFILE: ParamSpec = ParamSpec::new(
+    "profile",
+    ParamKind::Choice { options: &["srgb", "display_p3", "rec2020", "file"], default: "srgb" },
+);
+pub(crate) const PROFILE_FILE: ParamSpec =
+    ParamSpec::new("profile_file", ParamKind::Path { output: false });
+pub(crate) const INTENT: ParamSpec = ParamSpec::new(
+    "intent",
+    ParamKind::Choice {
+        options: &["perceptual", "relative", "saturation", "absolute"],
+        default: "relative",
+    },
+);
+pub(crate) const BLACK_POINT_COMPENSATION: ParamSpec =
+    ParamSpec::new("black_point_compensation", ParamKind::Bool { default: true });
+
+/// Loaded output settings, retaining the original ICC bytes for embedding.
+pub(crate) struct Output {
+    pub profile: Profile,
+    pub icc: Vec<u8>,
+    pub intent: Intent,
+    pub flags: Flags,
+}
+
+impl Output {
+    pub fn load(p: Params<'_>) -> Result<Self, String> {
+        let (profile, icc) = match p.choice("profile") {
+            "file" => {
+                let file = p.path("profile_file").ok_or("no output profile file chosen")?;
+                let in_file = |e| format!("{}: {e}", file.display());
+                let icc = std::fs::read(file).map_err(|e| in_file(e.to_string()))?;
+                (output_profile(&icc).map_err(in_file)?, icc)
+            }
+            name => {
+                let profile = built_in(name);
+                let icc = profile.icc().map_err(|e| e.to_string())?;
+                (profile, icc)
+            }
+        };
+        let intent = match p.choice("intent") {
+            "perceptual" => Intent::Perceptual,
+            "relative" => Intent::RelativeColorimetric,
+            "saturation" => Intent::Saturation,
+            _ => Intent::AbsoluteColorimetric,
+        };
+        let flags = if p.bool("black_point_compensation") {
+            Flags::BLACKPOINT_COMPENSATION
+        } else {
+            Flags::default()
+        };
+        Ok(Self { profile, icc, intent, flags })
+    }
+
+    /// Converts linear Rec.2020 to the selected device encoding.
+    pub fn convert<O: lcms2::Pod + Default>(
+        &self,
+        format: PixelFormat,
+        pixels: &[[f32; 3]],
+    ) -> Result<Vec<[O; 3]>, String> {
+        let transform = Transform::new_flags(
+            &rec2020_linear(),
+            PixelFormat::RGB_FLT,
+            &self.profile,
+            format,
+            self.intent,
+            self.flags,
+        )
+        .map_err(|e| e.to_string())?;
+        let mut result = vec![[O::default(); 3]; pixels.len()];
+        transform.transform_pixels(pixels, &mut result);
+        Ok(result)
+    }
+}
+
+/// Constructs the built-in profile selected by the output parameter schema.
 pub fn built_in(name: &str) -> Profile {
     match name {
         "srgb" => rgb("sRGB", REC709, srgb_curve()),
@@ -53,4 +131,20 @@ fn rgb(description: &str, primaries: [[f64; 2]; 3], curve: ToneCurve) -> Profile
     text.set_text(description, Locale::none());
     profile.write_tag(TagSignature::ProfileDescriptionTag, Tag::MLU(&text));
     profile
+}
+
+/// Parses an output profile, accepting only RGB profiles that can be a
+/// destination: display, output and color space classes.
+fn output_profile(icc: &[u8]) -> Result<Profile, String> {
+    let profile = Profile::new_icc(icc).map_err(|e| format!("not an ICC profile ({e})"))?;
+    let class = profile.device_class();
+    let usable = [
+        ProfileClassSignature::DisplayClass,
+        ProfileClassSignature::OutputClass,
+        ProfileClassSignature::ColorSpaceClass,
+    ];
+    if profile.color_space() != ColorSpaceSignature::RgbData || !usable.contains(&class) {
+        return Err(format!("not an RGB output profile ({:?}, {class:?})", profile.color_space()));
+    }
+    Ok(profile)
 }

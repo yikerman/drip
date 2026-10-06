@@ -4,9 +4,7 @@ use std::borrow::Cow;
 use std::io::{Cursor, Seek, Write};
 use std::path::Path;
 
-use lcms2::{
-    ColorSpaceSignature, Flags, Intent, PixelFormat, Profile, ProfileClassSignature, Transform,
-};
+use lcms2::PixelFormat;
 use tiff::encoder::colortype::{ColorType, RGB16, RGB32Float};
 use tiff::encoder::compression::DeflateLevel;
 use tiff::encoder::{Compression, DirectoryEncoder, Rational, TiffEncoder, TiffKind, TiffValue};
@@ -18,21 +16,16 @@ use crate::param::{ParamKind, ParamSpec, Params};
 use crate::ports::{Optional, Read};
 use crate::profile;
 
-const INTENTS: &[&str] = &["perceptual", "relative", "saturation", "absolute"];
-
-/// The built-in profiles, or `file` for `profile_file`.
-const PROFILES: &[&str] = &["srgb", "display_p3", "rec2020", "file"];
-
 pub static TIFF: NodeKind = NodeKind::new::<TiffExport>(
     "export.tiff",
     "export",
     "Export",
     &[
         ParamSpec::new("path", ParamKind::Path { output: true }).external(),
-        ParamSpec::new("profile", ParamKind::Choice { options: PROFILES, default: "srgb" }),
-        ParamSpec::new("profile_file", ParamKind::Path { output: false }),
-        ParamSpec::new("intent", ParamKind::Choice { options: INTENTS, default: "relative" }),
-        ParamSpec::new("black_point_compensation", ParamKind::Bool { default: true }),
+        profile::PROFILE,
+        profile::PROFILE_FILE,
+        profile::INTENT,
+        profile::BLACK_POINT_COMPENSATION,
         ParamSpec::new("depth", ParamKind::Choice { options: &["u16", "f32"], default: "u16" }),
         ParamSpec::new(
             "compression",
@@ -67,30 +60,7 @@ fn export(
 ) -> Result<(), String> {
     let path = p.path("path").ok_or("no output file chosen")?;
     let in_file = |e: &dyn std::fmt::Display, path: &Path| format!("{}: {e}", path.display());
-    let (output, icc) = match p.choice("profile") {
-        "file" => {
-            let file = p.path("profile_file").ok_or("no output profile file chosen")?;
-            let icc = std::fs::read(file).map_err(|e| in_file(&e, file))?;
-            (output_profile(&icc).map_err(|e| in_file(&e, file))?, icc)
-        }
-        name => {
-            let built_in = profile::built_in(name);
-            let icc = built_in.icc().map_err(|e| e.to_string())?;
-            (built_in, icc)
-        }
-    };
-
-    let intent = match p.choice("intent") {
-        "perceptual" => Intent::Perceptual,
-        "relative" => Intent::RelativeColorimetric,
-        "saturation" => Intent::Saturation,
-        _ => Intent::AbsoluteColorimetric,
-    };
-    let flags = if p.bool("black_point_compensation") {
-        Flags::BLACKPOINT_COMPENSATION
-    } else {
-        Flags::default()
-    };
+    let output = profile::Output::load(p)?;
     let compression = match (p.choice("compression"), p.choice("deflate_level")) {
         ("none", _) => Compression::Uncompressed,
         (_, "fast") => Compression::Deflate(DeflateLevel::Fast),
@@ -98,14 +68,6 @@ fn export(
         _ => Compression::Deflate(DeflateLevel::Best),
     };
     let image = input.rgb();
-    let convert = |format| Conversion {
-        source: profile::rec2020_linear(),
-        output: &output,
-        format,
-        intent,
-        flags,
-        image,
-    };
     // Encoded in memory and written at once, so every I/O error is reported
     // and a failed encoding leaves no partial file.
     let write = |encode: &dyn Fn(&mut Tiff) -> tiff::TiffResult<()>| {
@@ -118,40 +80,16 @@ fn export(
     match p.choice("depth") {
         "u16" => {
             // LittleCMS saturates out-of-range values when encoding to 16 bit.
-            let pixels: Vec<[u16; 3]> = convert(PixelFormat::RGB_16).run()?;
-            write(&|tiff| write_image::<RGB16>(tiff, image, &icc, metadata, pixels.as_flattened()))
+            let pixels: Vec<[u16; 3]> = output.convert(PixelFormat::RGB_16, &image.pixels)?;
+            write(&|tiff| {
+                write_image::<RGB16>(tiff, image, &output.icc, metadata, pixels.as_flattened())
+            })
         }
         _ => {
-            let pixels: Vec<[f32; 3]> = convert(PixelFormat::RGB_FLT).run()?;
+            let pixels: Vec<[f32; 3]> = output.convert(PixelFormat::RGB_FLT, &image.pixels)?;
             let data = pixels.as_flattened();
-            write(&|tiff| write_image::<RGB32Float>(tiff, image, &icc, metadata, data))
+            write(&|tiff| write_image::<RGB32Float>(tiff, image, &output.icc, metadata, data))
         }
-    }
-}
-
-struct Conversion<'a> {
-    source: Profile,
-    output: &'a Profile,
-    format: PixelFormat,
-    intent: Intent,
-    flags: Flags,
-    image: &'a Rgb,
-}
-
-impl Conversion<'_> {
-    fn run<O: lcms2::Pod + Default>(&self) -> Result<Vec<[O; 3]>, String> {
-        let t = Transform::new_flags(
-            &self.source,
-            PixelFormat::RGB_FLT,
-            self.output,
-            self.format,
-            self.intent,
-            self.flags,
-        )
-        .map_err(|e| e.to_string())?;
-        let mut pixels = vec![[O::default(); 3]; self.image.pixels.len()];
-        t.transform_pixels(&self.image.pixels, &mut pixels);
-        Ok(pixels)
     }
 }
 
@@ -247,20 +185,4 @@ impl TiffValue for Undefined<'_> {
     fn data(&self) -> Cow<'_, [u8]> {
         Cow::Borrowed(self.0)
     }
-}
-
-/// Parses an output profile, accepting only RGB profiles that can be a
-/// destination: display, output and color space classes.
-fn output_profile(icc: &[u8]) -> Result<Profile, String> {
-    let profile = Profile::new_icc(icc).map_err(|e| format!("not an ICC profile ({e})"))?;
-    let class = profile.device_class();
-    let usable = [
-        ProfileClassSignature::DisplayClass,
-        ProfileClassSignature::OutputClass,
-        ProfileClassSignature::ColorSpaceClass,
-    ];
-    if profile.color_space() != ColorSpaceSignature::RgbData || !usable.contains(&class) {
-        return Err(format!("not an RGB output profile ({:?}, {class:?})", profile.color_space()));
-    }
-    Ok(profile)
 }

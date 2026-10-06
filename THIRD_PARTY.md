@@ -25,7 +25,7 @@ here when introduced.
 | Project and credit | Use | License |
 |--------------------|-----|---------|
 | [LibRaw LLC and contributors](https://www.libraw.org/) | RAW decoding through Drip's C shim | LGPL-2.1 OR CDDL-1.0 |
-| [Marti Maria and Little CMS contributors](https://github.com/mm2/Little-CMS) | ICC color transforms | MIT |
+| [Marti Maria and Little CMS contributors](https://github.com/mm2/Little-CMS) | ICC export, preview softproofing and gamut classification | MIT |
 | [Kornel Lesiński and rust-lcms2 contributors](https://github.com/kornelski/rust-lcms2) (`lcms2`, `lcms2-sys`) | Rust Little CMS bindings | MIT |
 | [Rayon contributors](https://github.com/rayon-rs/rayon) | CPU parallelism | MIT OR Apache-2.0 |
 | [image-rs contributors](https://github.com/image-rs/image-tiff) (`tiff`) | TIFF encoding | MIT |

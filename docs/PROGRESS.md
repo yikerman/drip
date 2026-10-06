@@ -3,6 +3,15 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-05: preview proofing
+
+- Added normal, softproof and cyan gamut-warning modes to Preview, sharing
+  profile settings and conversion with Export. The display renderer is unchanged.
+- Older saved Preview nodes need the new parameters under the strict file policy.
+- Validation: 130 workspace tests, three doctests, clippy and formatting passed;
+  one GPU test remains ignored. Proofing tests passed with LittleCMS 2.16 and
+  2.19, including agreement with bounded TIFF export. Live appearance is untested.
+
 ## 2026-10-05: categorized node selection
 
 - Split node-kind metadata into stable type ID, internal category and default

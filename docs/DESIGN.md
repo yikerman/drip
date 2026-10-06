@@ -130,6 +130,10 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
   [kernels](../crates/drip/src/nodes/scopes/density.rs) and
   [drawing](../crates/drip-gui/src/render/node_views.rs) define the coordinates
   and annotation colors. Scopes use black; image previews use middle grey.
+- **Decided:** Preview offers normal, softproof and gamutcheck modes, sharing
+  profile settings and ICC conversion with export. Softproof simulates bounded
+  output; gamutcheck marks out-of-gamut colors in cyan. Both run on the worker
+  and use the existing display path. Proof edits leave upstream processing cached.
 - **Decided:** The canvas is the main workspace. Parameters and views can pop
   out into OS windows above the main window; the WM arranges them. No docking or
   persisted pop-out state. Scale canvas text with its layer to avoid atlas churn,

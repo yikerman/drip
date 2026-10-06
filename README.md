@@ -165,6 +165,11 @@ Right-click a slider, checkbox, dropdown or filename and choose **Reset to defau
 to restore its node-defined default (or clear a path). These gestures also work
 in pop-outs and template inputs. The parameter name's menu also offers reset.
 
+In **Preview**, choose `none`, `softproof` to simulate the selected profile and
+intent, or `gamutcheck` to mark out-of-gamut colors in cyan. Match the profile,
+intent and black-point compensation to Export. These modes affect only the
+preview and its pop-out.
+
 Node bodies gain a thin border on hover. Wires thicken when targeted; their hit
 band stays narrow at every zoom level. Nodes, ports and controls take priority
 over wires. At a crossing, the nearest wire is highlighted and right-click removes

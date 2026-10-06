@@ -29,7 +29,6 @@ robustness and performance when usage or measurements justify it.
 | Camera color / other CFAs | Deferred | Calibration beyond matrix/as-shot WB; X-Trans and other non-Bayer inputs. |
 | Full EXIF passthrough | Deferred | Lens, GPS, orientation, time zone and maker notes. |
 | HDR / Windows SDR white | Deferred | Define headroom and metadata; track desktop SDR white on HDR displays. |
-| Soft-proofing | Deferred | Preview the intended output medium. |
 | Windows/macOS pop-outs | Deferred | Parenting and a pin control where the WM provides none. |
 | Cross-window pacing / occlusion | Deferred | Revisit hidden-window Fifo stalls if they matter in use. |
 | Undo/redo | Deferred | Not needed for current prototype use. |
