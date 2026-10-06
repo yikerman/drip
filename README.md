@@ -134,6 +134,7 @@ cargo run --release -p drip-gui
 Choose a RAW file under **inputs** to start editing. Select a node to adjust it,
 or use its gear button to open the controls in a separate window. The pop-out
 button on previews and scopes opens their views separately.
+
 The inspector describes the selected node's operation, assumptions and input/output types.
 
 Canvas gestures separate **navigation on the left button** from **modification
@@ -155,12 +156,14 @@ capitalized default name; **Rename** edits that node's name.
 Scroll to zoom around the pointer. A port's navigation menu lists connected
 `node · port` entries; choose one to select that node and bring it into view.
 Opening the menu preserves selection. Hover over a port to see its type.
+
 Buttons, menu items and parameter controls use ordinary left-click operation;
 drag a view's corner handle to resize it.
 
 In parameter panels, scroll over a slider to adjust it: up increases, down
 decreases. Each scroll line changes a floating-point value by 1% of its range,
 or an integer by one. The panel stays still while scrolling over a slider.
+
 Right-click a slider, checkbox, dropdown or filename and choose **Reset to default**
 to restore its node-defined default (or clear a path). These gestures also work
 in pop-outs and template inputs. The parameter name's menu also offers reset.
@@ -177,13 +180,18 @@ only that connection.
 
 To connect nodes, right-click a port, move to a compatible port in the opposite
 direction, then right-click again. You can start at either an input or an output.
+
 An input keeps its current source until a valid replacement is committed; an
 output can feed multiple inputs. Invalid targets leave the connection pending
-and report the reason. **Escape** or **right-click on empty canvas** cancels the
+and report the reason.
+
+**Escape** or **right-click on empty canvas** cancels the
 temporary wire without changing existing connections or opening the Add node menu.
 
 Set an output path and press **export** in the export node's panel when you're
-ready. Save your work as a `.drip` project, or use **Save template** to reuse the
+ready.
+
+Save your work as a `.drip` project, or use **Save template** to reuse the
 pipeline. Right-click a parameter name to make it a template input.
 
 You can also open a saved project from the command line:

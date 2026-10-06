@@ -1,7 +1,9 @@
 # Third-party credits
 
 Drip is AGPL-3.0-or-later. We thank the authors and contributors of the projects
-below. Dependency versions are recorded in `Cargo.lock`; native library versions
+below.
+
+Dependency versions are recorded in `Cargo.lock`; native library versions
 come from the build environment. This lists direct dependencies and major native
 components, rather than duplicating the full transitive dependency tree.
 
@@ -47,6 +49,7 @@ a `PassThrough` addition to v30.0.1 (`40f4a34e`) for egui-wgpu 0.36 compatibilit
 [13]. The fork retains wgpu's MIT OR Apache-2.0 licensing
 ([MIT](https://github.com/yikerman/wgpu/blob/e74560774b6029e893dab73961c2dbc57797cd78/LICENSE.MIT),
 [Apache-2.0](https://github.com/yikerman/wgpu/blob/e74560774b6029e893dab73961c2dbc57797cd78/LICENSE.APACHE)).
+
 Remove the workspace `[patch.crates-io]` override when upgrading to a compatible
 release with passthrough support.
 
@@ -83,7 +86,6 @@ BT.709/sRGB primaries.
 
 [5] SMPTE, “D-Cinema quality – Reference projector and environment,”
 SMPTE RP 431-2:2011, 2011. P3 primaries; Drip uses D65 for Display P3.
-
 
 [6] CIE, “CIE 1976 uniform-chromaticity-scale diagram,” *International Lighting
 Vocabulary*, term 17-23-073. [Online]. Available:

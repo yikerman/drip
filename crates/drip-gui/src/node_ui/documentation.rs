@@ -31,22 +31,24 @@ pub(super) fn of(kind: &NodeKind) -> Option<&'static Documentation> {
         (
             &nodes::READ,
             Documentation::new(
-                "Decode a Bayer RAW, subtract its black levels and normalize using sensor saturation. \
+                "Decode a Bayer RAW, subtract its black levels and normalize using sensor saturation.\n\n\
                  Camera characterization and as-shot white balance remain attached to the mosaic.",
             ),
         ),
         (
             &nodes::WHITE_BALANCE,
             Documentation::new(
-                "Multiply Bayer samples by the as-shot gains relative to the first green channel. \
+                "Multiply Bayer samples by the as-shot gains relative to the first green channel.\n\n\
                  Apply once before highlight reconstruction.",
             ),
         ),
         (
             &nodes::HIGHLIGHTS,
             Documentation::new(
-                "Reconstruct clipped Bayer samples with inpaint opposed. Assumes white-balanced input. \
-                 Threshold is a fraction of each channel's saturation level. Runs before preview reduction.",
+                "Reconstruct clipped Bayer samples with inpaint opposed.\n\n\
+                 Assumes white-balanced input.\n\
+                 Threshold is a fraction of each channel's saturation level.\n\
+                 Runs before preview reduction.",
             )
             .reference(
                 "darktable: inpaint opposed",
@@ -56,7 +58,7 @@ pub(super) fn of(kind: &NodeKind) -> Option<&'static Documentation> {
         (
             &nodes::RCD,
             Documentation::new(
-                "Bayer demosaicing with Ratio Corrected Demosaicing (RCD) and a bilinear border. \
+                "Bayer demosaicing with Ratio Corrected Demosaicing (RCD) and a bilinear border.\n\n\
                  Preview reduction precedes interpolation.",
             )
             .reference("RCD algorithm", "https://github.com/LuisSR/RCD-Demosaicing"),
@@ -64,14 +66,14 @@ pub(super) fn of(kind: &NodeKind) -> Option<&'static Documentation> {
         (
             &nodes::BIN_2X2,
             Documentation::new(
-                "Average each 2 × 2 Bayer cell into one RGB pixel, combining its two greens. \
+                "Average each 2 × 2 Bayer cell into one RGB pixel, combining its two greens.\n\n\
                  Output width and height are halved after preview reduction.",
             ),
         ),
         (
             &nodes::CAMERA_TO_REC2020,
             Documentation::new(
-                "Transform white-balanced camera RGB to Rec.2020/D65 using the camera matrix. \
+                "Transform white-balanced camera RGB to Rec.2020/D65 using the camera matrix.\n\n\
                  Neutral camera RGB (1, 1, 1) maps to neutral output.",
             ),
         ),
@@ -84,8 +86,9 @@ pub(super) fn of(kind: &NodeKind) -> Option<&'static Documentation> {
         (
             &nodes::SIGMOID,
             Documentation::new(
-                "Map scene values to display values with a smooth S-curve. \
-                 Assumes middle grey at 0.18 and keeps it fixed. Black is 0 and the curve approaches white at 1.",
+                "Map scene values to display values with a smooth S-curve.\n\n\
+                 Assumes middle grey at 0.18 and keeps it fixed.\n\
+                 Black is 0 and the curve approaches white at 1.",
             )
             .reference(
                 "darktable: sigmoid",
@@ -104,15 +107,17 @@ pub(super) fn of(kind: &NodeKind) -> Option<&'static Documentation> {
         (
             &nodes::HISTOGRAM,
             Documentation::new(
-                "Count each channel in log2(x) bins, with 0 EV at x = 1. \
-                 Out-of-range values accumulate in the end bins. Scale selects linear or logarithmic count display.",
+                "Count each channel in log2(x) bins, with 0 EV at x = 1.\n\n\
+                 Out-of-range values accumulate in the end bins.\n\
+                 Scale selects linear or logarithmic count display.",
             )
             .result("view", "channel histogram"),
         ),
         (
             &nodes::WAVEFORM,
             Documentation::new(
-                "Plot channel values by image column. Levels are log2(x), with 0 EV at x = 1. \
+                "Plot channel values by image column.\n\n\
+                 Levels are log2(x), with 0 EV at x = 1.\n\
                  Brightness indicates sample count.",
             )
             .result("view", "channel waveform"),
@@ -120,8 +125,10 @@ pub(super) fn of(kind: &NodeKind) -> Option<&'static Documentation> {
         (
             &nodes::VECTORSCOPE,
             Documentation::new(
-                "Plot CIE u'v' chromaticity relative to D65. Markers show the input color space's primaries. \
-                 Black is omitted. Negative channels are clipped for this view only.",
+                "Plot CIE u'v' chromaticity relative to D65.\n\n\
+                 Markers show the input color space's primaries.\n\
+                 Black is omitted.\n\
+                 Negative channels are clipped for this view only.",
             )
             .result("view", "chromaticity scope")
             .reference("CIE: u'v' chromaticity", "https://cie.co.at/eilvterm/17-23-073"),
@@ -129,7 +136,7 @@ pub(super) fn of(kind: &NodeKind) -> Option<&'static Documentation> {
         (
             &nodes::TIFF,
             Documentation::new(
-                "Export at full detail through the selected RGB ICC profile, including its transfer encoding. \
+                "Export at full detail through the selected RGB ICC profile, including its transfer encoding.\n\n\
                  RAW metadata, if any, is also copied.",
             )
             .result("writes", "TIFF file"),
