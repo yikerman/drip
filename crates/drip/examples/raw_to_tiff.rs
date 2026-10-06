@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut p = templates::raw_to_tiff();
     let (read, export) =
-        (p.graph.find("raw").expect("in the template"), p.graph.find("export").expect("too"));
+        (p.graph.find("RAW").expect("in the template"), p.graph.find("Export").expect("too"));
     let profile_kind = nodes::TIFF.param("profile").expect("export profile schema").kind;
     // The schema's custom-profile selector is an ICC path when passed as an argument.
     match profile.to_str().filter(|name| *name != "file" && profile_kind.accepts(&json!(name))) {

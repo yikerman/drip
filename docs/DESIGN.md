@@ -74,6 +74,15 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
 
 ## Presentation and editing
 
+- **Decided:** Node kinds declare a stable `id`, an internal `category` key and
+  a capitalized default `name`. Each graph node owns its editable name, changed
+  through the existing Rename action or inspector field. Serialized type IDs and
+  the file's `label` field retain their existing meaning and values.
+- **Decided:** The canvas Add node menu groups kinds by category and sorts by
+  category, name and ID. Internal category keys are shown directly. Selection
+  returns a kind to the editor, which owns the graph edit; no separate catalog
+  state is stored. Parent menus and submenus inherit one shared theme style.
+  A dedicated node picker remains deferred.
 - **Decided:** Parameter controls share conventional gestures in the inspector,
   pop-outs and template inputs. Scrolling a slider changes a float by 1% of its
   range per line, or an integer by one, and consumes the panel's scroll input.

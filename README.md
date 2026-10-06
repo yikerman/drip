@@ -148,6 +148,10 @@ Moving a node changes its layout, so it uses the right button too.
 | Output port | Show destinations menu | Pan canvas | Start or complete a connection | No action |
 | Wire | Clear selection | Pan canvas | Disconnect highlighted wire | No action |
 
+The Add node menu groups kinds by category, with categories and node names sorted
+alphabetically. Choose, for example, **color → Exposure**. New nodes use the
+capitalized default name; **Rename** edits that node's name.
+
 Scroll to zoom around the pointer. A port's navigation menu lists connected
 `node · port` entries; choose one to select that node and bring it into view.
 Opening the menu preserves selection. Hover over a port to see its type.

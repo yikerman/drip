@@ -314,6 +314,7 @@ mod tests {
         static CALLS: Mutex<Vec<f32>> = Mutex::new(Vec::new());
         static SOURCE: NodeKind = NodeKind::new::<SourceKernel>(
             "test.blocking",
+            "test",
             "blocking",
             &[
                 ParamSpec::new("value", ParamKind::Float { min: 0.0, max: 10.0, default: 1.0 }),
@@ -417,6 +418,7 @@ mod tests {
     fn exports_follow_invalidation_order_and_always_use_full_detail() {
         static FILE: NodeKind = NodeKind::new::<FileKernel>(
             "test.file",
+            "test",
             "file",
             &[ParamSpec::new("path", ParamKind::Path { output: false })],
             &[],
@@ -441,6 +443,7 @@ mod tests {
 
         static WRITE: NodeKind = NodeKind::new::<WriteKernel>(
             "test.write",
+            "test",
             "write",
             &[ParamSpec::new("path", ParamKind::Path { output: true })],
             &["image"],
@@ -516,7 +519,8 @@ mod tests {
 
     #[test]
     fn panic_wakes_the_ui_and_ends_the_busy_state() {
-        static PANIC: NodeKind = NodeKind::new::<PanicKernel>("test.panic", "panic", &[], &[], &[]);
+        static PANIC: NodeKind =
+            NodeKind::new::<PanicKernel>("test.panic", "test", "panic", &[], &[], &[]);
         struct PanicKernel;
         impl NodeKernel for PanicKernel {
             type Inputs = ();

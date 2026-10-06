@@ -3,6 +3,22 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-05: categorized node selection
+
+- Split node-kind metadata into stable type ID, internal category and default
+  display name. Built-in names are capitalized; graph instances keep their
+  editable names through the existing Rename/inspector path. Project files keep
+  their type IDs and serialized labels, including custom names.
+- Extracted the Add node selector into a small module that groups and sorts
+  categories and names, returning the chosen kind to the editor. Menu styling
+  now uses one inherited style function for both parent menus and submenus.
+- Updated README and tracked the future dedicated picker in TODO.
+- Validation: 124 workspace tests and three compile-fail doctests passed; the
+  GPU-only test remained ignored. Checks include menu order/selection, renaming
+  without changing type metadata, and serialized custom-name round trips.
+  Workspace clippy with warnings denied, formatting and diff checks passed.
+  Appearance has not been checked in the running GUI.
+
 ## 2026-10-05: parameter control gestures
 
 - Added wheel adjustment to the shared parameter sliders, consuming panel scroll

@@ -11,8 +11,14 @@ mod rcd;
 
 pub use bin2x2::BIN_2X2;
 
-pub static RCD: NodeKind =
-    NodeKind::new::<RcdDemosaic>("demosaic.rcd", "demosaic", &[], &["mosaic"], &["image"]);
+pub static RCD: NodeKind = NodeKind::new::<RcdDemosaic>(
+    "demosaic.rcd",
+    "demosaic",
+    "Demosaic",
+    &[],
+    &["mosaic"],
+    &["image"],
+);
 
 struct RcdDemosaic;
 impl NodeKernel for RcdDemosaic {

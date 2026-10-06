@@ -81,15 +81,18 @@ fn set_param_validates_against_the_schema() {
 }
 
 #[test]
-fn labels_are_unique() {
+fn names_are_unique() {
     let mut g = Graph::default();
     let (a, b) = (g.add_node(&CONST), g.add_node(&CONST));
-    assert_eq!(g.node(a).unwrap().label, "const");
-    assert_eq!(g.node(b).unwrap().label, "const 2");
-    assert_eq!(g.set_label(b, "const"), Err(GraphError::InvalidLabel("const".into())));
-    assert_eq!(g.set_label(b, ""), Err(GraphError::InvalidLabel("".into())));
-    g.set_label(b, "exposure").unwrap();
+    assert_eq!(g.node(a).unwrap().name, "const");
+    assert_eq!(g.node(b).unwrap().name, "const 2");
+    assert_eq!(g.set_name(b, "const"), Err(GraphError::InvalidName("const".into())));
+    assert_eq!(g.set_name(b, ""), Err(GraphError::InvalidName("".into())));
+    g.set_name(b, "exposure").unwrap();
     assert_eq!(g.find("exposure"), Some(b));
+    assert_eq!(g.node(b).unwrap().kind.id, "test.const");
+    assert_eq!(g.node(b).unwrap().kind.category, "test");
+    assert_eq!(g.node(b).unwrap().kind.name, "const");
 }
 
 #[test]

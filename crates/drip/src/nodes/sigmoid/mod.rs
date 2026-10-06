@@ -11,7 +11,8 @@ pub use algorithm::{GREY, Sigmoid};
 
 pub static SIGMOID: NodeKind = NodeKind::new::<SigmoidNode>(
     "tone.sigmoid",
-    "sigmoid",
+    "tone",
+    "Sigmoid",
     &[
         ParamSpec::new("contrast", ParamKind::Float { min: 0.5, max: 4.0, default: 1.5 }),
         ParamSpec::new("skew", ParamKind::Float { min: -1.0, max: 1.0, default: -0.2 }),

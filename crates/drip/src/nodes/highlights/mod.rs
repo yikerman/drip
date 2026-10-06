@@ -9,7 +9,8 @@ mod opposed;
 
 pub static HIGHLIGHTS: NodeKind = NodeKind::new::<ReconstructHighlights>(
     "raw.highlights",
-    "highlights",
+    "raw",
+    "Highlights",
     &[ParamSpec::new("threshold", ParamKind::Float { min: 0.5, max: 1.0, default: 0.98 })],
     &["mosaic"],
     &["mosaic"],

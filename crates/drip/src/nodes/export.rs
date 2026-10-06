@@ -26,6 +26,7 @@ const PROFILES: &[&str] = &["srgb", "display_p3", "rec2020", "file"];
 pub static TIFF: NodeKind = NodeKind::new::<TiffExport>(
     "export.tiff",
     "export",
+    "Export",
     &[
         ParamSpec::new("path", ParamKind::Path { output: true }).external(),
         ParamSpec::new("profile", ParamKind::Choice { options: PROFILES, default: "srgb" }),

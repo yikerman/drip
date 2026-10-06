@@ -7,6 +7,7 @@ robustness and performance when usage or measurements justify it.
 |------|--------|---------------------------|
 | Production pipeline validation | Next | Judge detail, highlights and color on varied photos/cameras beyond the Sony fixture. |
 | Editing UI/UX | Planned | Refine workflows around the production pipeline. |
+| Dedicated node picker | Deferred | Replace the canvas Add node menu using the kinds' category and name metadata. |
 | Display portability | Next | Verify current output on NVIDIA, other compositors and macOS; Windows remains best effort and untested. |
 | SpyderX verification | Planned | Measure the complete display color path before release. |
 | Packaging and v0.1 | Planned | Follow processing, workflow and color verification. |

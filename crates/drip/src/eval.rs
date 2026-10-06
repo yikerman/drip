@@ -103,7 +103,7 @@ impl Evaluator {
             if self.cache.0.get(&id).is_none_or(|entry| entry.stamp != stamp) {
                 let start = std::time::Instant::now();
                 let result = self.cache.compute(graph, &ctx, id);
-                let kind = graph.node(id).expect("in graph").kind.name;
+                let kind = graph.node(id).expect("in graph").kind.id;
                 log::debug!("evaluated {kind} {id:?} at level {level} in {:.1?}", start.elapsed());
                 self.cache.0.insert(id, Entry { stamp, result });
                 computed.push(id);
@@ -126,7 +126,7 @@ impl Cache {
     fn stamp(&self, graph: &Graph, ctx: &EvalContext, id: NodeId) -> u64 {
         let node = graph.node(id).expect("in graph");
         let mut h = DefaultHasher::new();
-        (node.kind.name, ctx.level).hash(&mut h);
+        (node.kind.id, ctx.level).hash(&mut h);
         serde_json::to_string(&node.params).expect("plain data serializes").hash(&mut h);
         for spec in node.kind.inputs() {
             spec.name.hash(&mut h);

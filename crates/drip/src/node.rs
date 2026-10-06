@@ -73,8 +73,12 @@ type Evaluate = fn(Params<'_>, &[Option<Value>], &EvalContext<'_>) -> Result<Eva
 type RunAction = fn(usize, Params<'_>, &[Option<Value>], &EvalContext<'_>) -> Result<(), String>;
 
 pub struct NodeKind {
+    /// Stable type identity used by registries, evaluation and project files.
+    pub id: &'static str,
+    /// Internal grouping key, independent of type identity.
+    pub category: &'static str,
+    /// Default user-facing name; each graph node owns its editable copy.
     pub name: &'static str,
-    pub label: &'static str,
     pub params: &'static [ParamSpec],
     input_names: &'static [&'static str],
     output_names: &'static [&'static str],
@@ -101,12 +105,13 @@ impl NodeKind {
     ///         -> Result<Evaluated<()>, String> { Ok(Evaluated::default()) }
     /// }
     /// static INVALID: NodeKind = NodeKind::new::<Empty>(
-    ///     "empty", "empty", &[], &[], &["undeclared output"],
+    ///     "empty", "test", "Empty", &[], &[], &["undeclared output"],
     /// );
     /// ```
     pub const fn new<K>(
+        id: &'static str,
+        category: &'static str,
         name: &'static str,
-        label: &'static str,
         params: &'static [ParamSpec],
         inputs: &'static [&'static str],
         outputs: &'static [&'static str],
@@ -117,8 +122,9 @@ impl NodeKind {
         assert!(inputs.len() == K::Inputs::REQUIREMENTS.len(), "input names must match tuple");
         assert!(outputs.len() == K::Outputs::TYPES.len(), "output names must match tuple");
         Self {
+            id,
+            category,
             name,
-            label,
             params,
             input_names: inputs,
             output_names: outputs,
@@ -156,12 +162,12 @@ impl NodeKind {
 }
 impl PartialEq for NodeKind {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
+        self.id == other.id
     }
 }
 impl std::fmt::Debug for NodeKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.name)
+        f.write_str(self.id)
     }
 }
 
@@ -258,15 +264,15 @@ pub struct Registry {
 
 impl Registry {
     pub fn with(mut self, kind: &'static NodeKind) -> Self {
-        self.kinds.insert(kind.name, kind);
+        self.kinds.insert(kind.id, kind);
         self
     }
 
-    pub fn get(&self, name: &str) -> Option<&'static NodeKind> {
-        self.kinds.get(name).copied()
+    pub fn get(&self, id: &str) -> Option<&'static NodeKind> {
+        self.kinds.get(id).copied()
     }
 
-    /// All kinds, ordered by name.
+    /// All kinds, ordered by type ID.
     pub fn kinds(&self) -> impl Iterator<Item = &'static NodeKind> + '_ {
         self.kinds.values().copied()
     }

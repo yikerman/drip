@@ -18,15 +18,17 @@ pub const BODY_SIZE: f32 = 16.0;
 pub const SMALL_SIZE: f32 = 14.0;
 
 pub fn context_menu(response: &egui::Response) -> egui::Popup<'_> {
-    egui::Popup::context_menu(response).frame(menu_frame(response))
+    egui::Popup::context_menu(response).style(menu_style)
 }
 
 pub fn menu(response: &egui::Response) -> egui::Popup<'_> {
-    egui::Popup::menu(response).frame(menu_frame(response))
+    egui::Popup::menu(response).style(menu_style)
 }
 
-fn menu_frame(response: &egui::Response) -> egui::Frame {
-    egui::Frame::menu(&response.ctx.global_style()).fill(LIGHTEST).stroke(Stroke::new(1.0, WEAK))
+fn menu_style(style: &mut egui::Style) {
+    egui::containers::menu::menu_style(style);
+    style.visuals.window_fill = LIGHTEST;
+    style.visuals.window_stroke = Stroke::new(1.0, WEAK);
 }
 
 pub fn apply(ctx: &egui::Context) {

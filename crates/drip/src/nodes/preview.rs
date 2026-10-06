@@ -8,7 +8,7 @@ use crate::view::{PreviewImage, View};
 
 /// Shows a Rec.2020 image; the frontend handles the display transform.
 pub static PREVIEW: NodeKind =
-    NodeKind::new::<Preview>("view.preview", "preview", &[], &["image"], &[]);
+    NodeKind::new::<Preview>("view.preview", "view", "Preview", &[], &["image"], &[]);
 
 struct Preview;
 impl NodeKernel for Preview {

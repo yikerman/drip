@@ -22,6 +22,8 @@ use serde_json::Value as Json;
 
 use crate::theme;
 
+mod node_menu;
+
 const HEADER: f32 = 22.0;
 const ROW: f32 = 18.0;
 const PORT: f32 = 4.0;
@@ -149,7 +151,7 @@ impl Editor {
             theme::context_menu(&body).show(|ui| {
                 if ui.button("Rename").clicked() {
                     *selected = Some(l.id);
-                    node_ui::parameters::focus_label(ui.ctx(), l.id);
+                    node_ui::parameters::focus_name(ui.ctx(), l.id);
                     ui.close();
                 }
                 if ui.button("Delete").clicked() {
@@ -200,7 +202,7 @@ impl Editor {
                     for peer in peers {
                         empty = false;
                         let node = graph.node(peer.0).expect("connected node");
-                        if ui.button(format!("{} · {}", node.label, peer.1)).clicked() {
+                        if ui.button(format!("{} · {}", node.name, peer.1)).clicked() {
                             navigate = Some(peer.0);
                             ui.close();
                         }
@@ -260,16 +262,13 @@ impl Editor {
             frame.edit(graph, Edit::Disconnect(input));
         } else {
             theme::context_menu(&background).show(|ui| {
-                for kind in registry.kinds() {
-                    if ui.button(kind.label).clicked() {
-                        let pointer = ui
-                            .ctx()
-                            .pointer_interact_pos()
-                            .unwrap_or(to_global * background.rect.center());
-                        let pos = (to_global.inverse() * pointer).to_vec2();
-                        *selected = frame.edit(graph, Edit::Add(kind, pos));
-                        ui.close();
-                    }
+                if let Some(kind) = node_menu::show(ui, registry) {
+                    let pointer = ui
+                        .ctx()
+                        .pointer_interact_pos()
+                        .unwrap_or(to_global * background.rect.center());
+                    let pos = (to_global.inverse() * pointer).to_vec2();
+                    *selected = frame.edit(graph, Edit::Add(kind, pos));
                 }
             });
         }
@@ -381,7 +380,7 @@ fn paint(painter: &Painter, l: &Layout, node: &Node, selected: bool) {
     let fill = if selected { theme::LIGHTER } else { theme::DARKER };
     painter.rect_filled(l.rect, 0.0, fill);
     let title = l.rect.min + vec2(8.0, HEADER / 2.0);
-    painter.text(title, Align2::LEFT_CENTER, &node.label, font, theme::TEXT);
+    painter.text(title, Align2::LEFT_CENTER, &node.name, font, theme::TEXT);
     let inputs = l.inputs.iter().zip(node.kind.inputs()).map(|(p, spec)| {
         (p, node_ui::ports::label(spec.requirement.name), 8.0, Align2::LEFT_CENTER)
     });

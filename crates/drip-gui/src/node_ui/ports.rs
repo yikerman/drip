@@ -32,7 +32,7 @@ mod tests {
             let inputs = kind.inputs().map(|port| port.requirement.name);
             let outputs = kind.outputs().map(|port| port.ty.name);
             for contract in inputs.chain(outputs) {
-                assert_ne!(label(contract), contract, "{}: {contract}", kind.name);
+                assert_ne!(label(contract), contract, "{}: {contract}", kind.id);
             }
         }
     }
@@ -56,7 +56,7 @@ mod tests {
                             crate::theme::WEAK,
                         )
                     });
-                    assert!(galley.size().x <= width, "{}: {text}", kind.name);
+                    assert!(galley.size().x <= width, "{}: {text}", kind.id);
                 }
             }
         })

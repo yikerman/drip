@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 pub static EXPOSURE: NodeKind = NodeKind::new::<Exposure>(
     "color.exposure",
-    "exposure",
+    "color",
+    "Exposure",
     &[ParamSpec::new("ev", ParamKind::Float { min: -10.0, max: 10.0, default: 0.0 })],
     &["image"],
     &["image"],

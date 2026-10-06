@@ -189,7 +189,7 @@ fn camera_matrix_is_neutral_preserving_and_ignores_channel_gains() {
 
 /// A source node emitting a fixed 4 × 2 RGGB mosaic.
 static MOSAIC: NodeKind =
-    NodeKind::new::<MosaicKernel>("test.mosaic", "mosaic", &[], &[], &["mosaic"]);
+    NodeKind::new::<MosaicKernel>("test.mosaic", "test", "mosaic", &[], &[], &["mosaic"]);
 struct MosaicKernel;
 impl NodeKernel for MosaicKernel {
     type Inputs = ();
@@ -210,7 +210,8 @@ impl NodeKernel for MosaicKernel {
 }
 
 /// A source node emitting the scene-referred pixels given as `pixels`.
-static SCENE: NodeKind = NodeKind::new::<SceneKernel>("test.scene", "scene", &[], &[], &["image"]);
+static SCENE: NodeKind =
+    NodeKind::new::<SceneKernel>("test.scene", "test", "scene", &[], &[], &["image"]);
 struct SceneKernel;
 impl NodeKernel for SceneKernel {
     type Inputs = ();
@@ -332,7 +333,7 @@ fn preview_presents_its_input() {
 #[test]
 fn highlights_reconstruct_before_preview_averaging() {
     static SOURCE: NodeKind =
-        NodeKind::new::<SourceKernel>("test.clipped", "clipped", &[], &[], &["mosaic"]);
+        NodeKind::new::<SourceKernel>("test.clipped", "test", "clipped", &[], &[], &["mosaic"]);
     struct SourceKernel;
     impl NodeKernel for SourceKernel {
         type Inputs = ();

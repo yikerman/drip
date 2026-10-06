@@ -12,6 +12,7 @@ use crate::param::{ParamKind, ParamSpec, Params};
 pub static READ: NodeKind = NodeKind::new::<ReadRaw>(
     "raw.read",
     "raw",
+    "RAW",
     &[ParamSpec::new("path", ParamKind::Path { output: false }).external()],
     &[],
     &["mosaic", "metadata"],

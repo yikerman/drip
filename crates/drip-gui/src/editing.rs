@@ -42,7 +42,7 @@ pub enum Edit<'a> {
     Connect(Port, Port),
     Disconnect(Port),
     Param(NodeId, &'a str, Json),
-    Label(NodeId, &'a str),
+    Name(NodeId, &'a str),
     External(NodeId, &'a str, bool),
     Ui(NodeId, &'a str, Vec2),
 }
@@ -58,7 +58,7 @@ impl<'a> Frame<'a> {
 
     /// Applies an edit immediately; adding a node returns its id for selection.
     pub fn edit(&mut self, graph: &mut Graph, edit: Edit<'_>) -> Option<NodeId> {
-        let evaluate = !matches!(edit, Edit::Label(..) | Edit::External(..) | Edit::Ui(..));
+        let evaluate = !matches!(edit, Edit::Name(..) | Edit::External(..) | Edit::Ui(..));
         let result: Result<_, GraphError> = (|| {
             match edit {
                 Edit::Add(kind, pos) => {
@@ -74,7 +74,7 @@ impl<'a> Frame<'a> {
                     graph.disconnect(&input);
                 }
                 Edit::Param(id, name, value) => graph.set_param(id, name, value)?,
-                Edit::Label(id, label) => graph.set_label(id, label)?,
+                Edit::Name(id, name) => graph.set_name(id, name)?,
                 Edit::External(id, name, external) => graph.set_external(id, name, external)?,
                 Edit::Ui(id, key, value) => set_ui(graph, id, key, value),
             }
@@ -124,8 +124,8 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
         self.frame.edit(self.graph, Edit::Param(self.id, name, value));
     }
 
-    pub fn set_label(&mut self, label: &str) {
-        self.frame.edit(self.graph, Edit::Label(self.id, label));
+    pub fn set_name(&mut self, name: &str) {
+        self.frame.edit(self.graph, Edit::Name(self.id, name));
     }
 
     pub fn set_external(&mut self, name: &str, external: bool) {

@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 pub static CAMERA_TO_REC2020: NodeKind = NodeKind::new::<CameraToRec2020>(
     "color.camera_to_rec2020",
-    "camera to rec2020",
+    "color",
+    "Camera to Rec.2020",
     &[],
     &["image"],
     &["image"],

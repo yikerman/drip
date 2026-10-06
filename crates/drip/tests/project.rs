@@ -41,8 +41,11 @@ fn project() -> (Project, [NodeId; 3]) {
 fn round_trips() {
     let (mut p, [c, ..]) = project();
     p.graph.set_external(c, "value", true).unwrap();
+    p.graph.set_name(c, "My source").unwrap();
     let saved: Json = serde_json::from_str(&p.to_json()).unwrap();
     assert_eq!(saved["version"], json!(MAJOR.parse::<u32>().unwrap()), "the crate's major version");
+    assert_eq!(saved["nodes"][0]["label"], "My source");
+    assert_eq!(saved["nodes"][0]["kind"], "test.const");
     assert_eq!(Project::from_json(&p.to_json(), &registry()).unwrap(), p);
 }
 
@@ -139,7 +142,7 @@ fn malformed_files_are_rejected() {
     assert!(matches!(graph(bad_value), GraphError::InvalidParam { .. }));
     let same_label =
         fails(file(json!([c, node(1, "c", "test.const", json!({ "value": 1.0 }))]), json!([])));
-    assert!(matches!(graph(same_label), GraphError::InvalidLabel(_)));
+    assert!(matches!(graph(same_label), GraphError::InvalidName(_)));
     let same_id =
         fails(file(json!([c, node(0, "d", "test.const", json!({ "value": 1.0 }))]), json!([])));
     assert!(matches!(same_id, LoadError::InvalidId(0)));

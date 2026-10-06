@@ -195,7 +195,7 @@ fn pending_connections_cancel_without_opening_the_canvas_menu() {
         click_port(&mut h, start, direction, Secondary);
         click(&mut h, pos2(40.0, 40.0), Secondary);
         assert!(h.state().editor.wire.is_none());
-        assert!(h.query_by_label(drip::nodes::EXPOSURE.label).is_none());
+        assert!(h.query_by_label("color ⏵").is_none());
         click_port(&mut h, start, direction, Secondary);
         h.key_press(egui::Key::Escape);
         h.run();
@@ -242,14 +242,14 @@ fn port_menus_navigate_to_connected_nodes_without_editing() {
     let offset = h.state().editor.offset;
     click_port(&mut h, source, Direction::Output, Primary);
     assert_eq!(h.state().selected, None);
-    assert!(h.query_by_label("exposure 3 · image").is_some());
-    h.get_by_label("exposure 2 · image").click();
+    assert!(h.query_by_label("Exposure 3 · image").is_some());
+    h.get_by_label("Exposure 2 · image").click();
     h.run();
     assert_eq!(h.state().selected, Some(near));
     assert_eq!(h.state().editor.offset, offset);
 
     click_port(&mut h, source, Direction::Output, Primary);
-    h.get_by_label("exposure 3 · image").click();
+    h.get_by_label("Exposure 3 · image").click();
     h.run();
     assert_eq!(h.state().selected, Some(far));
     let visible = h.state().area;
@@ -259,7 +259,7 @@ fn port_menus_navigate_to_connected_nodes_without_editing() {
 
     click_port(&mut h, far, Direction::Input, Primary);
     assert_eq!(h.state().selected, Some(far));
-    h.get_by_label("exposure · image").click();
+    h.get_by_label("Exposure · image").click();
     h.run();
     assert_eq!(h.state().selected, Some(source));
     assert!(visible.contains(h.state().node_point()));
@@ -306,7 +306,7 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
             assert_eq!(h.state().graph.source(&image_port(target)).is_none(), removed);
             assert_eq!(h.state().graph.source(&image_port(branch)), Some(&image_port(source)));
             assert_eq!(h.state().edited, removed);
-            assert_eq!(h.query_by_label(drip::nodes::EXPOSURE.label).is_some(), !removed);
+            assert_eq!(h.query_by_label("color ⏵").is_some(), !removed);
         }
     }
 }
@@ -417,7 +417,7 @@ fn right_drag_moves_only_nodes_without_opening_menus() {
         drag(&mut h, pos2(40.0, 40.0), Secondary, delta);
         assert_eq!(h.state().graph, graph);
         assert_eq!(h.state().editor.offset, offset);
-        assert!(h.query_by_label(drip::nodes::EXPOSURE.label).is_none());
+        assert!(h.query_by_label("color ⏵").is_none());
     }
 }
 
@@ -444,7 +444,7 @@ fn click_selection_and_node_menu_actions() {
     h.event(Event::Text("renamed".into()));
     h.key_press(egui::Key::Enter);
     h.run();
-    assert_eq!(h.state().graph.node(node).unwrap().label, "renamed");
+    assert_eq!(h.state().graph.node(node).unwrap().name, "renamed");
     assert!(!h.state().edited);
 
     pointer(&mut h, pos, Secondary, true);
@@ -457,8 +457,20 @@ fn click_selection_and_node_menu_actions() {
 
     pointer(&mut h, pos2(40.0, 40.0), Secondary, true);
     pointer(&mut h, pos2(40.0, 40.0), Secondary, false);
-    h.get_by_label(drip::nodes::EXPOSURE.label).click();
+    let categories = ["color", "demosaic", "export", "raw", "tone", "view"];
+    let rows: Vec<_> =
+        categories.iter().map(|name| h.get_by_label(&format!("{name} ⏵")).rect().top()).collect();
+    assert!(rows.windows(2).all(|rows| rows[0] < rows[1]));
+    h.get_by_label("color ⏵").click();
+    h.run();
+    let names = ["Camera to Rec.2020", "Exposure", "White balance"];
+    let rows: Vec<_> = names.iter().map(|name| h.get_by_label(name).rect().top()).collect();
+    assert!(rows.windows(2).all(|rows| rows[0] < rows[1]));
+    h.get_by_label(drip::nodes::EXPOSURE.name).click();
     h.run();
     assert_eq!(h.state().graph.nodes().count(), 1);
-    assert!(h.state().selected.is_some());
+    let added = h.state().graph.node(h.state().selected.unwrap()).unwrap();
+    assert_eq!(added.kind.id, "color.exposure");
+    assert_eq!(added.name, "Exposure");
+    assert!(!egui::Popup::is_any_open(&h.ctx));
 }

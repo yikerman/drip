@@ -79,7 +79,7 @@ impl Part {
 
 impl Popped {
     pub fn title(self, node: &Node) -> String {
-        format!("{} {} · Drip", node.label, self.part.name())
+        format!("{} {} · Drip", node.name, self.part.name())
     }
 
     /// The window's size, in points, when its content does not ask for one.

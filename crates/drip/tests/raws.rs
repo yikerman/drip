@@ -86,8 +86,8 @@ fn exports_a_tiff_from_a_raw() {
     std::fs::write(&profile, Profile::new_srgb().icc().unwrap()).unwrap();
 
     let mut p = drip::templates::raw_to_tiff();
-    let read = p.graph.find("raw").unwrap();
-    let export = p.graph.find("export").unwrap();
+    let read = p.graph.find("RAW").unwrap();
+    let export = p.graph.find("Export").unwrap();
     p.graph.set_param(read, "path", json!(fixture())).unwrap();
     p.graph.set_param(export, "path", json!(out)).unwrap();
     p.graph.set_param(export, "profile", json!("file")).unwrap();
@@ -114,7 +114,7 @@ fn exports_a_tiff_from_a_raw() {
 fn built_in_template_takes_the_raw_and_output_paths() {
     let template = drip::templates::raw_to_tiff();
     let (raw, export) =
-        (template.graph.find("raw").unwrap(), template.graph.find("export").unwrap());
+        (template.graph.find("RAW").unwrap(), template.graph.find("Export").unwrap());
     assert_eq!(template.graph.inputs().collect::<Vec<_>>(), [(raw, "path"), (export, "path")]);
     assert_eq!(Project::from_json(&template.to_json(), &nodes::registry()).unwrap(), template);
 
@@ -122,7 +122,7 @@ fn built_in_template_takes_the_raw_and_output_paths() {
     let path = std::env::temp_dir().join(format!("drip-raw-cache-{}.arw", std::process::id()));
     std::fs::copy(fixture(), &path).unwrap();
     p.graph.set_param(raw, "path", json!(path)).unwrap();
-    let preview = p.graph.find("preview").unwrap();
+    let preview = p.graph.find("Preview").unwrap();
     let mut ev = Evaluator::default();
     ev.evaluate(&p.graph, 3, &[preview]);
     // Later levels and export forks must work entirely from decoded data.
@@ -163,7 +163,7 @@ fn built_in_template_takes_the_raw_and_output_paths() {
             .data,
         ev.result(raw).unwrap().as_ref().unwrap().outputs[0].downcast_ref::<Mosaic>().unwrap().data,
     );
-    let demosaic = p.graph.find("demosaic").unwrap();
+    let demosaic = p.graph.find("Demosaic").unwrap();
     ev.evaluate(&p.graph, 31, &[demosaic]);
     let smallest = ev.result(demosaic).unwrap().as_ref().unwrap().outputs[0]
         .borrow::<Read<dyn LinearThreeChannelMatrix>>()

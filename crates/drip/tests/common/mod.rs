@@ -35,6 +35,7 @@ pub fn pixel(value: &Value) -> [f32; 3] {
 /// Outputs `[value, ctx.scale, 0]`, so tests can see the scale it ran at.
 pub static CONST: NodeKind = NodeKind::new::<ConstKernel>(
     "test.const",
+    "test",
     "const",
     &[ParamSpec::new("value", ParamKind::Float { min: -10.0, max: 10.0, default: 1.0 })],
     &[],
@@ -58,7 +59,7 @@ impl NodeKernel for ConstKernel {
 }
 
 pub static ADD: NodeKind =
-    NodeKind::new::<AddKernel>("test.add", "add", &[], &["a", "b"], &["sum"]);
+    NodeKind::new::<AddKernel>("test.add", "test", "add", &[], &["a", "b"], &["sum"]);
 struct AddKernel;
 impl NodeKernel for AddKernel {
     type Inputs = (Read<SceneRec2020>, Read<SceneRec2020>);
@@ -75,8 +76,14 @@ impl NodeKernel for AddKernel {
 }
 
 /// Identity, but changes the semantic type from scene- to display-referred.
-pub static TONEMAP: NodeKind =
-    NodeKind::new::<TonemapKernel>("test.tonemap", "tonemap", &[], &["scene"], &["display"]);
+pub static TONEMAP: NodeKind = NodeKind::new::<TonemapKernel>(
+    "test.tonemap",
+    "test",
+    "tonemap",
+    &[],
+    &["scene"],
+    &["display"],
+);
 struct TonemapKernel;
 impl NodeKernel for TonemapKernel {
     type Inputs = (Read<SceneRec2020>,);
@@ -95,7 +102,7 @@ impl NodeKernel for TonemapKernel {
 }
 
 pub static FAIL: NodeKind =
-    NodeKind::new::<FailKernel>("test.fail", "fail", &[], &["image"], &["image"]);
+    NodeKind::new::<FailKernel>("test.fail", "test", "fail", &[], &["image"], &["image"]);
 struct FailKernel;
 impl NodeKernel for FailKernel {
     type Inputs = (Read<SceneRec2020>,);
@@ -111,7 +118,8 @@ impl NodeKernel for FailKernel {
 }
 
 /// A UI-only node: no outputs, presents its input.
-pub static VIEW: NodeKind = NodeKind::new::<ViewKernel>("test.view", "view", &[], &["image"], &[]);
+pub static VIEW: NodeKind =
+    NodeKind::new::<ViewKernel>("test.view", "test", "view", &[], &["image"], &[]);
 struct ViewKernel;
 impl NodeKernel for ViewKernel {
     type Inputs = (Read<dyn RgbIn<Rec2020>>,);
@@ -129,6 +137,7 @@ impl NodeKernel for ViewKernel {
 /// A sink whose `write` action stores its input pixel at `path`.
 pub static WRITE: NodeKind = NodeKind::new::<WriteKernel>(
     "test.write",
+    "test",
     "write",
     &[ParamSpec::new("path", ParamKind::Path { output: true }).external()],
     &["image"],
@@ -157,6 +166,7 @@ impl NodeKernel for WriteKernel {
 /// Multiplies its input by `gain`.
 pub static GAIN: NodeKind = NodeKind::new::<GainKernel>(
     "test.gain",
+    "test",
     "gain",
     &[ParamSpec::new("gain", ParamKind::Float { min: 0.0, max: 10.0, default: 1.0 })],
     &["image"],
@@ -180,6 +190,7 @@ impl NodeKernel for GainKernel {
 /// Outputs the length of the file at `path`, read through the resource store.
 pub static FILE: NodeKind = NodeKind::new::<FileKernel>(
     "test.file",
+    "test",
     "file",
     &[ParamSpec::new("path", ParamKind::Path { output: false })],
     &[],

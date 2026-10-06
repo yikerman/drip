@@ -10,7 +10,7 @@ use std::sync::Arc;
 /// Naive debayering: each 2 × 2 Bayer cell becomes one pixel, averaging its
 /// two greens. Halves the resolution.
 pub static BIN_2X2: NodeKind =
-    NodeKind::new::<Bin2x2>("demosaic.bin2x2", "debayer", &[], &["mosaic"], &["image"]);
+    NodeKind::new::<Bin2x2>("demosaic.bin2x2", "demosaic", "Debayer", &[], &["mosaic"], &["image"]);
 
 struct Bin2x2;
 impl NodeKernel for Bin2x2 {

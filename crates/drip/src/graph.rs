@@ -20,7 +20,7 @@ pub struct Port(pub NodeId, pub String);
 #[derive(Debug, Clone, PartialEq)]
 pub struct Node {
     /// Unique and renamable; how users and the CLI refer to the node.
-    pub label: String,
+    pub name: String,
     pub kind: &'static NodeKind,
     /// A valid value for every parameter of the kind.
     pub params: ParamMap,
@@ -45,8 +45,8 @@ pub enum GraphError {
     UnknownParam(NodeId, String),
     #[error("invalid value {value} for parameter `{param}`")]
     InvalidParam { param: String, value: Json },
-    #[error("label `{0}` is empty or already used")]
-    InvalidLabel(String),
+    #[error("name `{0}` is empty or already used")]
+    InvalidName(String),
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -66,8 +66,8 @@ impl Graph {
         self.nodes.get(&id)
     }
 
-    pub fn find(&self, label: &str) -> Option<NodeId> {
-        self.nodes().find(|(_, node)| node.label == label).map(|(id, _)| id)
+    pub fn find(&self, name: &str) -> Option<NodeId> {
+        self.nodes().find(|(_, node)| node.name == name).map(|(id, _)| id)
     }
 
     /// Edges as (output, input) pairs.
@@ -85,12 +85,12 @@ impl Graph {
     }
 
     pub fn add_node(&mut self, kind: &'static NodeKind) -> NodeId {
-        let label = (1..)
-            .map(|n| if n == 1 { kind.label.to_string() } else { format!("{} {n}", kind.label) })
-            .find(|label| self.find(label).is_none())
+        let name = (1..)
+            .map(|n| if n == 1 { kind.name.to_string() } else { format!("{} {n}", kind.name) })
+            .find(|name| self.find(name).is_none())
             .expect("unbounded");
         let node = Node {
-            label,
+            name,
             kind,
             params: kind
                 .params
@@ -169,11 +169,11 @@ impl Graph {
         Ok(())
     }
 
-    pub fn set_label(&mut self, id: NodeId, label: &str) -> Result<(), GraphError> {
-        if label.is_empty() || self.find(label).is_some_and(|other| other != id) {
-            return Err(GraphError::InvalidLabel(label.into()));
+    pub fn set_name(&mut self, id: NodeId, name: &str) -> Result<(), GraphError> {
+        if name.is_empty() || self.find(name).is_some_and(|other| other != id) {
+            return Err(GraphError::InvalidName(name.into()));
         }
-        self.node_mut(id)?.label = label.into();
+        self.node_mut(id)?.name = name.into();
         Ok(())
     }
 

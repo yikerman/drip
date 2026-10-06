@@ -99,8 +99,8 @@ impl Project {
     pub fn to_json(&self) -> String {
         let nodes = self.graph.nodes().map(|(id, node)| FileNode {
             id: id.0,
-            label: node.label.clone(),
-            kind: node.kind.name.into(),
+            label: node.name.clone(),
+            kind: node.kind.id.into(),
             params: node.params.clone(),
             external: node.external.iter().map(|p| p.to_string()).collect(),
             ui: node.ui.clone(),
@@ -159,9 +159,9 @@ impl Project {
                 .map(|p| p.name)
                 .collect();
             if n.label.is_empty() || graph.find(&n.label).is_some() {
-                return Err(GraphError::InvalidLabel(n.label).into());
+                return Err(GraphError::InvalidName(n.label).into());
             }
-            graph.insert(id, Node { label: n.label, kind, params: n.params, external, ui: n.ui });
+            graph.insert(id, Node { name: n.label, kind, params: n.params, external, ui: n.ui });
         }
         for FileEdge { from, to } in file.edges {
             let (from, to) = (Port(NodeId(from.0), from.1), Port(NodeId(to.0), to.1));

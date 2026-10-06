@@ -25,7 +25,7 @@ const PIXELS: [[f32; 3]; 4] =
     [[1.0, 1.0, 1.0], [0.18, 0.18, 0.18], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]];
 
 static DISPLAY: NodeKind =
-    NodeKind::new::<DisplayKernel>("test.display", "display", &[], &[], &["image"]);
+    NodeKind::new::<DisplayKernel>("test.display", "test", "display", &[], &[], &["image"]);
 struct DisplayKernel;
 impl NodeKernel for DisplayKernel {
     type Inputs = ();
@@ -42,7 +42,7 @@ impl NodeKernel for DisplayKernel {
 }
 
 static METADATA: NodeKind =
-    NodeKind::new::<MetadataKernel>("test.metadata", "metadata", &[], &[], &["metadata"]);
+    NodeKind::new::<MetadataKernel>("test.metadata", "test", "metadata", &[], &[], &["metadata"]);
 struct MetadataKernel;
 impl NodeKernel for MetadataKernel {
     type Inputs = ();

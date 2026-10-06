@@ -26,10 +26,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path =
         std::env::args_os().nth(1).map(PathBuf::from).ok_or("usage: preview_latency <raw>")?;
     let mut project = templates::raw_to_tiff();
-    let raw = project.graph.find("raw").unwrap();
+    let raw = project.graph.find("RAW").unwrap();
     project.graph.set_param(raw, "path", serde_json::json!(path))?;
     let targets =
-        [project.graph.find("preview").unwrap(), project.graph.find("histogram").unwrap()];
+        [project.graph.find("Preview").unwrap(), project.graph.find("Histogram").unwrap()];
     let mut evaluator = Evaluator::default();
     let mut measure = |level| -> Result<f64, Box<dyn std::error::Error>> {
         let start = Instant::now();

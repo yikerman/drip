@@ -6,7 +6,7 @@ use serde_json::{Value as Json, json};
 
 use crate::editing::NodeCx;
 
-/// A node's label, kind, parameters and actions, without inspector help.
+/// A node's name, kind, parameters and actions, without inspector help.
 pub fn panel(ui: &mut Ui, cx: &mut NodeCx) {
     heading(ui, cx);
     controls(ui, cx);
@@ -14,19 +14,19 @@ pub fn panel(ui: &mut Ui, cx: &mut NodeCx) {
 
 pub fn heading(ui: &mut Ui, cx: &mut NodeCx) {
     let (id, node) = (cx.id(), cx.node().clone());
-    let label_id = egui::Id::new(("label", id));
-    if ui.data_mut(|data| data.remove_temp::<()>(label_id.with("focus"))).is_some() {
-        ui.memory_mut(|memory| memory.request_focus(label_id));
+    let name_id = egui::Id::new(("name", id));
+    if ui.data_mut(|data| data.remove_temp::<()>(name_id.with("focus"))).is_some() {
+        ui.memory_mut(|memory| memory.request_focus(name_id));
     }
-    if let Some(label) = edit_text(ui, label_id, &node.label) {
-        cx.set_label(&label);
+    if let Some(name) = edit_text(ui, name_id, &node.name) {
+        cx.set_name(&name);
     }
-    ui.weak(node.kind.name);
+    ui.weak(node.kind.id);
 }
 
-pub fn focus_label(ctx: &egui::Context, id: drip::graph::NodeId) {
+pub fn focus_name(ctx: &egui::Context, id: drip::graph::NodeId) {
     // The inspector precedes the canvas; focus once the newly selected field exists.
-    ctx.data_mut(|data| data.insert_temp(egui::Id::new(("label", id)).with("focus"), ()));
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(("name", id)).with("focus"), ()));
     ctx.request_repaint();
 }
 

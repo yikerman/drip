@@ -21,8 +21,14 @@ use crate::view::{Scope, ScopeAxes, View};
 const SIZE: usize = 256;
 const RADIUS: f32 = 0.5;
 
-pub static WAVEFORM: NodeKind =
-    NodeKind::new::<Waveform>("view.waveform", "waveform", super::EXPOSURE_PARAMS, &["image"], &[]);
+pub static WAVEFORM: NodeKind = NodeKind::new::<Waveform>(
+    "view.waveform",
+    "view",
+    "Waveform",
+    super::EXPOSURE_PARAMS,
+    &["image"],
+    &[],
+);
 
 struct Waveform;
 impl NodeKernel for Waveform {
@@ -44,7 +50,7 @@ impl NodeKernel for Waveform {
 }
 
 pub static VECTORSCOPE: NodeKind =
-    NodeKind::new::<Vectorscope>("view.vectorscope", "vectorscope", &[], &["image"], &[]);
+    NodeKind::new::<Vectorscope>("view.vectorscope", "view", "Vectorscope", &[], &["image"], &[]);
 
 struct Vectorscope;
 impl NodeKernel for Vectorscope {

@@ -15,7 +15,8 @@ const BINS: usize = 256;
 /// and always shows where 1.0 falls.
 pub static HISTOGRAM: NodeKind = NodeKind::new::<HistogramNode>(
     "view.histogram",
-    "histogram",
+    "view",
+    "Histogram",
     super::EXPOSURE_PARAMS,
     &["image"],
     &[],

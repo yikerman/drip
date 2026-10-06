@@ -65,7 +65,8 @@ impl NodeKernel for P3Source {
         Ok(Evaluated::new((Arc::new(LinearP3(pixels())),)))
     }
 }
-static P3_SOURCE: NodeKind = NodeKind::new::<P3Source>("test.p3", "P3", &[], &[], &["image"]);
+static P3_SOURCE: NodeKind =
+    NodeKind::new::<P3Source>("test.p3", "test", "P3", &[], &[], &["image"]);
 
 #[test]
 fn capabilities_preserve_semantics_and_share_pixels() {

@@ -94,8 +94,14 @@ fn unconnected_input_is_an_error() {
 }
 
 /// `base`, plus `offset` when connected.
-static OFFSET: NodeKind =
-    NodeKind::new::<OffsetKernel>("test.offset", "offset", &[], &["base", "offset"], &["image"]);
+static OFFSET: NodeKind = NodeKind::new::<OffsetKernel>(
+    "test.offset",
+    "test",
+    "offset",
+    &[],
+    &["base", "offset"],
+    &["image"],
+);
 struct OffsetKernel;
 impl NodeKernel for OffsetKernel {
     type Inputs = (Read<SceneRec2020>, Optional<Read<SceneRec2020>>);
@@ -257,7 +263,7 @@ mod release {
 
     /// Remembers its output allocation so tests can see when it is freed.
     static PROBE: NodeKind =
-        NodeKind::new::<ProbeKernel>("test.probe", "probe", &[], &[], &["image"]);
+        NodeKind::new::<ProbeKernel>("test.probe", "test", "probe", &[], &[], &["image"]);
     struct ProbeKernel;
     impl NodeKernel for ProbeKernel {
         type Inputs = ();
@@ -277,7 +283,7 @@ mod release {
 
     /// Records, while its action runs, whether the probe's output is alive.
     static CHECK: NodeKind =
-        NodeKind::new::<CheckKernel>("test.check", "check", &[], &["image"], &[]);
+        NodeKind::new::<CheckKernel>("test.check", "test", "check", &[], &["image"], &[]);
     struct CheckKernel;
     impl NodeKernel for CheckKernel {
         type Inputs = (Read<DisplayRec2020>,);

@@ -395,7 +395,7 @@ mod tests {
         let raw =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw/sony-ilce-7rm3.arw");
         let mut p = templates::raw_to_tiff();
-        let read = p.graph.find("raw").unwrap();
+        let read = p.graph.find("RAW").unwrap();
         p.graph.set_param(read, "path", json!(raw)).unwrap();
         let file =
             std::env::temp_dir().join(format!("drip-gui-{name}-{}.drip", std::process::id()));
@@ -444,13 +444,13 @@ mod tests {
         let mut h = harness(App::new(None, true, || {}));
         settle(&mut h);
         let app = h.state_mut();
-        let id = app.project.graph.find("sigmoid").unwrap();
+        let id = app.project.graph.find("Sigmoid").unwrap();
         let popped = Popped { node: id, part: node_ui::Part::Parameters };
         app.popped.insert(popped);
         app.take_redraw();
 
         for change in [
-            crate::editing::Edit::Label(id, "tone"),
+            crate::editing::Edit::Name(id, "tone"),
             crate::editing::Edit::External(id, "contrast", true),
             crate::editing::Edit::Ui(id, "pos", egui::vec2(40.0, 50.0)),
         ] {
@@ -461,8 +461,8 @@ mod tests {
         assert_eq!(app.windows()[0].title, "tone parameters · Drip");
         assert!(app.project.graph.inputs().any(|input| input == (id, "contrast")));
 
-        edit(app, crate::editing::Edit::Label(id, ""));
-        assert_eq!(app.project.graph.node(id).unwrap().label, "tone");
+        edit(app, crate::editing::Edit::Name(id, ""));
+        assert_eq!(app.project.graph.node(id).unwrap().name, "tone");
         assert!(app.status.as_ref().unwrap().error);
         assert!(!app.worker.busy());
 
@@ -483,10 +483,10 @@ mod tests {
         settle(&mut h);
         let app = h.state();
         assert!(app.file.as_ref() == Some(&file));
-        for name in ["preview", "histogram", "waveform", "vectorscope"] {
+        for name in ["Preview", "Histogram", "Waveform", "Vectorscope"] {
             assert!(has_view(app, name), "{name}");
         }
-        let id = app.project.graph.find("preview").unwrap();
+        let id = app.project.graph.find("Preview").unwrap();
         let Some(View::Image(image)) = app.worker.result(id).unwrap().as_ref().unwrap().clone()
         else {
             panic!("an image")
@@ -511,7 +511,7 @@ mod tests {
             panic!("an image")
         };
         assert_eq!(image.width, 1992);
-        let histogram = app.project.graph.find("histogram").unwrap();
+        let histogram = app.project.graph.find("Histogram").unwrap();
         let Some(View::Histogram(histogram)) =
             app.worker.result(histogram).unwrap().as_ref().unwrap()
         else {
@@ -534,7 +534,7 @@ mod tests {
 
         h.get_by_label("New").click();
         settle(&mut h);
-        assert!(!has_view(h.state(), "preview"), "the new template has no raw file yet");
+        assert!(!has_view(h.state(), "Preview"), "the new template has no raw file yet");
         assert_eq!(h.state().level, DEFAULT_LEVEL);
         std::fs::remove_file(file).unwrap();
     }
@@ -549,6 +549,7 @@ mod tests {
         static CALLS: AtomicUsize = AtomicUsize::new(0);
         static NODE: NodeKind = NodeKind::new::<OffscreenKernel>(
             "test.offscreen",
+            "test",
             "offscreen",
             &[ParamSpec::new("value", ParamKind::Bool { default: false })],
             &[],
@@ -606,6 +607,7 @@ mod tests {
         static GATE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
         static SLOW: NodeKind = NodeKind::new::<SlowKernel>(
             "test.slow",
+            "test",
             "slow",
             &[ParamSpec::new("block", ParamKind::Bool { default: false })],
             &[],
@@ -709,11 +711,11 @@ mod tests {
     #[test]
     fn inspector_shows_the_selected_node_and_the_inputs() {
         let mut app = App::new(None, true, || {});
-        app.selected = app.project.graph.find("export");
+        app.selected = app.project.graph.find("Export");
         let mut h = harness(app);
         h.run();
         for label in
-            ["profile", "intent", "depth", "export", "path (input)", "raw · path", "export · path"]
+            ["profile", "intent", "depth", "export", "path (input)", "RAW · path", "Export · path"]
         {
             assert!(h.query_by_label(label).is_some(), "{label}");
         }
@@ -722,7 +724,7 @@ mod tests {
     #[test]
     fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
         let mut app = App::new(None, true, || {});
-        let id = app.project.graph.find("sigmoid").unwrap();
+        let id = app.project.graph.find("Sigmoid").unwrap();
         app.selected = Some(id);
         let mut h = harness(app);
         h.run();
@@ -751,7 +753,7 @@ mod tests {
     #[test]
     fn nodes_without_controls_show_documentation_and_references() {
         let mut app = App::new(None, true, || {});
-        app.selected = app.project.graph.find("demosaic");
+        app.selected = app.project.graph.find("Demosaic");
         let mut h = harness(app);
         h.run();
         let kind = h.get_by_label("demosaic.rcd").rect();
@@ -769,7 +771,7 @@ mod tests {
         let mut h = harness(App::new(None, true, || {}));
         h.run();
         let graph = &h.state().project.graph;
-        let histogram = graph.find("histogram").unwrap();
+        let histogram = graph.find("Histogram").unwrap();
         let with_params: Vec<_> =
             graph.nodes().filter(|(_, n)| !n.kind.params.is_empty()).map(|(id, _)| id).collect();
         let viewers: Vec<_> = graph
@@ -794,8 +796,8 @@ mod tests {
         assert_eq!(
             titles,
             [
-                (parameters, "histogram parameters · Drip".into()),
-                (view, "histogram view · Drip".into())
+                (parameters, "Histogram parameters · Drip".into()),
+                (view, "Histogram view · Drip".into())
             ]
         );
         assert!(h.query_by_label("shown in its window").is_some());
@@ -822,16 +824,16 @@ mod tests {
             let windows = h.state().windows();
             assert_eq!(windows.len(), 1);
             assert_eq!(windows[0].popped.node, id);
-            assert_eq!(windows[0].title, format!("{} view · Drip", kind.label));
+            assert_eq!(windows[0].title, format!("{} view · Drip", kind.name));
         }
     }
 
     #[test]
     fn parameter_windows_show_the_parameters_and_close_with_their_node() {
         for (name, labels) in [
-            ("export", &["profile", "intent", "depth", "export"][..]),
+            ("Export", &["profile", "intent", "depth", "export"][..]),
             (
-                "sigmoid",
+                "Sigmoid",
                 &["contrast", "skew", "preserve_hue", "−8 … +8 EV relative to middle grey"][..],
             ),
         ] {
@@ -861,7 +863,7 @@ mod tests {
     #[test]
     fn empty_canvas_above_the_nodes_takes_clicks() {
         let mut app = App::new(None, true, || {});
-        app.selected = app.project.graph.find("export");
+        app.selected = app.project.graph.find("Export");
         let mut h = harness(app);
         h.run();
         // Above the fitted graph, inside the area the nodes' layer spans.

@@ -10,7 +10,8 @@ use std::sync::Arc;
 /// Multiplies each site by the camera's as-shot multiplier for its color.
 pub static WHITE_BALANCE: NodeKind = NodeKind::new::<WhiteBalance>(
     "color.white_balance",
-    "white balance",
+    "color",
+    "White balance",
     &[],
     &["mosaic"],
     &["mosaic"],

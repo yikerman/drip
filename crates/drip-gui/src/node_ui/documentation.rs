@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn every_builtin_node_has_user_documentation() {
         for kind in drip::nodes::registry().kinds() {
-            assert!(super::of(kind).is_some(), "{}", kind.name);
+            assert!(super::of(kind).is_some(), "{}", kind.id);
         }
     }
 }

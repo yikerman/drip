@@ -9,7 +9,7 @@ pub fn show(ui: &mut Ui, kind: &NodeKind) {
     if let Some(doc) = doc {
         ui.label(doc.description);
     }
-    egui::Grid::new(("node help", kind.name)).num_columns(2).show(ui, |ui| {
+    egui::Grid::new(("node help", kind.id)).num_columns(2).show(ui, |ui| {
         for input in kind.inputs() {
             ui.weak(if input.requirement.optional { "optional input" } else { "input" });
             ui.label(ports::label(input.requirement.name));
