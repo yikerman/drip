@@ -93,7 +93,21 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
 - **Decided:** Current prototype resource costs are acceptable. Robust saves,
   close protection, cancellation and memory budgets remain deferred in TODO.
 
+- **Decided:** `worker::serve` owns command dispatch, cache lifetimes and action
+  thread spawning. Preview evaluation/preparation and action execution have
+  private handlers; one-line reset/invalidate, collect and shutdown operations
+  stay in the dispatcher. Fork the action evaluator before spawning to preserve
+  reset/invalidation ordering. Prepared-allocation retention and panic boundaries
+  remain unchanged.
+
 ## Presentation and editing
+
+- **Decided:** `CanvasLayout` owns one frame's node and port geometry in graph
+  coordinates. Drawing and navigation share its lookups; graph edits affect the
+  next frame's geometry. `Editor::show` delegates wire drawing/hit-testing,
+  individual node UI and connected-peer menus to private helpers. Wires precede
+  nodes, navigation follows the node loop, and pending-wire cleanup follows
+  deletion. Widget IDs and immediate `Frame::edit` behavior remain unchanged.
 
 - **Decided:** Node kinds declare a stable `id`, an internal `category` key and
   a capitalized default `name`. Each graph node owns its editable name, changed

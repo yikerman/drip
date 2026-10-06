@@ -62,14 +62,39 @@ impl Default for Editor {
     }
 }
 
-/// Where a node and its parts are on screen.
-struct Layout {
+/// Where a node and its parts are in graph coordinates.
+struct NodeLayout {
     id: NodeId,
     rect: Rect,
     inputs: Vec<(&'static str, Pos2)>,
     outputs: Vec<(&'static str, Pos2)>,
     error: Option<(Pos2, String)>,
     body: Rect,
+}
+
+/// Geometry snapshot shared by drawing and interaction for one frame.
+/// Graph edits take effect in the next frame's layout.
+struct CanvasLayout {
+    nodes: Vec<NodeLayout>,
+}
+
+impl CanvasLayout {
+    fn new<'a>(graph: &Graph, results: &dyn Fn(NodeId) -> Option<&'a Presentation>) -> Self {
+        Self { nodes: graph.nodes().map(|(id, node)| layout(id, node, results(id))).collect() }
+    }
+
+    fn port_position(&self, port: &Port, direction: Direction) -> Option<Pos2> {
+        let node = self.nodes.iter().find(|l| l.id == port.0)?;
+        let ports = match direction {
+            Direction::Input => &node.inputs,
+            Direction::Output => &node.outputs,
+        };
+        ports.iter().find(|(name, _)| *name == port.1).map(|(_, pos)| *pos)
+    }
+
+    fn node_rect(&self, id: NodeId) -> Option<Rect> {
+        self.nodes.iter().find(|l| l.id == id).map(|l| l.rect)
+    }
 }
 
 impl Editor {
@@ -92,160 +117,26 @@ impl Editor {
         let ui = &mut canvas;
         let painter = ui.painter().clone();
 
-        let results = frame.results;
-        let layouts: Vec<Layout> =
-            graph.nodes().map(|(id, node)| layout(id, node, results(id))).collect();
-        let port_pos = |port: &Port, outputs: bool| {
-            let layout = layouts.iter().find(|l| l.id == port.0)?;
-            let ports = if outputs { &layout.outputs } else { &layout.inputs };
-            ports.iter().find(|(name, _)| *name == port.1).map(|(_, pos)| *pos)
-        };
+        let layout = CanvasLayout::new(graph, frame.results);
 
         // Wires thin out slower than the zoom; port hit areas keep their
         // on-screen size.
         let point = widgets::point(ui);
         let wire = Stroke::new(1.5 * zoom.sqrt() * point, theme::TEXT);
-        let wires: Vec<_> = graph
-            .edges()
-            .filter_map(|(output, input)| {
-                Some((
-                    input.clone(),
-                    bezier(port_pos(output, true)?, port_pos(input, false)?, wire),
-                ))
-            })
-            .collect();
         // Hit-test only the background: nodes, ports and controls retain priority.
-        let hovered_wire =
-            background.hover_pos().filter(|_| self.wire.is_none()).and_then(|pointer| {
-                wires
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (_, curve))| (i, wire_distance(curve, pointer, point)))
-                    .filter(|(_, distance)| *distance <= WIRE_HIT * point)
-                    .min_by(|(_, a), (_, b)| a.total_cmp(b))
-                    .map(|(i, _)| i)
-            });
-        let disconnect = hovered_wire.map(|i| wires[i].0.clone());
-        for (i, (_, mut curve)) in wires.into_iter().enumerate() {
-            if hovered_wire == Some(i) {
-                curve.stroke.width += 2.0 * point;
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            }
-            painter.add(curve);
-        }
+        let pointer = background.hover_pos().filter(|_| self.wire.is_none());
+        let disconnect = draw_wires(ui, graph, &layout, pointer, wire);
 
-        let hit = |pos: Pos2| Rect::from_center_size(pos, Vec2::splat(16.0 * point));
         let mut navigate = None;
-        for l in &layouts {
-            let body = ui.interact(l.rect, ui.id().with(l.id), Sense::click_and_drag());
-            if body.clicked() || body.drag_started_by(PointerButton::Secondary) {
-                *selected = Some(l.id);
-            }
-            self.pan(&body);
-            if body.dragged_by(PointerButton::Secondary) {
-                let pos =
-                    position(&graph.node(l.id).expect("laid out").ui, l.id) + body.drag_delta();
-                frame.edit(graph, Edit::Ui(l.id, "pos", pos));
-            }
-            let mut remove = false;
-            theme::context_menu(&body).show(|ui| {
-                if ui.button("Rename").clicked() {
-                    *selected = Some(l.id);
-                    node_ui::parameters::focus_name(ui.ctx(), l.id);
-                    ui.close();
-                }
-                if ui.button("Delete").clicked() {
-                    remove = true;
-                    ui.close();
-                }
-            });
-            if remove {
-                frame.edit(graph, Edit::Remove(l.id));
-                if *selected == Some(l.id) {
-                    *selected = None;
-                }
-                continue;
-            }
-            let node = graph.node(l.id).expect("laid out from the graph");
-            let descriptor = node.kind;
-            let (kind, kind_params) = (node_ui::of(node.kind), node.kind.params);
-            paint(&painter, l, node, *selected == Some(l.id));
-            let inputs =
-                l.inputs.iter().zip(descriptor.inputs()).map(|((name, pos), spec)| {
-                    (Direction::Input, *name, *pos, spec.requirement.name)
-                });
-            let outputs = l
-                .outputs
-                .iter()
-                .zip(descriptor.outputs())
-                .map(|((name, pos), spec)| (Direction::Output, *name, *pos, spec.ty.name));
-            for (direction, name, pos, contract) in inputs.chain(outputs) {
-                let endpoint = Endpoint { port: Port(l.id, name.into()), direction };
-                let response = ui
-                    .interact(
-                        hit(pos),
-                        ui.id().with((l.id, name, direction)),
-                        Sense::click_and_drag(),
-                    )
-                    .on_hover_text(node_ui::ports::label(contract));
-                self.pan(&response);
-                if response.secondary_clicked() {
-                    egui::Popup::close_all(ui.ctx());
-                    self.connect(endpoint.clone(), graph, frame);
-                }
-                theme::menu(&response).show(|ui| {
-                    let peers = graph.edges().filter_map(|(output, input)| match direction {
-                        Direction::Input => (input == &endpoint.port).then_some(output),
-                        Direction::Output => (output == &endpoint.port).then_some(input),
-                    });
-                    let mut empty = true;
-                    for peer in peers {
-                        empty = false;
-                        let node = graph.node(peer.0).expect("connected node");
-                        if ui.button(format!("{} · {}", node.name, peer.1)).clicked() {
-                            navigate = Some(peer.0);
-                            ui.close();
-                        }
-                    }
-                    if empty {
-                        let text = match direction {
-                            Direction::Input => "No source",
-                            Direction::Output => "No destinations",
-                        };
-                        ui.add_enabled(false, egui::Button::new(text));
-                    }
-                });
-            }
-            if let Some((at, error)) = &l.error {
-                let row = Rect::from_min_size(
-                    pos2(l.rect.min.x, at.y - ROW / 2.0),
-                    vec2(l.rect.width(), ROW),
-                );
-                ui.interact(row, ui.id().with((l.id, "error")), Sense::hover())
-                    .on_hover_text(error);
-            }
-            let mut cx = NodeCx::new(graph, l.id, frame);
-            if !kind_params.is_empty() {
-                let button = Rect::from_min_size(
-                    l.rect.right_top() + vec2(-HEADER, (HEADER - BUTTON) / 2.0),
-                    Vec2::splat(BUTTON),
-                );
-                widgets::pop_out(ui, button, &mut cx, Part::Parameters);
-            }
-            kind.body(&mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body)), &mut cx);
-            if body.hovered() {
-                painter.rect_stroke(
-                    l.rect,
-                    0.0,
-                    Stroke::new(point, theme::TEXT),
-                    egui::StrokeKind::Inside,
-                );
+        for node in &layout.nodes {
+            if let Some(id) = self.show_node(ui, node, graph, selected, frame) {
+                navigate = Some(id);
             }
         }
 
         if let Some(id) = navigate {
             *selected = Some(id);
-            let rect = layouts.iter().find(|l| l.id == id).expect("connected node").rect;
+            let rect = layout.node_rect(id).expect("connected node");
             let visible = ui.clip_rect();
             if !visible.contains_rect(rect) {
                 *self.offset.as_mut().expect("canvas initialized") +=
@@ -287,11 +178,110 @@ impl Editor {
         if let Some(from) = &self.wire {
             let pointer = ui.ctx().pointer_latest_pos().map(|p| to_global.inverse() * p);
             let output = from.direction == Direction::Output;
-            if let (Some(start), Some(end)) = (port_pos(&from.port, output), pointer) {
+            if let (Some(start), Some(end)) =
+                (layout.port_position(&from.port, from.direction), pointer)
+            {
                 let (start, end) = if output { (start, end) } else { (end, start) };
                 painter.add(bezier(start, end, wire));
             }
         }
+    }
+
+    fn show_node(
+        &mut self,
+        ui: &mut Ui,
+        l: &NodeLayout,
+        graph: &mut Graph,
+        selected: &mut Option<NodeId>,
+        frame: &mut Frame,
+    ) -> Option<NodeId> {
+        let painter = ui.painter().clone();
+        let point = widgets::point(ui);
+        let hit = |pos: Pos2| Rect::from_center_size(pos, Vec2::splat(16.0 * point));
+        let mut navigate = None;
+        let body = ui.interact(l.rect, ui.id().with(l.id), Sense::click_and_drag());
+        if body.clicked() || body.drag_started_by(PointerButton::Secondary) {
+            *selected = Some(l.id);
+        }
+        self.pan(&body);
+        if body.dragged_by(PointerButton::Secondary) {
+            let pos = position(&graph.node(l.id).expect("laid out").ui, l.id) + body.drag_delta();
+            frame.edit(graph, Edit::Ui(l.id, "pos", pos));
+        }
+        let mut remove = false;
+        theme::context_menu(&body).show(|ui| {
+            if ui.button("Rename").clicked() {
+                *selected = Some(l.id);
+                node_ui::parameters::focus_name(ui.ctx(), l.id);
+                ui.close();
+            }
+            if ui.button("Delete").clicked() {
+                remove = true;
+                ui.close();
+            }
+        });
+        if remove {
+            frame.edit(graph, Edit::Remove(l.id));
+            if *selected == Some(l.id) {
+                *selected = None;
+            }
+            return None;
+        }
+        let node = graph.node(l.id).expect("laid out from the graph");
+        let descriptor = node.kind;
+        let (kind, kind_params) = (node_ui::of(node.kind), node.kind.params);
+        paint(&painter, l, node, *selected == Some(l.id));
+        let inputs = l
+            .inputs
+            .iter()
+            .zip(descriptor.inputs())
+            .map(|((name, pos), spec)| (Direction::Input, *name, *pos, spec.requirement.name));
+        let outputs = l
+            .outputs
+            .iter()
+            .zip(descriptor.outputs())
+            .map(|((name, pos), spec)| (Direction::Output, *name, *pos, spec.ty.name));
+        for (direction, name, pos, contract) in inputs.chain(outputs) {
+            let endpoint = Endpoint { port: Port(l.id, name.into()), direction };
+            let response = ui
+                .interact(hit(pos), ui.id().with((l.id, name, direction)), Sense::click_and_drag())
+                .on_hover_text(node_ui::ports::label(contract));
+            self.pan(&response);
+            if response.secondary_clicked() {
+                egui::Popup::close_all(ui.ctx());
+                self.connect(endpoint.clone(), graph, frame);
+            }
+            theme::menu(&response).show(|ui| {
+                if let Some(id) = peer_menu(ui, graph, &endpoint) {
+                    navigate = Some(id);
+                }
+            });
+        }
+        if let Some((at, error)) = &l.error {
+            let row = Rect::from_min_size(
+                pos2(l.rect.min.x, at.y - ROW / 2.0),
+                vec2(l.rect.width(), ROW),
+            );
+            ui.interact(row, ui.id().with((l.id, "error")), Sense::hover()).on_hover_text(error);
+        }
+        let mut cx = NodeCx::new(graph, l.id, frame);
+        if !kind_params.is_empty() {
+            let button = Rect::from_min_size(
+                l.rect.right_top() + vec2(-HEADER, (HEADER - BUTTON) / 2.0),
+                Vec2::splat(BUTTON),
+            );
+            widgets::pop_out(ui, button, &mut cx, Part::Parameters);
+        }
+        kind.body(&mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body)), &mut cx);
+        if body.hovered() {
+            painter.rect_stroke(
+                l.rect,
+                0.0,
+                Stroke::new(point, theme::TEXT),
+                egui::StrokeKind::Inside,
+            );
+        }
+        navigate
     }
 
     fn pan(&mut self, response: &egui::Response) {
@@ -373,8 +363,74 @@ impl Editor {
     }
 }
 
+fn draw_wires(
+    ui: &mut Ui,
+    graph: &Graph,
+    layout: &CanvasLayout,
+    pointer: Option<Pos2>,
+    wire: Stroke,
+) -> Option<Port> {
+    let point = widgets::point(ui);
+    let wires: Vec<_> = graph
+        .edges()
+        .filter_map(|(output, input)| {
+            Some((
+                input.clone(),
+                bezier(
+                    layout.port_position(output, Direction::Output)?,
+                    layout.port_position(input, Direction::Input)?,
+                    wire,
+                ),
+            ))
+        })
+        .collect();
+    let hovered_wire = pointer.and_then(|pointer| {
+        wires
+            .iter()
+            .enumerate()
+            .map(|(i, (_, curve))| (i, wire_distance(curve, pointer, point)))
+            .filter(|(_, distance)| *distance <= WIRE_HIT * point)
+            .min_by(|(_, a), (_, b)| a.total_cmp(b))
+            .map(|(i, _)| i)
+    });
+    let disconnect = hovered_wire.map(|i| wires[i].0.clone());
+    for (i, (_, mut curve)) in wires.into_iter().enumerate() {
+        if hovered_wire == Some(i) {
+            curve.stroke.width += 2.0 * point;
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        ui.painter().add(curve);
+    }
+    disconnect
+}
+
+fn peer_menu(ui: &mut Ui, graph: &Graph, endpoint: &Endpoint) -> Option<NodeId> {
+    let mut navigate = None;
+    let peers = graph.edges().filter_map(|(output, input)| match endpoint.direction {
+        Direction::Input => (input == &endpoint.port).then_some(output),
+        Direction::Output => (output == &endpoint.port).then_some(input),
+    });
+    let mut empty = true;
+    for peer in peers {
+        empty = false;
+        let node = graph.node(peer.0).expect("connected node");
+        if ui.button(format!("{} · {}", node.name, peer.1)).clicked() {
+            navigate = Some(peer.0);
+            ui.close();
+        }
+    }
+    if empty {
+        let text = match endpoint.direction {
+            Direction::Input => "No source",
+            Direction::Output => "No destinations",
+        };
+        ui.add_enabled(false, egui::Button::new(text));
+    }
+    navigate
+}
+
 /// Paints a node's frame: its fill, label, ports and error.
-fn paint(painter: &Painter, l: &Layout, node: &Node, selected: bool) {
+fn paint(painter: &Painter, l: &NodeLayout, node: &Node, selected: bool) {
     let (font, small) =
         (FontId::proportional(theme::BODY_SIZE), FontId::proportional(theme::SMALL_SIZE));
     let fill = if selected { theme::LIGHTER } else { theme::DARKER };
@@ -410,7 +466,7 @@ fn paint(painter: &Painter, l: &Layout, node: &Node, selected: bool) {
 
 /// From the top: header, input rows, output rows, an error row if the node
 /// failed, the body its kind's GUI draws.
-fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> Layout {
+fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> NodeLayout {
     let error = match result {
         Some(Err(NodeError::Upstream(_))) | Some(Ok(_)) | None => None,
         Some(Err(e)) => Some(e.to_string()),
@@ -419,7 +475,7 @@ fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> Layout {
     let body_top = ports(node) + if error.is_some() { ROW } else { 0.0 };
     let pos = position(&node.ui, id).to_pos2();
     let port = |i: usize, x: f32| pos + vec2(x, HEADER + ROW * (i as f32 + 0.5));
-    Layout {
+    NodeLayout {
         id,
         rect: Rect::from_min_size(pos, vec2(size.x, body_top + size.y)),
         inputs: node.kind.inputs().enumerate().map(|(i, p)| (p.name, port(i, 0.0))).collect(),

@@ -170,29 +170,29 @@ impl Worker {
                 Event::Evaluated { generation, level, views, failures } => {
                     self.in_flight = false;
                     self.collect = true;
-                    if generation == self.generation {
-                        for (id, failure) in &failures {
-                            if self.failures.get(id) != Some(failure) {
-                                log::log!(
-                                    failure.level(),
-                                    "preview generation={generation} level={level} node={id:?} kind={}: {}",
-                                    failure.kind,
-                                    failure.error
-                                );
-                            }
-                        }
-                        let error = failures.iter().next().map(|(id, failure)| {
-                            format!("{id:?} ({}): {}", failure.kind, failure.error)
-                        });
-                        self.failures = failures;
-                        self.views = views;
-                        notices.push(Notice::Evaluated(error.map_or(Ok(()), Err)));
-                    } else {
+                    if generation != self.generation {
                         log::trace!(
                             "discarded preview generation={generation} current={}",
                             self.generation
                         );
+                        continue;
                     }
+                    for (id, failure) in &failures {
+                        if self.failures.get(id) != Some(failure) {
+                            log::log!(
+                                failure.level(),
+                                "preview generation={generation} level={level} node={id:?} kind={}: {}",
+                                failure.kind,
+                                failure.error
+                            );
+                        }
+                    }
+                    let error = failures.iter().next().map(|(id, failure)| {
+                        format!("{id:?} ({}): {}", failure.kind, failure.error)
+                    });
+                    self.failures = failures;
+                    self.views = views;
+                    notices.push(Notice::Evaluated(error.map_or(Ok(()), Err)));
                 }
                 Event::Action(result) => {
                     if !self.failed {
@@ -201,19 +201,13 @@ impl Worker {
                 }
                 Event::Stopped => {
                     log::error!("preview worker stopped");
-                    self.failed = true;
-                    self.in_flight = false;
-                    self.pending = None;
-                    notices.push(Notice::Failed);
+                    notices.push(self.fail());
                 }
             }
         }
         if self.start().is_err() && !self.failed {
             log::error!("preview worker disconnected");
-            self.failed = true;
-            self.in_flight = false;
-            self.pending = None;
-            notices.push(Notice::Failed);
+            notices.push(self.fail());
         }
         notices
     }
@@ -224,6 +218,13 @@ impl Worker {
         if std::mem::take(&mut self.collect) {
             let _ = self.send(Command::Collect);
         }
+    }
+
+    fn fail(&mut self) -> Notice {
+        self.failed = true;
+        self.in_flight = false;
+        self.pending = None;
+        Notice::Failed
     }
 
     fn start(&mut self) -> Result<(), String> {
@@ -257,94 +258,94 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
     for command in commands {
         match command {
             Command::Evaluate(request) => {
-                let start = Instant::now();
-                log::debug!(
-                    "preview started generation={} level={} targets={}",
-                    request.generation,
-                    request.level,
-                    request.targets.len()
-                );
-                let computed = evaluator.evaluate(&request.graph, request.level, &request.targets);
-                let evaluated = start.elapsed();
-                let failures: BTreeMap<_, _> = evaluator
-                    .failures(&request.graph, &request.targets)
-                    .map(|(id, error)| {
-                        (
-                            id,
-                            Failure {
-                                kind: request.graph.node(id).expect("evaluated node").kind.id,
-                                error: error.clone(),
-                            },
-                        )
-                    })
-                    .collect();
-                let views = request
-                    .targets
-                    .iter()
-                    .map(|&id| {
-                        let result = evaluator
-                            .result(id)
-                            .expect("evaluated target")
-                            .as_ref()
-                            .map(|result| result.view.as_ref().map(|view| prepared.view(view)))
-                            .map_err(Clone::clone);
-                        (id, result)
-                    })
-                    .collect();
-                log::debug!(
-                    "preview finished generation={} level={} recomputed={} failures={} evaluate={evaluated:.1?} prepare={:.1?}",
-                    request.generation,
-                    request.level,
-                    computed.len(),
-                    failures.len(),
-                    start.elapsed() - evaluated
-                );
-                notify.send(Event::Evaluated {
-                    generation: request.generation,
-                    level: request.level,
-                    views,
-                    failures,
-                });
+                notify.send(evaluate(&request, &mut evaluator, &mut prepared));
             }
             Command::Reset | Command::Invalidate => evaluator = Evaluator::default(),
             Command::Action { graph, id, name } => {
                 let evaluator = evaluator.fork();
                 let notify = notify.clone();
                 thread::spawn(move || {
-                    let node = graph.node(id).expect("action node");
-                    let destinations: Vec<_> = node
-                        .kind
-                        .params
-                        .iter()
-                        .filter(|p| matches!(p.kind, ParamKind::Path { output: true }))
-                        .map(|p| (&p.name, &node.params[p.name]))
-                        .collect();
-                    let context = format!(
-                        "node={id:?} kind={} action={name} destinations={destinations:?}",
-                        node.kind.id
-                    );
-                    let start = Instant::now();
-                    log::info!("action started {context}");
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        evaluator.run_action(&graph, id, name).map_err(|e| e.to_string())
-                    }))
-                    .unwrap_or_else(|_| Err("the action crashed".into()));
-                    match &result {
-                        Ok(()) => {
-                            log::info!("action completed {context} elapsed={:.1?}", start.elapsed())
-                        }
-                        Err(error) => log::error!(
-                            "action failed {context} elapsed={:.1?}: {error}",
-                            start.elapsed()
-                        ),
-                    }
-                    notify.send(Event::Action(result));
+                    notify.send(Event::Action(run_action(evaluator, &graph, id, name)));
                 });
             }
             Command::Collect => prepared.collect(),
             Command::Shutdown => break,
         }
     }
+}
+
+fn evaluate(request: &Request, evaluator: &mut Evaluator, prepared: &mut Prepared) -> Event {
+    let start = Instant::now();
+    log::debug!(
+        "preview started generation={} level={} targets={}",
+        request.generation,
+        request.level,
+        request.targets.len()
+    );
+    let computed = evaluator.evaluate(&request.graph, request.level, &request.targets);
+    let evaluated = start.elapsed();
+    let failures: BTreeMap<_, _> = evaluator
+        .failures(&request.graph, &request.targets)
+        .map(|(id, error)| {
+            (
+                id,
+                Failure {
+                    kind: request.graph.node(id).expect("evaluated node").kind.id,
+                    error: error.clone(),
+                },
+            )
+        })
+        .collect();
+    let views = request
+        .targets
+        .iter()
+        .map(|&id| {
+            let result = evaluator
+                .result(id)
+                .expect("evaluated target")
+                .as_ref()
+                .map(|result| result.view.as_ref().map(|view| prepared.view(view)))
+                .map_err(Clone::clone);
+            (id, result)
+        })
+        .collect();
+    log::debug!(
+        "preview finished generation={} level={} recomputed={} failures={} evaluate={evaluated:.1?} prepare={:.1?}",
+        request.generation,
+        request.level,
+        computed.len(),
+        failures.len(),
+        start.elapsed() - evaluated
+    );
+    Event::Evaluated { generation: request.generation, level: request.level, views, failures }
+}
+
+fn run_action(evaluator: Evaluator, graph: &Graph, id: NodeId, name: &str) -> Result<(), String> {
+    let node = graph.node(id).expect("action node");
+    let destinations: Vec<_> = node
+        .kind
+        .params
+        .iter()
+        .filter(|p| matches!(p.kind, ParamKind::Path { output: true }))
+        .map(|p| (&p.name, &node.params[p.name]))
+        .collect();
+    let context =
+        format!("node={id:?} kind={} action={name} destinations={destinations:?}", node.kind.id);
+    let start = Instant::now();
+    log::info!("action started {context}");
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        evaluator.run_action(graph, id, name).map_err(|e| e.to_string())
+    }))
+    .unwrap_or_else(|_| Err("the action crashed".into()));
+    match &result {
+        Ok(()) => {
+            log::info!("action completed {context} elapsed={:.1?}", start.elapsed())
+        }
+        Err(error) => {
+            log::error!("action failed {context} elapsed={:.1?}: {error}", start.elapsed())
+        }
+    }
+    result
 }
 
 #[cfg(test)]

@@ -3,6 +3,22 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-06: editor geometry and worker handlers
+
+- Added `CanvasLayout` as the frame's geometry snapshot, sharing node bounds and
+  port positions between drawing and navigation. Extracted wire drawing/hit
+  testing, individual node UI and peer menus from `Editor::show`, preserving
+  widget IDs and interaction/edit ordering.
+- Extracted preview evaluation/preparation and action execution from
+  `worker::serve`. Command ordering, evaluator forks, thread spawning and cache
+  lifetimes remain explicit in dispatch; panic boundaries are preserved.
+- Renamed individual geometry to `NodeLayout`, flattened stale-result handling
+  in `Worker::poll`, and centralized the worker's failure state transition.
+- Validation: all 49 GUI tests passed, including editor gestures and worker
+  coalescing, invalidation, export isolation and panic notification. The opt-in
+  GPU test remained ignored. Clippy with warnings denied, formatting and diff
+  checks passed. Live GUI behavior has not been checked.
+
 ## 2026-10-06: pointer-leave scroll handling
 
 - Reproduced the image pop-out panic with wheel scrolling followed by
