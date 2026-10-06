@@ -7,7 +7,7 @@ use std::thread;
 use drip::eval::{Evaluator, NodeError};
 use drip::graph::{Graph, NodeId};
 
-use crate::views::{Prepared, PreparedView};
+use crate::render::node_views::{Prepared, PreparedView};
 
 pub type Presentation = Result<Option<PreparedView>, NodeError>;
 type Snapshot = BTreeMap<NodeId, Presentation>;

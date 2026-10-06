@@ -9,7 +9,7 @@ use drip::nodes::scopes::vectorscope_xyz;
 use drip::view::{Histogram, Scope, ScopeAxes, View};
 use egui::{Align2, FontId, Painter, Rect, Stroke};
 
-use crate::preview::{self, Image};
+use crate::render::image::{self, Image};
 use crate::theme;
 
 /// A view in the form the UI thread draws without further CPU work.
@@ -55,7 +55,7 @@ pub fn draw(painter: &Painter, rect: Rect, id: egui::Id, view: &PreparedView, fo
             let fit = (rect.width() / image.width as f32).min(rect.height() / image.height as f32);
             let size = egui::vec2(image.width as f32, image.height as f32) * fit;
             let shown = Rect::from_center_size(rect.center(), size);
-            preview::draw(painter, shown, id, image.clone());
+            image::draw(painter, shown, id, image.clone());
         }
         PreparedView::Histogram(h) => histogram(painter, rect, h, font),
         PreparedView::Scope(scope, mesh) => draw_scope(painter, rect, scope, mesh, font),

@@ -1,7 +1,7 @@
 //! The displayed curve is sampled from the processing implementation.
 
-use super::NodeUi;
-use crate::{editing::NodeCx, inspector, theme};
+use super::{NodeUi, parameters};
+use crate::{editing::NodeCx, theme};
 use drip::{nodes::sigmoid, param::Params};
 use egui::{Color32, Sense, Shape, Stroke, Ui, vec2};
 
@@ -9,7 +9,7 @@ pub(super) struct Controls;
 
 impl NodeUi for Controls {
     fn controls(&self, ui: &mut Ui, node: &mut NodeCx) {
-        inspector::parameters(ui, node);
+        parameters::schema(ui, node);
         let curve = sigmoid::settings(Params::validated(&node.node().params));
         // Bound the plot's preferred width when a pop-out measures its contents.
         let (rect, _) = ui.allocate_exact_size(

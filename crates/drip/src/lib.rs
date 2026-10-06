@@ -15,7 +15,7 @@
 //! 2. [`value`] and [`ports`]: capability registration and tuple adapters that
 //!    connect typed kernels to a heterogeneous graph.
 //! 3. [`node`] and [`nodes`]: signatures, processing and explicit actions. Read
-//!    `nodes/exposure.rs` for a small node, `nodes/scopes.rs` for capability inputs,
+//!    `nodes/exposure.rs` for a small node, `nodes/scopes/density.rs` for capability inputs,
 //!    and `nodes/export.rs` for file-writing actions.
 //! 4. [`graph`]: nodes, named edges, connection validation and DAG traversal.
 //! 5. [`eval`]: evaluation and node-result caching. Follow

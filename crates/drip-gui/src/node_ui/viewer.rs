@@ -1,7 +1,8 @@
 use super::{NodeUi, PAD, Part};
 use crate::editing::{NodeCx, pair};
+use crate::render::node_views;
 use crate::widgets::BUTTON;
-use crate::{theme, views, widgets};
+use crate::{theme, widgets};
 use drip::graph::Node;
 use egui::{FontId, Rect, Ui, UiBuilder, Vec2, vec2};
 
@@ -34,7 +35,7 @@ impl NodeUi for Viewer {
             });
         } else if let Some(view) = node.view() {
             let font = FontId::proportional(theme::SMALL_SIZE);
-            views::draw(ui.painter(), rect, ui.id().with("view"), view, &font);
+            node_views::draw(ui.painter(), rect, ui.id().with("view"), view, &font);
         }
         // Over the view, so on a backdrop.
         let button = Rect::from_min_size(rect.right_top() - vec2(BUTTON, 0.0), Vec2::splat(BUTTON));
@@ -53,7 +54,7 @@ impl NodeUi for Viewer {
         if let Some(view) = node.view() {
             let (rect, font) =
                 (ui.available_rect_before_wrap(), FontId::proportional(theme::BODY_SIZE));
-            views::draw(ui.painter(), rect, ui.id().with("view"), view, &font);
+            node_views::draw(ui.painter(), rect, ui.id().with("view"), view, &font);
         }
     }
 }

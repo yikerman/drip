@@ -119,7 +119,7 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
     );
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("preview"),
-        source: wgpu::ShaderSource::Wgsl(crate::preview::SHADER.into()),
+        source: wgpu::ShaderSource::Wgsl(crate::render::image::SHADER.into()),
     });
     let pipeline = create_pipeline(&device, &shader, "fs", CANVAS);
     let source_view = source.create_view(&Default::default());
@@ -188,7 +188,9 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
         for (i, pixel) in rgb.iter().enumerate() {
             if output.wide_gamut() {
                 let actual: Vec<f64> = bytes[i * 8..i * 8 + 6]
-                    .as_chunks::<2>().0.iter()
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|b| half::f16::from_ne_bytes([b[0], b[1]]).to_f64())
                     .collect();
                 let pixel = bounded[i].map(f64::from);

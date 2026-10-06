@@ -4,8 +4,8 @@
 //!
 //! `app.rs` owns the project, `editing.rs` applies edits and their effects, and
 //! `worker.rs` schedules background evaluation. `editor.rs`, `inspector.rs` and
-//! `node_ui/` handle interaction; `views.rs`, `preview.rs` and `display.rs` prepare
-//! and render results. This module owns OS windows and the event loop.
+//! `node_ui/` handle interaction; `render/` prepares node views, draws images and
+//! presents each window. This module owns OS windows and the event loop.
 //!
 //!     drip-gui [project.drip]
 //!
@@ -13,15 +13,13 @@
 //! timings, `RUST_LOG=frame=debug` frame timings alone.
 
 mod app;
-mod display;
 mod editing;
 mod editor;
 mod inspector;
 mod node_ui;
 mod parent;
-mod preview;
+mod render;
 mod theme;
-mod views;
 mod widgets;
 mod worker;
 
@@ -36,8 +34,8 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use app::App;
-use display::{Display, Gpu};
 use node_ui::Popped;
+use render::display::{Display, Gpu};
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();

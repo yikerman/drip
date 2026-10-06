@@ -21,7 +21,7 @@ impl NodeKernel for Bin2x2 {
         (input,): (&Mosaic,),
         ctx: &EvalContext<'_>,
     ) -> Result<Evaluated<Self::Outputs>, String> {
-        let m = super::demosaic::preview(input, ctx);
+        let m = super::preview(input, ctx);
         let (width, height) = (m.width / 2, m.height / 2);
         // The second green (3) joins the first.
         let colors: Vec<u32> = m.cfa.colors.iter().map(|&c| [0, 1, 2, 1][c as usize]).collect();
@@ -61,8 +61,8 @@ pub fn debayer(
 
 #[cfg(test)]
 mod tests {
-    use super::super::white_balance::process as white_balance;
     use super::*;
+    use crate::nodes::white_balance::process as white_balance;
 
     #[test]
     fn cfa_kernels_cover_phases_and_crop_odd_edges() {

@@ -129,9 +129,7 @@ pub(super) fn of(kind: &NodeKind) -> Option<&'static Documentation> {
             &nodes::TIFF,
             Documentation::new(
                 "Export at full detail through the selected RGB ICC profile, including its transfer encoding. \
-                 Choose 16-bit integer or 32-bit float samples. \
-                 Connected RAW metadata is written as camera make and model, exposure time, \
-                 f-number, ISO, focal length and capture time. Orientation is not written: pixels stay unrotated.",
+                 RAW metadata, if any, is also copied.",
             )
             .result("writes", "TIFF file"),
         ),

@@ -56,7 +56,7 @@ use std::sync::Arc;
 
 use winit::window::Window;
 
-use crate::preview;
+use crate::render::image;
 
 const CANVAS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
@@ -143,7 +143,7 @@ impl Display {
         let compositor = Compositor::new(device, output, &config);
         let mut egui =
             egui_wgpu::Renderer::new(device, CANVAS, egui_wgpu::RendererOptions::default());
-        preview::install(device, &mut egui);
+        image::install(device, &mut egui);
         Ok(Display {
             gpu: gpu.clone(),
             window,
@@ -240,7 +240,7 @@ impl Display {
                 .forget_lifetime();
             self.egui.render(&mut pass, jobs, &screen);
         }
-        preview::end_frame(&mut self.egui);
+        image::end_frame(&mut self.egui);
         let view = frame.texture.create_view(&Default::default());
         self.compositor.draw(&mut encoder, &view);
         commands.push(encoder.finish());

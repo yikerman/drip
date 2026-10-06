@@ -382,7 +382,7 @@ mod tests {
     use drip::param::Params;
     use drip::view::PreviewImage;
 
-    use crate::views::PreparedView as View;
+    use crate::render::node_views::PreparedView as View;
     use drip::param::ParamKind;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;

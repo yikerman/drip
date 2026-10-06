@@ -16,7 +16,7 @@ const BINS: usize = 256;
 pub static HISTOGRAM: NodeKind = NodeKind::new::<HistogramNode>(
     "view.histogram",
     "histogram",
-    super::scope_settings::EXPOSURE_PARAMS,
+    super::EXPOSURE_PARAMS,
     &["image"],
     &[],
 );

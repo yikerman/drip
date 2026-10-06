@@ -102,29 +102,3 @@ pub fn normalize(raw: &Raw) -> Result<Mosaic, String> {
     let camera = Arc::new(Camera { xyz_to_cam: raw.xyz_to_cam, white_balance });
     Ok(Mosaic { width, height, scale: 1, cfa, data, camera, white })
 }
-
-/// Halves a Bayer mosaic by averaging four sites of each phase. Only whole
-/// 4 × 4 input cells contribute, so every output remains a complete Bayer cell.
-pub fn downsample(m: &Mosaic) -> Mosaic {
-    let (width, height) = (m.width / 4 * 2, m.height / 4 * 2);
-    let mut data = Vec::with_capacity(width * height);
-    for row in 0..height {
-        for col in 0..width {
-            let (r, c) = (row / 2 * 4 + row % 2, col / 2 * 4 + col % 2);
-            let i = r * m.width + c;
-            data.push(
-                (m.data[i] + m.data[i + 2] + m.data[i + 2 * m.width] + m.data[i + 2 * m.width + 2])
-                    * 0.25,
-            );
-        }
-    }
-    Mosaic {
-        width,
-        height,
-        scale: m.scale * 2,
-        data,
-        cfa: m.cfa.clone(),
-        camera: m.camera.clone(),
-        white: m.white,
-    }
-}

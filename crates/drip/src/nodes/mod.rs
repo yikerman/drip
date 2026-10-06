@@ -1,29 +1,24 @@
 //! The built-in node kinds.
 
-mod bin2x2;
 mod camera;
 mod demosaic;
-pub use demosaic::RCD;
 mod export;
 mod exposure;
-pub use exposure::EXPOSURE;
 mod highlights;
-mod histogram;
-mod scope_settings;
-pub use highlights::HIGHLIGHTS;
 mod preview;
 mod raw;
 pub mod scopes;
-pub use scopes::{VECTORSCOPE, WAVEFORM};
 pub mod sigmoid;
 mod white_balance;
 
-pub use bin2x2::BIN_2X2;
 pub use camera::CAMERA_TO_REC2020;
+pub use demosaic::{BIN_2X2, RCD, downsample};
 pub use export::TIFF;
-pub use histogram::HISTOGRAM;
+pub use exposure::EXPOSURE;
+pub use highlights::HIGHLIGHTS;
 pub use preview::PREVIEW;
-pub use raw::{READ, downsample, normalize};
+pub use raw::{READ, normalize};
+pub use scopes::{HISTOGRAM, VECTORSCOPE, WAVEFORM};
 pub use sigmoid::SIGMOID;
 pub use white_balance::WHITE_BALANCE;
 

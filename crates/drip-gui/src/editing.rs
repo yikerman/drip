@@ -1,7 +1,7 @@
 //! Applies frontend graph edits and owns their redraw/evaluation effects.
 
 use crate::node_ui::{Part, Popped};
-use crate::views::PreparedView;
+use crate::render::node_views::PreparedView;
 use crate::worker::Presentation;
 use drip::graph::{Graph, GraphError, Node, NodeId, Port};
 use drip::node::NodeKind;

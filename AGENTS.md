@@ -23,7 +23,7 @@
 
 - `crates/drip`: library. processing, node graph, color management, persistence. must never depend on a GUI.
 - `crates/drip-cli`: batch frontend (binary `drip`), scaffold only.
-- `crates/drip-gui`: interactive frontend (binary `drip-gui`) on winit + wgpu + egui: `display` (extended-linear sRGB output), `preview` (wide-gamut image drawing), `editor` (node graph), `node_ui` (per-kind node bodies and pop-out windows), `editing` (graph edits and notifications), `widgets` (shared by node GUIs and the editor), `parent` (pop-outs above the main window), `inspector` (parameters, inputs), `theme`.
+- `crates/drip-gui`: interactive frontend (binary `drip-gui`) on winit + wgpu + egui: `render` (node views, wide-gamut image drawing, display output and shaders), `editor` (node graph), `node_ui` (shared parameter controls, per-kind node bodies and pop-out windows), `editing` (graph edits and notifications), `widgets` (shared by node GUIs and the editor), `parent` (pop-outs above the main window), `inspector` (sidebar composition and template inputs), `theme`.
 - `crates/drip-libraw`: minimal LibRaw binding (C shim + safe `decode`).
 - `docs/DESIGN.md`: decisions, status, rationale. `docs/PROGRESS.md`: session log.
 - `TODO.md`: ideas not implemented.

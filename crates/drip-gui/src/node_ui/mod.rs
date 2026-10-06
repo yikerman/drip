@@ -2,11 +2,11 @@
 
 mod documentation;
 pub mod help;
+pub mod parameters;
 pub mod ports;
 mod sigmoid;
 mod viewer;
 use crate::editing::NodeCx;
-use crate::inspector;
 use drip::graph::{Node, NodeId};
 use drip::node::NodeKind;
 use drip::nodes::{HISTOGRAM, PREVIEW, VECTORSCOPE, WAVEFORM};
@@ -20,7 +20,7 @@ pub const PAD: f32 = 6.0;
 
 pub trait NodeUi: Sync {
     fn controls(&self, ui: &mut Ui, node: &mut NodeCx) {
-        inspector::parameters(ui, node);
+        parameters::schema(ui, node);
     }
 
     /// The size of the node's body, below its ports, in graph units. Its
@@ -94,7 +94,7 @@ impl Popped {
     pub fn show(self, ui: &mut Ui, node: &mut NodeCx) {
         match self.part {
             Part::Parameters => {
-                let used = ui.scope(|ui| inspector::node(ui, node)).response.rect;
+                let used = ui.scope(|ui| parameters::panel(ui, node)).response.rect;
                 fit_window(ui.ctx(), used);
             }
             Part::Gui(name) => of(node.node().kind).window(ui, name, node),
