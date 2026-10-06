@@ -8,8 +8,8 @@ for now. Revisit performance work when measurements or usage justify it.
 |------|--------|---------------------------|
 | Production pipeline validation | Next | Sigmoid, RCD and inpaint opposed are implemented; judge detail, highlights and color on varied real photos before calling the pipeline production-ready. |
 | Editing UI/UX | Planned | Refine the workflow around the production pipeline. |
-| Wayland description correctness | Next | Declare a Rec.2020 target volume with extended-target support, or present in linear Rec.2020. Decide before implementation. |
-| Display portability | Next | Verify the owned Wayland description on Intel/Mesa and other compositors, and reference white on X11, Windows and macOS, where the driver still describes extended-linear output. |
+| HDR presentation | Deferred | Define luminance/headroom and compositor metadata. SDR preview currently clips scene values in Rec.2020. |
+| Display portability | Next | Verify Rec.2020 presentation on NVIDIA and other compositors, and reference white on X11, Windows and macOS, where the driver still describes extended-linear output. |
 | Drop the wgpu fork | Deferred | Remove the patch once a wgpu release has `SurfaceColorSpace::PassThrough` (gfx-rs/wgpu#10545); steps are in THIRD_PARTY.md. |
 | SpyderX color verification | Planned | Measure display output and check the complete color path before release. |
 | Packaging and v0.1 | Planned | Follow processing, workflow and color verification. |

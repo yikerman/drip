@@ -4,6 +4,19 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: SDR Rec.2020 presentation
+
+- Wayland output now converts the composed canvas to linear Rec.2020 and tags
+  the matching SDR volume. Preview clips scene values in Rec.2020, retaining
+  wide-gamut coordinates through the extended-sRGB canvas. HDR is deferred.
+- Relative-colorimetric intent is preferred and logged, with perceptual fallback.
+  Intel/KWin traces confirmed Rec.2020, linear transfer, (0, 80, 80) luminances
+  and relative intent across three window lifecycles.
+- GUI tests (23), clippy and formatting passed. Intel GPU readback verified
+  Rec.2020 round trips, bounded scene values, GUI colors, driver scRGB and both
+  sRGB target encodings against independent colorimetric references.
+- NVIDIA and other compositors remain unverified for this presentation mode.
+
 ## 2026-10-05: Wayland setup cleanup
 
 - Failed or unsupported managed Wayland setup now selects sRGB, avoiding the

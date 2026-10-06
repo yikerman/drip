@@ -1,7 +1,7 @@
 //! Each window composites egui and previews in an FP16 extended-sRGB canvas.
-//! Presentation decodes it to extended linear BT.709 with white at 1.0, with
-//! sRGB as fallback, and the compositor maps it to the display. On Wayland Drip
-//! describes the output itself through pass-through; elsewhere the driver does.
+//! Wayland presentation converts to bounded linear Rec.2020 and uses an owned
+//! description through passthrough. Other backends use driver-described scRGB.
+//! Both paths fall back to sRGB when their required capabilities are absent.
 
 mod output;
 #[cfg(test)]

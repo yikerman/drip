@@ -33,5 +33,8 @@ fn encode(v: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs(in: Out) -> @location(0) vec4<f32> {
-    return vec4<f32>(encode(TO_SRGB * textureSample(image, image_sampler, in.uv).rgb), 1.0);
+    // SDR preview only. Clip in Rec.2020 before conversion so colors outside
+    // BT.709 survive in the extended canvas. Processing/export are unchanged.
+    let rgb = clamp(textureSample(image, image_sampler, in.uv).rgb, vec3(0.0), vec3(1.0));
+    return vec4<f32>(encode(TO_SRGB * rgb), 1.0);
 }

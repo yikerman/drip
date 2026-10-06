@@ -33,7 +33,8 @@ impl Output {
 
     pub fn fragment(self) -> &'static str {
         match self.color_space {
-            Space::ExtendedSrgbLinear | Space::PassThrough => "linear",
+            Space::PassThrough => "rec2020",
+            Space::ExtendedSrgbLinear => "linear",
             Space::Srgb if self.format.is_srgb() => "srgb_linear",
             Space::Srgb => "srgb",
             _ => unreachable!("only pass-through, extended-sRGB and sRGB outputs are selected"),

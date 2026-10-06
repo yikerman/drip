@@ -1,8 +1,6 @@
-//! Application-owned BT.709/extended-linear surface description [11].
-//! Mesa and NVIDIA use different reference-white conventions for scRGB, so
-//! pass-through lets Drip fix white at 1.0 and request relative intent.
-//! The target volume currently defaults to BT.709; the wide-gamut declaration
-//! remains incomplete (see docs/DESIGN.md).
+//! Application-owned SDR Rec.2020/linear surface description [11].
+//! Passthrough avoids driver-specific scRGB reference-white conventions.
+//! Pixels are bounded to the declared Rec.2020 volume, with white at 1.0.
 
 use wayland_client::backend::{Backend, ObjectId};
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
@@ -69,15 +67,15 @@ impl Description {
         let supported = [Feature::Parametric, Feature::SetLuminances]
             .iter()
             .all(|f| state.features.contains(f))
-            && state.primaries.contains(&Primaries::Srgb)
+            && state.primaries.contains(&Primaries::Bt2020)
             && state.transfers.contains(&TransferFunction::ExtLinear);
         if !supported {
-            log::warn!("the compositor cannot describe extended linear sRGB");
+            log::warn!("the compositor cannot describe linear Rec.2020");
             return None;
         }
 
         let params = manager.create_parametric_creator(&qh, ());
-        params.set_primaries_named(Primaries::Srgb);
+        params.set_primaries_named(Primaries::Bt2020);
         params.set_tf_named(TransferFunction::ExtLinear);
         // cd/m², min scaled by 10⁴. With a linear transfer, 1.0 is the maximum.
         params.set_luminances(0, 80, 80);
@@ -94,7 +92,9 @@ impl Description {
             } else {
                 RenderIntent::Perceptual
             };
-            log::info!("describing the surface as extended linear sRGB, {intent:?} intent");
+            log::info!(
+                "describing the surface as linear Rec.2020, SDR white 80 cd/m², {intent:?} intent"
+            );
             let surface = manager.get_surface(target, &qh, ());
             surface.set_image_description(&description, intent);
             surface

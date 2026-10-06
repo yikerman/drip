@@ -23,7 +23,7 @@ fn select_supported_format_and_encoding_together() {
     let output = Output::choose(&caps, Space::PassThrough).unwrap();
     assert_eq!(output.color_space, Space::PassThrough);
     assert_eq!(output.format, CANVAS);
-    assert_eq!(output.fragment(), "linear");
+    assert_eq!(output.fragment(), "rec2020");
     assert!(output.wide_gamut());
 
     let output = Output::choose(&caps, Space::ExtendedSrgbLinear).unwrap();
@@ -155,7 +155,8 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
     )
     .unwrap();
     let mut reference = vec![[0u16; 3]; rgb.len()];
-    convert.transform_pixels(&rgb, &mut reference);
+    let bounded = rgb.map(|pixel| pixel.map(|v| v.clamp(0.0, 1.0)));
+    convert.transform_pixels(&bounded, &mut reference);
     let matrix = color::mul(
         &color::inverse(&color::rgb_to_xyz(color::REC709, color::D65)),
         &color::rgb_to_xyz(color::REC2020, color::D65),
@@ -184,7 +185,13 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
                     .chunks_exact(2)
                     .map(|b| half::f16::from_ne_bytes([b[0], b[1]]).to_f64())
                     .collect();
-                let expected = color::apply(&matrix, pixel.map(f64::from));
+                let pixel = bounded[i].map(f64::from);
+                let expected = if output.color_space == Space::PassThrough {
+                    assert!(actual.iter().all(|v| (0.0..=1.0).contains(v)));
+                    pixel
+                } else {
+                    color::apply(&matrix, pixel)
+                };
                 for channel in 0..3 {
                     assert!(
                         (actual[channel] - expected[channel]).abs() < 0.004,
@@ -201,6 +208,54 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
                     );
                 }
             }
+        }
+    }
+
+    // GUI colors enter the canvas directly, without the preview transform.
+    let gui = [[0.0f32; 3], [0.5; 3], [1.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let canvas = texture(&device, gui.len() as u32, CANVAS);
+    let bytes: Vec<u8> = gui
+        .iter()
+        .flat_map(|&[r, g, b]| [r, g, b, 1.0])
+        .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
+        .collect();
+    queue.write_texture(
+        canvas.as_image_copy(),
+        &bytes,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(gui.len() as u32 * 8),
+            rows_per_image: None,
+        },
+        canvas.size(),
+    );
+    let pipeline = create_pipeline(&device, &shader, "rec2020", CANVAS);
+    let canvas_view = canvas.create_view(&Default::default());
+    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::TextureView(&canvas_view),
+        }],
+    });
+    let target = texture(&device, gui.len() as u32, CANVAS);
+    draw(&device, &queue, &pipeline, &group, &target, 3);
+    let bytes = read(&device, &queue, &target);
+    let to_rec2020 = color::inverse(&matrix);
+    for (i, pixel) in gui.iter().enumerate() {
+        let linear = pixel.map(|v| {
+            let v = f64::from(v);
+            if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        });
+        let expected = color::apply(&to_rec2020, linear);
+        for (channel, expected) in expected.into_iter().enumerate() {
+            let offset = i * 8 + channel * 2;
+            let actual = half::f16::from_ne_bytes([bytes[offset], bytes[offset + 1]]).to_f64();
+            assert!(
+                (actual - expected).abs() < 0.001,
+                "GUI {pixel:?}, channel {channel}: {actual} != {expected}"
+            );
         }
     }
 }
