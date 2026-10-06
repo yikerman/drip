@@ -1,6 +1,6 @@
 //! TIFF export, read back and checked against independently computed values.
 
-use drip::image::DisplayRec2020;
+use drip::image::{DisplayRec2020, RawMetadata};
 use drip::node::{EvalContext, NodeKernel};
 use drip::param::Params;
 use std::path::{Path, PathBuf};
@@ -16,6 +16,7 @@ use drip::profile;
 use drip::project::Project;
 use lcms2::{CIExyY, InfoType, Locale, Profile, ToneCurve};
 use serde_json::json;
+use tiff::decoder::ifd::Value;
 use tiff::decoder::{Decoder, DecodingResult};
 use tiff::tags::Tag;
 
@@ -37,6 +38,31 @@ impl NodeKernel for DisplayKernel {
     ) -> Result<Evaluated<Self::Outputs>, String> {
         let image = Rgb { width: 2, height: 2, scale: 1, pixels: PIXELS.to_vec() };
         Ok(Evaluated { outputs: (Arc::new(DisplayRec2020::from(Arc::new(image))),), view: None })
+    }
+}
+
+static METADATA: NodeKind =
+    NodeKind::new::<MetadataKernel>("test.metadata", "metadata", &[], &[], &["metadata"]);
+struct MetadataKernel;
+impl NodeKernel for MetadataKernel {
+    type Inputs = ();
+    type Outputs = (Arc<RawMetadata>,);
+
+    fn eval(
+        _: Params<'_>,
+        (): (),
+        _: &EvalContext<'_>,
+    ) -> Result<Evaluated<Self::Outputs>, String> {
+        Ok(Evaluated::new((Arc::new(RawMetadata {
+            make: "Sony".into(),
+            model: "ILCE-7RM3".into(),
+            iso: 100.0,
+            shutter: 1.0 / 320.0,
+            aperture: 6.3,
+            focal_length: 0.0,
+            timestamp: 0,
+            datetime: "2026:05:25 08:35:00".into(),
+        }),)))
     }
 }
 
@@ -180,4 +206,42 @@ fn unusable_profiles_are_rejected() {
     assert!(message.contains("not an ICC profile"), "{message}");
     assert_eq!(failure(json!({ "profile": "file" })), "no output profile file chosen");
     assert!(!out.exists(), "nothing written on failure");
+}
+
+#[test]
+fn connected_camera_metadata_is_written_as_exif() {
+    let s = Scratch::new("exif");
+    let out = s.0.join("out.tif");
+    let mut p = Project::default();
+    let g = &mut p.graph;
+    let (src, metadata, tiff) =
+        (g.add_node(&DISPLAY), g.add_node(&METADATA), g.add_node(&nodes::TIFF));
+    g.connect(Port(src, "image".into()), Port(tiff, "image".into())).unwrap();
+    set(&mut p, tiff, json!({ "path": out }));
+    run_action(&p.graph, tiff, "export").unwrap();
+    let mut decoder = Decoder::new(std::fs::File::open(&out).unwrap()).unwrap();
+    assert!(decoder.find_tag(Tag::ExifDirectory).unwrap().is_none(), "metadata is optional");
+
+    p.graph.connect(Port(metadata, "metadata".into()), Port(tiff, "metadata".into())).unwrap();
+    run_action(&p.graph, tiff, "export").unwrap();
+    let mut decoder = Decoder::new(std::fs::File::open(&out).unwrap()).unwrap();
+    assert_eq!(decoder.get_tag_ascii_string(Tag::Make).unwrap(), "Sony");
+    assert_eq!(decoder.get_tag_ascii_string(Tag::Model).unwrap(), "ILCE-7RM3");
+    let exif = decoder.get_tag(Tag::ExifDirectory).unwrap().into_ifd_pointer().unwrap();
+    let exif = decoder.read_directory(exif).unwrap();
+    let tags: Vec<_> = decoder
+        .read_directory_tags(&exif)
+        .tag_iter()
+        .map(|tag| tag.map(|(tag, value)| (tag.to_u16(), value)).unwrap())
+        .collect();
+    let datetime = Value::Ascii("2026:05:25 08:35:00".into());
+    let expected = [
+        (0x829a, Value::Rational(1, 320)),
+        (0x829d, Value::Rational(63, 10)),
+        (0x8827, Value::Short(100)),
+        (0x9000, Value::List(b"0232".map(Value::Byte).to_vec())),
+        (0x9003, datetime),
+    ];
+    assert_eq!(tags, expected, "unknown focal length omitted");
+    assert!(matches!(decoder.read_image().unwrap(), DecodingResult::U16(_)));
 }

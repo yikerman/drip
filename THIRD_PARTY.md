@@ -95,3 +95,7 @@ Article licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 [9] darktable contributors, “Module reference,” *darktable user manual*, ver. 5.6.
 [Online]. Available: https://docs.darktable.org/usermanual/5.6/en/module-reference/overview/.
 Accessed Oct. 5, 2026. Structure and writing reference for frontend node help.
+
+[10] CIPA and JEITA, “Exchangeable image file format for digital still
+cameras: Exif Version 2.32,” CIPA DC-008-2019, May 2019. Exif IFD and tag
+definitions for exported capture metadata.

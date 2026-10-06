@@ -144,6 +144,10 @@ This sequence takes priority over CLI expansion and speculative optimization.
   profiles built in. “Arbitrary ICC” means suitable RGB destinations, not every
   profile class. Float output does not guarantee unbounded transforms: profile
   curves/LUTs can clamp, and reader support varies.
+- **Decided (2026-10-05):** TIFF export takes RAW metadata as an optional input
+  and writes make/model and an Exif IFD with capture settings and time. Edges
+  keep provenance explicit rather than hiding it in image types. Orientation is
+  omitted because exported pixels are unrotated; LibRaw's normalized make is used.
 - **Decided:** Let the compositor perform the display transform via scRGB.
   Owning the surface is why we use winit + wgpu + egui directly. Manually tagging
   a Rec.2020 surface relied on undocumented WSI behavior and saved no conversion.

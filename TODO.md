@@ -27,7 +27,7 @@ for now. Revisit performance work when measurements or usage justify it.
 | Camera color improvements | Deferred | Calibration beyond the current matrix/as-shot WB; sigmoid color handling is implemented. |
 | Broader real-RAW validation | Next | Exercise production algorithms beyond the current Sony fixture. |
 | Other CFA support | Deferred | X-Trans and other non-Bayer inputs. |
-| EXIF passthrough | Deferred | Carry source metadata into exports. |
+| Full EXIF passthrough | Deferred | Lens, GPS, orientation, time zone and maker notes; exports now carry make/model and capture settings only. |
 | Soft-proofing | Deferred | Preview the intended output medium. |
 | Display portability and measurement | Deferred | Windows/macOS paths, app-side fallback and monitor changes; SpyderX verification is planned separately. |
 | Pop-out behavior on Windows/macOS | Deferred | Parenting above the main window and a pin control where the WM provides none. |

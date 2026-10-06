@@ -4,6 +4,15 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: TIFF camera metadata
+
+- Kernel inputs can be optional. TIFF export takes RAW metadata on an optional
+  input and writes make/model plus an Exif IFD (exposure, f-number, ISO, focal
+  length, capture time). The built-in template connects it. The LibRaw shim now
+  returns the camera's wall-clock capture time, inverting LibRaw's `mktime()`.
+- A fixture export read back with exiftool and exiv2 matched the source ARW,
+  without warnings. Capture time was checked under UTC, Tokyo and Los Angeles.
+
 ## 2026-10-05: reference link visibility
 
 - Node references use a shared link widget with a blue accent and persistent

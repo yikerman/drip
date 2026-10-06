@@ -9,8 +9,9 @@ use crate::project::Project;
 
 /// The prototype pipeline, laid out for the editor: the processing chain on
 /// the left, a 3:2 preview beside its end and three scopes beyond that, the
-/// exporter under the chain. Its inputs are the raw reader's path and the
-/// exporter's path; the output profile defaults to sRGB.
+/// exporter under the chain, which also receives the RAW's camera metadata.
+/// Its inputs are the raw reader's path and the exporter's path; the output
+/// profile defaults to sRGB.
 pub fn raw_to_tiff() -> Project {
     let mut g = Graph::default();
     let mut add = |kind: &'static NodeKind, ui| {
@@ -43,5 +44,8 @@ pub fn raw_to_tiff() -> Project {
         g.connect(Port(*chain.last().unwrap(), "image".into()), Port(id, "image".into()))
             .expect("compatible built-in ports");
     }
+    let export = *sinks.last().unwrap();
+    g.connect(Port(chain[0], "metadata".into()), Port(export, "metadata".into()))
+        .expect("compatible built-in ports");
     Project { graph: g, ui: serde_json::Value::Null }
 }
