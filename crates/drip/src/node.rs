@@ -192,7 +192,7 @@ impl Action {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Evaluated<Outputs = Vec<Value>> {
     pub outputs: Outputs,
     pub view: Option<View>,

@@ -78,8 +78,8 @@ fn failures_block_descendants_only() {
     g.connect(port(c, "image"), port(ok, "image")).unwrap();
     let mut ev = Evaluator::default();
     ev.evaluate(&p.graph, PREVIEW, &[after, ok]);
-    assert_eq!(ev.result(fail), Some(&Err(NodeError::Failed("boom".into()))));
-    assert_eq!(ev.result(after), Some(&Err(NodeError::Upstream(fail))));
+    assert_eq!(ev.result(fail).unwrap().as_ref().unwrap_err(), &NodeError::Failed("boom".into()));
+    assert_eq!(ev.result(after).unwrap().as_ref().unwrap_err(), &NodeError::Upstream(fail));
     assert!(ev.result(ok).unwrap().is_ok());
 }
 
@@ -87,7 +87,10 @@ fn failures_block_descendants_only() {
 fn unconnected_input_is_an_error() {
     let mut p = Project::default();
     let add = p.graph.add_node(&ADD);
-    assert_eq!(eval(&mut Evaluator::default(), &p, add), &Err(NodeError::MissingInput("a")));
+    assert_eq!(
+        eval(&mut Evaluator::default(), &p, add).as_ref().unwrap_err(),
+        &NodeError::MissingInput("a")
+    );
 }
 
 /// `base`, plus `offset` when connected.
@@ -122,10 +125,10 @@ fn optional_inputs_may_stay_unconnected_but_not_fail() {
 
     p.graph.connect(port(c, "image"), port(fail, "image")).unwrap();
     p.graph.connect(port(fail, "image"), port(offset, "offset")).unwrap();
-    assert_eq!(eval(&mut ev, &p, offset), &Err(NodeError::Upstream(fail)));
+    assert_eq!(eval(&mut ev, &p, offset).as_ref().unwrap_err(), &NodeError::Upstream(fail));
 
     p.graph.disconnect(&port(offset, "base"));
-    assert_eq!(eval(&mut ev, &p, offset), &Err(NodeError::MissingInput("base")));
+    assert_eq!(eval(&mut ev, &p, offset).as_ref().unwrap_err(), &NodeError::MissingInput("base"));
 }
 
 #[test]
@@ -188,9 +191,9 @@ fn errors_name_the_current_upstream() {
     g.connect(port(c, "image"), port(f2, "image")).unwrap();
     g.connect(port(f1, "image"), port(v, "image")).unwrap();
     let mut ev = Evaluator::default();
-    assert_eq!(eval(&mut ev, &p, v), &Err(NodeError::Upstream(f1)));
+    assert_eq!(eval(&mut ev, &p, v).as_ref().unwrap_err(), &NodeError::Upstream(f1));
     p.graph.connect(port(f2, "image"), port(v, "image")).unwrap();
-    assert_eq!(eval(&mut ev, &p, v), &Err(NodeError::Upstream(f2)));
+    assert_eq!(eval(&mut ev, &p, v).as_ref().unwrap_err(), &NodeError::Upstream(f2));
 }
 
 #[test]

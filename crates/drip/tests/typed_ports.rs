@@ -20,7 +20,7 @@ fn pixels() -> Arc<Rgb> {
     Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[1.0, 0.0, 0.0]] })
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 struct EncodedChannels(Arc<Rgb>);
 impl ThreeChannelMatrix for EncodedChannels {
     fn rgb(&self) -> &Arc<Rgb> {
@@ -31,8 +31,8 @@ impl EdgeValue for EncodedChannels {
     const TYPE: TypeDescriptor = Describe::<Self>::new("encoded channels").channels().build();
 }
 
-// A new color-space implementation requires no edits to any consuming node.
-#[derive(Debug, PartialEq)]
+// A new color space needs neither payload equality nor edits to consuming nodes.
+#[derive(Debug)]
 struct LinearP3(Arc<Rgb>);
 impl ThreeChannelMatrix for LinearP3 {
     fn rgb(&self) -> &Arc<Rgb> {
@@ -77,7 +77,6 @@ fn capabilities_preserve_semantics_and_share_pixels() {
     let (scene_ref, display_ref) = <(Read<SceneRec2020>, Read<DisplayRec2020>)>::read(&slots);
     assert!(std::ptr::eq(scene_ref, &*scene));
     assert!(std::ptr::eq(display_ref, &*display));
-    assert_ne!(outputs[0], outputs[1], "identical storage has different semantic types");
     assert!(outputs[0].borrow::<Read<DisplayRec2020>>().is_none());
     assert!(outputs[1].borrow::<Read<SceneRec2020>>().is_none());
     for value in &outputs {

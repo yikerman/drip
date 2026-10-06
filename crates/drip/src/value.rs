@@ -33,7 +33,6 @@ pub struct TypeDescriptor {
     pub(crate) linear: Option<Projection<dyn LinearThreeChannelMatrix>>,
     pub(crate) color: Option<Projection<dyn ColorspaceRgbMatrix>>,
     pub(crate) rec2020: Option<Projection<dyn RgbIn<Rec2020>>>,
-    equal: fn(&Erased, &Erased) -> bool,
 }
 
 impl Debug for TypeDescriptor {
@@ -50,7 +49,7 @@ impl Debug for TypeDescriptor {
 /// semantic laws the payload obeys. The builder checks trait bounds, not those
 /// laws. A payload and its interpretation must remain unchanged while cached;
 /// interior mutation would invalidate dependency-stamp reuse.
-pub trait EdgeValue: Any + Send + Sync + Debug + PartialEq {
+pub trait EdgeValue: Any + Send + Sync + Debug {
     const TYPE: TypeDescriptor;
 }
 
@@ -81,7 +80,6 @@ where
                 linear: None,
                 color: None,
                 rec2020: None,
-                equal: |left, right| left.downcast_ref::<T>() == right.downcast_ref::<T>(),
             },
             payload: PhantomData,
         }
@@ -172,11 +170,5 @@ impl Value {
 impl Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(self.descriptor.name).finish_non_exhaustive()
-    }
-}
-impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
-        (self.descriptor.id)() == (other.descriptor.id)()
-            && (self.descriptor.equal)(&*self.payload, &*other.payload)
     }
 }

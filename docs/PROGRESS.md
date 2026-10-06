@@ -4,6 +4,24 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: edge equality cleanup
+
+- Removed erased payload equality and its `EdgeValue` bound. Evaluator tests
+  compare errors directly; capability tests use payloads without `PartialEq`.
+- Preview-level invalidation remains unchanged, as requested after review.
+- Workspace tests (including RAW fixtures and compile-fail doctests), clippy
+  with warnings denied, and formatting checks passed.
+
+## 2026-10-05: independent review assessment
+
+- Confirmed conservative detail-change invalidation, repeated scope preparation
+  and UI-thread mesh copies/uploads. Upload time is included in frame render logs.
+- Export activity survives project replacement, so the reported overlapping-action
+  race does not follow. Completion lacks project attribution; preview generations
+  cannot guard it because ordinary edits must not invalidate an export.
+- Checked equality and module boundaries. All 14 evaluator and three worker tests
+  passed. No runtime changes or new latency measurements.
+
 ## 2026-10-05: TIFF camera metadata
 
 - Kernel inputs can be optional. TIFF export takes RAW metadata on an optional

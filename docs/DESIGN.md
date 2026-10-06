@@ -63,6 +63,9 @@ This sequence takes priority over CLI expansion and speculative optimization.
 - **Decided (2026-10-05):** Preserve existing dependency stamps and cache behavior
   through the type refactor, including preview-level invalidation. Dirty flags,
   revision keys and an execution-plan compiler are not prerequisites.
+- **Decided:** Erased edge values do not require or expose payload equality.
+  Cache reuse follows dependency stamps; concrete payloads may define comparisons
+  for consumers that need them.
 - **Decided:** Keep semantic laws beside the traits: channel storage, linearity,
   color interpretation and scene/display reference are distinct promises. Rust
   checks signatures; implementers remain responsible for the mathematical laws.
