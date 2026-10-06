@@ -62,7 +62,12 @@ release with passthrough support.
 | [vcpkg-rs contributors](https://github.com/mcgoo/vcpkg-rs) | Find LibRaw on Windows | MIT OR Apache-2.0 |
 | [egui contributors](https://github.com/emilk/egui) (`egui_kittest`) | Headless GUI tests | MIT OR Apache-2.0 |
 
-RAW fixture provenance is recorded with the files in `fixtures/`.
+Test images in `fixtures/raw/pixls/` are from [raw.pixls.us](https://raw.pixls.us/),
+licensed [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
+Thank you to the contributors—you guys are awesome!
+
+Original Sony ILCE-7RM3 photo (`fixtures/raw/sony-ilce-7rm3.arw`):
+Yi Cao <yi@ycao.net>.
 
 ## Papers and technical references
 

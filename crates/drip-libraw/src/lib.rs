@@ -35,6 +35,7 @@ unsafe extern "C" {
     fn drip_raw_copy(handle: *mut c_void, dst: *mut u16);
     fn drip_raw_close(handle: *mut c_void);
     fn drip_raw_strerror(err: c_int) -> *const c_char;
+    fn drip_raw_unsupported(err: c_int) -> c_int;
     #[cfg(feature = "reference")]
     fn drip_raw_reference(
         path: *const c_char,
@@ -105,11 +106,22 @@ pub struct Metadata {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Error(String);
+pub struct Error {
+    message: String,
+    unsupported: bool,
+}
+
+impl Error {
+    /// LibRaw lacks this file format or decoder. Drip's Bayer-only restriction,
+    /// other decoder errors and I/O errors are deliberately excluded.
+    pub fn is_unsupported(&self) -> bool {
+        self.unsupported
+    }
+}
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)
     }
 }
 
@@ -118,17 +130,26 @@ impl std::error::Error for Error {}
 fn error(code: c_int) -> Error {
     if code > 0 {
         // LibRaw passes system errors through as positive errno values.
-        return Error(std::io::Error::from_raw_os_error(code).to_string());
+        return Error {
+            message: std::io::Error::from_raw_os_error(code).to_string(),
+            unsupported: false,
+        };
     }
     // SAFETY: returns a pointer to a static NUL-terminated string.
-    Error(unsafe { CStr::from_ptr(drip_raw_strerror(code)) }.to_string_lossy().into_owned())
+    let message = unsafe { CStr::from_ptr(drip_raw_strerror(code)) }.to_string_lossy().into_owned();
+    // SAFETY: a pure classification of LibRaw's integer error codes.
+    let unsupported = unsafe { drip_raw_unsupported(code) != 0 };
+    Error { message, unsupported }
 }
 
 fn c_path(path: &Path) -> Result<CString, Error> {
     // LibRaw takes narrow paths; on Windows that limits paths to ANSI (TODO.md).
-    let path =
-        path.to_str().ok_or_else(|| Error(format!("{} is not valid UTF-8", path.display())))?;
-    CString::new(path).map_err(|_| Error("path contains NUL".into()))
+    let path = path.to_str().ok_or_else(|| Error {
+        message: format!("{} is not valid UTF-8", path.display()),
+        unsupported: false,
+    })?;
+    CString::new(path)
+        .map_err(|_| Error { message: "path contains NUL".into(), unsupported: false })
 }
 
 /// Closes the LibRaw handle on every exit path.

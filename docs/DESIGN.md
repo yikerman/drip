@@ -21,6 +21,13 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
   The minimal owned-data [LibRaw binding](../crates/drip-libraw/src/lib.rs) keeps
   version-dependent native layouts behind a C shim.
 
+- **Decided:** Cross-camera tests use CC0 raw.pixls.us fixtures and the original
+  Sony photograph. Skip only LibRaw's unsupported-format/decoder errors;
+  fixture integrity belongs to Git/LFS. Track unsupported metadata/unpacking
+  cases in TODO and keep the active corpus limited to renderable samples.
+  Numerical references, pipeline contracts and visual review provide different
+  evidence; a plausible rendering is not a colorimetric ground truth.
+
 - **Requirement:** Group source by semantic responsibility, not file size.
   Keep one computational kernel source across backends; portability and ease of
   development take priority over peak throughput.

@@ -3,6 +3,71 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-06: Nikon Z demo
+
+- Added `fixtures/raw/pixls/nikon-z6ii.nef`: CC0 raw.pixls.us sample #4160,
+  Nikon Z6 II (`Z 6_2` in LibRaw), 14-bit lossless NEF. Autumn woodland at
+  ISO 100 with the NIKKOR Z 24–200mm f/4–6.3 VR; fine branches provide detail
+  for demosaicing review. The existing PIXLS credit and LFS attributes apply.
+- Included it in the corpus integration test. The corpus now has 15 images
+  across 13 manufacturers, including the original Sony photograph.
+- Validation: all 15 images rendered and passed the corpus checks, with zero
+  skips. Clippy, formatting and diff checks passed. The new sample's as-shot
+  WB and camera matrix are available; no processing changes were needed.
+
+## 2026-10-06: usable RAW corpus
+
+- Recorded Canon D30, Samsung GX-1L and both Sigma fp cases in TODO for broader
+  RAW support and correct unpacking, retaining the upstream sample IDs. Removed
+  those four files and their expected-rejection branches from the corpus test.
+- The active corpus contains 14 renderable images across 13 manufacturers:
+  13 CC0 PIXLS samples and Yi Cao's original Sony ILCE-7RM3 photograph.
+  No decoding or processing fixes were made.
+- Validation: all 14 remaining images rendered and passed the corpus checks,
+  with zero skips. Clippy, formatting and diff checks passed.
+
+## 2026-10-06: fixture integrity delegated to Git
+
+- Removed corpus dependence on the deleted checksum manifest and verification
+  script, and removed LFS-pointer checks. Test cases now list paths and expected
+  decoding outcomes directly. Git/LFS handles fixture integrity.
+- Validation: corpus still renders 14 images and records four metadata
+  rejections; no unsupported-format skips. Clippy and formatting passed.
+
+## 2026-10-05: cross-camera testing
+
+- Added 17 CC0 raw.pixls.us fixtures across 14 manufacturers (about 171 MiB),
+  Git LFS attributes and concise credits, including Yi Cao's original Sony
+  ILCE-7RM3 photograph. Fixture integrity belongs to Git/LFS; the corpus test
+  lists its cases directly, without a checksum manifest or LFS-pointer checks.
+
+- [Corpus tests](../crates/drip/tests/pixls.rs) cover decoded metadata/CFA,
+  full and 1/8 previews, finite output, TIFF dimensions and metadata, embedded
+  ICC bytes, and every exported pixel against the full preview after ICC
+  conversion (at most one 16-bit code difference). These are consistency
+  contracts; independent algorithm references remain in the existing tests.
+  `DRIP_RAW_REVIEW_DIR=/tmp/drip-pixls-review cargo test -p drip --test pixls
+  --release -- --nocapture` retains sRGB TIFFs for visual review.
+
+- LibRaw 0.22.2: 18 images tested including the original Sony; 14 rendered,
+  four documented metadata rejections, zero unsupported-format skips. Canon
+  D30 and Samsung GX-1L return unusable as-shot WB. Both Sigma fp DNG samples
+  return zero `cam_xyz`, although ExifTool confirms nonzero ColorMatrix1/2 in
+  the files. GX-1L also returns zero `cam_xyz`. No processing fixes were made.
+  The binding now exposes unsupported-error classification for test skips.
+
+- Validation: all 17 upstream checksums matched; corpus passed in about 54 s
+  in release mode. The remaining workspace tests, three compile-fail doctests,
+  changed-crate Clippy with warnings denied, formatting and diff checks passed.
+  The existing opt-in GPU test was not run.
+
+- Visual review covered all 14 rendered overviews and 800 × 600 native-pixel
+  center crops, including the original Sony. No obvious structural corruption,
+  seams or pervasive Bayer checkerboard was seen in those views. Phase One's
+  violet/cool neutrals also appear in its embedded thumbnail; Pentax chart
+  neutrals look slightly cyan and Samsung shaded snow blue. These observations
+  do not establish color error without measured targets and illuminants.
+
 ## 2026-10-05: dropdown wheel navigation
 
 - Shared dropdowns across parameters, Preview detail and pop-out zoom. Wheel
