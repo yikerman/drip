@@ -99,3 +99,16 @@ Accessed Oct. 5, 2026. Structure and writing reference for frontend node help.
 [10] CIPA and JEITA, “Exchangeable image file format for digital still
 cameras: Exif Version 2.32,” CIPA DC-008-2019, May 2019. Exif IFD and tag
 definitions for exported capture metadata.
+
+[11] Wayland contributors, “Color management protocol,” *wayland-protocols*,
+`color-management-v1.xml`, distributed with `wayland-protocols` Rust crate
+0.32.13. [Online]. Available:
+https://gitlab.freedesktop.org/wayland/wayland-protocols/-/blob/main/staging/color-management/color-management-v1.xml.
+Accessed Oct. 5, 2026. Reference-white and surface-description contracts;
+MIT license in the protocol source. No implementation copied.
+
+[12] Khronos Group, “Window System Integration (WSI),” *Vulkan Specification*,
+“Surface Color Spaces.” [Online]. Available:
+https://docs.vulkan.org/spec/latest/chapters/VK_KHR_surface/wsi.html.
+Accessed Oct. 5, 2026. `VK_COLOR_SPACE_PASS_THROUGH_EXT` permits application-owned
+Wayland color management without conflicting with WSI surface ownership.

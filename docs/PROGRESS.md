@@ -4,6 +4,20 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: Wayland brightness diagnosis
+
+- Intel LNL/Mesa 26.2.3 presents FP16 extended-linear sRGB. A live Wayland trace
+  shows BT.709 primaries, extended-linear transfer and default luminances, so
+  white is 1.0. Drip's 203/80 multiplier adds about 1.34 EV. Screenshot surround
+  is 179 rather than the configured 118; a matched sky patch is about 2.5 times
+  the TIFF's linear values while Gwenview closely matches its encoded pixels.
+- User's TIFF is uncompressed RGB16 with embedded sRGB. All seven export tests
+  passed. No processing or renderer changes made; the actual project was not
+  available for a full-resolution/preview data comparison.
+- Intel advertises FP16 Vulkan passthrough and the needed Wayland parametric
+  description features. wgpu 30 filters passthrough out. Proposed explicit
+  surface ownership avoids driver branches; NVIDIA remains to be verified.
+
 ## 2026-10-05: edge equality cleanup
 
 - Removed erased payload equality and its `EdgeValue` bound. Evaluator tests

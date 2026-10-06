@@ -154,7 +154,17 @@ This sequence takes priority over CLI expansion and speculative optimization.
 - **Decided:** Let the compositor perform the display transform via scRGB.
   Owning the surface is why we use winit + wgpu + egui directly. Manually tagging
   a Rec.2020 surface relied on undocumented WSI behavior and saved no conversion.
-  Extended values must survive the preview path; SDR white uses 203/80 scaling.
+  Extended values must survive the preview path.
+- **Open (2026-10-05):** The unconditional 203/80 output gain is wrong on
+  Mesa 26.2.3/Wayland: its linear BT.709 description uses reference white at 1.0.
+  Windows-scRGB has different reference-white semantics [11]. The earlier
+  NVIDIA result does not establish a portable scaling rule.
+- **Tentative:** Use Vulkan `PASS_THROUGH_EXT` and own the Wayland image
+  description [11, 12]: linear Rec.2020, explicit black and reference white,
+  with white at pixel value 1.0. This leaves monitor transforms to the compositor
+  without driver-specific gain. wgpu 30 does not expose passthrough and needs
+  an extension. Select by advertised capabilities; unsupported systems need a
+  fallback policy. NVIDIA and other compositors still need live verification.
 - **Decided:** Fall back to sRGB with a visible warning when scRGB is unavailable.
   egui's internal blending remains in gamma space. In-gamut screenshot checks
   passed; actual wide-gamut output still needs instrument verification.
