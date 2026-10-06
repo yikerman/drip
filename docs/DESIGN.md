@@ -74,6 +74,18 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
 
 ## Presentation and editing
 
+- **Decided:** Canvas and node gestures separate navigation from modification.
+  Left-drag pans the whole canvas even when started on a node. This decision
+  covers only the canvas background and node body.
+
+  | Context | Left click | Left drag | Right click | Right drag |
+  |---------|------------|-----------|-------------|------------|
+  | Empty canvas | Clear selection | Pan canvas | Open Add node menu | No action |
+  | Node | Select and show inspector | Pan canvas | Open Rename / Delete menu | Move node |
+
+  The mouse wheel zooms around the pointer in both contexts. Rename selects
+  the node and focuses its existing label field in the inspector.
+
 - **Decided:** Right-click menus use a lighter neutral fill and a dark border
   to separate them from the middle-grey workspace; styling is shared in
   [theme](../crates/drip-gui/src/theme.rs).

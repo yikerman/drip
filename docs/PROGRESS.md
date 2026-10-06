@@ -3,6 +3,16 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-05: canvas and node gestures
+
+- Implemented the agreed interaction table: left-drag pans over background and
+  nodes, right-drag moves nodes, and right-click opens node Rename / Delete.
+  Rename selects the node and focuses its inspector label field on the next pass.
+- Headless interaction tests cover selection, panning/movement at three zoom
+  levels, drag/menu separation, and rename/delete/add actions. All 26 GUI tests
+  passed; the GPU-only test remained ignored. Clippy with warnings denied,
+  formatting and diff checks passed. Live GUI gestures have not been checked.
+
 ## 2026-10-05: context menu contrast
 
 - Added a lighter neutral background and a thin dark border to the canvas and

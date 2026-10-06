@@ -14,10 +14,20 @@ pub fn panel(ui: &mut Ui, cx: &mut NodeCx) {
 
 pub fn heading(ui: &mut Ui, cx: &mut NodeCx) {
     let (id, node) = (cx.id(), cx.node().clone());
-    if let Some(label) = edit_text(ui, egui::Id::new(("label", id)), &node.label) {
+    let label_id = egui::Id::new(("label", id));
+    if ui.data_mut(|data| data.remove_temp::<()>(label_id.with("focus"))).is_some() {
+        ui.memory_mut(|memory| memory.request_focus(label_id));
+    }
+    if let Some(label) = edit_text(ui, label_id, &node.label) {
         cx.set_label(&label);
     }
     ui.weak(node.kind.name);
+}
+
+pub fn focus_label(ctx: &egui::Context, id: drip::graph::NodeId) {
+    // The inspector precedes the canvas; focus once the newly selected field exists.
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(("label", id)).with("focus"), ()));
+    ctx.request_repaint();
 }
 
 pub fn controls(ui: &mut Ui, cx: &mut NodeCx) {

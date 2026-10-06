@@ -15,7 +15,8 @@ use drip::node::Registry;
 use egui::emath::TSTransform;
 use egui::epaint::CubicBezierShape;
 use egui::{
-    Align2, FontId, LayerId, Painter, Pos2, Rect, Sense, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
+    Align2, FontId, LayerId, Painter, PointerButton, Pos2, Rect, Sense, Stroke, Ui, UiBuilder,
+    Vec2, pos2, vec2,
 };
 use serde_json::Value as Json;
 
@@ -91,13 +92,39 @@ impl Editor {
         let hit = |pos: Pos2| Rect::from_center_size(pos, Vec2::splat(16.0 * point));
         for l in &layouts {
             let body = ui.interact(l.rect, ui.id().with(l.id), Sense::click_and_drag());
-            if body.clicked() || body.drag_started() {
+            if body.clicked() || body.drag_started_by(PointerButton::Secondary) {
                 *selected = Some(l.id);
             }
-            if body.dragged() {
+            if body.dragged_by(PointerButton::Primary)
+                && ui.input(|i| i.pointer.delta()) != Vec2::ZERO
+            {
+                *self.offset.as_mut().expect("canvas initialized") +=
+                    ui.input(|i| i.pointer.delta());
+                ui.ctx().request_repaint();
+            }
+            if body.dragged_by(PointerButton::Secondary) {
                 let pos =
                     position(&graph.node(l.id).expect("laid out").ui, l.id) + body.drag_delta();
                 frame.edit(graph, Edit::Ui(l.id, "pos", pos));
+            }
+            let mut remove = false;
+            theme::context_menu(&body).show(|ui| {
+                if ui.button("Rename").clicked() {
+                    *selected = Some(l.id);
+                    node_ui::parameters::focus_label(ui.ctx(), l.id);
+                    ui.close();
+                }
+                if ui.button("Delete").clicked() {
+                    remove = true;
+                    ui.close();
+                }
+            });
+            if remove {
+                frame.edit(graph, Edit::Remove(l.id));
+                if *selected == Some(l.id) {
+                    *selected = None;
+                }
+                continue;
             }
             let node = graph.node(l.id).expect("laid out from the graph");
             let descriptor = node.kind;
@@ -195,7 +222,7 @@ impl Editor {
             .sense(Sense::click_and_drag());
         let mut canvas = ui.new_child(canvas);
         let background = canvas.response();
-        if background.dragged() {
+        if background.dragged_by(PointerButton::Primary) {
             *offset += ui.input(|i| i.pointer.delta());
         }
         if background.clicked() {
@@ -335,5 +362,174 @@ fn elide(text: &str, chars: usize) -> String {
         text.into()
     } else {
         text.chars().take(chars - 1).chain(['…']).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{
+        Event, Modifiers,
+        PointerButton::{Primary, Secondary},
+    };
+    use egui_kittest::{Harness, kittest::Queryable};
+    use serde_json::json;
+
+    struct Scene {
+        editor: Editor,
+        graph: Graph,
+        node: NodeId,
+        selected: Option<NodeId>,
+        origin: Pos2,
+        edited: bool,
+    }
+
+    impl Scene {
+        fn node_point(&self) -> Pos2 {
+            let node = self.graph.node(self.node).unwrap();
+            self.origin
+                + self.editor.offset.unwrap()
+                + (position(&node.ui, self.node) + vec2(40.0, 10.0)) * self.editor.zoom
+        }
+    }
+
+    fn harness(zoom: f32) -> Harness<'static, Scene> {
+        let mut graph = Graph::default();
+        let node = graph.add_node(&drip::nodes::EXPOSURE);
+        graph.set_ui(node, json!({"pos": [100.0, 100.0]})).unwrap();
+        let scene = Scene {
+            editor: Editor { offset: Some(vec2(20.0, 20.0)), zoom, wire: None },
+            graph,
+            node,
+            selected: None,
+            origin: Pos2::ZERO,
+            edited: false,
+        };
+        Harness::builder().with_size(vec2(1000.0, 700.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+            |ui, s: &mut Scene| {
+                theme::apply(ui.ctx());
+                let popped = Default::default();
+                let mut frame = Frame::new(&|_| None, &popped, false);
+                egui::Panel::right("inspector").default_size(250.0).show(ui, |ui| {
+                    if let Some(id) = s.selected {
+                        crate::inspector::selected_node(
+                            ui,
+                            &mut NodeCx::new(&mut s.graph, id, &mut frame),
+                        );
+                    }
+                });
+                egui::CentralPanel::default().show(ui, |ui| {
+                    s.origin = ui.available_rect_before_wrap().min;
+                    s.editor.show(
+                        ui,
+                        &mut s.graph,
+                        &drip::nodes::registry(),
+                        &mut s.selected,
+                        &mut frame,
+                    );
+                });
+                s.edited |= frame.report.edited;
+            },
+            scene,
+        )
+    }
+
+    fn pointer(h: &mut Harness<'_, Scene>, pos: Pos2, button: PointerButton, pressed: bool) {
+        h.event(Event::PointerMoved(pos));
+        h.event(Event::PointerButton { pos, button, pressed, modifiers: Modifiers::NONE });
+        h.run();
+    }
+
+    fn drag(h: &mut Harness<'_, Scene>, pos: Pos2, button: PointerButton, delta: Vec2) {
+        pointer(h, pos, button, true);
+        h.event(Event::PointerMoved(pos + delta));
+        h.run();
+        pointer(h, pos + delta, button, false);
+    }
+
+    #[test]
+    fn left_drag_pans_over_background_and_nodes_without_editing() {
+        for zoom in [0.5, 1.0, 2.0] {
+            for on_node in [false, true] {
+                let mut h = harness(zoom);
+                h.run();
+                let graph = h.state().graph.clone();
+                let offset = h.state().editor.offset.unwrap();
+                let pos = if on_node { h.state().node_point() } else { pos2(40.0, 40.0) };
+                let delta = vec2(50.0, 30.0);
+                drag(&mut h, pos, Primary, delta);
+                assert_eq!(h.state().editor.offset.unwrap(), offset + delta);
+                assert_eq!(h.state().graph, graph);
+                assert_eq!(h.state().selected, None);
+                assert!(!h.state().edited);
+            }
+        }
+    }
+
+    #[test]
+    fn right_drag_moves_only_nodes_without_opening_menus() {
+        for zoom in [0.5, 1.0, 2.0] {
+            let mut h = harness(zoom);
+            h.run();
+            let offset = h.state().editor.offset;
+            let pos = h.state().node_point();
+            let delta = vec2(50.0, 30.0);
+            drag(&mut h, pos, Secondary, delta);
+            let s = h.state();
+            assert_eq!(
+                position(&s.graph.node(s.node).unwrap().ui, s.node),
+                vec2(100.0, 100.0) + delta / zoom
+            );
+            assert_eq!(s.editor.offset, offset);
+            assert!(!s.edited);
+            assert!(h.query_by_label("Rename").is_none());
+            let graph = s.graph.clone();
+            drag(&mut h, pos2(40.0, 40.0), Secondary, delta);
+            assert_eq!(h.state().graph, graph);
+            assert_eq!(h.state().editor.offset, offset);
+            assert!(h.query_by_label(drip::nodes::EXPOSURE.label).is_none());
+        }
+    }
+
+    #[test]
+    fn click_selection_and_node_menu_actions() {
+        let mut h = harness(1.0);
+        h.run();
+        let node = h.state().node;
+        let pos = h.state().node_point();
+        pointer(&mut h, pos, Primary, true);
+        pointer(&mut h, pos, Primary, false);
+        assert_eq!(h.state().selected, Some(node));
+        assert!(h.query_by_label("ev").is_some());
+        pointer(&mut h, pos2(40.0, 40.0), Primary, true);
+        pointer(&mut h, pos2(40.0, 40.0), Primary, false);
+        assert_eq!(h.state().selected, None);
+
+        pointer(&mut h, pos, Secondary, true);
+        pointer(&mut h, pos, Secondary, false);
+        h.get_by_label("Rename").click();
+        h.run();
+        assert_eq!(h.state().selected, Some(node));
+        h.key_press_modifiers(Modifiers::COMMAND, egui::Key::A);
+        h.event(Event::Text("renamed".into()));
+        h.key_press(egui::Key::Enter);
+        h.run();
+        assert_eq!(h.state().graph.node(node).unwrap().label, "renamed");
+        assert!(!h.state().edited);
+
+        pointer(&mut h, pos, Secondary, true);
+        pointer(&mut h, pos, Secondary, false);
+        h.get_by_label("Delete").click();
+        h.run();
+        assert!(h.state().graph.node(node).is_none());
+        assert_eq!(h.state().selected, None);
+        assert!(h.state().edited);
+
+        pointer(&mut h, pos2(40.0, 40.0), Secondary, true);
+        pointer(&mut h, pos2(40.0, 40.0), Secondary, false);
+        h.get_by_label(drip::nodes::EXPOSURE.label).click();
+        h.run();
+        assert_eq!(h.state().graph.nodes().count(), 1);
+        assert!(h.state().selected.is_some());
     }
 }
