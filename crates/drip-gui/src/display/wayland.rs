@@ -1,6 +1,6 @@
-//! Application-owned SDR Rec.2020/linear surface description [11].
-//! Passthrough avoids driver-specific scRGB reference-white conventions.
-//! Pixels are bounded to the declared Rec.2020 volume, with white at 1.0.
+//! Application-owned extended-linear BT.709 with an SDR Rec.2020 target \[11\].
+//! Passthrough fixes reference white across drivers. Extended-target support is
+//! required because wide-gamut colors have negative/above-one BT.709 components.
 
 use wayland_client::backend::{Backend, ObjectId};
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
@@ -64,21 +64,32 @@ impl Description {
         let qh = queue.handle();
         let mut state = State::default();
         queue.roundtrip(&mut state).ok()?;
-        let supported = [Feature::Parametric, Feature::SetLuminances]
-            .iter()
-            .all(|f| state.features.contains(f))
-            && state.primaries.contains(&Primaries::Bt2020)
+        let supported = [
+            Feature::Parametric,
+            Feature::SetLuminances,
+            Feature::SetMasteringDisplayPrimaries,
+            Feature::ExtendedTargetVolume,
+        ]
+        .iter()
+        .all(|f| state.features.contains(f))
+            && state.primaries.contains(&Primaries::Srgb)
             && state.transfers.contains(&TransferFunction::ExtLinear);
         if !supported {
-            log::warn!("the compositor cannot describe linear Rec.2020");
+            log::warn!(
+                "the compositor cannot describe extended-linear sRGB with a Rec.2020 target"
+            );
             return None;
         }
 
         let params = manager.create_parametric_creator(&qh, ());
-        params.set_primaries_named(Primaries::Bt2020);
+        params.set_primaries_named(Primaries::Srgb);
         params.set_tf_named(TransferFunction::ExtLinear);
         // cd/m², min scaled by 10⁴. With a linear transfer, 1.0 is the maximum.
         params.set_luminances(0, 80, 80);
+        let xy = |p: [f64; 2]| p.map(|v| (v * 1_000_000.0).round() as i32);
+        let [[rx, ry], [gx, gy], [bx, by]] = drip::color::REC2020.map(xy);
+        let [wx, wy] = xy(drip::color::D65);
+        params.set_mastering_display_primaries(rx, ry, gx, gy, bx, by, wx, wy);
         let description = params.create(&qh, ());
         while state.ready.is_none() {
             if queue.blocking_dispatch(&mut state).is_err() {
@@ -93,7 +104,7 @@ impl Description {
                 RenderIntent::Perceptual
             };
             log::info!(
-                "describing the surface as linear Rec.2020, SDR white 80 cd/m², {intent:?} intent"
+                "describing extended-linear sRGB, Rec.2020 target, SDR white 80 cd/m², {intent:?} intent"
             );
             let surface = manager.get_surface(target, &qh, ());
             surface.set_image_description(&description, intent);

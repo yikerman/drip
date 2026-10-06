@@ -8,8 +8,8 @@ for now. Revisit performance work when measurements or usage justify it.
 |------|--------|---------------------------|
 | Production pipeline validation | Next | Sigmoid, RCD and inpaint opposed are implemented; judge detail, highlights and color on varied real photos before calling the pipeline production-ready. |
 | Editing UI/UX | Planned | Refine the workflow around the production pipeline. |
-| HDR presentation | Deferred | Define luminance/headroom and compositor metadata. SDR preview currently clips scene values in Rec.2020. |
-| Display portability | Next | Verify Rec.2020 presentation on NVIDIA and other compositors, and reference white on X11, Windows and macOS, where the driver still describes extended-linear output. |
+| HDR presentation | Deferred | Define luminance/headroom and compositor metadata. SDR preview and the final composite are bounded in Rec.2020. |
+| Display portability | Next | Verify the explicit extended-linear/Rec.2020-target description on NVIDIA and other compositors, and native scRGB on macOS. Windows is best effort and untested. |
 | Drop the wgpu fork | Deferred | Remove the patch once a wgpu release has `SurfaceColorSpace::PassThrough` (gfx-rs/wgpu#10545); steps are in THIRD_PARTY.md. |
 | SpyderX color verification | Planned | Measure display output and check the complete color path before release. |
 | Packaging and v0.1 | Planned | Follow processing, workflow and color verification. |
@@ -32,7 +32,7 @@ for now. Revisit performance work when measurements or usage justify it.
 | Other CFA support | Deferred | X-Trans and other non-Bayer inputs. |
 | Full EXIF passthrough | Deferred | Lens, GPS, orientation, time zone and maker notes; exports now carry make/model and capture settings only. |
 | Soft-proofing | Deferred | Preview the intended output medium. |
-| Display portability and measurement | Deferred | Windows/macOS paths, app-side fallback and monitor changes; SpyderX verification is planned separately. |
+| Windows SDR white | Deferred | Native scRGB is best effort and untested. Match desktop SDR white when Windows HDR is enabled, including monitor/configuration changes. |
 | Pop-out behavior on Windows/macOS | Deferred | Parenting above the main window and a pin control where the WM provides none. |
 | Cross-window frame pacing and occlusion | Deferred | Revisit if hidden-window Fifo stalls matter in use; avoid unnecessary hidden draws. |
 | Undo/redo | Deferred | Not needed for current prototype use. |

@@ -1,4 +1,4 @@
-use super::{CANVAS, Output};
+use super::{CANVAS, compositor, presentation::Output};
 use wgpu::{SurfaceCapabilities, SurfaceColorSpace as Space, SurfaceColorSpaces as Spaces};
 
 fn capabilities(formats: &[(wgpu::TextureFormat, Spaces)]) -> SurfaceCapabilities {
@@ -23,7 +23,7 @@ fn select_supported_format_and_encoding_together() {
     let output = Output::choose(&caps, Space::PassThrough).unwrap();
     assert_eq!(output.color_space, Space::PassThrough);
     assert_eq!(output.format, CANVAS);
-    assert_eq!(output.fragment(), "rec2020");
+    assert_eq!(output.fragment(), "linear");
     assert!(output.wide_gamut());
 
     let output = Output::choose(&caps, Space::ExtendedSrgbLinear).unwrap();
@@ -117,7 +117,10 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
         },
         source.size(),
     );
-    let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/preview.wgsl"));
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("preview"),
+        source: wgpu::ShaderSource::Wgsl(crate::preview::SHADER.into()),
+    });
     let pipeline = create_pipeline(&device, &shader, "fs", CANVAS);
     let source_view = source.create_view(&Default::default());
     let sampler = device.create_sampler(&Default::default());
@@ -143,7 +146,10 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
     let canvas = texture(&device, width, CANVAS);
     draw(&device, &queue, &pipeline, &group, &canvas, 6);
     let canvas_view = canvas.create_view(&Default::default());
-    let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/composite.wgsl"));
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("presentation"),
+        source: wgpu::ShaderSource::Wgsl(compositor::SHADER.into()),
+    });
     let source_profile = profile::rec2020_linear();
     let destination_profile = profile::built_in("srgb");
     let convert = Transform::new(
@@ -186,12 +192,7 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
                     .map(|b| half::f16::from_ne_bytes([b[0], b[1]]).to_f64())
                     .collect();
                 let pixel = bounded[i].map(f64::from);
-                let expected = if output.color_space == Space::PassThrough {
-                    assert!(actual.iter().all(|v| (0.0..=1.0).contains(v)));
-                    pixel
-                } else {
-                    color::apply(&matrix, pixel)
-                };
+                let expected = color::apply(&matrix, pixel);
                 for channel in 0..3 {
                     assert!(
                         (actual[channel] - expected[channel]).abs() < 0.004,
@@ -211,8 +212,25 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
         }
     }
 
-    // GUI colors enter the canvas directly, without the preview transform.
-    let gui = [[0.0f32; 3], [0.5; 3], [1.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    // GUI colors and an encoded-space blend enter the output shader directly.
+    let mut gui =
+        vec![[0.0f32; 3], [0.5; 3], [1.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let encode = |v: f64| {
+        let a = v.abs();
+        v.signum() * if a <= 0.0031308 { a * 12.92 } else { 1.055 * a.powf(1.0 / 2.4) - 0.055 }
+    };
+    let decode = |v: f32| {
+        let v = f64::from(v);
+        let a = v.abs();
+        v.signum() * if a <= 0.04045 { a / 12.92 } else { ((a + 0.055) / 1.055).powf(2.4) }
+    };
+    // Half-transparent black over Rec.2020 green leaves the Rec.2020 cube
+    // after gamma-space blending, despite both inputs being in gamut.
+    let blended = color::apply(&matrix, [0.0, 1.0, 0.0]).map(|v| (encode(v) * 0.5) as f32);
+    let to_rec2020 = color::inverse(&matrix);
+    assert!(color::apply(&to_rec2020, blended.map(decode)).iter().any(|v| *v < -0.001));
+    gui.push(blended);
+    gui.push([1.5; 3]);
     let canvas = texture(&device, gui.len() as u32, CANVAS);
     let bytes: Vec<u8> = gui
         .iter()
@@ -229,7 +247,7 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
         },
         canvas.size(),
     );
-    let pipeline = create_pipeline(&device, &shader, "rec2020", CANVAS);
+    let pipeline = create_pipeline(&device, &shader, "linear", CANVAS);
     let canvas_view = canvas.create_view(&Default::default());
     let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
@@ -242,19 +260,15 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
     let target = texture(&device, gui.len() as u32, CANVAS);
     draw(&device, &queue, &pipeline, &group, &target, 3);
     let bytes = read(&device, &queue, &target);
-    let to_rec2020 = color::inverse(&matrix);
     for (i, pixel) in gui.iter().enumerate() {
-        let linear = pixel.map(|v| {
-            let v = f64::from(v);
-            if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
-        });
-        let expected = color::apply(&to_rec2020, linear);
+        let rec2020 = color::apply(&to_rec2020, pixel.map(decode)).map(|v| v.clamp(0.0, 1.0));
+        let expected = color::apply(&matrix, rec2020);
         for (channel, expected) in expected.into_iter().enumerate() {
             let offset = i * 8 + channel * 2;
             let actual = half::f16::from_ne_bytes([bytes[offset], bytes[offset + 1]]).to_f64();
             assert!(
                 (actual - expected).abs() < 0.001,
-                "GUI {pixel:?}, channel {channel}: {actual} != {expected}"
+                "canvas {pixel:?}, channel {channel}: {actual} != {expected}"
             );
         }
     }

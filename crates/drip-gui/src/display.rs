@@ -1,9 +1,39 @@
-//! Each window composites egui and previews in an FP16 extended-sRGB canvas.
-//! Wayland presentation converts to bounded linear Rec.2020 and uses an owned
-//! description through passthrough. Other backends use driver-described scRGB.
-//! Both paths fall back to sRGB when their required capabilities are absent.
+//! Color-managed presentation, with one pixel pipeline across window systems.
+//!
+//! ```text
+//! linear Rec.2020 preview                  egui + scopes (sRGB)
+//!   | clip to SDR [0,1]                         |
+//!   | Rec.2020 -> BT.709, extended sRGB encode  |
+//!   +--------------------+---------------------+
+//!                        v
+//!             FP16 extended-sRGB canvas
+//!             (egui's encoded-space blending)
+//!                        |
+//!                  sRGB decode
+//!                        |
+//!       BT.709 -> Rec.2020 -> clip SDR -> BT.709
+//!                        |
+//!          shared FP16 extended-linear sRGB
+//!              /                       \
+//! Wayland passthrough               native scRGB
+//! BT.709 + Rec.2020 target          macOS / Windows
+//!              \                       /
+//!                OS display conversion
+//!
+//! Unsupported output -> bounded sRGB -> platform presentation
+//! ```
+//!
+//! `compositor` owns the canvas and final conversion, `presentation` selects
+//! the surface encoding, and `wayland` owns its explicit color description.
+//! The shared transfer functions and matrices live in `shaders/color.wgsl`.
+//!
+//! egui treats float targets as gamma-encoded, so the canvas follows its
+//! blending convention. Extended BT.709 coordinates preserve wide gamut.
+//! SDR limits apply in Rec.2020, including after blending. Windows HDR desktop
+//! white scaling remains unimplemented; macOS EDR is enabled by wgpu.
 
-mod output;
+mod compositor;
+mod presentation;
 #[cfg(test)]
 mod tests;
 #[cfg(target_os = "linux")]
@@ -19,11 +49,11 @@ mod wayland {
     }
 }
 
-use output::Output;
+use compositor::Compositor;
+use presentation::Presentation;
 
 use std::sync::Arc;
 
-use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
 use crate::preview;
@@ -71,11 +101,9 @@ pub struct Display {
     config: wgpu::SurfaceConfiguration,
     /// Whether the output preserves extended RGB coordinates.
     pub wide_gamut: bool,
-    canvas: wgpu::TextureView,
-    composite: wgpu::RenderPipeline,
-    composite_group: wgpu::BindGroup,
+    compositor: Compositor,
     pub egui: egui_wgpu::Renderer,
-    _description: Option<wayland::Description>,
+    _presentation: Presentation,
 }
 
 impl Display {
@@ -93,26 +121,9 @@ impl Display {
         let size = window.inner_size();
         let caps = surface.get_capabilities(adapter);
 
-        // A description must not be attached unless pass-through keeps the
-        // driver from attaching its own.
-        let description = caps
-            .color_spaces(CANVAS)
-            .contains(wgpu::SurfaceColorSpaces::PASS_THROUGH)
-            .then(|| wayland::Description::new(&window))
-            .flatten();
-        let preferred = if description.is_some() {
-            wgpu::SurfaceColorSpace::PassThrough
-        } else if matches!(
-            window.window_handle().map_err(|e| e.to_string())?.as_raw(),
-            RawWindowHandle::Wayland(_)
-        ) {
-            // Driver-owned scRGB has inconsistent reference white on Wayland.
-            wgpu::SurfaceColorSpace::Srgb
-        } else {
-            wgpu::SurfaceColorSpace::ExtendedSrgbLinear
-        };
-        let output = Output::choose(&caps, preferred).ok_or("no usable surface color space")?;
-        let Output { format, color_space } = output;
+        let presentation = Presentation::new(&window, &caps)?;
+        let output = presentation.output;
+        let (format, color_space) = (output.format, output.color_space);
         if !output.wide_gamut() {
             log::warn!("extended output unavailable or undescribed; using sRGB");
         }
@@ -129,30 +140,7 @@ impl Display {
         };
         surface.configure(device, &config);
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/composite.wgsl"));
-        let composite = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("composite"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs"),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some(output.fragment()),
-                targets: &[Some(format.into())],
-                compilation_options: Default::default(),
-            }),
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-        let canvas = Self::canvas(device, &config);
-        let composite_group = Self::composite_group(device, &composite, &canvas);
+        let compositor = Compositor::new(device, output, &config);
         let mut egui =
             egui_wgpu::Renderer::new(device, CANVAS, egui_wgpu::RendererOptions::default());
         preview::install(device, &mut egui);
@@ -162,46 +150,9 @@ impl Display {
             surface,
             config,
             wide_gamut: output.wide_gamut(),
-            canvas,
-            composite,
-            composite_group,
+            compositor,
             egui,
-            _description: description,
-        })
-    }
-
-    fn canvas(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::TextureView {
-        device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("canvas"),
-                size: wgpu::Extent3d {
-                    width: config.width,
-                    height: config.height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: CANVAS,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            })
-            .create_view(&Default::default())
-    }
-
-    fn composite_group(
-        device: &wgpu::Device,
-        pipeline: &wgpu::RenderPipeline,
-        canvas: &wgpu::TextureView,
-    ) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("composite"),
-            layout: &pipeline.get_bind_group_layout(0),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(canvas),
-            }],
+            _presentation: presentation,
         })
     }
 
@@ -211,9 +162,7 @@ impl Display {
         }
         (self.config.width, self.config.height) = (width, height);
         self.surface.configure(&self.gpu.device, &self.config);
-        self.canvas = Self::canvas(&self.gpu.device, &self.config);
-        self.composite_group =
-            Self::composite_group(&self.gpu.device, &self.composite, &self.canvas);
+        self.compositor.resize(&self.gpu.device, &self.config);
     }
 
     /// Draws one frame. Texture changes are applied even if the frame is
@@ -278,7 +227,7 @@ impl Display {
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("egui"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.canvas,
+                        view: &self.compositor.canvas,
                         resolve_target: None,
                         depth_slice: None,
                         ops: wgpu::Operations {
@@ -293,24 +242,7 @@ impl Display {
         }
         preview::end_frame(&mut self.egui);
         let view = frame.texture.create_view(&Default::default());
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("composite"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.composite);
-            pass.set_bind_group(0, &self.composite_group, &[]);
-            pass.draw(0..3, 0..1);
-        }
+        self.compositor.draw(&mut encoder, &view);
         commands.push(encoder.finish());
         self.gpu.queue.submit(commands);
         // On Wayland, winit then holds back redraws until the compositor asks

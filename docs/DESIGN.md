@@ -151,20 +151,25 @@ This sequence takes priority over CLI expansion and speculative optimization.
   and writes make/model and an Exif IFD with capture settings and time. Edges
   keep provenance explicit rather than hiding it in image types. Orientation is
   omitted because exported pixels are unrotated; LibRaw's normalized make is used.
-- **Decided:** Composite egui and previews in an FP16 extended-sRGB canvas.
-  For SDR preview, clip scene values to [0, 1] in Rec.2020 before conversion.
-  Preserve extended BT.709 coordinates through compositing to retain gamut.
-  Processing and export are unaffected. HDR presentation is deferred.
-- **Decided:** On Wayland, convert the canvas to bounded linear Rec.2020 and
-  present through Vulkan passthrough. Declare Rec.2020 primaries, extended-linear
-  transfer and luminances (0, 80, 80) cd/m² [11, 12]. The buffer and default target
-  volume then agree without extended-target support. The pinned wgpu patch is
-  documented in THIRD_PARTY.md [13]. Other backends retain driver-described scRGB.
-- **Decided:** Request relative-colorimetric intent when advertised, otherwise
-  perceptual, and log the selected intent. The compositor maps to the monitor.
-- **Requirement:** Use sRGB fallback when managed Wayland output is unavailable.
-  The D65 matrix/shaper conversion is tested against LittleCMS relative output,
-  including hardware-sRGB targets. Physical gamut accuracy needs measurement.
+- **Decided:** Composite egui and previews in an FP16 extended-sRGB canvas,
+  retaining egui's encoded-space blending. Decode and limit the final composite
+  to the SDR Rec.2020 volume, then output extended-linear BT.709 on all platforms.
+  Negative/above-one BT.709 coordinates carry wide gamut. Preview also clips scene
+  inputs in Rec.2020; processing and export are unchanged. HDR is deferred.
+- **Decided:** Wayland uses Vulkan passthrough with a BT.709/extended-linear
+  description, explicit Rec.2020 target primaries, and (0, 80, 80) cd/m² luminances
+  [11, 12]. Require mastering-primaries and extended-target support, otherwise use
+  sRGB. This keeps reference white independent of driver conventions. The pinned
+  wgpu patch is documented in THIRD_PARTY.md [13].
+- **Decided:** macOS uses wgpu's extended-linear sRGB layer tagging, which enables
+  Metal EDR even for our SDR content. Windows uses the same shader and native
+  scRGB as best effort, untested. HDR desktop SDR-white adjustment is not yet
+  implemented. No additional wgpu patch is needed for the shared encoding.
+- **Decided:** On Wayland request relative-colorimetric intent when advertised,
+  otherwise perceptual, and log it. Other platforms use the system's mapping.
+- **Requirement:** Fall back to bounded sRGB when the required output capabilities
+  are absent. The matrix/shaper conversion is tested against LittleCMS relative
+  output, including hardware-sRGB targets. Physical accuracy needs measurement.
 
 - **Decided:** Diagnostic scopes use a black plotting area and light labels,
   distinct from the image preview’s middle-grey surround.

@@ -47,8 +47,14 @@ struct Shown {
     rect: wgpu::Buffer,
 }
 
+pub(crate) const SHADER: &str =
+    concat!(include_str!("shaders/color.wgsl"), include_str!("shaders/preview.wgsl"),);
+
 pub fn install(device: &wgpu::Device, renderer: &mut egui_wgpu::Renderer) {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/preview.wgsl"));
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("preview"),
+        source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+    });
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("preview"),
         layout: None,

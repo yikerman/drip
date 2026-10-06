@@ -4,6 +4,23 @@ Compact session record, newest first. Keep outcomes, evidence and unresolved
 limits; implementation details and older experiments remain in Git history.
 [DESIGN](DESIGN.md) holds intent; [TODO](../TODO.md) holds unfinished work.
 
+## 2026-10-05: shared extended-linear output
+
+- Unified the final shader as extended-linear BT.709. Wayland now declares
+  Rec.2020 target primaries and requires extended-target support. Native macOS
+  and Windows retain wgpu's scRGB tagging. No additional wgpu patch was needed.
+- Separated canvas conversion (`compositor`) from surface selection/tagging
+  (`presentation`, `wayland`). Shared shader color functions have one source.
+  The display module docstring contains the pipeline flowchart.
+- GPU readback passed for wide-gamut images, GUI colors, scene clipping, an
+  encoded-space blend escaping Rec.2020, and both sRGB fallback formats. GUI
+  tests (23), clippy, formatting and private rustdoc generation passed.
+- Intel/KWin traces verified BT.709, linear transfer, Rec.2020 target and relative
+  intent over three window lifecycles. Three runs each with missing extended-
+  target support and injected setup failure selected sRGB and exited normally.
+- macOS and NVIDIA remain untested for this revision. Windows is explicitly
+  best effort and untested, including the known HDR desktop-white limitation.
+
 ## 2026-10-05: SDR Rec.2020 presentation
 
 - Wayland output now converts the composed canvas to linear Rec.2020 and tags
