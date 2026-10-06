@@ -154,6 +154,13 @@ Opening the menu preserves selection. Hover over a port to see its type.
 Buttons, menu items and parameter controls use ordinary left-click operation;
 drag a view's corner handle to resize it.
 
+In parameter panels, scroll over a slider to adjust it: up increases, down
+decreases. Each scroll line changes a floating-point value by 1% of its range,
+or an integer by one. The panel stays still while scrolling over a slider.
+Right-click a slider, checkbox, dropdown or filename and choose **Reset to default**
+to restore its node-defined default (or clear a path). These gestures also work
+in pop-outs and template inputs. The parameter name's menu also offers reset.
+
 Node bodies gain a thin border on hover. Wires thicken when targeted; their hit
 band stays narrow at every zoom level. Nodes, ports and controls take priority
 over wires. At a crossing, the nearest wire is highlighted and right-click removes

@@ -74,6 +74,17 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
 
 ## Presentation and editing
 
+- **Decided:** Parameter controls share conventional gestures in the inspector,
+  pop-outs and template inputs. Scrolling a slider changes a float by 1% of its
+  range per line, or an integer by one, and consumes the panel's scroll input.
+  Right-click opens Reset to default, using `ParamKind::default_value`; paths
+  expose it on their filename so the browse button retains its normal action.
+  The parameter name's existing menu shares the same reset action.
+  Reset uses a menu to avoid conflicts with controls' single-click behavior.
+  Slider setters reject right-button edits before painting so opening the menu
+  preserves both the stored value and its display.
+  Values remain in the graph. Only fractional scroll steps live temporarily in
+  egui memory while a slider is hovered.
 - **Decided:** Canvas and node gestures separate navigation from modification.
   Left-drag pans the whole canvas even when started on a node. This decision
   covers only the canvas background and node body.

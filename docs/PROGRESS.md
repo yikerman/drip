@@ -3,6 +3,24 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-05: parameter control gestures
+
+- Added wheel adjustment to the shared parameter sliders, consuming panel scroll
+  while hovered. Fractional wheel input accumulates in egui memory; graph values
+  and schema defaults remain authoritative.
+- Right-click opens Reset to default on sliders, checkboxes, dropdowns and path
+  filenames, and in the existing parameter-name menu. Removed double-click reset
+  after the user reported conflicts with single-click behavior. Inspector,
+  pop-outs and template inputs use the same renderer. README usage documents
+  these gestures.
+- Slider setters reject right-button edits before egui paints, preventing the
+  temporary value jump when opening Reset. A regression test reproduced the
+  old mismatch and now checks displayed values on press, drag and release.
+- Validation: 41 GUI tests passed, including reset menus, right-click preserving
+  displayed values, wheel bounds, trackpad accumulation and panel scroll isolation. The
+  GPU-only test remained ignored. Clippy with warnings denied, formatting and
+  diff checks passed. The final gestures have not been checked live.
+
 ## 2026-10-05: port navigation and connection gestures
 
 - Unified input/output port behavior: left-click opens connected-node navigation,

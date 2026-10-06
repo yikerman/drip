@@ -1,7 +1,7 @@
 //! Node parameter panels and schema widgets, shared by the inspector and pop-outs.
 
 use drip::param::ParamKind;
-use egui::{Sense, Ui};
+use egui::{PointerButton, Sense, Ui};
 use serde_json::{Value as Json, json};
 
 use crate::editing::NodeCx;
@@ -55,6 +55,10 @@ pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
                 cx.set_param(spec.name, value);
             }
             crate::theme::context_menu(&name).show(|ui| {
+                if let Some(value) = reset_action(ui, &spec.kind) {
+                    cx.set_param(spec.name, value);
+                }
+                ui.separator();
                 let toggle = if external { "Fix in template" } else { "Make template input" };
                 if ui.button(toggle).clicked() {
                     cx.set_external(spec.name, !external);
@@ -68,54 +72,125 @@ pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
 
 /// A widget for one parameter value; returns the new value when edited.
 pub fn edit_value(ui: &mut Ui, id: egui::Id, kind: &ParamKind, value: &Json) -> Option<Json> {
-    match *kind {
+    let (response, mut chosen) = match *kind {
         ParamKind::Float { min, max, .. } => {
             let mut v = value.as_f64().expect("validated float");
-            ui.add(egui::Slider::new(&mut v, min..=max)).changed().then(|| json!(v))
+            let response = slider(ui, &mut v, min..=max);
+            v = (v + scroll_steps(ui, &response) * (max - min) / 100.0).clamp(min, max);
+            (response, Some(json!(v)))
         }
         ParamKind::Int { min, max, .. } => {
             let mut v = value.as_i64().expect("validated int");
-            ui.add(egui::Slider::new(&mut v, min..=max)).changed().then(|| json!(v))
+            let response = slider(ui, &mut v, min..=max);
+            v = v.saturating_add(scroll_steps(ui, &response) as i64).clamp(min, max);
+            (response, Some(json!(v)))
         }
         ParamKind::Bool { .. } => {
             let mut v = value.as_bool().expect("validated bool");
-            ui.checkbox(&mut v, "").changed().then(|| json!(v))
+            let response = ui.checkbox(&mut v, "");
+            (response, Some(json!(v)))
         }
         ParamKind::Choice { options, .. } => {
             let current = value.as_str().expect("validated choice");
             let mut chosen = None;
-            egui::ComboBox::from_id_salt(id).selected_text(current).show_ui(ui, |ui| {
-                for option in options {
-                    if ui.selectable_label(*option == current, *option).clicked() {
-                        chosen = Some(json!(option));
+            let response = egui::ComboBox::from_id_salt(id)
+                .selected_text(current)
+                .show_ui(ui, |ui| {
+                    for option in options {
+                        if ui.selectable_label(*option == current, *option).clicked() {
+                            chosen = Some(json!(option));
+                        }
                     }
-                }
-            });
-            chosen
+                })
+                .response;
+            (response, chosen)
         }
         ParamKind::Path { output } => {
             let path = value.as_str().map(std::path::Path::new);
             let name =
                 path.and_then(|p| p.file_name()).map_or("none".into(), |n| n.to_string_lossy());
             let mut chosen = None;
-            ui.horizontal(|ui| {
-                if ui.button("…").clicked() {
-                    let dialog = rfd::FileDialog::new();
-                    let dialog = match path.and_then(|p| p.parent()) {
-                        Some(dir) => dialog.set_directory(dir),
-                        None => dialog,
-                    };
-                    chosen = if output { dialog.save_file() } else { dialog.pick_file() }
-                        .map(|p| json!(p));
-                }
-                let label = ui.label(name);
-                if let Some(path) = path {
-                    label.on_hover_text(path.display().to_string());
-                }
-            });
-            chosen
+            let response = ui
+                .horizontal(|ui| {
+                    if ui.button("…").clicked() {
+                        let dialog = rfd::FileDialog::new();
+                        let dialog = match path.and_then(|p| p.parent()) {
+                            Some(dir) => dialog.set_directory(dir),
+                            None => dialog,
+                        };
+                        chosen = if output { dialog.save_file() } else { dialog.pick_file() }
+                            .map(|p| json!(p));
+                    }
+                    let label = ui.add(egui::Label::new(name).sense(Sense::click()));
+                    if let Some(path) = path {
+                        label.clone().on_hover_text(path.display().to_string());
+                    }
+                    label
+                })
+                .inner;
+            (response, chosen)
         }
+    };
+    let response = response.on_hover_text("Right-click to reset to default");
+    let mut menu = crate::theme::context_menu(&response).id(ui.make_persistent_id((id, "reset")));
+    // Slider rails sense drags, so their response does not report clicks.
+    if response.hovered()
+        && ui.input(|input| input.pointer.button_clicked(PointerButton::Secondary))
+    {
+        menu = menu.open_memory(egui::SetOpenCommand::Bool(true));
     }
+    menu.show(|ui| {
+        if let Some(value) = reset_action(ui, kind) {
+            chosen = Some(value);
+            response.surrender_focus();
+        }
+    });
+    chosen.filter(|chosen| chosen != value)
+}
+
+fn slider<T: egui::emath::Numeric>(
+    ui: &mut Ui,
+    value: &mut T,
+    range: std::ops::RangeInclusive<T>,
+) -> egui::Response {
+    let secondary = ui.input(|input| {
+        input.pointer.button_down(PointerButton::Secondary)
+            || input.pointer.button_released(PointerButton::Secondary)
+    });
+    let slider = egui::Slider::from_get_set(range.start().to_f64()..=range.end().to_f64(), |new| {
+        // Reject right-button edits before egui reads the value back for painting.
+        if !secondary && let Some(new) = new {
+            *value = T::from_f64(new);
+        }
+        value.to_f64()
+    });
+    ui.add(if T::INTEGRAL { slider.integer() } else { slider })
+}
+
+fn reset_action(ui: &mut Ui, kind: &ParamKind) -> Option<Json> {
+    ui.button("Reset to default").clicked().then(|| {
+        ui.close();
+        kind.default_value()
+    })
+}
+
+fn scroll_steps(ui: &mut Ui, response: &egui::Response) -> f64 {
+    let id = response.id.with("scroll");
+    if !response.hovered() {
+        ui.data_mut(|data| data.remove::<f64>(id));
+        return 0.0;
+    }
+    let delta = ui.input_mut(|input| std::mem::take(&mut input.smooth_scroll_delta.y));
+    let line = ui.ctx().options(|options| options.input_options.line_scroll_speed);
+    // egui smooths wheel input across frames; retain only the unfinished step,
+    // never a second copy of the parameter value.
+    ui.data_mut(|data| {
+        let remainder = data.get_temp_mut_or_default::<f64>(id);
+        *remainder += f64::from(delta / line);
+        let steps = remainder.round();
+        *remainder -= steps;
+        steps
+    })
 }
 
 /// A single-line text field whose edit is returned once the field stops having
@@ -131,3 +206,6 @@ fn edit_text(ui: &mut Ui, id: egui::Id, current: &str) -> Option<String> {
     ui.data_mut(|d| d.remove::<String>(id));
     (editing.is_some() && draft != current).then_some(draft)
 }
+
+#[cfg(test)]
+mod tests;
