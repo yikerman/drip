@@ -44,7 +44,7 @@ pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
             {
                 cx.set_param(spec.name, value);
             }
-            name.context_menu(|ui| {
+            crate::theme::context_menu(&name).show(|ui| {
                 let toggle = if external { "Fix in template" } else { "Make template input" };
                 if ui.button(toggle).clicked() {
                     cx.set_external(spec.name, !external);

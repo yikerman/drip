@@ -212,7 +212,7 @@ impl Editor {
             }
         }
         let to_global = TSTransform::new(area.min.to_vec2() + *offset, self.zoom);
-        background.context_menu(|ui| {
+        theme::context_menu(&background).show(|ui| {
             for kind in registry.kinds() {
                 if ui.button(kind.label).clicked() {
                     let pointer = ui.ctx().pointer_interact_pos().unwrap_or(area.center());

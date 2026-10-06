@@ -74,6 +74,9 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
 
 ## Presentation and editing
 
+- **Decided:** Right-click menus use a lighter neutral fill and a dark border
+  to separate them from the middle-grey workspace; styling is shared in
+  [theme](../crates/drip-gui/src/theme.rs).
 - **Decided:** Use one extended-linear BT.709 output pipeline with an SDR Rec.2020
   bound and bounded-sRGB fallback. Explicit Wayland tagging avoids driver-defined
   reference white; macOS/Windows use native scRGB. Encoding, blending and platform

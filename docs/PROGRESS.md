@@ -3,6 +3,13 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-05: context menu contrast
+
+- Added a lighter neutral background and a thin dark border to the canvas and
+  parameter right-click menus through a shared theme helper.
+- Validation: formatting and `cargo check -p drip-gui --offline` passed.
+  Appearance has not been checked in the running GUI.
+
 ## 2026-10-05: semantic source cleanup
 
 - Grouped demosaicing with bin2x2 and preview reduction, and scopes with shared
