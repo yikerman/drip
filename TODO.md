@@ -7,7 +7,6 @@ robustness and performance when usage or measurements justify it.
 |------|--------|---------------------------|
 | DAG portability verification | Open | Production macros, reflection and discovery pass Linux tests. Verify Rust 1.92 and Windows/macOS linker discovery/builds; declared dependency MSRVs fit 1.92. |
 | Additional interpretation families | Deferred | Add mask bounds, coordinate/calibration evidence and multi-input basis/geometry predicates with real consumers. Generic trait reflection and arbitrary symbolic constraints are intentionally outside the current design. |
-| CLR rewrite feasibility | Open | F# core / C# host evaluation; require correct Wayland, Windows and macOS color. Dear ImGui and a narrow SDL_GPU Wayland extension passed local numerical/metadata probes; validate Windows/macOS, failure recovery, application-owned pop-outs and shader variants before kernel/latency comparisons. No migration decided. |
 | Production pipeline validation | Next | Cross-camera contract tests are in place; judge detail, highlights and color against measured/reference evidence. |
 | Broader RAW support / correct unpacking | Open | Investigate metadata extraction for Canon EOS D30 (`canon-eos-d30.crw`, raw.pixls.us #1307): unusable as-shot WB; Samsung GX-1L (`samsung-gx-1l.pef`, #8115): unusable WB and zero camera matrix. Samples removed from the active corpus until supported. |
 | DNG camera matrix unpacking | Open | Sigma fp 8-bit (`sigma-fp.dng`, raw.pixls.us #7280) and 14-bit (`sigma-fp-14bit-3-2.dng`, #7273) contain nonzero ColorMatrix1/2 tags, but LibRaw 0.22.2 returns zero `cam_xyz` after unpack. Investigate correct extraction; samples removed from the active corpus. |
@@ -30,6 +29,8 @@ robustness and performance when usage or measurements justify it.
 | Failure-safe saves/exports | Deferred | Protect existing destinations on write failure. |
 | Close protection | Deferred | Unsaved edits and completion of in-flight exports. |
 | Resource memory / streamed TIFF | Deferred | Revisit retained RAWs and export buffers if costly. |
+| Shared GPU preview textures | Deferred | Measure duplicate uploads across drawing IDs/windows before adding a device-owned texture cache. CPU packed pixels already share ownership; preserve worker-side retirement. |
+| Scope draw cost | Deferred | Measure per-frame mesh cloning/transformation before introducing transformed-mesh caching or a GPU drawing path. Density counting already runs on the worker. |
 | Changed input files | Idea | Detect changes; invalidation is currently manual. |
 | Cooperative cancellation | Deferred | Only if obsolete evaluation delays current edits noticeably. |
 | GPU computation | Deferred | Require whole-node gains and one kernel source across backends. |
