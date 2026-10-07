@@ -16,42 +16,34 @@ use crate::editing::NodeCx;
 use drip::graph::{Node, NodeId};
 use drip::node::NodeKind;
 use egui::{Rect, Ui, Vec2, vec2};
-use viewer::Viewer;
 
 /// Width of a node whose body does not set one, in graph units.
 pub const WIDTH: f32 = 160.0;
 /// Space around a node's contents, in graph units.
 pub const PAD: f32 = 6.0;
 
-/// Canvas body and its pop-out views, independent of parameter controls.
-pub trait NodeView: Sync {
-    /// The size of the node's body, below its ports, in graph units. Its
-    /// width is the node's.
-    fn size(&self, _node: &Node) -> Vec2 {
-        vec2(WIDTH, PAD)
-    }
-
-    /// Draws the body into `ui`, whose max rect has the body's size.
-    fn body(&self, _ui: &mut Ui, _node: &mut NodeCx) {}
-
-    /// The initial size of the window the body popped out as `name`, in points.
-    fn window_size(&self, _name: &'static str, _node: &Node) -> Vec2 {
-        vec2(360.0, 320.0)
-    }
-
-    /// Draws the content of the window the body popped out as `name`.
-    fn window(&self, _ui: &mut Ui, _name: &'static str, _node: &mut NodeCx) {}
-}
-
 #[linkme::distributed_slice]
 pub(super) static BINDINGS: [Binding];
 
-/// Resolved controls and view; each override retains the other's default.
+/// Custom controls coexist with the standard viewer whenever preparation exists.
 pub struct NodeUi {
     binding: Option<&'static Binding>,
-    pub view: &'static dyn NodeView,
 }
 impl NodeUi {
+    fn has_view(&self) -> bool {
+        self.binding.is_some_and(Binding::has_preparation)
+    }
+
+    pub fn size(&self, node: &Node) -> Vec2 {
+        if self.has_view() { viewer::size(node) + vec2(0.0, PAD) } else { vec2(WIDTH, PAD) }
+    }
+
+    pub fn body(&self, ui: &mut Ui, node: &mut NodeCx) {
+        if self.has_view() {
+            viewer::body(ui, node);
+        }
+    }
+
     pub fn controls(&self, ui: &mut Ui, node: &mut NodeCx) {
         match self.binding {
             Some(binding) => binding.controls(ui, node),
@@ -77,11 +69,7 @@ pub fn binding(kind: &NodeKind) -> Option<&'static Binding> {
 }
 
 pub fn of(kind: &NodeKind) -> NodeUi {
-    let binding = binding(kind);
-    let view = binding.and_then(Binding::view).unwrap_or_else(|| {
-        if binding.is_some_and(Binding::has_preparation) { &Viewer } else { &Plain }
-    });
-    NodeUi { binding, view }
+    NodeUi { binding: binding(kind) }
 }
 
 /// A popped-out window: one part of one node.
@@ -95,15 +83,15 @@ pub struct Popped {
 pub enum Part {
     /// The node's parameters, the same for every kind.
     Parameters,
-    /// A part of the node's body, named by its kind's GUI.
-    Gui(&'static str),
+    /// The prepared view.
+    View,
 }
 
 impl Part {
     pub fn name(self) -> &'static str {
         match self {
             Part::Parameters => "parameters",
-            Part::Gui(name) => name,
+            Part::View => "view",
         }
     }
 }
@@ -117,7 +105,7 @@ impl Popped {
     pub fn size(self, node: &Node) -> Vec2 {
         match self.part {
             Part::Parameters => vec2(360.0, 240.0),
-            Part::Gui(name) => of(node.kind).view.window_size(name, node),
+            Part::View => viewer::size(node),
         }
     }
 
@@ -128,7 +116,7 @@ impl Popped {
                 let used = ui.scope(|ui| parameters::panel(ui, node)).response.rect;
                 fit_window(ui.ctx(), used);
             }
-            Part::Gui(name) => of(node.node().kind).view.window(ui, name, node),
+            Part::View => viewer::window(ui, node),
         }
     }
 }
@@ -150,7 +138,3 @@ const FITTED: &str = "fitted window size";
 pub fn fitted(ctx: &egui::Context) -> Option<Vec2> {
     ctx.data(|d| d.get_temp(egui::Id::new(FITTED)))
 }
-
-struct Plain;
-
-impl NodeView for Plain {}

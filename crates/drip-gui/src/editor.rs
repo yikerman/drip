@@ -5,10 +5,11 @@
 //! everything on it is drawn and interacted with in graph units. The editor
 //! draws each node's frame (header, ports, error) and its kind's GUI the body.
 
-use crate::editing::{Edit, Frame, NodeCx, pair};
+use crate::editing::{Edit, Frame, NodeCx};
 use crate::node_ui::{self, Part, ports::PortText};
+use crate::ui_state::{LayoutField, position};
 use crate::widgets::{self, BUTTON};
-use crate::worker::Presentation;
+use crate::worker::ViewResult;
 use drip::eval::NodeError;
 use drip::graph::{Graph, Node, NodeId, Port};
 use drip::node::Registry;
@@ -18,7 +19,6 @@ use egui::{
     Align2, FontId, LayerId, Painter, PointerButton, Pos2, Rect, Sense, Stroke, Ui, UiBuilder,
     Vec2, pos2, vec2,
 };
-use serde_json::Value as Json;
 
 use crate::theme;
 
@@ -79,7 +79,7 @@ struct CanvasLayout {
 }
 
 impl CanvasLayout {
-    fn new<'a>(graph: &Graph, results: &dyn Fn(NodeId) -> Option<&'a Presentation>) -> Self {
+    fn new<'a>(graph: &Graph, results: &dyn Fn(NodeId) -> Option<&'a ViewResult>) -> Self {
         Self { nodes: graph.nodes().map(|(id, node)| layout(id, node, results(id))).collect() }
     }
 
@@ -206,7 +206,7 @@ impl Editor {
         self.pan(&body);
         if body.dragged_by(PointerButton::Secondary) {
             let pos = position(&graph.node(l.id).expect("laid out").ui, l.id) + body.drag_delta();
-            frame.edit(graph, Edit::Ui(l.id, "pos", pos));
+            frame.edit(graph, Edit::Ui(l.id, LayoutField::Position, pos));
         }
         let mut remove = false;
         theme::context_menu(&body).show(|ui| {
@@ -264,7 +264,7 @@ impl Editor {
             );
             widgets::pop_out(ui, button, &mut cx, Part::Parameters);
         }
-        kind.view.body(&mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body)), &mut cx);
+        kind.body(&mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body)), &mut cx);
         if body.hovered() {
             painter.rect_stroke(
                 l.rect,
@@ -452,12 +452,12 @@ fn paint(painter: &Painter, l: &NodeLayout, node: &Node, texts: &[PortText], sel
 
 /// From the top: header, input rows, output rows, an error row if the node
 /// failed, the body its kind's GUI draws.
-fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> NodeLayout {
+fn layout(id: NodeId, node: &Node, result: Option<&ViewResult>) -> NodeLayout {
     let error = match result {
         Some(Err(NodeError::Upstream(_))) | Some(Ok(_)) | None => None,
         Some(Err(e)) => Some(e.to_string()),
     };
-    let size = node_ui::of(node.kind).view.size(node);
+    let size = node_ui::of(node.kind).size(node);
     let body_top = ports(node) + if error.is_some() { ROW } else { 0.0 };
     let pos = position(&node.ui, id).to_pos2();
     let port = |i: usize, x: f32| pos + vec2(x, HEADER + ROW * (i as f32 + 0.5));
@@ -481,15 +481,9 @@ fn ports(node: &Node) -> f32 {
     HEADER + ROW * (node.kind.inputs().len() + node.kind.outputs().len()) as f32
 }
 
-/// A node's saved position, or a spot derived from its id for nodes never placed.
-fn position(ui: &Json, id: NodeId) -> Vec2 {
-    pair(&ui["pos"])
-        .unwrap_or_else(|| vec2(40.0 + 200.0 * (id.0 % 5) as f32, 40.0 + 140.0 * (id.0 / 5) as f32))
-}
-
 /// A node's rectangle in graph units, without an error row.
 fn bounds(id: NodeId, node: &Node) -> Rect {
-    let size = node_ui::of(node.kind).view.size(node);
+    let size = node_ui::of(node.kind).size(node);
     Rect::from_min_size(position(&node.ui, id).to_pos2(), vec2(size.x, ports(node) + size.y))
 }
 

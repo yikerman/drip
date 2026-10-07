@@ -9,7 +9,7 @@ struct SigmoidGui;
 #[drip_macros::gui_node]
 impl GuiNode for SigmoidGui {
     type Node = sigmoid::SigmoidNode;
-    type Prepared = ();
+    type Presentation = ();
     const NODE: &'static drip::node::TypedNode<Self::Node> = &sigmoid::SIGMOID;
     fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Node>) {
         node.schema(ui);

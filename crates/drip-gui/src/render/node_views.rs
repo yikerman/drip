@@ -9,7 +9,7 @@ use crate::render::image::Image;
 use crate::theme;
 
 /// A view the UI thread draws without further image processing.
-pub trait PreparedView: Send + Sync + Any {
+pub trait Drawable: Send + Sync + Any {
     fn draw(&self, painter: &Painter, rect: Rect, id: egui::Id, font: &FontId);
 
     fn window(&self, ui: &mut Ui) {
@@ -22,7 +22,7 @@ pub trait PreparedView: Send + Sync + Any {
     }
 }
 
-impl dyn PreparedView {
+impl dyn Drawable {
     #[cfg(test)]
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
         (self as &dyn Any).downcast_ref()
@@ -30,22 +30,16 @@ impl dyn PreparedView {
 }
 
 /// Each presentation type owns its final worker-side drawing preparation.
-pub trait IntoPrepared {
-    fn prepare(self, cache: &mut Prepared) -> Arc<dyn PreparedView>;
+pub trait IntoDrawable {
+    fn into_drawable(self, cache: &mut ImageCache) -> Arc<dyn Drawable>;
 }
 
-/// Packed pixels and sampling policy; navigation belongs to the displaying surface.
-pub struct ImageView {
-    pub image: Arc<Image>,
-    pub interpolation: bool,
-}
-
-/// Prepared images by source, so an unchanged image is packed once. The owner
+/// Packed images by source, so an unchanged image is packed once. The owner
 /// keeps every image until nothing else does, so the last drop happens there.
 #[derive(Default)]
-pub struct Prepared(Vec<(Arc<Rgb>, Arc<Image>)>);
+pub struct ImageCache(Vec<(Arc<Rgb>, Arc<Image>)>);
 
-impl Prepared {
+impl ImageCache {
     pub fn image(&mut self, source: &Arc<Rgb>) -> Arc<Image> {
         if let Some((_, image)) = self.0.iter().find(|(rgb, _)| Arc::ptr_eq(rgb, source)) {
             return image.clone();
@@ -61,10 +55,19 @@ impl Prepared {
     }
 }
 
+impl Drawable for () {
+    fn draw(&self, _: &egui::Painter, _: egui::Rect, _: egui::Id, _: &egui::FontId) {}
+}
+impl IntoDrawable for () {
+    fn into_drawable(self, _: &mut ImageCache) -> Arc<dyn Drawable> {
+        Arc::new(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node_ui::preview::PreviewImage;
+    use crate::node_ui::preview::{ImageView, PreviewImage};
     use drip::image::Rec2020Mat;
 
     #[test]
@@ -73,16 +76,16 @@ mod tests {
             Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[-1.0, 0.5, 2.0]] });
         let raw = Arc::downgrade(&source);
         let mut value = PreviewImage::new(&Rec2020Mat::from(source));
-        let mut prepared = Prepared::default();
+        let mut images = ImageCache::default();
         let first = {
-            let view = value.clone().prepare(&mut prepared);
+            let view = value.clone().into_drawable(&mut images);
             let view = view.downcast_ref::<ImageView>().unwrap();
             assert!(!view.interpolation);
             view.image.clone()
         };
         value.interpolation = true;
         let second = {
-            let view = value.prepare(&mut prepared);
+            let view = value.into_drawable(&mut images);
             let view = view.downcast_ref::<ImageView>().unwrap();
             assert!(view.interpolation);
             view.image.clone()
@@ -97,11 +100,11 @@ mod tests {
         );
         let pixels = Arc::downgrade(&first);
         drop(first);
-        prepared.collect();
+        images.collect();
         assert!(raw.upgrade().is_some(), "renderer still owns the prepared image");
         drop(second);
         assert!(pixels.upgrade().is_some(), "the owner does the final destruction");
-        prepared.collect();
+        images.collect();
         assert!(pixels.upgrade().is_none() && raw.upgrade().is_none());
     }
 }

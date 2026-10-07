@@ -1,17 +1,18 @@
 //! Applies frontend graph edits and owns their redraw/evaluation effects.
 
 use crate::node_ui::{Part, Popped, ports};
-use crate::render::node_views::PreparedView;
-use crate::worker::Presentation;
+use crate::render::node_views::Drawable;
+use crate::ui_state::LayoutField;
+use crate::worker::ViewResult;
 use drip::graph::{Graph, GraphError, Node, NodeId, Port};
 use drip::node::NodeKind;
-use egui::{Vec2, vec2};
-use serde_json::{Value as Json, json};
+use egui::Vec2;
+use serde_json::Value as Json;
 use std::collections::BTreeSet;
 
 /// What one frame of node GUIs reads from the app, and what they did.
 pub struct Frame<'a> {
-    pub results: &'a dyn Fn(NodeId) -> Option<&'a Presentation>,
+    pub results: &'a dyn Fn(NodeId) -> Option<&'a ViewResult>,
     /// The windows popped out.
     pub popped: &'a BTreeSet<Popped>,
     /// Disables actions while one runs.
@@ -44,12 +45,12 @@ pub enum Edit<'a> {
     Param(NodeId, &'a str, Json),
     Name(NodeId, &'a str),
     External(NodeId, &'a str, bool),
-    Ui(NodeId, &'a str, Vec2),
+    Ui(NodeId, LayoutField, Vec2),
 }
 
 impl<'a> Frame<'a> {
     pub fn new(
-        results: &'a dyn Fn(NodeId) -> Option<&'a Presentation>,
+        results: &'a dyn Fn(NodeId) -> Option<&'a ViewResult>,
         popped: &'a BTreeSet<Popped>,
         action_running: bool,
     ) -> Self {
@@ -63,7 +64,7 @@ impl<'a> Frame<'a> {
             match edit {
                 Edit::Add(kind, pos) => {
                     let id = graph.add_node(kind);
-                    set_ui(graph, id, "pos", pos);
+                    set_ui(graph, id, LayoutField::Position, pos);
                     return Ok(Some(id));
                 }
                 Edit::Remove(id) => {
@@ -120,7 +121,7 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
     }
 
     /// The view of the node's latest result, if it has one.
-    pub fn view(&self) -> Option<&'a dyn PreparedView> {
+    pub fn view(&self) -> Option<&'a dyn Drawable> {
         (self.frame.results)(self.id)?.as_ref().ok()?.as_deref()
     }
 
@@ -136,9 +137,9 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
         self.frame.edit(self.graph, Edit::External(self.id, name, external));
     }
 
-    /// Sets `key` in the node's ui object to `value`, keeping the rest of it.
-    pub fn set_ui(&mut self, key: &str, value: Vec2) {
-        self.frame.edit(self.graph, Edit::Ui(self.id, key, value));
+    /// Updates layout without changing processing parameters.
+    pub fn set_ui(&mut self, field: LayoutField, value: Vec2) {
+        self.frame.edit(self.graph, Edit::Ui(self.id, field, value));
     }
 
     pub fn run(&mut self, action: &'static str) {
@@ -161,22 +162,10 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
     }
 }
 
-/// Sets `key` in a node's ui object to `value`, keeping the rest of it.
-fn set_ui(graph: &mut Graph, id: NodeId, key: &str, value: Vec2) {
+fn set_ui(graph: &mut Graph, id: NodeId, field: LayoutField, value: Vec2) {
     let mut ui = graph.node(id).expect("node exists").ui.clone();
-    if !ui.is_object() {
-        ui = json!({});
-    }
-    ui[key] = json!([value.x, value.y]);
+    field.write(&mut ui, value);
     graph.set_ui(id, ui).expect("node exists");
-}
-
-/// A two-number array in a node's ui object.
-pub fn pair(value: &Json) -> Option<Vec2> {
-    match value.as_array()?.iter().map(|v| v.as_f64()).collect::<Option<Vec<_>>>()?.as_slice() {
-        [x, y] => Some(vec2(*x as f32, *y as f32)),
-        _ => None,
-    }
 }
 
 /// Names the refused input in node terms. Connecting rechecks descendants,

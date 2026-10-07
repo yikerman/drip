@@ -65,7 +65,7 @@ pub fn pop_out(ui: &mut Ui, rect: Rect, node: &mut NodeCx, part: Part) {
     let popped = node.popped(part);
     let icon = match part {
         Part::Parameters => "⚙",
-        Part::Gui(_) => "🗗",
+        Part::View => "🗗",
     };
     let button = egui::Button::new(icon).frame(false).selected(popped);
     let hint = if popped { "close its window" } else { "show in its own window" };

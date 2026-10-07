@@ -9,10 +9,10 @@ use drip::eval::{Evaluator, NodeError};
 use drip::graph::{Graph, NodeId};
 use drip::param::ParamKind;
 
-use crate::render::node_views::{Prepared, PreparedView};
+use crate::render::node_views::{Drawable, ImageCache};
 
-pub type Presentation = Result<Option<Arc<dyn PreparedView>>, NodeError>;
-type Snapshot = BTreeMap<NodeId, Presentation>;
+pub type ViewResult = Result<Option<Arc<dyn Drawable>>, NodeError>;
+type Snapshot = BTreeMap<NodeId, ViewResult>;
 
 struct Request {
     generation: u64,
@@ -113,7 +113,7 @@ impl Worker {
         }
     }
 
-    pub fn result(&self, id: NodeId) -> Option<&Presentation> {
+    pub fn result(&self, id: NodeId) -> Option<&ViewResult> {
         self.views.get(&id)
     }
 
@@ -263,12 +263,12 @@ impl Drop for Worker {
 
 fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
     let mut evaluator = Evaluator::default();
-    let mut prepared = Prepared::default();
+    let mut images = ImageCache::default();
     let mut presentations = BTreeMap::new();
     for command in commands {
         match command {
             Command::Evaluate(request) => {
-                notify.send(evaluate(&request, &mut evaluator, &mut prepared, &mut presentations));
+                notify.send(evaluate(&request, &mut evaluator, &mut images, &mut presentations));
             }
             Command::Reset | Command::Invalidate => {
                 evaluator = Evaluator::default();
@@ -281,18 +281,18 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
                     notify.send(Event::Action(run_action(evaluator, &graph, id, name)));
                 });
             }
-            Command::Collect => prepared.collect(),
+            Command::Collect => images.collect(),
             Command::Shutdown => break,
         }
     }
 }
 
-type CachedPresentations = BTreeMap<NodeId, (drip::eval::Revision, Presentation)>;
+type CachedPresentations = BTreeMap<NodeId, (drip::eval::Revision, ViewResult)>;
 
 fn evaluate(
     request: &Request,
     evaluator: &mut Evaluator,
-    prepared: &mut Prepared,
+    images: &mut ImageCache,
     presentations: &mut CachedPresentations,
 ) -> Event {
     let start = Instant::now();
@@ -331,7 +331,7 @@ fn evaluate(
                 let result =
                     match crate::node_ui::binding(node.kind).filter(|b| b.has_preparation()) {
                         Some(binding) => {
-                            binding.prepare(evaluator, &request.graph, id, request.level, prepared)
+                            binding.prepare(evaluator, &request.graph, id, request.level, images)
                         }
                         None => evaluator
                             .result(id)
@@ -444,7 +444,7 @@ mod tests {
 
     fn pixel(worker: &Worker, id: NodeId) -> [f32; 4] {
         let prepared = worker.result(id).unwrap().as_ref().unwrap().as_ref().unwrap();
-        let image = &prepared.downcast_ref::<crate::render::node_views::ImageView>().unwrap().image;
+        let image = &prepared.downcast_ref::<crate::node_ui::preview::ImageView>().unwrap().image;
         std::array::from_fn(|c| {
             half::f16::from_bits(u16::from_ne_bytes([image.texels[c * 2], image.texels[c * 2 + 1]]))
                 .to_f32()
@@ -790,7 +790,7 @@ mod tests {
         struct ProbeGui;
         impl crate::node_ui::GuiNode for ProbeGui {
             type Node = ProbeNode;
-            type Prepared = ();
+            type Presentation = ();
             const NODE: &'static drip::node::TypedNode<Self::Node> = &PROBE;
             const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|settings, (), _| {
                 CALLS.fetch_add(1, Ordering::Relaxed);

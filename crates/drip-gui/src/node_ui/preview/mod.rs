@@ -9,6 +9,8 @@ use drip::ports::MatRef;
 use drip::profile;
 
 use proofing::{gamutcheck, softproof};
+#[cfg(test)]
+pub use view::ImageView;
 pub use view::PreviewImage;
 
 #[cfg(test)]
@@ -45,7 +47,7 @@ struct PreviewGui;
 #[drip_macros::gui_node]
 impl super::GuiNode for PreviewGui {
     type Node = drip::nodes::preview::PreviewNode;
-    type Prepared = PreviewImage;
+    type Presentation = PreviewImage;
     const NODE: &'static drip::node::TypedNode<Self::Node> = &drip::nodes::PREVIEW;
     const PREPARE: Option<super::Prepare<Self>> = Some(prepare);
 }

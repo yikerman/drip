@@ -137,7 +137,7 @@ mod tests {
             let mut graph = Graph::default();
             for kind in nodes::registry().kinds() {
                 let id = graph.add_node(kind);
-                let width = super::super::of(kind).view.size(graph.node(id).unwrap()).x - 16.0;
+                let width = super::super::of(kind).size(graph.node(id).unwrap()).x - 16.0;
                 for text in texts(&graph, id).into_iter().map(|t| t.label).chain([PENDING.into()]) {
                     let galley = ui.fonts_mut(|fonts| {
                         fonts.layout_no_wrap(

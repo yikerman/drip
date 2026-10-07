@@ -101,7 +101,7 @@ struct HistogramGui;
 #[drip_macros::gui_node]
 impl crate::node_ui::GuiNode for HistogramGui {
     type Node = drip::nodes::scopes::HistogramNode;
-    type Prepared = Arc<Histogram>;
+    type Presentation = Arc<Histogram>;
     const NODE: &'static drip::node::TypedNode<Self::Node> = &drip::nodes::HISTOGRAM;
     const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(histogram);
 }

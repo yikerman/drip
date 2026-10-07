@@ -2,7 +2,7 @@ struct Probe;
 
 impl crate::node_ui::GuiNode for Probe {
     type Node = drip::nodes::preview::PreviewNode;
-    type Prepared = crate::node_ui::preview::PreviewImage;
+    type Presentation = crate::node_ui::preview::PreviewImage;
     const NODE: &'static drip::node::TypedNode<Self::Node> = &drip::nodes::PREVIEW;
     const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(crate::node_ui::preview::prepare);
 }

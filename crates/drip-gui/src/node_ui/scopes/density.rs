@@ -206,7 +206,7 @@ struct WaveformGui;
 #[drip_macros::gui_node]
 impl crate::node_ui::GuiNode for WaveformGui {
     type Node = drip::nodes::scopes::WaveformNode;
-    type Prepared = Arc<Scope>;
+    type Presentation = Arc<Scope>;
     const NODE: &'static drip::node::TypedNode<Self::Node> = &drip::nodes::WAVEFORM;
     const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(waveform);
 }
@@ -215,7 +215,7 @@ struct VectorscopeGui;
 #[drip_macros::gui_node]
 impl crate::node_ui::GuiNode for VectorscopeGui {
     type Node = drip::nodes::scopes::VectorscopeNode;
-    type Prepared = Arc<Scope>;
+    type Presentation = Arc<Scope>;
     const NODE: &'static drip::node::TypedNode<Self::Node> = &drip::nodes::VECTORSCOPE;
     const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(vectorscope);
 }

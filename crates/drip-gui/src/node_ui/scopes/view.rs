@@ -7,16 +7,16 @@ use egui::{Align2, FontId, Painter, Rect, Stroke};
 
 use super::vectorscope_xyz;
 use super::{Histogram, Scope, ScopeAxes};
-use crate::render::node_views::{IntoPrepared, Prepared, PreparedView};
+use crate::render::node_views::{Drawable, ImageCache, IntoDrawable};
 use crate::theme;
 
-impl IntoPrepared for Arc<Histogram> {
-    fn prepare(self, _: &mut Prepared) -> Arc<dyn PreparedView> {
+impl IntoDrawable for Arc<Histogram> {
+    fn into_drawable(self, _: &mut ImageCache) -> Arc<dyn Drawable> {
         self
     }
 }
 
-impl PreparedView for Histogram {
+impl Drawable for Histogram {
     fn draw(&self, painter: &Painter, rect: Rect, _: egui::Id, font: &FontId) {
         histogram(painter, rect, self, font);
     }
@@ -27,14 +27,14 @@ struct ScopeView {
     mesh: egui::Mesh,
 }
 
-impl IntoPrepared for Arc<Scope> {
-    fn prepare(self, _: &mut Prepared) -> Arc<dyn PreparedView> {
+impl IntoDrawable for Arc<Scope> {
+    fn into_drawable(self, _: &mut ImageCache) -> Arc<dyn Drawable> {
         let mesh = scope_mesh(&self);
         Arc::new(ScopeView { scope: self, mesh })
     }
 }
 
-impl PreparedView for ScopeView {
+impl Drawable for ScopeView {
     fn draw(&self, painter: &Painter, rect: Rect, _: egui::Id, font: &FontId) {
         draw_scope(painter, rect, &self.scope, &self.mesh, font);
     }

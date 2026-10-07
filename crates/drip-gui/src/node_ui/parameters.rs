@@ -14,15 +14,15 @@ pub fn panel(ui: &mut Ui, cx: &mut NodeCx) {
 }
 
 pub fn heading(ui: &mut Ui, cx: &mut NodeCx) {
-    let (id, node) = (cx.id(), cx.node().clone());
+    let id = cx.id();
     let name_id = egui::Id::new(("name", id));
     if ui.data_mut(|data| data.remove_temp::<()>(name_id.with("focus"))).is_some() {
         ui.memory_mut(|memory| memory.request_focus(name_id));
     }
-    if let Some(name) = edit_text(ui, name_id, &node.name) {
+    if let Some(name) = edit_text(ui, name_id, &cx.node().name) {
         cx.set_name(&name);
     }
-    ui.weak(node.kind.id);
+    ui.weak(cx.node().kind.id);
 }
 
 pub fn focus_name(ctx: &egui::Context, id: drip::graph::NodeId) {
@@ -43,10 +43,10 @@ pub fn controls(ui: &mut Ui, cx: &mut NodeCx) {
 
 /// Default schema controls, shared by custom node panels and generic nodes.
 pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
-    let (id, node) = (cx.id(), cx.node().clone());
+    let (id, kind) = (cx.id(), cx.node().kind);
     egui::Grid::new(("params", id)).num_columns(2).show(ui, |ui| {
-        for spec in node.kind.params {
-            let external = node.external.contains(spec.name);
+        for spec in kind.params {
+            let external = cx.node().external.contains(spec.name);
             let text = if external { format!("{} (input)", spec.name) } else { spec.name.into() };
             // Generated from the parameter's doc comment; empty when undocumented.
             let hint = match spec.documentation {
@@ -54,9 +54,12 @@ pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
                 doc => format!("{doc}\n\nright-click to change"),
             };
             let name = ui.label(text).interact(Sense::click()).on_hover_text(hint);
-            if let Some(value) =
-                edit_value(ui, egui::Id::new((id, spec.name)), &spec.kind, &node.params[spec.name])
-            {
+            if let Some(value) = edit_value(
+                ui,
+                egui::Id::new((id, spec.name)),
+                &spec.kind,
+                &cx.node().params[spec.name],
+            ) {
                 cx.set_param(spec.name, value);
             }
             crate::theme::context_menu(&name).show(|ui| {

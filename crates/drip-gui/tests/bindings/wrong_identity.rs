@@ -3,7 +3,7 @@ struct Probe;
 impl crate::node_ui::GuiNode for Probe {
     // These nodes share parameters and inputs, but their identities must differ.
     type Node = drip::nodes::scopes::HistogramNode;
-    type Prepared = ();
+    type Presentation = ();
     const NODE: &'static drip::node::TypedNode<Self::Node> = &drip::nodes::WAVEFORM;
 }
 

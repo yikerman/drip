@@ -13,12 +13,9 @@ use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
 use crate::editing::{Frame, NodeCx, Report};
 use crate::editor::Editor;
 use crate::node_ui::{self, Popped};
+use crate::ui_state::{self, DEFAULT_LEVEL, MAX_LEVEL};
 use crate::worker::{Notice, Worker};
 use crate::{inspector, theme};
-
-/// Preview levels never go coarser than 1/256 of the sensor.
-const MAX_LEVEL: u8 = 8;
-const DEFAULT_LEVEL: u8 = 1;
 
 pub struct App {
     project: Project,
@@ -266,7 +263,7 @@ impl App {
             .on_hover_text("Global preview scale. Export always uses full detail.");
             if self.level != previous {
                 log::debug!("preview level changed from {previous} to {}", self.level);
-                self.project.ui["preview_level"] = serde_json::json!(self.level);
+                ui_state::set_preview_level(&mut self.project.ui, self.level);
                 self.dirty = true;
             }
         });
@@ -296,17 +293,7 @@ impl App {
     }
 
     fn set_project(&mut self, project: Project, file: Option<PathBuf>) -> Result<(), String> {
-        if !project.ui.is_null() && !project.ui.is_object() {
-            return Err("project UI state must be an object".into());
-        }
-        let level = match project.ui.get("preview_level") {
-            None => DEFAULT_LEVEL,
-            Some(value) => {
-                value.as_u64().filter(|&level| level <= u64::from(MAX_LEVEL)).ok_or_else(|| {
-                    format!("preview level must be an integer from 0 to {MAX_LEVEL}")
-                })? as u8
-            }
-        };
+        let level = ui_state::preview_level(&project.ui)?;
         self.level = level;
         self.project = project;
         self.file = file;
@@ -393,7 +380,7 @@ mod tests {
 
     use crate::node_ui::{preview::PreviewImage, scopes::Histogram};
 
-    use crate::render::node_views::ImageView;
+    use crate::node_ui::preview::ImageView;
     use drip::param::ParamKind;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
@@ -487,7 +474,11 @@ mod tests {
         for change in [
             crate::editing::Edit::Name(id, "tone"),
             crate::editing::Edit::External(id, "contrast", true),
-            crate::editing::Edit::Ui(id, "pos", egui::vec2(40.0, 50.0)),
+            crate::editing::Edit::Ui(
+                id,
+                crate::ui_state::LayoutField::Position,
+                egui::vec2(40.0, 50.0),
+            ),
         ] {
             edit(app, change);
             assert!(app.take_redraw(), "other windows must see the shared edit");
@@ -679,7 +670,7 @@ mod tests {
         struct SlowGui;
         impl crate::node_ui::GuiNode for SlowGui {
             type Node = SlowKernel;
-            type Prepared = PreviewImage;
+            type Presentation = PreviewImage;
             const NODE: &'static drip::node::TypedNode<Self::Node> = &SLOW;
             const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|p, (), _| {
                 if p.block {
@@ -898,7 +889,7 @@ mod tests {
         h.get_all_by_label("🗗").nth(index(&viewers)).unwrap().click_accesskit();
         h.run();
         let parameters = Popped { node: histogram, part: Part::Parameters };
-        let view = Popped { node: histogram, part: Part::Gui("view") };
+        let view = Popped { node: histogram, part: Part::View };
         let titles: Vec<_> = h.state().windows().into_iter().map(|w| (w.popped, w.title)).collect();
         assert_eq!(
             titles,
@@ -942,7 +933,7 @@ mod tests {
         struct TestGui;
         impl crate::node_ui::GuiNode for TestGui {
             type Node = ViewNode;
-            type Prepared = PreviewImage;
+            type Presentation = PreviewImage;
             const NODE: &'static drip::node::TypedNode<Self::Node> = &VIEW;
             const PREPARE: Option<crate::node_ui::Prepare<Self>> =
                 Some(|_, (), _| Err(KernelError::Incomplete("no view yet")));
@@ -983,7 +974,7 @@ mod tests {
         struct TestGui;
         impl crate::node_ui::GuiNode for TestGui {
             type Node = ViewNode;
-            type Prepared = PreviewImage;
+            type Presentation = PreviewImage;
             const NODE: &'static drip::node::TypedNode<Self::Node> = &VIEW;
             const PREPARE: Option<crate::node_ui::Prepare<Self>> =
                 Some(|_, (), _| Err(KernelError::Incomplete("no view yet")));
@@ -1010,7 +1001,7 @@ mod tests {
         assert!(h.query_by_label("Typed enabled: true").is_some());
         h.get_by_label("🗗").click_accesskit();
         h.run();
-        let popped = Popped { node: id, part: crate::node_ui::Part::Gui("view") };
+        let popped = Popped { node: id, part: crate::node_ui::Part::View };
         assert_eq!(h.state().windows()[0].popped, popped);
         assert!(h.query_by_label("shown in its window").is_some());
         assert!(h.query_by_label("Custom view controls").is_some());

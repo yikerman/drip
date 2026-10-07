@@ -29,9 +29,9 @@ pub fn inputs(ui: &mut Ui, graph: &mut Graph, frame: &mut Frame) {
                 label.on_hover_text(spec.documentation);
             }
             let kind = spec.kind;
-            let value = node.params[param].clone();
+            let value = &node.params[param];
             if let Some(value) =
-                parameters::edit_value(ui, egui::Id::new(("input", id, param)), &kind, &value)
+                parameters::edit_value(ui, egui::Id::new(("input", id, param)), &kind, value)
             {
                 frame.edit(graph, Edit::Param(id, param, value));
             }

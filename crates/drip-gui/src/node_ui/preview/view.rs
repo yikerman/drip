@@ -5,7 +5,7 @@ use std::sync::Arc;
 use egui::{FontId, Painter, Rect, Ui};
 
 use crate::render::image;
-use crate::render::node_views::{ImageView, IntoPrepared, Prepared, PreparedView};
+use crate::render::node_views::{Drawable, ImageCache, IntoDrawable};
 use drip::image::{RealMat, Rec2020Rgb, Rgb};
 
 /// Linear Rec.2020 pixels for the preview shader, with reference semantics
@@ -29,13 +29,19 @@ impl PreviewImage {
     }
 }
 
-impl IntoPrepared for PreviewImage {
-    fn prepare(self, cache: &mut Prepared) -> Arc<dyn PreparedView> {
+impl IntoDrawable for PreviewImage {
+    fn into_drawable(self, cache: &mut ImageCache) -> Arc<dyn Drawable> {
         Arc::new(ImageView { image: cache.image(self.rgb()), interpolation: self.interpolation })
     }
 }
 
-impl PreparedView for ImageView {
+/// Packed pixels and sampling policy; navigation belongs to the displaying surface.
+pub struct ImageView {
+    pub image: Arc<image::Image>,
+    pub interpolation: bool,
+}
+
+impl Drawable for ImageView {
     fn draw(&self, painter: &Painter, rect: Rect, id: egui::Id, _: &FontId) {
         let fit =
             (rect.width() / self.image.width as f32).min(rect.height() / self.image.height as f32);
