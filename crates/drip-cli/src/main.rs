@@ -2,6 +2,6 @@
 //! Scaffold only; implementation is postponed (see docs/DESIGN.md).
 
 fn main() {
-    eprintln!("drip: the batch CLI is not implemented yet");
+    eprintln!("drip-cli: the batch CLI is not implemented yet");
     std::process::exit(2);
 }
