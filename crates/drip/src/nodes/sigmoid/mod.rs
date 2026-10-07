@@ -1,9 +1,8 @@
 //! Creative tone mapping in linear Rec.2020; algorithm settings also serve frontend curve plots.
 
-use crate::image::{Rec2020Mat, Rec2020Rgb, Rgb};
+use crate::image::{Rec2020Mat, Rgb};
 use crate::node::{EvalContext, KernelError};
 use crate::param::ParamKind;
-use crate::ports::MatRef;
 use std::sync::Arc;
 
 mod algorithm;
@@ -24,7 +23,7 @@ impl Settings {
     }
 }
 
-/// Creative S-curve on linear Rec.2020.
+/// Creative S-curve on Rec.2020 RGB.
 ///
 /// Assumes middle grey at 0.18 and keeps it fixed. Black is 0 and the curve approaches 1.
 /// The output is interpreted as linear Rec.2020 for further processing; additional
@@ -32,7 +31,7 @@ impl Settings {
 #[crate::node(kind = SIGMOID, id = "tone.sigmoid", category = "tone", name = "Sigmoid", outputs = ["image"], references = [("darktable: sigmoid", "https://docs.darktable.org/usermanual/5.6/en/module-reference/processing-modules/sigmoid/")])]
 fn sigmoid(
     p: Settings,
-    (image,): (MatRef<'_, 3, dyn Rec2020Rgb>,),
+    (image,): (&Rec2020Mat,),
     _: &EvalContext<'_>,
 ) -> Result<(Arc<Rec2020Mat>,), KernelError> {
     let input = image.rgb();

@@ -4,18 +4,19 @@
 //! # Design intent
 //!
 //! Make the pipeline explicit while rejecting connections with incompatible data
-//! semantics. Nodes request the weakest capability their mathematics needs;
-//! their input/output tuples drive both connection checks and evaluation.
-//! Rust checks signatures; documented trait laws describe what implementers must
-//! uphold. Pure kernels and immutable results allow dependency-based cache reuse.
+//! representations. Ordinary RGB nodes use linear Rec.2020/D65, including after
+//! creative nonlinear processing. Concrete input/output tuples drive connection
+//! checks and execution; node-local checks express actual-value prerequisites.
+//! Rust checks signatures, not photographic intent or numerical correctness.
+//! Pure kernels and immutable results allow dependency-based cache reuse.
 //!
 //! # Reading order
 //!
-//! 1. [`image`]: data structures, capability hierarchy and semantic laws.
-//! 2. [`value`] and [`ports`]: generated capability evidence and tuple adapters that
+//! 1. [`image`]: storage and concrete image interpretations.
+//! 2. [`value`] and [`ports`]: concrete type descriptors and tuple adapters that
 //!    connect typed kernels to a heterogeneous graph.
 //! 3. [`mod@node`] and [`nodes`]: signatures, processing and explicit actions. Read
-//!    `nodes/exposure.rs` for a capability input, `nodes/preview.rs` for a declaration,
+//!    `nodes/exposure.rs` for a working-RGB input, `nodes/preview.rs` for a declaration,
 //!    and `nodes/export.rs` for file-writing actions.
 //! 4. [`graph`]: nodes, named edges, connection validation and DAG traversal.
 //! 5. [`eval`]: evaluation and node-result caching. Follow
@@ -40,11 +41,10 @@ pub mod templates;
 pub mod value;
 
 extern crate self as drip;
-pub use drip_macros::{Choice, Parameters, capability, interpretation, node};
+pub use drip_macros::{Choice, Parameters, node};
 
 #[doc(hidden)]
 pub mod __private {
-    pub use bevy_reflect;
     pub use linkme;
     pub use serde;
 }

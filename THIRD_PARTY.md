@@ -29,7 +29,6 @@ here when introduced.
 | [LibRaw LLC and contributors](https://www.libraw.org/) | RAW decoding through Drip's C shim | LGPL-2.1 OR CDDL-1.0 |
 | [Marti Maria and Little CMS contributors](https://github.com/mm2/Little-CMS) | ICC export, preview softproofing and gamut classification | MIT |
 | [Kornel Lesiński and rust-lcms2 contributors](https://github.com/kornelski/rust-lcms2) (`lcms2`, `lcms2-sys`) | Rust Little CMS bindings | MIT |
-| [Bevy contributors](https://github.com/bevyengine/bevy/tree/v0.19.1/crates/bevy_reflect) (`bevy_reflect` 0.19.1) | Interpretation trait projection; no Bevy ECS or renderer | MIT OR Apache-2.0 ([MIT](https://github.com/bevyengine/bevy/blob/v0.19.1/LICENSE-MIT), [Apache-2.0](https://github.com/bevyengine/bevy/blob/v0.19.1/LICENSE-APACHE)) |
 | [David Tolnay and linkme contributors](https://github.com/dtolnay/linkme/tree/0.3.37) (`linkme` 0.3.37) | Linked node discovery and local custom GUI bindings | MIT OR Apache-2.0 ([MIT](https://github.com/dtolnay/linkme/blob/0.3.37/LICENSE-MIT), [Apache-2.0](https://github.com/dtolnay/linkme/blob/0.3.37/LICENSE-APACHE)) |
 | [Rayon contributors](https://github.com/rayon-rs/rayon) | Processing and GUI scope/proofing parallelism | MIT OR Apache-2.0 |
 | [image-rs contributors](https://github.com/image-rs/image-tiff) (`tiff`) | TIFF encoding and GUI proof/export parity tests | MIT |
@@ -109,7 +108,7 @@ Drip uses exposure-independent u′v′ chromaticity and an EV waveform.
 [8] Y. Zhu and G. D. Finlayson, “A Mathematical Investigation into the Design
 of Prefilters That Make Cameras More Colorimetric,” *Sensors*, vol. 20, no. 23,
 Art. no. 6882, Dec. 2020, doi: [10.3390/s20236882](https://doi.org/10.3390/s20236882).
-Luther-condition reference for image capability contracts; no algorithm copied.
+Luther-condition reference for camera color interpretation; no algorithm copied.
 Article licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
 [9] darktable contributors, “Module reference,” *darktable user manual*, ver. 5.6.

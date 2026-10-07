@@ -1,6 +1,6 @@
 //! Applies frontend graph edits and owns their redraw/evaluation effects.
 
-use crate::node_ui::{Part, Popped, ports};
+use crate::node_ui::{Part, Popped};
 use crate::render::node_views::Drawable;
 use crate::ui_state::LayoutField;
 use crate::worker::ViewResult;
@@ -168,17 +168,15 @@ fn set_ui(graph: &mut Graph, id: NodeId, field: LayoutField, value: Vec2) {
     graph.set_ui(id, ui).expect("node exists");
 }
 
-/// Names the refused input in node terms. Connecting rechecks descendants,
-/// so the input may lie downstream of the new edge.
+/// Names the refused input using the same concrete contracts as port labels.
 fn refusal(graph: &Graph, error: &GraphError) -> String {
     match error {
         GraphError::TypeMismatch { input, mismatch } => format!(
-            "{} · {} requires {}, got {} ({})",
+            "{} · {} requires {}, got {}",
             graph.node(input.0).expect("checked input").name,
             input.1,
-            ports::name(mismatch.expected),
-            ports::name(mismatch.actual),
-            mismatch.reason,
+            mismatch.expected,
+            mismatch.actual,
         ),
         error => error.to_string(),
     }

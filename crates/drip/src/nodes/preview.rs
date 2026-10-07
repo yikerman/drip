@@ -1,8 +1,7 @@
 //! Preview declaration; preparation belongs to the frontend.
 
 use crate::node::{EvalContext, KernelError};
-use crate::ports::MatRef;
-use crate::{image::Rec2020Rgb, param::ParamKind, profile};
+use crate::{image::Rec2020Mat, param::ParamKind, profile};
 
 #[derive(Clone, Copy, crate::Choice)]
 pub enum Mode {
@@ -31,8 +30,4 @@ pub struct Preview {
 /// gamut clipping in cyan. Interpolation selects bilinear display sampling; off
 /// preserves discrete pixels. Produces an image preview view.
 #[crate::node(kind = PREVIEW, id = "view.preview", category = "view", name = "Preview", outputs = [])]
-fn preview(
-    p: Preview,
-    (image,): (MatRef<'_, 3, dyn Rec2020Rgb>,),
-    ctx: &EvalContext<'_>,
-) -> Result<(), KernelError>;
+fn preview(p: Preview, (image,): (&Rec2020Mat,), ctx: &EvalContext<'_>) -> Result<(), KernelError>;

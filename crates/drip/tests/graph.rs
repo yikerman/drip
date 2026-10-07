@@ -11,7 +11,7 @@ fn connect_rejects_incompatible_types() {
     let (c, w) = (g.add_node(&CONST), g.add_node(&WRITE));
     let err = g.connect(port(c, "image"), port(w, "image")).unwrap_err();
     assert!(
-        matches!(err, GraphError::TypeMismatch { input, mismatch } if input == port(w, "image") && mismatch.actual == "Rec2020")
+        matches!(err, GraphError::TypeMismatch { input, mismatch } if input == port(w, "image") && mismatch.actual == "Rec.2020 RGB")
     );
     assert_eq!(g.edges().count(), 0);
 }

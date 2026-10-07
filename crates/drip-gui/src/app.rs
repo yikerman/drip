@@ -793,8 +793,8 @@ mod tests {
         h.run();
         let kind = h.get_by_label("tone.sigmoid").rect();
         let description = h.get_by_label(drip::nodes::SIGMOID.documentation).rect();
-        let input = h.get_by_label("rec2020 rgb").rect();
-        let output = h.get_by_label("rec2020").rect();
+        let input = h.get_all_by_label("Rec.2020 RGB").next().unwrap().rect();
+        let output = h.get_all_by_label("Rec.2020 RGB").nth(1).unwrap().rect();
         let control = h.get_by_label("contrast").rect();
         assert!(h.query_by_label("darktable: sigmoid").is_some());
         assert!(kind.bottom() <= description.top());
@@ -810,8 +810,7 @@ mod tests {
         popup.run();
         assert!(popup.query_by_label("tone.sigmoid").is_some());
         assert!(popup.query_by_label("contrast").is_some());
-        assert!(popup.query_by_label("rec2020").is_none());
-        assert!(popup.query_by_label("rec2020 rgb").is_none());
+        assert!(popup.query_by_label("Rec.2020 RGB").is_none());
         assert!(popup.query_by_label("darktable: sigmoid").is_none());
         assert!(popup.query_by_label(drip::nodes::SIGMOID.documentation).is_none());
     }
@@ -823,8 +822,8 @@ mod tests {
         let mut h = harness(app);
         h.run();
         let kind = h.get_by_label("demosaic.rcd").rect();
-        let input = h.get_by_label("sensor mosaic").rect();
-        let output = h.get_by_label("camera").rect();
+        let input = h.get_by_label("Sensor mosaic").rect();
+        let output = h.get_by_label("Camera RGB").rect();
         let reference = h.get_by_label("RCD algorithm").rect();
         assert!(kind.bottom() <= input.top());
         assert!(input.bottom() <= output.top());
@@ -833,23 +832,19 @@ mod tests {
 
     #[test]
     fn undocumented_nodes_show_generated_port_help() {
-        use drip::image::LinearRgb;
+        use drip::image::Rec2020Mat;
         use drip::node::NodeKind;
-        use drip::ports::{MatRef, Preserved, ReadMat};
+        use drip::ports::Read;
+        use std::sync::Arc;
         static GENERIC: NodeKind =
             NodeKind::new::<Generic>("test.generic", "test", "generic", &["image"], &["image"]);
         struct Generic;
         impl NodeDeclaration for Generic {
             type Parameters = ();
-            type Inputs = (ReadMat<3, dyn LinearRgb>,);
-            type Outputs = (Preserved<0>,);
-            const KERNEL: Option<drip::node::Kernel<Self>> = Some(
-                |_: Self::Parameters,
-                 (image,): (MatRef<'_, 3, dyn LinearRgb>,),
-                 _: &EvalContext<'_>| {
-                    Ok((image.preserve::<0>(image.rgb().pixels.clone()),))
-                },
-            );
+            type Inputs = (Read<Rec2020Mat>,);
+            type Outputs = (Arc<Rec2020Mat>,);
+            const KERNEL: Option<drip::node::Kernel<Self>> =
+                Some(|_, (image,), _| Ok((Arc::new(image.clone()),)));
         }
 
         let mut project = Project::default();
@@ -860,10 +855,10 @@ mod tests {
         let mut h = harness(app);
         h.run();
         let kind = h.get_by_label("test.generic").rect();
-        let input = h.get_by_label("linear rgb").rect();
-        let output = h.get_by_label("pending").rect();
+        let input = h.get_all_by_label("Rec.2020 RGB").next().unwrap().rect();
+        let output = h.get_all_by_label("Rec.2020 RGB").nth(1).unwrap().rect();
         assert!(kind.bottom() <= input.top() && input.bottom() <= output.top());
-        assert!(h.query_by_label("same type as input image").is_some());
+        assert!(h.query_by_label("pending").is_none());
     }
 
     #[test]

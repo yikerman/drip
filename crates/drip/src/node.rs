@@ -6,9 +6,9 @@
 //! evaluation. Declarations also support input-only consumers and explicit actions.
 
 use crate::param::{ParamSpec, Parameters, Params};
-use crate::ports::{InputRequirement, InputTuple, OutputTuple, OutputType};
+use crate::ports::{InputRequirement, InputTuple, OutputTuple};
 use crate::resource::Resources;
-use crate::value::Value;
+use crate::value::{TypeDescriptor, Value};
 use std::collections::BTreeMap;
 
 /// A signature determines both connection checking and evaluator adaptation.
@@ -152,7 +152,7 @@ pub struct NodeKind {
     input_names: &'static [&'static str],
     output_names: &'static [&'static str],
     input_types: &'static [InputRequirement],
-    output_types: &'static [OutputType],
+    output_types: &'static [TypeDescriptor],
     /// Deterministic and side-effect free: dependency stamps cache the result.
     pub(crate) eval: Evaluate,
     // CHECKS/ACTIONS contain callbacks typed by their owning declaration. Accessors
@@ -230,17 +230,6 @@ impl NodeKind {
         assert!(K::KERNEL.is_some() || K::Outputs::TYPES.is_empty(), "outputs require a kernel");
         assert!(inputs.len() == K::Inputs::REQUIREMENTS.len(), "input names must match tuple");
         assert!(outputs.len() == K::Outputs::TYPES.len(), "output names must match tuple");
-        let mut index = 0;
-        while index < K::Outputs::TYPES.len() {
-            if let OutputType::Preserve(input) = K::Outputs::TYPES[index] {
-                assert!(input < inputs.len(), "preserved output refers to a nonexistent input");
-                assert!(
-                    !K::Inputs::REQUIREMENTS[input].optional,
-                    "preserved outputs need a required input"
-                );
-            }
-            index += 1;
-        }
         Self {
             check_count: K::CHECKS.len(),
             check_at: |i| K::CHECKS[i].name,
@@ -307,7 +296,7 @@ pub struct InputSpec {
 #[derive(Debug, Clone, Copy)]
 pub struct OutputSpec {
     pub name: &'static str,
-    pub ty: OutputType,
+    pub ty: TypeDescriptor,
 }
 
 pub struct Action {
@@ -338,18 +327,7 @@ where
     let Some(kernel) = K::KERNEL else {
         return Ok(Vec::new());
     };
-    let outputs = kernel(K::Parameters::read(params), K::Inputs::read(inputs), ctx)?.erase();
-    for (output, ty) in outputs.iter().zip(K::Outputs::TYPES) {
-        if let OutputType::Preserve(index) = ty {
-            let source = inputs[*index].as_ref().expect("required preserving input");
-            if !output.preserves(source) {
-                return Err(KernelError::Failed(
-                    "kernel violated its declared interpretation preservation".into(),
-                ));
-            }
-        }
-    }
-    Ok(outputs)
+    Ok(kernel(K::Parameters::read(params), K::Inputs::read(inputs), ctx)?.erase())
 }
 fn run_action<K>(
     index: usize,

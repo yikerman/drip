@@ -1,10 +1,10 @@
 //! Exposure multiplication preserves the input RGB interpretation.
 
-use crate::image::ScaleInvariant;
+use crate::image::{Rec2020Mat, Rgb};
 use crate::node::{EvalContext, KernelError};
 use crate::param::ParamKind;
-use crate::ports::{MatRef, Preserved};
 use rayon::prelude::*;
+use std::sync::Arc;
 
 #[derive(crate::Parameters)]
 pub struct Exposure {
@@ -15,15 +15,15 @@ pub struct Exposure {
 
 /// Multiply linear RGB by 2^ev: x * 2^ev.
 ///
-/// Requires linear RGB whose full interpretation permits positive scaling.
-/// The output keeps the input's type and is pending until the input has one.
+/// Input and output use linear Rec.2020 coordinates. After creative tone mapping,
+/// this scales the rendered light rather than restoring scene exposure.
 #[crate::node(kind = EXPOSURE, id = "color.exposure", category = "color", name = "Exposure", outputs = ["image"])]
 fn exposure(
     p: Exposure,
-    (image,): (MatRef<'_, 3, dyn ScaleInvariant>,),
+    (image,): (&Rec2020Mat,),
     _: &EvalContext<'_>,
-) -> Result<(Preserved<0>,), KernelError> {
+) -> Result<(Arc<Rec2020Mat>,), KernelError> {
     let gain = p.ev.exp2();
     let pixels = image.rgb().pixels.par_iter().map(|p| p.map(|v| v * gain)).collect();
-    Ok((image.preserve::<0>(pixels),))
+    Ok((Arc::new(Rec2020Mat::from(Arc::new(Rgb { pixels, ..**image.rgb() }))),))
 }

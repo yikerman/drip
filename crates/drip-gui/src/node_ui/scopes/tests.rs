@@ -1,20 +1,52 @@
-use super::{density::vectorscope, histogram::histogram};
-use std::sync::{Arc, LazyLock};
-
-use bevy_reflect::Reflect;
-use drip::color::{self, D65, P3};
-use drip::graph::Graph;
-use drip::image::{
-    Colorimetry, LinearRgb, LinearRgbColorSpace, Linearity, RealMat, Rec2020Mat, Rgb,
+use super::{
+    density::{vectorscope, waveform},
+    histogram::histogram,
 };
+use std::sync::Arc;
+
+use drip::graph::Graph;
+use drip::image::{Camera, CameraRgb, Rec2020Mat, Rgb};
 use drip::node::EvalContext;
-use drip::nodes::scopes::{ExposureSettings, HISTOGRAM};
+use drip::nodes::scopes::{ExposureSettings, HISTOGRAM, Scale};
 use drip::param::{Parameters, Params};
-use drip::ports::ReadMat;
+use drip::ports::{Read, ReadEither};
 use drip::value::Value;
 use serde_json::json;
 
 use super::ScopeAxes;
+
+#[test]
+fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
+    let pixels = Arc::new(Rgb {
+        width: 2,
+        height: 2,
+        scale: 1,
+        pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36], [1.0, 0.5, 2.0], [0.25; 3]],
+    });
+    let working = Value::new(Arc::new(Rec2020Mat::from(pixels.clone())));
+    let camera = Value::new(Arc::new(CameraRgb::new(
+        pixels,
+        Camera {
+            xyz_to_cam: [[2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 4.0]],
+            white_balance: [2.0, 1.0, 1.5, 1.0],
+        },
+    )));
+    let resources = Default::default();
+    let context = EvalContext::new(0, &resources).unwrap();
+    let prepare = |value: &Value| {
+        let image = value.borrow::<ReadEither<Rec2020Mat, CameraRgb>>().unwrap();
+        let settings = || ExposureSettings { min_ev: -12, max_ev: 4, scale: Scale::Log };
+        (
+            histogram(settings(), (image,), &context).unwrap(),
+            waveform(settings(), (image,), &context).unwrap(),
+        )
+    };
+    let (histogram, waveform) = prepare(&working);
+    assert_eq!(histogram.counts.iter().flatten().sum::<u32>(), 12);
+    assert_eq!(waveform.counts.iter().flatten().sum::<u32>(), 12);
+    // Exposure scopes inspect native channels, without applying camera color or WB transforms.
+    assert_eq!((histogram, waveform), prepare(&camera));
+}
 
 #[test]
 fn histogram_bins_by_stops() {
@@ -30,7 +62,7 @@ fn histogram_bins_by_stops() {
     let context = EvalContext::new(0, &resources).unwrap();
     let prepare = |graph: &Graph| {
         let params = ExposureSettings::read(Params::validated(&graph.node(id).unwrap().params));
-        let image = value.borrow::<ReadMat<3, dyn Linearity>>().unwrap();
+        let image = value.borrow::<ReadEither<Rec2020Mat, CameraRgb>>().unwrap();
         histogram(params, (image,), &context).unwrap()
     };
     let h = prepare(&graph);
@@ -51,46 +83,27 @@ fn histogram_bins_by_stops() {
     assert_eq!(h.counts[((0.36f32.log2() + 2.0) / 3.0 * 256.0) as usize][2], 1);
 }
 
-#[drip::interpretation(LinearRgb)]
-#[derive(Debug, Default, Reflect)]
-struct P3Interpretation;
-impl Linearity for P3Interpretation {}
-impl Colorimetry for P3Interpretation {
-    fn to_xyz_d65(&self, sample: [f32; 3]) -> [f32; 3] {
-        color::apply(&self.color_space().to_xyz_d65, sample.map(f64::from)).map(|v| v as f32)
-    }
-}
-impl LinearRgb for P3Interpretation {
-    fn color_space(&self) -> &LinearRgbColorSpace {
-        static SPACE: LazyLock<LinearRgbColorSpace> = LazyLock::new(|| LinearRgbColorSpace {
-            name: "Display P3",
-            to_xyz_d65: color::rgb_to_xyz(P3, D65),
-        });
-        &SPACE
-    }
-}
-
 #[test]
-fn vectorscope_uses_the_connected_color_space_witness() {
-    let source = RealMat::<3, P3Interpretation>::from(Arc::new(Rgb {
+fn vectorscope_uses_working_rec2020_coordinates() {
+    let source = Rec2020Mat::from(Arc::new(Rgb {
         width: 1,
         height: 1,
         scale: 1,
         pixels: vec![[1.0, 0.0, 0.0]],
     }));
     let value = Value::new(Arc::new(source));
-    let image = value.borrow::<ReadMat<3, dyn LinearRgb>>().unwrap();
+    let image = value.borrow::<Read<Rec2020Mat>>().unwrap();
     let resources = Default::default();
     let context = EvalContext::new(0, &resources).unwrap();
     let scope = vectorscope((), (image,), &context).unwrap();
     let ScopeAxes::Vectorscope { primaries, color_space } = scope.axes else {
         panic!("chromaticity")
     };
-    assert_eq!(color_space, "Display P3");
-    // Independently derive CIE u'v' for P3 red (x=.68, y=.32), relative to D65.
+    assert_eq!(color_space, "Rec.2020");
+    // Independently derive CIE u'v' for Rec.2020 red (x=.708, y=.292), relative to D65.
     let expected: [f64; 2] = [
-        0.5 + 4.0 * 0.68 / (-2.0 * 0.68 + 12.0 * 0.32 + 3.0) - 0.1978300066,
-        0.5 - 9.0 * 0.32 / (-2.0 * 0.68 + 12.0 * 0.32 + 3.0) + 0.4683199949,
+        0.5 + 4.0 * 0.708 / (-2.0 * 0.708 + 12.0 * 0.292 + 3.0) - 0.1978300066,
+        0.5 - 9.0 * 0.292 / (-2.0 * 0.708 + 12.0 * 0.292 + 3.0) + 0.4683199949,
     ];
     for (actual, expected) in primaries[0].into_iter().zip(expected) {
         assert!((f64::from(actual) - expected).abs() < 1e-6);

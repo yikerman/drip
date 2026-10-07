@@ -1,7 +1,7 @@
 //! The pipeline on a real raw.
 
-use drip::image::{Linearity, Mosaic};
-use drip::ports::ReadMat;
+use drip::image::{CameraRgb, Mosaic, Rec2020Mat};
+use drip::ports::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -46,7 +46,7 @@ fn pipeline_matches_libraw() {
     let mut ev = Evaluator::default();
     ev.evaluate(&p.graph, 0, &[ids[3]]);
     let ours = ev.result(ids[3]).unwrap().as_ref().unwrap()[0]
-        .borrow::<ReadMat<3, dyn Linearity>>()
+        .borrow::<Read<Rec2020Mat>>()
         .unwrap()
         .rgb()
         .clone();
@@ -169,7 +169,7 @@ fn built_in_template_takes_the_raw_and_output_paths() {
     let demosaic = p.graph.find("Demosaic").unwrap();
     ev.evaluate(&p.graph, 31, &[demosaic]);
     let smallest = ev.result(demosaic).unwrap().as_ref().unwrap()[0]
-        .borrow::<ReadMat<3, dyn Linearity>>()
+        .borrow::<Read<CameraRgb>>()
         .unwrap()
         .rgb()
         .clone();

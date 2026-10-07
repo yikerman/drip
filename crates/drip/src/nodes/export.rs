@@ -10,10 +10,9 @@ use tiff::encoder::compression::DeflateLevel;
 use tiff::encoder::{Compression, DirectoryEncoder, Rational, TiffEncoder, TiffKind, TiffValue};
 use tiff::tags::{Tag, Type};
 
-use crate::image::{RawMetadata, Rec2020Rgb, Rgb};
+use crate::image::{RawMetadata, Rec2020Mat, Rgb};
 use crate::node::{EvalContext, KernelError};
 use crate::param::ParamKind;
-use crate::ports::MatRef;
 use crate::profile;
 
 #[derive(Clone, Copy, crate::Choice)]
@@ -65,13 +64,13 @@ pub struct Export {
 #[crate::node(kind = TIFF, id = "export.tiff", category = "export", name = "Export", outputs = [], actions = [("export", export)])]
 fn tiff(
     _: Export,
-    (image, metadata): (MatRef<'_, 3, dyn Rec2020Rgb>, Option<&RawMetadata>),
+    (image, metadata): (&Rec2020Mat, Option<&RawMetadata>),
     _: &EvalContext<'_>,
 ) -> Result<(), KernelError>;
 
 fn export(
     p: Export,
-    (input, metadata): (MatRef<'_, 3, dyn Rec2020Rgb>, Option<&RawMetadata>),
+    (input, metadata): (&Rec2020Mat, Option<&RawMetadata>),
     ctx: &EvalContext,
 ) -> Result<(), KernelError> {
     let path = p.path.as_deref().ok_or(KernelError::Incomplete("no output file chosen"))?;

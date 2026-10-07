@@ -51,9 +51,9 @@
   precise: prefer `x * 2^ev` to vague brightness advice. Link references for
   complex algorithms instead of expanding their derivation.
 
-- Use compact shared names such as `scn rec2020 img` and `disp rec2020 img`,
-  both implicitly linear. Spell out exceptional encodings or requirements where
-  relevant.
+- Use declared concrete payload names on ports (`Rec.2020 RGB`, implicitly
+  linear). Creative nodes may reinterpret their results under that convention;
+  document consequences without imposing scene/display ordering restrictions.
 
 - Follow darktable's module-reference structure without its length. Use short,
   direct sentences. Avoid filler, repeated explanations and unnecessary

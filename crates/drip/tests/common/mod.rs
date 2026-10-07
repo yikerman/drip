@@ -1,33 +1,18 @@
 //! Toy node kinds for exercising the graph engine without real image processing.
 #![allow(dead_code)]
 
-use bevy_reflect::Reflect;
-use drip::image::{
-    Colorimetry, LinearRgb, LinearRgbColorSpace, Linearity, RealMat, Rec2020, Rec2020Mat,
-    Rec2020Rgb,
-};
+use drip::image::{Interpretation, RealMat, Rec2020Mat};
 
-// A distinct test-only nominal interpretation with the same RGB capabilities.
-#[drip::interpretation(Rec2020Rgb)]
-#[derive(Debug, Default, Reflect)]
+#[derive(Debug, Default)]
 pub struct TaggedRec2020;
-impl Linearity for TaggedRec2020 {}
-impl Colorimetry for TaggedRec2020 {
-    fn to_xyz_d65(&self, v: [f32; 3]) -> [f32; 3] {
-        Rec2020.to_xyz_d65(v)
-    }
+impl Interpretation for TaggedRec2020 {
+    const NAME: &'static str = "Test tagged RGB";
 }
-impl LinearRgb for TaggedRec2020 {
-    fn color_space(&self) -> &LinearRgbColorSpace {
-        Rec2020.color_space()
-    }
-}
-impl Rec2020Rgb for TaggedRec2020 {}
 pub type TaggedMat = RealMat<3, TaggedRec2020>;
 
 use drip::node::{KernelError, NodeDeclaration, TypedAction};
 
-use drip::ports::{Read, ReadMat};
+use drip::ports::{Either, Read, ReadEither};
 use std::sync::Arc;
 
 use drip::eval::{Evaluator, NodeResult};
@@ -43,7 +28,10 @@ pub fn scene(pixel: [f32; 3]) -> Arc<Rec2020Mat> {
 }
 
 pub fn pixel(value: &Value) -> [f32; 3] {
-    value.borrow::<ReadMat<3, dyn Linearity>>().unwrap().rgb().pixels[0]
+    match value.borrow::<ReadEither<Rec2020Mat, TaggedMat>>().unwrap() {
+        Either::First(image) => image.rgb().pixels[0],
+        Either::Second(image) => image.rgb().pixels[0],
+    }
 }
 
 /// Outputs `[value, ctx.scale, 0]`, so tests can see the scale it ran at.
@@ -107,7 +95,7 @@ pub static VIEW: drip::node::TypedNode<ViewKernel> =
 pub struct ViewKernel;
 impl NodeDeclaration for ViewKernel {
     type Parameters = ();
-    type Inputs = (ReadMat<3, dyn Rec2020Rgb>,);
+    type Inputs = (ReadEither<Rec2020Mat, TaggedMat>,);
     type Outputs = ();
 }
 

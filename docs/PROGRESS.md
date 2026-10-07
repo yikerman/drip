@@ -3,6 +3,31 @@
 Current implementation and validation evidence. [DESIGN](DESIGN.md) owns decisions;
 [TODO](../TODO.md) tracks remaining work. Earlier implementation history is in Git.
 
+## 2026-10-07: Concrete DAG contracts
+
+- Replaced capability reflection, erased matrix reconstruction and preserving
+  output inference with concrete payload types. Ordinary RGB processing uses
+  Rec.2020/D65 throughout, including creative nonlinear operations. Camera RGB
+  and mosaics stay distinct; histogram/waveform explicitly accept camera or
+  working RGB. Node-local value checks, optional inputs and actions remain.
+- Removed Bevy reflection and its dictionary/witness machinery. GUI ports and
+  diagnostics use declared names, with output types known even on incomplete
+  nodes. Node help, generated discovery and typed GUI bindings remain local to
+  their declarations; computational kernels and presentation stay separate.
+- Added runnable/tested synthetic calibration and masked-edit DAGs. They cover
+  typed frame collections, reusable calibration values, independent branches,
+  masks, failed-edit rollback, runtime grid checks and cache recovery. RAW
+  calibration/profiling remain future work, with decoding prerequisites in TODO.
+- Validation: 163 all-target tests passed plus the RAW corpus/export test and
+  seven compile-fail doctests. Both demos also ran directly. Strict workspace
+  Clippy, warning-free Rustdoc (excluding the CLI name collision), formatting
+  and all five private GUI binding probes passed. Follow-up removed the redundant
+  graph-wide type scan and verified histogram/waveform preparation agrees for
+  shared samples under camera and working RGB interpretations. All 22 targeted
+  graph, typed-port and scope tests passed, as did strict workspace Clippy.
+  The GPU-only test was not rerun; display code is unchanged. Linux validation
+  only; platform/MSRV limits below still apply.
+
 ## 2026-10-07: GUI presentation cleanup
 
 - Separated presentation values, drawables and the image cache in naming; moved
@@ -32,11 +57,11 @@ Current implementation and validation evidence. [DESIGN](DESIGN.md) owns decisio
 
 ## Current implementation
 
-- Logical interpretations over `RawMat<C>` separate storage from capabilities.
-  Local macros generate trait evidence, typed node/parameter contracts, help and
-  discovery. Graph edits check downstream consequences transactionally; evaluation
-  checks the same requirements plus actual-value predicates and preservation
-  witnesses. Existing serialized IDs, ports, keys and choices are retained.
+- Concrete payloads over shared storage distinguish mosaics, camera RGB and
+  working Rec.2020 RGB. Function signatures generate port contracts, adapters,
+  help and discovery. Graph edits compare concrete types; evaluation checks
+  actual-value relationships before kernels/actions. Serialized node IDs, ports,
+  parameter keys and choices are retained.
 - Library kernels return output tuples. GUI nodes own proofing, scopes, drawing
   and preparation caches. Input observation evaluates dependencies without running
   the observed kernel. Custom controls retain the standard viewer;

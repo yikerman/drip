@@ -226,9 +226,10 @@ what's planned.
 ## Under the hood
 
 Drip is written in Rust, with Rayon for processing and wgpu/egui for the GUI.
-The processing library is independent of the interface. Typed node functions and
-interpretation traits generate DAG contracts through local macros and Bevy reflection.
-Several algorithms
+The processing library is independent of the interface. Local macros derive DAG
+contracts and help from typed node functions. Concrete ports distinguish sensor
+data, camera RGB and working Rec.2020 RGB; creative processing does not impose
+an ordering restriction. Several algorithms
 come from darktable; sources and credits are in [THIRD_PARTY.md](THIRD_PARTY.md).
 
 For development, see the [library design and reading guide](crates/drip/src/lib.rs)
@@ -238,8 +239,19 @@ See [DESIGN](docs/DESIGN.md) for decisions and
 [PROGRESS](docs/PROGRESS.md) for the current handoff. Run the tests with:
 
 ```sh
-cargo test --workspace
+cargo test --workspace --all-targets
+cargo test --workspace --doc
 ```
+
+Runnable declaration/DAG examples:
+
+```sh
+cargo run -p drip --example calibration_dag
+cargo run -p drip --example masked_edit_dag
+```
+
+The first shares synthetic sensor frames and a fitted calibration between branches;
+the second blends a creative processing branch through a mask.
 
 Logs go to stderr: `RUST_LOG=warn,drip=debug` for diagnostics,
 `RUST_LOG=warn,drip_gui::frame=trace` for frame timings.

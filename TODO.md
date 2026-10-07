@@ -5,8 +5,10 @@ robustness and performance when usage or measurements justify it.
 
 | Idea | Status | Scope / reason to revisit |
 |------|--------|---------------------------|
-| DAG portability verification | Open | Production macros, reflection and discovery pass Linux tests. Verify Rust 1.92 and Windows/macOS linker discovery/builds; declared dependency MSRVs fit 1.92. |
-| Additional interpretation families | Deferred | Add mask bounds, coordinate/calibration evidence and multi-input basis/geometry predicates with real consumers. Generic trait reflection and arbitrary symbolic constraints are intentionally outside the current design. |
+| DAG portability verification | Open | Production macros, concrete bindings and discovery pass Linux tests. Verify Rust 1.92 and Windows/macOS linker discovery/builds; declared dependency MSRVs fit 1.92. |
+| Additional payload families | Deferred | Add masks, gain fields, transforms, registrations and typed frame collections with real consumers. Share storage/kernels; keep input relationships local to nodes. |
+| Sensor calibration inputs | Open | Separate decode from black subtraction/normalization/crop, or retain reversible sample conventions and sensor coordinates, before adding two-mosaic dark/flat correction. Avoid duplicate black subtraction and stale saturation/noise metadata. |
+| Reusable chart calibration | Deferred | Sample a separate chart image, fit against illuminated reference patches, and publish a transform for other images. State basis/normalization and residuals; no file paths inside fitting/apply kernels. |
 | Production pipeline validation | Next | Cross-camera contract tests are in place; judge detail, highlights and color against measured/reference evidence. |
 | Broader RAW support / correct unpacking | Open | Investigate metadata extraction for Canon EOS D30 (`canon-eos-d30.crw`, raw.pixls.us #1307): unusable as-shot WB; Samsung GX-1L (`samsung-gx-1l.pef`, #8115): unusable WB and zero camera matrix. Samples removed from the active corpus until supported. |
 | DNG camera matrix unpacking | Open | Sigma fp 8-bit (`sigma-fp.dng`, raw.pixls.us #7280) and 14-bit (`sigma-fp-14bit-3-2.dng`, #7273) contain nonzero ColorMatrix1/2 tags, but LibRaw 0.22.2 returns zero `cam_xyz` after unpack. Investigate correct extraction; samples removed from the active corpus. |

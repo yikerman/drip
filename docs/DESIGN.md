@@ -21,141 +21,100 @@ Statuses: **requirement** = user goal; **decided** = agreed direction;
 - **Requirement:** Group code by responsibility. Keep one computational kernel
   source across backends; portability and ease of development outrank peak speed.
 
-## DAG type system
+## DAG contracts
 
 ### Philosophy and goals
 
-- **Requirement:** Suggest useful pipelines without prescribing module order.
-  Check operation prerequisites, not aesthetics or workflow recommendations.
-- **Requirement:** Verify pipeline contracts as formally as practical with
-  contained complexity. Do not build a general compiler or theorem prover.
-  Numerical laws remain obligations of trusted interpretations and kernels.
-- **Requirement:** Define each node locally once. Generate descriptions, adapters,
-  discovery, help and diagnostics from that declaration. Generated lookup data is
-  acceptable; manually synchronized node/type/casting catalogues are not.
-- **Requirement:** Support future processing families without requiring speculative
-  framework primitives. Add contracts and intermediates when users need them.
+- **Requirement:** Permit compositions whose declared local contracts agree,
+  including unusual creative orderings. Recommend useful pipelines without
+  enforcing photographic taste or pretending to prove scene fidelity.
+- **Decided:** Ordinary color processing uses concrete linear Rec.2020/D65 RGB.
+  A creative curve establishes new values under that interpretation; it need not
+  preserve captured-light ratios. Exposure or blur after sigmoid is meaningful.
+  Gamma-encoded RGB, camera-native coordinates and sensor mosaics are different
+  representations and need explicit conversion before ordinary RGB processing.
+- **Requirement:** Kernels compute from parameters, input values and explicit
+  context. Computation is pure; caches do not change results. External effects
+  such as file export are actions. Graphs are acyclic.
+- **Requirement:** Reject representation mismatches and unmet algorithmic
+  prerequisites. Keep recommendations about calibration quality, module order
+  and intended looks in node help. Numerical preconditions belong to the node
+  that needs them; there is no universal positive/bounded-pixel rule.
 
-### Case studies
+### Case studies and future requirements
 
-- **Linearity and creative processing:** nonlinear RAW reconstruction can estimate
-  linear signals. Sigmoid computes a nonlinear rendering but interprets its output
-  as linear RGB. Darktable's modern [color balance RGB](https://docs.darktable.org/usermanual/5.6/en/module-reference/processing-modules/color-balance-rgb/)
-  and [tone equalizer](https://docs.darktable.org/usermanual/5.6/en/module-reference/processing-modules/tone-equalizer/)
-  likewise change physical relationships to the capture. Creative processing
-  deliberately interprets the result y as new light coordinates: XYZ = M y.
-  This neither undoes the edit nor weakens the definition of linearity.
-- **Masks and pixel math:** a scalar field is not necessarily a weight in [0, 1].
-  Complement and multiplication preserve that bound; addition need not. Masks may
-  depend on pre- or post-operation data, as in darktable's [parametric masks](https://docs.darktable.org/usermanual/5.6/en/darkroom/masking-and-blending/masks/parametric/).
-- **Filtering and geometry:** normalized nonnegative filters may preserve bounds
-  with suitable boundary handling; signed filters do not inherit that promise.
-  Masking a blur result differs from restricting its support. Equal dimensions
-  do not establish alignment after crop or distortion. Lens correction combines
-  geometry, channel sampling and gain, with different effects on contracts.
-- **Calibration and noise:** CFA, black levels, gains, saturation and calibration
-  must describe the actual samples. Scaling/interpolation can invalidate a noise
-  model even when capture metadata is retained. Provenance is not applicability.
-- **Multiple frames:** denoising, super-resolution, HDR and stitching may consume
-  multiple paths and return one demosaiced image. Alignment/merging can stay inside
-  the node; track each resource without mandating frame stacks or alignment maps.
+- **Sensor calibration:** dark subtraction takes two mosaics, not two file paths.
+  Flat preparation may produce a reusable gain field. Corresponding sensor sites,
+  CFA phase and sample units matter; matching filenames or dimensions alone do
+  not establish them. RAW decoding must eventually expose unmodified samples or
+  retain enough information to account for black subtraction, normalization and
+  crop. Current `raw.read` still performs those steps together.
+- **Chart calibration:** sample patches from a separate photograph, fit a transform
+  against reference values, then apply that transform to another image. Chart
+  and subject need not share dimensions or exposure. Transform inputs must use
+  its declared basis/normalization. Reference illumination and fit residuals are
+  explicit data, not inferred guarantees from a profile's filename.
+- **Masks and pixel math:** share arithmetic kernels across concrete wrappers.
+  Scalar fields, masks and gain fields may share storage without being the same
+  contract. Define mask range/broadcasting and division behavior locally. A
+  typed sample-extraction/reinterpretation operation can support experiments
+  without silently treating sensor coordinates as working RGB.
+- **Filtering and geometry:** blending a blurred image through a mask differs
+  from restricting a filter's samples using that mask. Geometry and boundary
+  policies belong to each operation. Index-wise blending may deliberately pair
+  unrelated images; same-sensor calibration requires sensor-site correspondence.
+- **Noise and metadata:** capture EXIF is provenance, not a noise-model promise.
+  Transform or discard applicability-dependent metadata when processing changes
+  it. Spatial gains can require spatial saturation/noise data; copying old
+  channel thresholds is not sufficient. Do not add a history-wide proof system.
+- **Multiple frames:** decoded-value collections can feed denoise, HDR, super-
+  resolution or stitching nodes. Reusable transforms/registrations can be separate
+  outputs, but combined nodes may keep alignment internal. Typed collection
+  payloads require no graph-level frame-stack abstraction.
 
-### Requirements
+### Declarations and execution
 
-- **Requirement:** A node computes outputs from explicit context, parameters and
-  inputs. Computation is pure; caches do not change results. The dataflow is acyclic.
-  External resources participate in dependency tracking and invalidation.
-- **Requirement:** Storage layout and logical type are distinct. Three-channel
-  fp32 storage can represent incompatible types, like metres and seconds sharing
-  float storage. Capabilities classify interpretations through laws and operations.
-  Immutable samples retain the instance data needed to interpret them.
-- **Requirement:** `LinearRgb` means intended linear, colorimetric coordinates in
-  a declared RGB basis with a mapping to XYZ D65. It says neither that its producer
-  is linear nor that the values retain capture relationships. Creative nodes may
-  establish this interpretation for their result without a separate user override;
-  exposure history, noise statistics and bounds are additional promises.
-- **Requirement:** Express per-input requirements, relationships among actual
-  inputs, and output guarantees. Consumers request only what they need. Distinguish
-  incompatible, unresolved and unestablished guarantees; metadata copying alone
-  grants none. An unmet prerequisite blocks its consumer; ordering advice does not.
-- **Requirement:** Compatibility, input binding and diagnostics share one
-  definition. Validate external data at its boundary and resolve instance
-  constraints before consuming it. Kernels trust validated inputs; capabilities
-  do not imply repeated full-buffer scans.
-- **Requirement:** Diagnostics identify node/port, expected and actual properties,
-  and the unmet requirement. Keep incomplete configuration, incompatibility,
-  processing failure and internal contract violations distinct across frontends.
+- **Decided:** `RawMat<C>` is storage; `RealMat<C, I>` adds concrete interpretation
+  metadata. `Mosaic`, `CameraRgb` and `Rec2020Mat` are distinct Rust types.
+  `Interpretation` supplies only a name. Other payloads implement `EdgeValue`
+  locally; they need no central enum or manual catalogue entry.
+- **Decided:** `#[node(...)]` accepts a function body or a declaration ending in
+  `;`. Its signature supplies parameter/input/output types. Rustdoc supplies help;
+  attributes supply stable ID, category, name, port names, checks/actions and
+  references. The macro generates the typed handle, adapters and linked discovery.
+- **Decided:** Inputs are `&T`, `Either<&A, &B>`, or `Option` of either. Alternatives
+  are finite concrete choices, used by histogram/waveform for working or camera
+  RGB. They confer no inherited capabilities. Wrapper names must appear in the
+  signature (qualified paths work); proc macros do not resolve wrapper aliases.
+- **Decided:** Outputs are tuples of `Arc<T>`. Every output has a known concrete
+  type before evaluation. `Value` constructs its payload and `TypeId` descriptor
+  together. Sharing a display name never establishes compatibility. No reflection
+  dictionaries, interpretation-witness checks or input-dependent output inference.
+- **Decided:** Connection edits check endpoints, cycles and accepted concrete
+  types before replacing an edge. Fixed outputs make downstream type propagation
+  unnecessary. Unconnected inputs affect evaluability, not output type knowledge.
+- **Decided:** Evaluation uses the same input contracts, then runs node-local
+  typed checks on actual values before invoking a kernel, action or observer.
+  Optional inputs permit absence, not errors or incompatible connected data.
+  Diagnostics identify the affected node/port or named relationship.
+- **Decided:** Rust checks signatures; implementers remain responsible for sample
+  meaning and numerical correctness. Contracts do not certify arbitrary kernels,
+  chart quality, sensor calibration or a photograph's relationship to its scene.
+- **Decided:** `Parameters` and `Choice` derive schema, validated typed access,
+  defaults, persistence names and documentation from local declarations. GUI
+  labels and errors use declared payload names verbatim.
+- **Decided:** Evaluation caches values and failures by dependencies, parameters
+  and resolution. RAW/ICC reads share explicit resource snapshots; manual
+  invalidation refreshes same-path changes. The concrete-port rewrite leaves
+  resource lifetime, actions and GUI preparation boundaries unchanged.
 
-### Declarations and capabilities
-
-- **Decided:** `RawMat<C>` holds row-major fp32 samples and geometry;
-  `RealMat<C, I>` adds an immutable interpretation witness. Mosaic, camera RGB and
-  Rec.2020 use this construction. Other payloads implement `EdgeValue` locally;
-  there is no central payload enum. See [image](../crates/drip/src/image.rs) and
-  [value](../crates/drip/src/value.rs).
-- **Decided:** Capability traits declare laws and operations. `LinearRgb` extends
-  `Linearity + Colorimetry`; `Rec2020Rgb` adds a fixed basis. `#[capability]` uses
-  Bevy trait projection and exposes annotated parents automatically.
-  `#[interpretation(...)]` generates immutable, memoized dictionaries from typed
-  implementations. Capabilities are object-safe and nongeneric; instance
-  parameters live in interpretation data. No caller maintains a mutable registry.
-- **Decided:** `#[node(...)]` accepts a function body or a signature ending in `;`.
-  It generates a declaration identity (`foo_bar` → `FooBarNode`), `TypedNode<N>`,
-  adapters and linked discovery. Metadata supplies stable ID, category, name,
-  output names and optional checks/actions. Input names come from tuple bindings;
-  Rust types supply the contracts. Duplicate IDs are declaration errors.
-- **Decided:** Macro inputs use `&T`, `MatRef<'_, C, dyn Capability>`, or `Option`
-  of either. Qualified paths work; wrapper aliases are not resolved. `&T` becomes
-  an exact logical-type requirement; `MatRef` requires layout plus capability.
-  Handwritten `NodeDeclaration` implementations use the same executor.
-- **Decided:** `NodeDeclaration` owns parameter/input/output types, typed checks,
-  actions and an optional kernel. Kernels return `Result<Outputs, KernelError>`
-  directly. Kernel-less declarations have no outputs: preview/scopes are input
-  consumers; export supplies an explicit action. Headless tools can load and
-  validate their contracts without executing GUI preparation.
-- **Decided:** `Parameters` derives persisted keys, defaults, bounds, typed access
-  and field help; flattening reuses schemas without changing project keys.
-  `Choice` derives finite enum strings and schemas, checked against field types
-  and defaults at compile time. Kernels receive typed parameters, never an
-  independent schema or raw map. Node Rustdoc and declaration reference links
-  supply inspector help; implementation rationale stays in ordinary comments.
-
-### Preservation and runtime checks
-
-- **Decided:** Outputs have fixed logical types or `Preserved<input_index>`.
-  Preservation expresses `RealMat<C, I> -> RealMat<C, I>` after a capability borrow
-  erased concrete I. The graph needs that relationship before executing pixels;
-  a produced-value inspection would defer connection errors until evaluation.
-  Runtime checks retain both type and the input's interpretation witness, including
-  calibration data. They reject preserving a different input witness even when
-  both have the same Rust type. See [ports](../crates/drip/src/ports.rs).
-  A capability alone does not establish preservation: exposure requires
-  `ScaleInvariant: LinearRgb`, meaning *all* interpretation promises survive
-  positive uniform scaling. `Rec2020Rgb` alone grants no such law. Sigmoid instead
-  establishes fresh Rec.2020 output and drops refinements. Keep this fixed-or-
-  preserved model explicit; generic inference would still need runtime contracts
-  while adding macro complexity. No unification or symbolic expressions.
-- **Decided:** A connection checks endpoints, single-source input replacement,
-  cycles and known type requirements. Resolve preserving chains and recheck
-  downstream edges transactionally; incompatibility rolls back the edit. An
-  unconnected preserving chain has a pending type. Editing may retain pending
-  connections, but they do not authorize evaluation.
-- **Decided:** Runtime binding uses the same `InputRequirement::check` as graph
-  validation. Node-local typed predicates check actual units, basis parameters,
-  geometry or other relationships before kernels/actions. TypeId alone does not
-  compare instance data. Optional inputs allow absence, not failure or mismatch
-  of a connected source. Errors carry the failing node and named port/check.
-- **Decided:** Evaluation caches output values and errors by dependency stamps,
-  parameters and resolution, without payload equality. RAW/ICC reads share explicit
-  resource snapshots. Replacing the evaluator invalidates its caches; existing
-  forks retain their snapshot. Same-path changes require manual invalidation.
-- **Decided:** Rust checks signatures and trait implementations; generated adapters
-  check erased bindings and runtime relationships. Soundness still depends on
-  truthful laws, correct kernels and external-data validation. Neither reflection
-  nor macros prove numerical behavior or calibration.
-- **Open:** Add richer interpretations, constraints and widgets with their first
-  consumers. Masks, geometry and multi-path fusion need no speculative framework.
-  Windows/macOS discovery and Rust 1.92 execution remain validation work.
+The executable [calibration DAG](../crates/drip/examples/calibration_dag.rs)
+demonstrates concrete sensor values, a reusable calibration branch, type rejection,
+value-dependent grid checks and cache recovery. It uses synthetic common-unit
+samples; it is not a production dark/flat or chart-profiling implementation.
+The [masked-edit DAG](../crates/drip/examples/masked_edit_dag.rs) demonstrates
+ordinary RGB processing, a scalar-mask payload and blending a branch containing
+sigmoid followed by exposure. Both examples run as tests in CI.
 
 ## Computational and GUI nodes
 

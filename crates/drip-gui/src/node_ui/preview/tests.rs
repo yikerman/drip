@@ -3,7 +3,7 @@ use drip::color::{self, D65, REC709, REC2020};
 use drip::graph::Graph;
 use drip::image::Rec2020Mat;
 use drip::nodes::preview::PREVIEW;
-use drip::ports::ReadMat;
+use drip::ports::Read;
 use drip::project::Project;
 use lcms2::{Intent, PixelFormat, Profile, Transform};
 use serde_json::json;
@@ -17,7 +17,7 @@ fn preview(image: &Rec2020Mat, params: serde_json::Value) -> Result<PreviewImage
     let resources = Default::default();
     let context = EvalContext::new(0, &resources).unwrap();
     let value = drip::value::Value::new(Arc::new(image.clone()));
-    let image = value.borrow::<ReadMat<3, dyn Rec2020Rgb>>().unwrap();
+    let image = value.borrow::<Read<Rec2020Mat>>().unwrap();
     let params = <Preview as drip::param::Parameters>::read(drip::param::Params::validated(
         &graph.node(id).unwrap().params,
     ));

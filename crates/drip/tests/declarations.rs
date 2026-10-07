@@ -1,32 +1,23 @@
-//! A new interpretation, capability and node need no central registration edits.
-use bevy_reflect::Reflect;
+//! Local concrete payloads and nodes need no central registration edits.
 use drip::eval::{Evaluator, NodeError};
 use drip::graph::{Graph, Port};
-use drip::image::{Linearity, RawMat, RealMat};
+use drip::image::{Interpretation, RawMat, RealMat};
 use drip::node::{EvalContext, KernelError};
 use drip::param::{ParamKind, Parameters as _};
-use drip::ports::{MatRef, Preserved};
-use drip::{Parameters, capability, interpretation, node};
+use drip::{Parameters, node};
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
 
-#[capability]
-pub trait Measured: Linearity {
-    fn unit(&self) -> u32;
-}
-#[interpretation(Measured)]
-#[derive(Debug, Reflect)]
+#[derive(Debug, Clone)]
 pub struct Measurement {
     unit: u32,
 }
-impl Linearity for Measurement {}
-impl Measured for Measurement {
-    fn unit(&self) -> u32 {
-        self.unit
-    }
+impl Interpretation for Measurement {
+    const NAME: &'static str = "Measurement";
 }
+type Samples = RealMat<1, Measurement>;
 
 #[derive(Parameters)]
 struct Geometry {
@@ -56,28 +47,20 @@ fn source(
     )),))
 }
 
-fn compatible(
-    _: (),
-    (a, b): (MatRef<'_, 1, dyn Measured>, MatRef<'_, 1, dyn Measured>),
-    _: &EvalContext<'_>,
-) -> Result<(), String> {
+fn compatible(_: (), (a, b): (&Samples, &Samples), _: &EvalContext<'_>) -> Result<(), String> {
     if (a.buffer().width, a.buffer().height, a.buffer().scale)
         != (b.buffer().width, b.buffer().height, b.buffer().scale)
     {
         return Err("sample geometries differ".into());
     }
-    if a.interpretation.unit() != b.interpretation.unit() {
+    if a.interpretation().unit != b.interpretation().unit {
         return Err("measurement units differ".into());
     }
     Ok(())
 }
 static EVALUATIONS: AtomicUsize = AtomicUsize::new(0);
 static ACTIONS: AtomicUsize = AtomicUsize::new(0);
-fn action(
-    _: (),
-    _: (MatRef<'_, 1, dyn Measured>, MatRef<'_, 1, dyn Measured>),
-    _: &EvalContext<'_>,
-) -> Result<(), KernelError> {
+fn action(_: (), _: (&Samples, &Samples), _: &EvalContext<'_>) -> Result<(), KernelError> {
     ACTIONS.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
@@ -85,13 +68,13 @@ fn action(
     checks = [("matching geometry and units", compatible)], actions = [("record", action)])]
 fn sum(
     _: (),
-    (a, b): (MatRef<'_, 1, dyn Measured>, MatRef<'_, 1, dyn Measured>),
+    (a, b): (&Samples, &Samples),
     _: &EvalContext<'_>,
-) -> Result<(Preserved<0>,), KernelError> {
+) -> Result<(Arc<Samples>,), KernelError> {
     EVALUATIONS.fetch_add(1, Ordering::Relaxed);
     let pixels =
         a.buffer().pixels.iter().zip(&b.buffer().pixels).map(|(a, b)| [a[0] + b[0]]).collect();
-    Ok((a.preserve::<0>(pixels),))
+    Ok((Arc::new(a.with_buffer(Arc::new(RawMat { pixels, ..**a.buffer() }))),))
 }
 
 #[test]
@@ -144,37 +127,8 @@ fn fields_supply_flat_schema_defaults_and_documentation() {
     assert!(drip::nodes::registry().get(SOURCE.id).is_some());
 }
 
-#[node(kind = WRONG_SOURCE, id = "contract.wrong_source", category = "test", name = "Wrong source", outputs = ["samples"])]
-fn wrong_source(
-    _: (),
-    (a, b): (MatRef<'_, 1, dyn Measured>, MatRef<'_, 1, dyn Measured>),
-    _: &EvalContext<'_>,
-) -> Result<(Preserved<0>,), KernelError> {
-    let _ = a;
-    Ok((b.preserve::<0>(b.buffer().pixels.clone()),))
-}
-#[test]
-fn preservation_checks_the_actual_input_witness_even_for_the_same_nominal_type() {
-    let mut graph = Graph::default();
-    let a = graph.add_node(&SOURCE);
-    let b = graph.add_node(&SOURCE);
-    graph.set_param(b, "unit", 1.into()).unwrap();
-    let wrong = graph.add_node(&WRONG_SOURCE);
-    graph.connect(Port(a, "samples".into()), Port(wrong, "a".into())).unwrap();
-    graph.connect(Port(b, "samples".into()), Port(wrong, "b".into())).unwrap();
-    let mut eval = Evaluator::default();
-    eval.evaluate(&graph, 0, &[wrong]);
-    assert!(
-        matches!(eval.result(wrong).unwrap(), Err(NodeError::Failed(message)) if message.contains("preservation"))
-    );
-}
-
 #[node(kind = OBSERVER, id = "contract.observer", category = "test", name = "Observer", outputs = [])]
-fn observer(
-    _: (),
-    (samples,): (MatRef<'_, 1, dyn Measured>,),
-    _: &EvalContext<'_>,
-) -> Result<(), KernelError>;
+fn observer(_: (), (samples,): (&Samples,), _: &EvalContext<'_>) -> Result<(), KernelError>;
 
 #[test]
 fn declaration_only_nodes_provide_validated_inputs_without_computation() {
@@ -248,7 +202,7 @@ mod observed_kernel {
 
     fn check(
         _: Settings,
-        inputs: (MatRef<'_, 1, dyn Measured>, MatRef<'_, 1, dyn Measured>),
+        inputs: (&Samples, &Samples),
         ctx: &EvalContext<'_>,
     ) -> Result<(), String> {
         CHECKS.fetch_add(1, Ordering::Relaxed);
@@ -258,15 +212,15 @@ mod observed_kernel {
     #[node(kind = PROBE, id = "contract.observed_kernel", category = "test", name = "Observed kernel", outputs = ["samples"], checks = [("matching geometry and units", check)])]
     fn probe(
         settings: Settings,
-        (a, b): (MatRef<'_, 1, dyn Measured>, MatRef<'_, 1, dyn Measured>),
+        (a, b): (&Samples, &Samples),
         _: &EvalContext<'_>,
-    ) -> Result<(Preserved<0>,), KernelError> {
+    ) -> Result<(Arc<Samples>,), KernelError> {
         KERNEL_CALLS.fetch_add(1, Ordering::Relaxed);
         let _ = b;
         if settings.fail {
             return Err("kernel failed".into());
         }
-        Ok((a.preserve::<0>(a.buffer().pixels.clone()),))
+        Ok((Arc::new(a.clone()),))
     }
 
     #[test]

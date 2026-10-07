@@ -1,5 +1,5 @@
 //! Inspector help: the node's documentation, then its port
-//! contracts as the current graph resolves them.
+//! declared concrete port contracts.
 
 use super::ports;
 use drip::graph::{Graph, NodeId};
@@ -13,12 +13,7 @@ pub fn show(ui: &mut Ui, graph: &Graph, id: NodeId) {
     egui::Grid::new(("node help", id)).num_columns(2).show(ui, |ui| {
         for port in ports::texts(graph, id) {
             ui.weak(format!("{} {}", port.role.label(), port.port));
-            ui.horizontal(|ui| {
-                ui.label(port.label);
-                if let Some(input) = port.origin {
-                    ui.weak(format!("same type as input {input}"));
-                }
-            });
+            ui.label(port.label);
             ui.end_row();
         }
         for check in kind.checks() {

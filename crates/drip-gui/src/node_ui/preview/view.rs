@@ -6,10 +6,9 @@ use egui::{FontId, Painter, Rect, Ui};
 
 use crate::render::image;
 use crate::render::node_views::{Drawable, ImageCache, IntoDrawable};
-use drip::image::{RealMat, Rec2020Rgb, Rgb};
+use drip::image::{Rec2020Mat, Rgb};
 
-/// Linear Rec.2020 pixels for the preview shader, with reference semantics
-/// erased only at this presentation boundary. Cannot be used as an export input.
+/// Shared linear Rec.2020 pixels for frontend presentation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewImage {
     /// Bilinear display sampling when true, nearest-neighbor otherwise.
@@ -18,10 +17,7 @@ pub struct PreviewImage {
 }
 
 impl PreviewImage {
-    pub fn new<I: Rec2020Rgb>(image: &RealMat<3, I>) -> Self {
-        Self { data: image.rgb().clone(), interpolation: false }
-    }
-    pub fn from_input(image: &drip::ports::MatRef<'_, 3, dyn Rec2020Rgb>) -> Self {
+    pub fn new(image: &Rec2020Mat) -> Self {
         Self { data: image.rgb().clone(), interpolation: false }
     }
     pub fn rgb(&self) -> &Arc<Rgb> {

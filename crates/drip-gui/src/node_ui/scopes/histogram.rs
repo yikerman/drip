@@ -1,9 +1,9 @@
 //! Histogram evaluation and its integer reduction.
 
-use drip::image::Linearity;
+use drip::image::{CameraRgb, Rec2020Mat};
 use drip::node::{EvalContext, KernelError};
 use drip::nodes::scopes::ExposureSettings;
-use drip::ports::MatRef;
+use drip::ports::Either;
 use rayon::prelude::*;
 use std::sync::Arc;
 
@@ -23,12 +23,16 @@ const BINS: usize = 256;
 
 pub fn histogram(
     p: ExposureSettings,
-    (image,): (MatRef<'_, 3, dyn Linearity>,),
+    (image,): (Either<&Rec2020Mat, &CameraRgb>,),
     _: &EvalContext<'_>,
 ) -> Result<Arc<Histogram>, KernelError> {
+    let image = match image {
+        Either::First(rgb) => rgb.rgb(),
+        Either::Second(camera) => camera.rgb(),
+    };
     let (min, max) = (p.min_ev as f32, p.max_ev as f32);
     let thresholds = std::array::from_fn(|i| 2f32.powf(min + i as f32 * (max - min) / BINS as f32));
-    let counts = count(&image.rgb().pixels, &thresholds);
+    let counts = count(&image.pixels, &thresholds);
     let log = super::logarithmic(p.scale);
     let histogram = Histogram { min_stop: min, max_stop: max, counts, log };
     Ok(Arc::new(histogram))

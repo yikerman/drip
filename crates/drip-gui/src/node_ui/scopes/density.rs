@@ -9,13 +9,11 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-#[cfg(test)]
-use drip::color::REC2020;
-use drip::color::{self, D65};
-use drip::image::{LinearRgb, Linearity, Rgb};
+use drip::color::{self, D65, REC2020};
+use drip::image::{CameraRgb, Rec2020Mat, Rgb};
 use drip::node::{EvalContext, KernelError};
 use drip::nodes::scopes::ExposureSettings;
-use drip::ports::MatRef;
+use drip::ports::Either;
 
 /// Row-major density bins, top to bottom. Waveforms use RGB counts;
 /// chromaticity uses the first channel only.
@@ -45,11 +43,15 @@ const RADIUS: f32 = 0.5;
 
 pub fn waveform(
     p: ExposureSettings,
-    (image,): (MatRef<'_, 3, dyn Linearity>,),
+    (image,): (Either<&Rec2020Mat, &CameraRgb>,),
     _: &EvalContext<'_>,
 ) -> Result<Arc<Scope>, KernelError> {
     let (min, max) = (p.min_ev as f32, p.max_ev as f32);
-    let counts = waveform_counts(image.rgb(), min, max);
+    let image = match image {
+        Either::First(rgb) => rgb.rgb(),
+        Either::Second(camera) => camera.rgb(),
+    };
+    let counts = waveform_counts(image, min, max);
     Ok(scope(
         counts,
         ScopeAxes::Waveform { min_stop: min, max_stop: max },
@@ -59,14 +61,13 @@ pub fn waveform(
 
 pub fn vectorscope(
     _: (),
-    (image,): (MatRef<'_, 3, dyn LinearRgb>,),
+    (image,): (&Rec2020Mat,),
     _: &EvalContext<'_>,
 ) -> Result<Arc<Scope>, KernelError> {
-    let space = image.interpretation.color_space();
-    let matrix = &space.to_xyz_d65;
+    let matrix = &color::rgb_to_xyz(REC2020, D65);
     let counts = vector_counts(&image.rgb().pixels, matrix);
     let primaries = color::transpose(*matrix).map(|primary| position(uv(primary)));
-    Ok(scope(counts, ScopeAxes::Vectorscope { primaries, color_space: space.name }, true))
+    Ok(scope(counts, ScopeAxes::Vectorscope { primaries, color_space: "Rec.2020" }, true))
 }
 
 fn waveform_counts(image: &Rgb, min: f32, max: f32) -> Vec<[u32; 3]> {

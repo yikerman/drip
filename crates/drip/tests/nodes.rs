@@ -1,9 +1,9 @@
 //! The built-in nodes on synthetic data with independently known results.
 
-use drip::image::{Linearity, Rec2020Mat};
+use drip::image::{CameraRgb, Rec2020Mat};
 use drip::node::NodeDeclaration;
 
-use drip::ports::ReadMat;
+use drip::ports::Read;
 use std::sync::Arc;
 
 use drip::color::{self, D65, REC2020};
@@ -260,7 +260,7 @@ fn white_balance_scales_each_site_by_its_color() {
 fn binning_debayer_averages_greens_and_halves_resolution() {
     let (p, bin) = chain(&MOSAIC, &[&nodes::BIN_2X2]);
     let out = evaluate(&p, bin);
-    let image = out[0].borrow::<ReadMat<3, dyn Linearity>>().unwrap().rgb().clone();
+    let image = out[0].borrow::<Read<CameraRgb>>().unwrap().rgb().clone();
     assert_eq!((image.width, image.height, image.scale), (2, 1, 2));
     // Cells: [0.1 0.2 / 0.5 0.6] and [0.3 0.4 / 0.7 0.8], RGGB.
     assert_eq!(image.pixels, [[0.1, (0.2 + 0.5) / 2.0, 0.6], [0.3, (0.4 + 0.7) / 2.0, 0.8]]);
@@ -270,8 +270,7 @@ fn binning_debayer_averages_greens_and_halves_resolution() {
 fn exposure_scales_linear_rgb_and_sigmoid_reinterprets_its_finite_output() {
     let (mut p, exposure) = chain(&SCENE, &[&nodes::EXPOSURE]);
     p.graph.set_param(exposure, "ev", json!(1.0)).unwrap();
-    let rgb =
-        evaluate(&p, exposure)[0].borrow::<ReadMat<3, dyn Linearity>>().unwrap().rgb().clone();
+    let rgb = evaluate(&p, exposure)[0].borrow::<Read<Rec2020Mat>>().unwrap().rgb().clone();
     assert_eq!(rgb.pixels, [[0.36, 0.0, -2.0], [0.18, 2e6, 0.72]]);
     let sigmoid = p.graph.add_node(&nodes::SIGMOID);
     p.graph.connect(Port(exposure, "image".into()), Port(sigmoid, "image".into())).unwrap();
@@ -279,7 +278,7 @@ fn exposure_scales_linear_rgb_and_sigmoid_reinterprets_its_finite_output() {
     assert!(out[0].downcast_ref::<Rec2020Mat>().is_some());
     assert!(
         out[0]
-            .borrow::<ReadMat<3, dyn Linearity>>()
+            .borrow::<Read<Rec2020Mat>>()
             .unwrap()
             .rgb()
             .pixels
@@ -331,17 +330,14 @@ fn highlights_reconstruct_before_preview_averaging() {
     let result = |id| &ev.result(id).unwrap().as_ref().unwrap()[0];
     assert_eq!(result(highlights).downcast_ref::<Mosaic>().unwrap().scale, 1);
     assert_eq!(result(highlights).downcast_ref::<Mosaic>().unwrap().width, 8);
-    assert_eq!(result(repaired).borrow::<ReadMat<3, dyn Linearity>>().unwrap().rgb().scale, 2);
-    assert_eq!(result(repaired).borrow::<ReadMat<3, dyn Linearity>>().unwrap().rgb().width, 4);
+    assert_eq!(result(repaired).borrow::<Read<CameraRgb>>().unwrap().rgb().scale, 2);
+    assert_eq!(result(repaired).borrow::<Read<CameraRgb>>().unwrap().rgb().width, 4);
     assert!(
-        (result(repaired).borrow::<ReadMat<3, dyn Linearity>>().unwrap().rgb().pixels[0][0] - 0.65)
-            .abs()
+        (result(repaired).borrow::<Read<CameraRgb>>().unwrap().rgb().pixels[0][0] - 0.65).abs()
             < 1e-6
     );
     assert!(
-        (result(bypass).borrow::<ReadMat<3, dyn Linearity>>().unwrap().rgb().pixels[0][0] - 0.4)
-            .abs()
-            < 1e-6
+        (result(bypass).borrow::<Read<CameraRgb>>().unwrap().rgb().pixels[0][0] - 0.4).abs() < 1e-6
     );
 }
 

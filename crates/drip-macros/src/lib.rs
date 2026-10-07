@@ -1,83 +1,14 @@
-//! Mechanical adapters; semantic laws remain on the annotated traits and kernels.
+//! Mechanical node/parameter adapters; data contracts remain on payloads and kernels.
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{ItemStruct, ItemTrait, TypeParamBound, parse_macro_input};
-
-/// Reflect an object-safe capability and expose its declared supercapabilities.
-/// Parent traits must also use this attribute. Send/Sync/'static are supplied.
-#[proc_macro_attribute]
-pub fn capability(_: TokenStream, input: TokenStream) -> TokenStream {
-    let mut item = parse_macro_input!(input as ItemTrait);
-    if !item.generics.params.is_empty() {
-        return syn::Error::new_spanned(
-            &item.generics,
-            "use runtime interpretation data for capability parameters",
-        )
-        .into_compile_error()
-        .into();
-    }
-    let name = item.ident.clone();
-    let reflected = format_ident!("Reflect{}", name);
-    let parents: Vec<_> = item
-        .supertraits
-        .iter()
-        .filter_map(|b| {
-            let TypeParamBound::Trait(parent) = b else { return None };
-            Some(parent.path.clone())
-        })
-        .collect();
-    item.supertraits.push(syn::parse_quote!(Send));
-    item.supertraits.push(syn::parse_quote!(Sync));
-    item.supertraits.push(syn::parse_quote!('static));
-    quote! {
-        #[::drip::__private::bevy_reflect::reflect_trait]
-        #item
-        impl dyn #name {
-            #[doc(hidden)]
-            pub fn __expose<T: ::drip::__private::bevy_reflect::Reflect + #name>(r: &mut ::drip::__private::bevy_reflect::TypeRegistration) {
-                if r.data::<#reflected>().is_some() { return; }
-                r.insert(<#reflected as ::drip::__private::bevy_reflect::FromType<T>>::from_type());
-                #(<dyn #parents>::__expose::<T>(r);)*
-            }
-        }
-        impl ::drip::ports::Capability for dyn #name {
-            const NAME: &'static str = stringify!(#name);
-            fn accepts(r: &::drip::__private::bevy_reflect::TypeRegistration) -> bool {
-                r.data::<#reflected>().is_some()
-            }
-            fn project<'a>(r: &::drip::__private::bevy_reflect::TypeRegistration, value: &'a dyn ::drip::__private::bevy_reflect::Reflect) -> Option<&'a Self> {
-                r.data::<#reflected>()?.get(value)
-            }
-        }
-    }.into()
-}
-
-/// Generate a local interpretation dictionary from its strongest capabilities.
-#[proc_macro_attribute]
-pub fn interpretation(args: TokenStream, input: TokenStream) -> TokenStream {
-    let caps = parse_macro_input!(args with syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated);
-    let item = parse_macro_input!(input as ItemStruct);
-    let name = &item.ident;
-    let (ig, tg, wc) = item.generics.split_for_impl();
-    let caps: Vec<_> = caps.into_iter().collect();
-    quote! {
-        #item
-        impl #ig ::drip::image::Interpretation for #name #tg #wc {
-            const NAME: &'static str = stringify!(#name);
-            fn expose(r: &mut ::drip::__private::bevy_reflect::TypeRegistration) {
-                #(<dyn #caps>::__expose::<Self>(r);)*
-            }
-        }
-    }
-    .into()
-}
+use syn::parse_macro_input;
 
 /// Include a locally defined node in the executable's generated catalogue.
 /// Function Rustdoc supplies inspector help; optional `references = [(label, url), ...]`
 /// supplies links. Keep implementation rationale in ordinary comments inside the function.
 /// Functions return output tuples; a signature ending in `;` declares a consumer without a kernel.
-/// Input syntax is `&T`, `MatRef<'_, C, dyn Capability>`, or `Option` of either;
+/// Input syntax is `&T`, `Either<&A, &B>`, or `Option` of either;
 /// qualified paths are accepted, but aliases for these wrappers are not resolved.
 /// The function `foo_bar` declares `FooBarNode` and the typed handle named by `kind`.
 #[proc_macro_attribute]
@@ -280,44 +211,39 @@ fn documentation(attrs: &[syn::Attribute]) -> String {
         .join("\n")
 }
 
-fn matrix_input(ty: &syn::Type) -> syn::Result<proc_macro2::TokenStream> {
+fn input_type(ty: &syn::Type) -> syn::Result<proc_macro2::TokenStream> {
     match ty {
-        syn::Type::Reference(r) => {
+        syn::Type::Reference(r) if r.mutability.is_none() => {
             let t = &r.elem;
             Ok(quote!(::drip::ports::Read<#t>))
         }
         syn::Type::Path(path) => {
             let segment = path.path.segments.last().unwrap();
-            let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
-                return Err(syn::Error::new_spanned(
-                    ty,
-                    "input must be &T, MatRef<'_, C, dyn Capability>, or Option of either; wrapper aliases are not resolved",
-                ));
-            };
             if segment.ident == "Option" {
-                let Some(syn::GenericArgument::Type(inner)) = args.args.first() else {
+                let args = type_arguments(ty, "Option")?;
+                let [inner] = args.as_slice() else {
                     return Err(syn::Error::new_spanned(ty, "expected Option<T>"));
                 };
-                let inner = matrix_input(inner)?;
+                let inner = input_type(inner)?;
                 Ok(quote!(::drip::ports::Optional<#inner>))
-            } else if segment.ident == "MatRef" {
-                let args: Vec<_> = args
-                    .args
-                    .iter()
-                    .filter(|a| !matches!(a, syn::GenericArgument::Lifetime(_)))
-                    .collect();
-                if args.len() != 2 {
-                    return Err(syn::Error::new_spanned(ty, "expected MatRef<'_, C, I>"));
+            } else if segment.ident == "Either" {
+                let args = type_arguments(ty, "Either")?;
+                let [syn::Type::Reference(a), syn::Type::Reference(b)] = args.as_slice() else {
+                    return Err(syn::Error::new_spanned(ty, "expected Either<&A, &B>"));
+                };
+                if a.mutability.is_some() || b.mutability.is_some() {
+                    return Err(syn::Error::new_spanned(ty, "inputs must be immutable"));
                 }
-                Ok(quote!(::drip::ports::ReadMat<#(#args),*>))
+                let (a, b) = (&a.elem, &b.elem);
+                Ok(quote!(::drip::ports::ReadEither<#a, #b>))
             } else {
                 Err(syn::Error::new_spanned(
                     ty,
-                    "unsupported input: use &T or MatRef; wrapper aliases are not resolved",
+                    "use &T, Either<&A, &B>, or Option of either; wrapper aliases are not resolved",
                 ))
             }
         }
-        _ => Err(syn::Error::new_spanned(ty, "unsupported input: use &T or MatRef")),
+        _ => Err(syn::Error::new_spanned(ty, "inputs must be immutable references")),
     }
 }
 
@@ -406,7 +332,7 @@ fn node_function(
             _ => Err(syn::Error::new_spanned(p, "input tuple elements must be named")),
         })
         .collect::<syn::Result<Vec<_>>>()?;
-    let inputs = types.elems.iter().map(matrix_input).collect::<syn::Result<Vec<_>>>()?;
+    let inputs = types.elems.iter().map(input_type).collect::<syn::Result<Vec<_>>>()?;
     let syn::ReturnType::Type(_, return_type) = &function.sig.output else {
         return Err(syn::Error::new_spanned(
             &function.sig,
@@ -488,19 +414,19 @@ fn callbacks(expr: Option<&syn::Expr>) -> syn::Result<Vec<(&syn::Expr, &syn::Exp
 
 #[cfg(test)]
 mod tests {
-    use super::{choice_impl, matrix_input};
+    use super::{choice_impl, input_type};
 
     #[test]
     fn input_syntax_accepts_qualified_wrappers_and_rejects_aliases() {
         for ty in [
             "&ImageAlias",
-            "drip::ports::MatRef<'_, 3, dyn LinearRgb>",
-            "std::option::Option<drip::ports::MatRef<'_, 3, dyn LinearRgb>>",
+            "drip::ports::Either<&A, &B>",
+            "std::option::Option<drip::ports::Either<&A, &B>>",
         ] {
-            assert!(matrix_input(&syn::parse_str(ty).unwrap()).is_ok(), "{ty}");
+            assert!(input_type(&syn::parse_str(ty).unwrap()).is_ok(), "{ty}");
         }
         for ty in ["ImageInput", "ImageInput<'_>", "Option<ImageInput<'_>>"] {
-            let error = matrix_input(&syn::parse_str(ty).unwrap()).unwrap_err();
+            let error = input_type(&syn::parse_str(ty).unwrap()).unwrap_err();
             assert!(error.to_string().contains("wrapper aliases are not resolved"), "{error}");
         }
     }

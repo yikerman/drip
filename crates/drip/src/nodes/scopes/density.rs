@@ -1,6 +1,6 @@
-use crate::image::{LinearRgb, Linearity};
+use crate::image::{CameraRgb, Rec2020Mat};
 use crate::node::{EvalContext, KernelError};
-use crate::ports::MatRef;
+use crate::ports::Either;
 
 /// Plot channel values of a linear input by image column.
 ///
@@ -9,17 +9,13 @@ use crate::ports::MatRef;
 #[crate::node(kind = WAVEFORM, id = "view.waveform", category = "view", name = "Waveform", outputs = [])]
 fn waveform(
     p: super::ExposureSettings,
-    (image,): (MatRef<'_, 3, dyn Linearity>,),
+    (image,): (Either<&Rec2020Mat, &CameraRgb>,),
     _: &EvalContext<'_>,
 ) -> Result<(), KernelError>;
 
-/// Plot CIE u'v' chromaticity relative to D65 using the input's color space.
+/// Plot CIE u'v' chromaticity relative to D65 in Rec.2020.
 ///
-/// Markers show that color space's primaries. Black is omitted. Negative channels are
+/// Markers show the Rec.2020 primaries. Black is omitted. Negative channels are
 /// clipped for this view only. Produces a chromaticity scope view.
 #[crate::node(kind = VECTORSCOPE, id = "view.vectorscope", category = "view", name = "Vectorscope", outputs = [], references = [("CIE: u’v’ chromaticity", "https://cie.co.at/eilvterm/17-23-073")])]
-fn vectorscope(
-    _: (),
-    (image,): (MatRef<'_, 3, dyn LinearRgb>,),
-    _: &EvalContext<'_>,
-) -> Result<(), KernelError>;
+fn vectorscope(_: (), (image,): (&Rec2020Mat,), _: &EvalContext<'_>) -> Result<(), KernelError>;

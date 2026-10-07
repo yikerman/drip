@@ -2,10 +2,9 @@
 
 use std::sync::Arc;
 
-use drip::image::{Rec2020Mat, Rec2020Rgb, Rgb};
+use drip::image::{Rec2020Mat, Rgb};
 use drip::node::{EvalContext, KernelError};
 use drip::nodes::preview::{Mode, Preview};
-use drip::ports::MatRef;
 use drip::profile;
 
 use proofing::{gamutcheck, softproof};
@@ -22,7 +21,7 @@ mod view;
 
 pub fn prepare(
     p: Preview,
-    (image,): (MatRef<'_, 3, dyn Rec2020Rgb>,),
+    (image,): (&Rec2020Mat,),
     ctx: &EvalContext<'_>,
 ) -> Result<PreviewImage, KernelError> {
     let input = image.rgb();
@@ -33,7 +32,7 @@ pub fn prepare(
         Mode::Gamutcheck => Some(gamutcheck(&output()?, &input.pixels)?),
     };
     let mut view = match pixels {
-        None => PreviewImage::from_input(&image),
+        None => PreviewImage::new(image),
         Some(pixels) => {
             let proof = Rec2020Mat::from(Arc::new(Rgb { pixels, ..**input }));
             PreviewImage::new(&proof)

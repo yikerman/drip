@@ -132,7 +132,12 @@ fn input_only_consumers_borrow_validated_upstream_values() {
     let (p, [_, _, _, view, _]) = diamond();
     let mut ev = Evaluator::default();
     let pixel = ev
-        .with_inputs(&p.graph, view, PREVIEW, &VIEW, |_, (image,), _| Ok(image.rgb().pixels[0]))
+        .with_inputs(&p.graph, view, PREVIEW, &VIEW, |_, (image,), _| {
+            Ok(match image {
+                drip::ports::Either::First(image) => image.rgb().pixels[0],
+                drip::ports::Either::Second(image) => image.rgb().pixels[0],
+            })
+        })
         .unwrap();
     assert_eq!(pixel, [3.0, 8.0, 0.0]);
     assert!(ev.result(view).is_none());
