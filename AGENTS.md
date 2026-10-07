@@ -1,83 +1,83 @@
 # Drip development guidelines
 
-- code should be single-source-of-truth, modular, concise, funtional and
-  self-explaintory. minimize special cases, only do checks at user input and
-  treat every internal code input/output correct.
+## Philosophy
 
-- docs/comments are complementry to code. if a piece of code is not
-  self-explaintory, especially for some dense kernel code, comment. also explain
-  motivation when needed. do not write obvious/trivial things.
+- a DAG refuses to evaluate iff something is logically inherently wrong,
+  where logical validity is more permissive than intuition, e.g. in image
+  processing when creative intent is involved. pipeline recommendations are
+  guidance.
 
-- Write code docs for engineers familiar with Rust, image processing and
-  colorimetry. Focus on project-specific contracts and rationale; omit generic
-  tutorials, repetition and document housekeeping.
+- enforce port contracts when connecting and data-dependent contracts when
+  evaluating.
 
-- cite borrowed algorithms and papers in IEEE format. Maintain `THIRD_PARTY.md`
-  with credits and licenses for major dependencies and adapted code, pinned
-  revisions for source ports, and full references for papers. Keep upstream
-  notices and brief citations beside adapted algorithms; explain meaningful
-  deviations there. Link upstream license texts from `THIRD_PARTY.md` rather
-  than duplicating them in a `LICENSES/` directory.
+## Code organization
 
-- do not add any agentic coding system or model into co-authored-by.
+- code should be single-source-of-truth, modular, concise, functional and
+  self-explanatory. check inputs at boundaries, trust internal code afterwards.
+  keep abstractions proportional to actual needs.
 
-- commits are self-contained, do one thing right, and has the format of
-  "{submodule} or chore: {summary} \n {explanation (follow same guidelines as
-  docs/comments)}"
+- a node computes context × parameters × inputs → outputs. 
+  where computation is pure. define contracts and docs with the node,
+  generate mechanical discovery and bindings.
 
-- when some ideas are incomplete, conflicting or inheritly difficult to
-  implement or require hackish methods, stop and talk to the user
+- compose reusable operations over values. keep loading, processing and
+  presentation separate.
 
-- maintain a TODO.md, in which a table tracks ideas not implemented
-
-- record decisions and rationale in `docs/DESIGN.md` with status: requirement,
-  decided, tentative, or open. update `docs/PROGRESS.md` each session and track
-  unimplemented ideas in the `TODO.md` table.
-
-- style match existing code and/or commit
+- in Rust, structs represent memory layouts and/or interpretations; traits
+  express interpretation contracts. interpretations determine compatibility.
 
 - maintain one source implementation of each computational kernel across
-  execution backends; cross-platform support and ease of development take
+  execution backends. cross-platform support and ease of development take
   priority over peak performance.
 
-## User-facing documentation
+- match existing code style and commit message.
 
-- Define node help in Rustdoc on the node function, with reference links in its
-  `#[node(...)]` declaration. Keep implementation rationale in ordinary code
-  comments. The frontend shows generated help below the type ID in the main
-  inspector, not in pop-outs.
+- discuss incomplete or conflicting requirements, and difficulties requiring
+  design tradeoffs or hackish workarounds.
 
-- Briefly state the operation, assumptions and inputs/outputs. Be technical and
-  precise: prefer `x * 2^ev` to vague brightness advice. Link references for
-  complex algorithms instead of expanding their derivation.
+## Documentation
 
-- Use declared concrete payload names on ports (`Rec.2020 RGB`, implicitly
-  linear). Creative nodes may reinterpret their results under that convention;
-  document consequences without imposing scene/display ordering restrictions.
+- docs/comments complement code. explain contracts, motivation and dense kernels.
+  write for engineers familiar with Rust, image processing and colorimetry.
+  keep prose short, direct and specific to the project.
 
-- Follow darktable's module-reference structure without its length. Use short,
-  direct sentences. Avoid filler, repeated explanations and unnecessary
-  semicolons.
+- define node help in Rustdoc on the node function, with references in
+  `#[node(...)]`. keep implementation rationale in ordinary comments. show help
+  below the type ID in the main inspector.
+
+- briefly state operation, assumptions and inputs/outputs. use declared payload
+  names on ports and document creative reinterpretations. follow darktable's
+  module-reference structure, kept concise. link algorithm derivations. write
+  like a human, no common ai slop or filler.
+
+- cite borrowed algorithms and papers in IEEE format. maintain `THIRD_PARTY.md`
+  with dependency/adapted-code credits and licenses, pinned source-port revisions
+  and full paper references. keep upstream notices and brief citations beside
+  adapted code; explain meaningful deviations there. link upstream license texts.
+
+## Workflow
+
+- record decisions and rationale in `docs/DESIGN.md` with status: requirement,
+  decided, tentative, or open. update `docs/PROGRESS.md` each session. track
+  unimplemented ideas in the `TODO.md` table.
+
+- commits are self-contained and do one thing right. format:
+  `{submodule} or chore: {summary}` followed by an explanation using the same
+  guidelines as docs/comments. do not add coding agent or model to
+  co-authored-by.
 
 ## Project structure
 
-- `crates/drip`: library. processing, node graph, color management, persistence.
-  The drip library should never include GUI-related code, not even data
-  preparation. Think of what is reachable on a headless batch processing system.
+- `crates/drip`: headless library. processing, node graph, color management,
+  persistence. think of what is reachable on a headless batch processing system:
+  if code has parts a headless system will never touch (e.g. prepare data for
+  gui vectorscope) it should not be there.
 
-- `crates/drip-cli`: batch frontend (binary `drip`), scaffold only.
+- `crates/drip-cli`: batch frontend todo
 
 - `crates/drip-gui`: interactive frontend (binary `drip-gui`) on winit + wgpu +
-  egui.
+  egui. owns GUI code, presentation and all preview preparation.
 
 - `crates/drip-libraw`: minimal LibRaw binding (C shim + safe `decode`).
 
-- `docs/DESIGN.md`: decisions, status, rationale. `docs/PROGRESS.md`: session
-  log.
-
-- `TODO.md`: ideas not implemented.
-
-- `THIRD_PARTY.md`: dependency and algorithm credits, licenses, and paper
-  references.
-
-- `fixtures/`: test data; raws are stored with Git LFS.
+- `fixtures/`: test data; binary data are stored with Git LFS.
