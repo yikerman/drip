@@ -2,7 +2,7 @@
 
 use crate::color::{self, D65, REC2020};
 use crate::image::{CameraRgb, Rec2020Mat, Rgb};
-use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::node::{EvalContext, KernelError};
 use rayon::prelude::*;
 use std::sync::Arc;
 
@@ -14,14 +14,14 @@ fn camera_to_rec2020(
     _: (),
     (image,): (&CameraRgb,),
     _: &EvalContext<'_>,
-) -> Result<Evaluated<(Arc<Rec2020Mat>,)>, KernelError> {
+) -> Result<(Arc<Rec2020Mat>,), KernelError> {
     let camera = image.interpretation();
     let image = image.rgb();
     let m =
         color::camera_to_rgb(&color::to_f64(&camera.xyz_to_cam), &color::rgb_to_xyz(REC2020, D65));
     let m = color::to_f32(&m.expect("raw.read rejects degenerate matrices"));
     let pixels = matrix(&image.pixels, &m);
-    Ok(Evaluated::new((Arc::new(Rec2020Mat::from(Arc::new(Rgb { pixels, ..**image }))),)))
+    Ok((Arc::new(Rec2020Mat::from(Arc::new(Rgb { pixels, ..**image }))),))
 }
 
 pub fn matrix(input: &[[f32; 3]], matrix: &[[f32; 3]; 3]) -> Vec<[f32; 3]> {

@@ -62,17 +62,13 @@
 ## Project structure
 
 - `crates/drip`: library. processing, node graph, color management, persistence.
-  must never depend on a GUI.
+  The drip library should never include GUI-related code, not even data
+  preparation. Think of what is reachable on a headless batch processing system.
 
 - `crates/drip-cli`: batch frontend (binary `drip`), scaffold only.
 
 - `crates/drip-gui`: interactive frontend (binary `drip-gui`) on winit + wgpu +
-  egui: `render` (node views, wide-gamut image drawing, display output and
-  shaders), `editor` (node graph), `node_ui` (shared parameter controls,
-  per-kind node bodies and pop-out windows), `editing` (graph edits and
-  notifications), `widgets` (shared by node GUIs and the editor), `parent`
-  (pop-outs above the main window), `inspector` (sidebar composition and
-  template inputs), `theme`.
+  egui.
 
 - `crates/drip-libraw`: minimal LibRaw binding (C shim + safe `decode`).
 

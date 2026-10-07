@@ -4,13 +4,12 @@
 use std::path::{Path, PathBuf};
 
 use drip::eval::Evaluator;
-use drip::view::View;
 use serde_json::json;
 use tiff::decoder::{Decoder, DecodingResult};
 use tiff::tags::Tag;
 
 #[test]
-fn camera_corpus_preview_and_export() {
+fn camera_corpus_resolution_and_export() {
     // Camera names are LibRaw's normalized names, including regional aliases.
     let fixtures = [
         ("nikon-d70s.nef", "Nikon", "D70s"),
@@ -89,9 +88,15 @@ fn camera_corpus_preview_and_export() {
             evaluator.evaluate(&project.graph, level, &[preview]);
             let failures: Vec<_> = evaluator.failures(&project.graph, &[preview]).collect();
             assert!(failures.is_empty(), "{}: {failures:?}", file);
-            let result = evaluator.result(preview).unwrap().as_ref().unwrap();
-            let Some(View::Image(image)) = &result.view else { panic!("missing preview") };
-            let rgb = image.rgb();
+            let rgb = evaluator
+                .with_inputs(
+                    &project.graph,
+                    preview,
+                    level,
+                    &drip::nodes::PREVIEW,
+                    |_, (image,), _| Ok(image.rgb().clone()),
+                )
+                .unwrap();
             let scale = 1 << level;
             assert_eq!(rgb.scale, scale);
             let scale = scale as usize;
@@ -100,13 +105,16 @@ fn camera_corpus_preview_and_export() {
                 (raw.width / (2 * scale) * 2, raw.height / (2 * scale) * 2)
             );
             assert_eq!(rgb.pixels.len(), rgb.width * rgb.height);
-            assert!(rgb.pixels.iter().flatten().all(|v| v.is_finite()), "nonfinite preview");
+            assert!(
+                rgb.pixels.iter().flatten().all(|v| v.is_finite()),
+                "nonfinite processing output"
+            );
             if level == 0 {
                 full = Some(rgb.clone());
             }
         }
         // Export reevaluates at full resolution. A separately read TIFF must
-        // agree with the preview after its declared ICC conversion.
+        // agree with the computational output after its declared ICC conversion.
         evaluator.run_action(&project.graph, export, "export").unwrap();
         let full = full.unwrap();
         let mut decoder = Decoder::new(std::fs::File::open(&out).unwrap()).unwrap();
@@ -133,7 +141,7 @@ fn camera_corpus_preview_and_export() {
         transform.transform_pixels(&full.pixels, &mut expected);
         assert!(
             data.iter().zip(expected.as_flattened()).all(|(a, b)| a.abs_diff(*b) <= 1),
-            "TIFF differs from full-resolution preview after ICC conversion"
+            "TIFF differs from full-resolution processing output after ICC conversion"
         );
         eprintln!("PASS {}", file);
         passed += 1;

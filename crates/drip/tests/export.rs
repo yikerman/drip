@@ -1,7 +1,7 @@
 //! TIFF export, read back and checked against independently computed values.
 
 use drip::image::{RawMetadata, Rec2020Mat};
-use drip::node::{EvalContext, KernelError, NodeKernel};
+use drip::node::NodeDeclaration;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,12 +10,11 @@ use drip::color::{self, D65, P3, REC2020};
 use drip::eval::{Evaluator, NodeError, run_action};
 use drip::graph::{NodeId, Port};
 use drip::image::Rgb;
-use drip::node::{Evaluated, NodeKind};
+use drip::node::NodeKind;
 use drip::nodes;
 use drip::profile;
 use drip::project::Project;
-use drip::view::View;
-use lcms2::{CIExyY, InfoType, Intent, Locale, PixelFormat, Profile, ToneCurve, Transform};
+use lcms2::{CIExyY, InfoType, Locale, Profile, ToneCurve};
 use serde_json::json;
 use tiff::decoder::ifd::Value;
 use tiff::decoder::{Decoder, DecodingResult};
@@ -28,37 +27,27 @@ const PIXELS: [[f32; 3]; 4] =
 static DISPLAY: NodeKind =
     NodeKind::new::<DisplayKernel>("test.display", "test", "display", &[], &["image"]);
 struct DisplayKernel;
-impl NodeKernel for DisplayKernel {
+impl NodeDeclaration for DisplayKernel {
     type Parameters = ();
-    type View = ();
     type Inputs = ();
     type Outputs = (Arc<Rec2020Mat>,);
 
-    fn eval(
-        _: Self::Parameters,
-        (): (),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+    const KERNEL: Option<drip::node::Kernel<Self>> = Some(|_, (), _| {
         let image = Rgb { width: 2, height: 2, scale: 1, pixels: PIXELS.to_vec() };
-        Ok(Evaluated { outputs: (Arc::new(Rec2020Mat::from(Arc::new(image))),), view: () })
-    }
+        Ok((Arc::new(Rec2020Mat::from(Arc::new(image))),))
+    });
 }
 
 static METADATA: NodeKind =
     NodeKind::new::<MetadataKernel>("test.metadata", "test", "metadata", &[], &["metadata"]);
 struct MetadataKernel;
-impl NodeKernel for MetadataKernel {
+impl NodeDeclaration for MetadataKernel {
     type Parameters = ();
-    type View = ();
     type Inputs = ();
     type Outputs = (Arc<RawMetadata>,);
 
-    fn eval(
-        _: Self::Parameters,
-        (): (),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-        Ok(Evaluated::new((Arc::new(RawMetadata {
+    const KERNEL: Option<drip::node::Kernel<Self>> = Some(|_, (), _| {
+        Ok((Arc::new(RawMetadata {
             make: "Sony".into(),
             model: "ILCE-7RM3".into(),
             iso: 100.0,
@@ -67,8 +56,8 @@ impl NodeKernel for MetadataKernel {
             focal_length: 0.0,
             timestamp: 0,
             datetime: "2026:05:25 08:35:00".into(),
-        }),)))
-    }
+        }),))
+    });
 }
 
 struct Scratch(PathBuf);
@@ -228,10 +217,9 @@ fn an_export_without_a_destination_is_incomplete() {
 }
 
 #[test]
-fn softproof_matches_bounded_export_and_only_recomputes_the_preview() {
-    let scratch = Scratch::new("proof");
-    let custom = scratch.profile("linear.icc", &profile::rec2020_linear());
-    let path = scratch.0.join("proof.tif");
+fn headless_export_loads_preview_declarations_without_preparing_them() {
+    let scratch = Scratch::new("headless");
+    let path = scratch.0.join("out.tif");
     let mut project = Project::default();
     let source = project.graph.add_node(&DISPLAY);
     let preview = project.graph.add_node(&nodes::PREVIEW);
@@ -240,52 +228,22 @@ fn softproof_matches_bounded_export_and_only_recomputes_the_preview() {
         project.graph.connect(Port(source, "image".into()), Port(node, "image".into())).unwrap();
     }
     set(&mut project, tiff, json!({ "path": path }));
+    set(
+        &mut project,
+        preview,
+        json!({
+            "mode": "softproof", "profile": "file", "profile_file": scratch.0.join("missing.icc")
+        }),
+    );
+    let registry = nodes::registry().with(&DISPLAY);
+    let loaded = Project::from_json(&project.to_json(), &registry).unwrap();
     let mut evaluator = Evaluator::default();
-    evaluator.evaluate(&project.graph, 0, &[preview]);
-    set(&mut project, preview, json!({ "mode": "softproof" }));
-
-    for target in ["srgb", "display_p3", "rec2020", "file"] {
-        for intent in ["perceptual", "relative", "saturation", "absolute"] {
-            for bpc in [false, true] {
-                for node in [preview, tiff] {
-                    set(
-                        &mut project,
-                        node,
-                        json!({
-                            "profile": target, "profile_file": custom,
-                            "intent": intent, "black_point_compensation": bpc,
-                        }),
-                    );
-                }
-                assert_eq!(evaluator.evaluate(&project.graph, 0, &[preview]), [preview]);
-                let result = evaluator.result(preview).unwrap().as_ref().unwrap();
-                let Some(View::Image(shown)) = &result.view else { panic!("image") };
-
-                run_action(&project.graph, tiff, "export").unwrap();
-                let (data, icc, _) = read(&path);
-                let DecodingResult::U16(data) = data else { panic!("16-bit export") };
-                let encoded = data.as_chunks::<3>().0;
-                let display = Transform::new(
-                    &Profile::new_icc(&icc).unwrap(),
-                    PixelFormat::RGB_16,
-                    &profile::rec2020_linear(),
-                    PixelFormat::RGB_FLT,
-                    Intent::RelativeColorimetric,
-                )
-                .unwrap();
-                let mut expected = vec![[0.0f32; 3]; encoded.len()];
-                display.transform_pixels(encoded, &mut expected);
-                for (&got, &want) in
-                    shown.rgb().pixels.as_flattened().iter().zip(expected.as_flattened())
-                {
-                    assert!(
-                        (got - want).abs() < 0.0002,
-                        "{target}, {intent}, BPC {bpc}: {got} vs {want}"
-                    );
-                }
-            }
-        }
-    }
+    evaluator.evaluate(&loaded.graph, 0, &[preview]);
+    assert!(evaluator.result(preview).unwrap().as_ref().unwrap().is_empty());
+    evaluator.run_action(&loaded.graph, tiff, "export").unwrap();
+    let (data, _, _) = read(&path);
+    let DecodingResult::U16(data) = data else { panic!("16-bit export") };
+    assert_eq!(data.len(), PIXELS.len() * 3);
 }
 
 #[test]

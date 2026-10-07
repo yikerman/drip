@@ -45,7 +45,7 @@ fn pipeline_matches_libraw() {
     let (p, ids) = pipeline(&path, &[]);
     let mut ev = Evaluator::default();
     ev.evaluate(&p.graph, 0, &[ids[3]]);
-    let ours = ev.result(ids[3]).unwrap().as_ref().unwrap().outputs[0]
+    let ours = ev.result(ids[3]).unwrap().as_ref().unwrap()[0]
         .borrow::<ReadMat<3, dyn Linearity>>()
         .unwrap()
         .rgb()
@@ -129,11 +129,12 @@ fn built_in_template_takes_the_raw_and_output_paths() {
     ev.evaluate(&p.graph, 3, &[preview]);
     // Later levels and export forks must work entirely from decoded data.
     std::fs::remove_file(&path).unwrap();
-    let view = ev.result(preview).unwrap().as_ref().unwrap().view.clone();
-    let Some(drip::view::View::Image(image)) = view else { panic!("no preview") };
-    assert_eq!(image.rgb().scale, 8, "RCD preserves the requested scale");
+    let scale = ev
+        .with_inputs(&p.graph, preview, 3, &nodes::PREVIEW, |_, (image,), _| Ok(image.rgb().scale))
+        .unwrap();
+    assert_eq!(scale, 8, "RCD preserves the requested scale");
 
-    let cached = ev.result(raw).unwrap().as_ref().unwrap().outputs[0].downcast::<Mosaic>().unwrap();
+    let cached = ev.result(raw).unwrap().as_ref().unwrap()[0].downcast::<Mosaic>().unwrap();
     let previous = Arc::downgrade(&cached);
     let expected = cached.samples().to_vec();
     drop(cached);
@@ -142,10 +143,7 @@ fn built_in_template_takes_the_raw_and_output_paths() {
     ev.evaluate(&p.graph, 3, &[raw]);
     assert_eq!(
         expected,
-        ev.result(raw).unwrap().as_ref().unwrap().outputs[0]
-            .downcast_ref::<Mosaic>()
-            .unwrap()
-            .samples()
+        ev.result(raw).unwrap().as_ref().unwrap()[0].downcast_ref::<Mosaic>().unwrap().samples()
     );
 
     let other = p.graph.add_node(&nodes::READ);
@@ -154,7 +152,7 @@ fn built_in_template_takes_the_raw_and_output_paths() {
     fork.evaluate(&p.graph, 3, &[other]);
     assert_eq!(
         expected,
-        fork.result(other).unwrap().as_ref().unwrap().outputs[0]
+        fork.result(other).unwrap().as_ref().unwrap()[0]
             .downcast_ref::<Mosaic>()
             .unwrap()
             .samples()
@@ -162,25 +160,21 @@ fn built_in_template_takes_the_raw_and_output_paths() {
     fork.evaluate(&p.graph, 0, &[other]);
     ev.evaluate(&p.graph, 0, &[raw]);
     assert_eq!(
-        fork.result(other).unwrap().as_ref().unwrap().outputs[0]
+        fork.result(other).unwrap().as_ref().unwrap()[0]
             .downcast_ref::<Mosaic>()
             .unwrap()
             .samples(),
-        ev.result(raw).unwrap().as_ref().unwrap().outputs[0]
-            .downcast_ref::<Mosaic>()
-            .unwrap()
-            .samples(),
+        ev.result(raw).unwrap().as_ref().unwrap()[0].downcast_ref::<Mosaic>().unwrap().samples(),
     );
     let demosaic = p.graph.find("Demosaic").unwrap();
     ev.evaluate(&p.graph, 31, &[demosaic]);
-    let smallest = ev.result(demosaic).unwrap().as_ref().unwrap().outputs[0]
+    let smallest = ev.result(demosaic).unwrap().as_ref().unwrap()[0]
         .borrow::<ReadMat<3, dyn Linearity>>()
         .unwrap()
         .rgb()
         .clone();
     assert!(smallest.pixels.is_empty());
     assert_eq!(smallest.scale, 1 << 31);
-    let sensor =
-        ev.result(raw).unwrap().as_ref().unwrap().outputs[0].downcast_ref::<Mosaic>().unwrap();
+    let sensor = ev.result(raw).unwrap().as_ref().unwrap()[0].downcast_ref::<Mosaic>().unwrap();
     assert_eq!(sensor.scale, 1, "sensor processing precedes preview reduction");
 }

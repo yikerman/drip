@@ -15,14 +15,14 @@
 //! 2. [`value`] and [`ports`]: generated capability evidence and tuple adapters that
 //!    connect typed kernels to a heterogeneous graph.
 //! 3. [`mod@node`] and [`nodes`]: signatures, processing and explicit actions. Read
-//!    `nodes/exposure.rs` for a small node, `nodes/scopes/density.rs` for capability inputs,
+//!    `nodes/exposure.rs` for a capability input, `nodes/preview.rs` for a declaration,
 //!    and `nodes/export.rs` for file-writing actions.
 //! 4. [`graph`]: nodes, named edges, connection validation and DAG traversal.
 //! 5. [`eval`]: evaluation and node-result caching. Follow
 //!    [`eval::Evaluator::evaluate`], then `Evaluator::run` and `Cache::stamp` in
 //!    the source. [`resource`] separately caches decoded files shared by preview
 //!    and full-detail actions; its lifetime differs from cached node results.
-//! 6. [`view`]: headless presentation. [`param`], [`project`] and [`templates`]:
+//! 6. [`param`], [`project`] and [`templates`]:
 //!    validation and persistence. [`color`] and [`profile`]: color math and ICC.
 
 pub mod color;
@@ -38,7 +38,6 @@ pub mod project;
 pub mod resource;
 pub mod templates;
 pub mod value;
-pub mod view;
 
 extern crate self as drip;
 pub use drip_macros::{Choice, Parameters, capability, interpretation, node};

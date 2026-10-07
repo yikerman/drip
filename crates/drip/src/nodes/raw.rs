@@ -6,7 +6,7 @@ use drip_libraw::Raw;
 
 use crate::color::{self, D65, REC2020};
 use crate::image::{Camera, Cfa, Mosaic, RawMetadata};
-use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::node::{EvalContext, KernelError};
 use crate::param::ParamKind;
 
 #[derive(crate::Parameters)]
@@ -25,14 +25,14 @@ fn read(
     p: RawSource,
     (): (),
     ctx: &EvalContext<'_>,
-) -> Result<Evaluated<(Arc<Mosaic>, Arc<RawMetadata>)>, KernelError> {
+) -> Result<(Arc<Mosaic>, Arc<RawMetadata>), KernelError> {
     let path = p.path.as_deref().ok_or(KernelError::Incomplete("no raw file chosen"))?;
     let raw = ctx.resources().load(path, |path| {
         drip_libraw::decode(path).map_err(|e| format!("{}: {e}", path.display()))
     })?;
     let mosaic = normalize(&raw)?;
     let outputs = (Arc::new(mosaic), Arc::new(raw.metadata.clone()));
-    Ok(Evaluated { outputs, view: () })
+    Ok(outputs)
 }
 
 /// Subtracts black and scales sensor saturation to 1, cropping partial Bayer

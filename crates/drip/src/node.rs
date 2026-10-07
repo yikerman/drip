@@ -1,16 +1,14 @@
 //! Typed kernels and runtime descriptions for an editable graph.
 //!
 //! `NodeKind::new` derives parameter schemas, port contracts and evaluator
-//! adapters from a kernel's associated types; names only label positions. Rust
+//! adapters from a declaration's associated types; names only label positions. Rust
 //! checks returned types, while the graph checks user-created connections before
-//! evaluation. Optional [`View`] data has its own presentation contract and is
-//! not a graph output.
+//! evaluation. Declarations also support input-only consumers and explicit actions.
 
 use crate::param::{ParamSpec, Parameters, Params};
 use crate::ports::{InputRequirement, InputTuple, OutputTuple, OutputType};
 use crate::resource::Resources;
 use crate::value::Value;
-use crate::view::{Presentation, View};
 use std::collections::BTreeMap;
 
 /// A signature determines both connection checking and evaluator adaptation.
@@ -28,28 +26,52 @@ use std::collections::BTreeMap;
 /// ```compile_fail,E0308
 /// use std::sync::Arc;
 /// use drip::image::{CameraRgb, Rec2020Mat};
-/// use drip::node::{EvalContext, Evaluated, KernelError};
+/// use drip::node::{EvalContext, KernelError};
 /// #[drip::node(kind = BAD, id = "bad", category = "test", name = "Bad", outputs = ["image"])]
 /// fn bad(_: (), (image,): (&CameraRgb,), _: &EvalContext<'_>)
-///     -> Result<Evaluated<(Arc<Rec2020Mat>,)>, KernelError>
+///     -> Result<(Arc<Rec2020Mat>,), KernelError>
 /// {
-///     Ok(Evaluated::new((Arc::new(image.clone()),)))
+///     Ok((Arc::new(image.clone()),))
 /// }
 /// ```
-pub trait NodeKernel: Sized + 'static {
+///
+/// Input-only declarations omit the body. Their signatures are still checked;
+/// they cannot advertise outputs that no kernel produces.
+///
+/// ```compile_fail,E0080
+/// use drip::{node, node::{EvalContext, KernelError}, image::Rec2020Mat};
+/// use std::sync::Arc;
+/// #[node(kind = BAD, id = "bad", category = "test", name = "Bad", outputs = ["image"])]
+/// fn bad(_: (), (): (), _: &EvalContext<'_>) -> Result<(Arc<Rec2020Mat>,), KernelError>;
+/// ```
+///
+/// ```compile_fail,E0308
+/// use drip::{node, node::EvalContext};
+/// #[node(kind = BAD, id = "bad", category = "test", name = "Bad", outputs = [])]
+/// fn bad(_: (), (): (), _: &EvalContext<'_>) -> Result<(), String>;
+/// ```
+///
+/// ```compile_fail,E0308
+/// use drip::{node, node::KernelError};
+/// #[node(kind = BAD, id = "bad", category = "test", name = "Bad", outputs = [])]
+/// fn bad(_: (), (): (), _: &()) -> Result<(), KernelError>;
+/// ```
+pub trait NodeDeclaration: Sized + 'static {
     type Parameters: Parameters;
-    type View: Presentation;
     type Inputs: InputTuple;
     type Outputs: OutputTuple;
     const ACTIONS: &'static [TypedAction<Self>] = &[];
     const CHECKS: &'static [TypedCheck<Self>] = &[];
 
-    fn eval(
-        params: Self::Parameters,
-        inputs: <Self::Inputs as InputTuple>::Borrowed<'_>,
-        ctx: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError>;
+    /// Absent for declarations consumed through actions or external observers.
+    const KERNEL: Option<Kernel<Self>> = None;
 }
+
+pub type Kernel<N> = for<'i, 'c, 'r> fn(
+    <N as NodeDeclaration>::Parameters,
+    <<N as NodeDeclaration>::Inputs as InputTuple>::Borrowed<'i>,
+    &'c EvalContext<'r>,
+) -> Result<<N as NodeDeclaration>::Outputs, KernelError>;
 
 /// Incomplete configuration is normal while editing; failed processing is not.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -76,17 +98,17 @@ impl From<&str> for KernelError {
     }
 }
 
-// K: node kernel (also used by the adapters below).
+// K: owning declaration, shared by kernels, actions and checks.
 type TypedActionFn<K> = for<'inputs, 'context, 'resources> fn(
-    <K as NodeKernel>::Parameters,
-    <<K as NodeKernel>::Inputs as InputTuple>::Borrowed<'inputs>,
+    <K as NodeDeclaration>::Parameters,
+    <<K as NodeDeclaration>::Inputs as InputTuple>::Borrowed<'inputs>,
     &'context EvalContext<'resources>,
 ) -> Result<(), KernelError>;
 
-/// Actions use their owning kernel's parameter and input types.
+/// Actions use their owning declaration's parameter and input types.
 pub struct TypedAction<K>
 where
-    K: NodeKernel,
+    K: NodeDeclaration,
 {
     pub name: &'static str,
     pub run: TypedActionFn<K>,
@@ -94,13 +116,13 @@ where
 
 /// A value-dependent relationship, checked before computation and explicit actions.
 /// A declaration stays pending during graph editing until its inputs are available.
-pub struct TypedCheck<K: NodeKernel> {
+pub struct TypedCheck<K: NodeDeclaration> {
     pub name: &'static str,
     pub check: TypedCheckFn<K>,
 }
 type TypedCheckFn<K> = for<'i, 'c, 'r> fn(
-    <K as NodeKernel>::Parameters,
-    <<K as NodeKernel>::Inputs as InputTuple>::Borrowed<'i>,
+    <K as NodeDeclaration>::Parameters,
+    <<K as NodeDeclaration>::Inputs as InputTuple>::Borrowed<'i>,
     &'c EvalContext<'r>,
 ) -> Result<(), String>;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -111,7 +133,7 @@ pub struct ConstraintError {
 }
 
 type Evaluate =
-    fn(Params<'_>, &[Option<Value>], &EvalContext<'_>) -> Result<Evaluation, KernelError>;
+    fn(Params<'_>, &[Option<Value>], &EvalContext<'_>) -> Result<Vec<Value>, KernelError>;
 type RunAction =
     fn(usize, Params<'_>, &[Option<Value>], &EvalContext<'_>) -> Result<(), KernelError>;
 
@@ -120,8 +142,6 @@ pub struct NodeKind {
     pub documentation: &'static str,
     /// Named reference links declared beside the node function.
     pub references: &'static [(&'static str, &'static str)],
-    /// Offer a view surface even when evaluation is incomplete or has failed.
-    has_view: bool,
     /// Stable type identity used by registries, evaluation and project files.
     pub id: &'static str,
     /// Internal grouping key, independent of type identity.
@@ -141,22 +161,25 @@ pub struct NodeKind {
     action_at: fn(usize) -> Action,
 }
 
-/// A node declaration retaining its parameter type for frontend bindings.
+/// A declaration retaining its identity and full signature for typed consumers.
 /// The graph borrows its erased descriptor through `kind()` or deref coercion.
-/// A binding expecting another parameter type cannot accept this declaration:
+/// Equal parameter types do not make two declarations interchangeable:
 ///
 /// ```compile_fail,E0308
-/// use drip::node::TypedNode;
-/// fn controls(_: &TypedNode<()>) {}
-/// controls(&drip::nodes::SIGMOID);
+/// use drip::{node, node::{EvalContext, KernelError, TypedNode}};
+/// #[node(kind = FIRST, id = "first", category = "test", name = "First", outputs = [])]
+/// fn first(_: (), (): (), _: &EvalContext<'_>) -> Result<(), KernelError>;
+/// #[node(kind = SECOND, id = "second", category = "test", name = "Second", outputs = [])]
+/// fn second(_: (), (): (), _: &EvalContext<'_>) -> Result<(), KernelError>;
+/// let _: &TypedNode<FirstNode> = &SECOND;
 /// ```
-pub struct TypedNode<P: Parameters> {
+pub struct TypedNode<N: NodeDeclaration> {
     kind: NodeKind,
-    parameters: std::marker::PhantomData<fn() -> P>,
+    declaration: std::marker::PhantomData<fn() -> N>,
 }
 
-impl<P: Parameters> TypedNode<P> {
-    pub const fn new<K: NodeKernel<Parameters = P>>(
+impl<N: NodeDeclaration> TypedNode<N> {
+    pub const fn new(
         id: &'static str,
         category: &'static str,
         name: &'static str,
@@ -164,8 +187,8 @@ impl<P: Parameters> TypedNode<P> {
         outputs: &'static [&'static str],
     ) -> Self {
         Self {
-            kind: NodeKind::new::<K>(id, category, name, inputs, outputs),
-            parameters: std::marker::PhantomData,
+            kind: NodeKind::new::<N>(id, category, name, inputs, outputs),
+            declaration: std::marker::PhantomData,
         }
     }
     pub const fn kind(&self) -> &NodeKind {
@@ -181,7 +204,7 @@ impl<P: Parameters> TypedNode<P> {
     }
 }
 
-impl<P: Parameters> std::ops::Deref for TypedNode<P> {
+impl<N: NodeDeclaration> std::ops::Deref for TypedNode<N> {
     type Target = NodeKind;
     fn deref(&self) -> &NodeKind {
         self.kind()
@@ -189,27 +212,9 @@ impl<P: Parameters> std::ops::Deref for TypedNode<P> {
 }
 
 impl NodeKind {
-    pub const fn has_view(&self) -> bool {
-        self.has_view
-    }
-    /// The kernel's parameter type supplies the schema. Names annotate tuple
+    /// The declaration's parameter type supplies the schema. Names annotate tuple
     /// positions; static declarations check arity during compilation.
     ///
-    /// ```compile_fail,E0080
-    /// use drip::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
-    /// struct Empty;
-    /// impl NodeKernel for Empty {
-    ///     type Parameters = ();
-    ///     type View = ();
-    ///     type Inputs = ();
-    ///     type Outputs = ();
-    ///     fn eval(_: (), (): (), _: &EvalContext<'_>)
-    ///         -> Result<Evaluated<()>, KernelError> { Ok(Evaluated::default()) }
-    /// }
-    /// static INVALID: NodeKind = NodeKind::new::<Empty>(
-    ///     "empty", "test", "Empty", &[], &["undeclared output"],
-    /// );
-    /// ```
     pub const fn new<K>(
         id: &'static str,
         category: &'static str,
@@ -218,8 +223,9 @@ impl NodeKind {
         outputs: &'static [&'static str],
     ) -> Self
     where
-        K: NodeKernel,
+        K: NodeDeclaration,
     {
+        assert!(K::KERNEL.is_some() || K::Outputs::TYPES.is_empty(), "outputs require a kernel");
         assert!(inputs.len() == K::Inputs::REQUIREMENTS.len(), "input names must match tuple");
         assert!(outputs.len() == K::Outputs::TYPES.len(), "output names must match tuple");
         let mut index = 0;
@@ -238,7 +244,6 @@ impl NodeKind {
             check_at: |i| K::CHECKS[i].name,
             documentation: "",
             references: &[],
-            has_view: K::View::HAS_VIEW,
             id,
             category,
             name,
@@ -327,54 +332,19 @@ impl Action {
     }
 }
 
-/// The presentation type determines whether frontends offer a view surface.
-/// `()` means no presentation; `Option<V>` permits a temporarily absent view.
-///
-/// ```compile_fail,E0308
-/// use drip::node::Evaluated;
-/// use drip::view::View;
-/// fn missing_view() -> Evaluated<(), View> {
-///     Evaluated::new(())
-/// }
-/// ```
-///
-/// ```compile_fail,E0308
-/// use drip::node::Evaluated;
-/// use drip::view::View;
-/// fn undeclared_view(view: View) -> Evaluated<()> {
-///     Evaluated { outputs: (), view }
-/// }
-/// ```
-#[derive(Debug, Clone, Default)]
-pub struct Evaluated<Outputs, V = ()> {
-    pub outputs: Outputs,
-    pub view: V,
-}
-impl<Outputs> Evaluated<Outputs> {
-    pub fn new(outputs: Outputs) -> Self {
-        Self { outputs, view: () }
-    }
-}
-impl<V: Presentation> Evaluated<(), V> {
-    pub fn view(view: V) -> Self {
-        Self { outputs: (), view }
-    }
-}
-
-/// Erased result cached by the heterogeneous graph executor.
-pub type Evaluation = Evaluated<Vec<Value>, Option<View>>;
-
 fn evaluate<K>(
     params: Params<'_>,
     inputs: &[Option<Value>],
     ctx: &EvalContext<'_>,
-) -> Result<Evaluation, KernelError>
+) -> Result<Vec<Value>, KernelError>
 where
-    K: NodeKernel,
+    K: NodeDeclaration,
 {
     check_inputs::<K>(params, inputs, ctx)?;
-    let result = K::eval(K::Parameters::read(params), K::Inputs::read(inputs), ctx)?;
-    let outputs = result.outputs.erase();
+    let Some(kernel) = K::KERNEL else {
+        return Ok(Vec::new());
+    };
+    let outputs = kernel(K::Parameters::read(params), K::Inputs::read(inputs), ctx)?.erase();
     for (output, ty) in outputs.iter().zip(K::Outputs::TYPES) {
         if let OutputType::Preserve(index) = ty {
             let source = inputs[*index].as_ref().expect("required preserving input");
@@ -385,7 +355,7 @@ where
             }
         }
     }
-    Ok(Evaluated { outputs, view: result.view.into_view() })
+    Ok(outputs)
 }
 fn run_action<K>(
     index: usize,
@@ -394,13 +364,13 @@ fn run_action<K>(
     ctx: &EvalContext<'_>,
 ) -> Result<(), KernelError>
 where
-    K: NodeKernel,
+    K: NodeDeclaration,
 {
     check_inputs::<K>(params, inputs, ctx)?;
     (K::ACTIONS[index].run)(K::Parameters::read(params), K::Inputs::read(inputs), ctx)
 }
 
-fn check_inputs<K: NodeKernel>(
+pub(crate) fn check_inputs<K: NodeDeclaration>(
     params: Params<'_>,
     inputs: &[Option<Value>],
     ctx: &EvalContext<'_>,
@@ -432,12 +402,19 @@ pub static NODE_KINDS: [&'static NodeKind];
 
 /// What a node's evaluation may depend on besides its params and inputs.
 pub struct EvalContext<'a> {
-    /// Downscaled by `2^level` along each axis; frontends keep it below 32.
+    /// Downscaled by `2^level` along each axis; callers keep it below 31.
     pub(crate) level: u8,
     pub(crate) resources: &'a Resources,
 }
 
-impl EvalContext<'_> {
+impl<'a> EvalContext<'a> {
+    pub fn new(level: u8, resources: &'a Resources) -> Result<Self, KernelError> {
+        if level >= 31 {
+            return Err(KernelError::Failed("resolution level must be below 31".into()));
+        }
+        Ok(Self { level, resources })
+    }
+
     /// Sensor pixels per image pixel along each axis; 1 is full resolution.
     /// Demosaic adapters downsample by it after sensor-space processing.
     pub fn scale(&self) -> u32 {

@@ -31,8 +31,8 @@ here when introduced.
 | [Kornel Lesiński and rust-lcms2 contributors](https://github.com/kornelski/rust-lcms2) (`lcms2`, `lcms2-sys`) | Rust Little CMS bindings | MIT |
 | [Bevy contributors](https://github.com/bevyengine/bevy/tree/v0.19.1/crates/bevy_reflect) (`bevy_reflect` 0.19.1) | Interpretation trait projection; no Bevy ECS or renderer | MIT OR Apache-2.0 ([MIT](https://github.com/bevyengine/bevy/blob/v0.19.1/LICENSE-MIT), [Apache-2.0](https://github.com/bevyengine/bevy/blob/v0.19.1/LICENSE-APACHE)) |
 | [David Tolnay and linkme contributors](https://github.com/dtolnay/linkme/tree/0.3.37) (`linkme` 0.3.37) | Linked node discovery and local custom GUI bindings | MIT OR Apache-2.0 ([MIT](https://github.com/dtolnay/linkme/blob/0.3.37/LICENSE-MIT), [Apache-2.0](https://github.com/dtolnay/linkme/blob/0.3.37/LICENSE-APACHE)) |
-| [Rayon contributors](https://github.com/rayon-rs/rayon) | CPU parallelism | MIT OR Apache-2.0 |
-| [image-rs contributors](https://github.com/image-rs/image-tiff) (`tiff`) | TIFF encoding | MIT |
+| [Rayon contributors](https://github.com/rayon-rs/rayon) | Processing and GUI scope/proofing parallelism | MIT OR Apache-2.0 |
+| [image-rs contributors](https://github.com/image-rs/image-tiff) (`tiff`) | TIFF encoding and GUI proof/export parity tests | MIT |
 | [Emil Ernerfeldt and egui contributors](https://github.com/emilk/egui) (`egui`, `egui-winit`, `egui-wgpu`) | GUI and renderer integration | MIT OR Apache-2.0 |
 | [gfx-rs contributors](https://github.com/gfx-rs/wgpu) (`wgpu`, patched below) | GPU rendering | MIT OR Apache-2.0 |
 | [rust-windowing contributors](https://github.com/rust-windowing/winit) (`winit`) | Windows and input events | Apache-2.0 |
@@ -59,7 +59,7 @@ release with passthrough support.
 
 | Project and credit | Use | License |
 |--------------------|-----|---------|
-| [David Tolnay and Rust macro contributors](https://github.com/dtolnay/syn) (`syn`, `quote`, `proc-macro2`; versions in Cargo.lock) | Local `drip-macros` declaration parsing and adapter generation | MIT OR Apache-2.0 ([syn licenses](https://github.com/dtolnay/syn#license), [quote licenses](https://github.com/dtolnay/quote#license), [proc-macro2 licenses](https://github.com/dtolnay/proc-macro2#license)) |
+| [David Tolnay and Rust macro contributors](https://github.com/dtolnay/syn) (`syn`, `quote`, `proc-macro2`; versions in Cargo.lock) | Local `drip-macros` node/parameter declaration parsing, typed adapters and GUI binding discovery | MIT OR Apache-2.0 ([syn licenses](https://github.com/dtolnay/syn#license), [quote licenses](https://github.com/dtolnay/quote#license), [proc-macro2 licenses](https://github.com/dtolnay/proc-macro2#license)) |
 | [cc-rs contributors](https://github.com/rust-lang/cc-rs) (`cc`) | Compile the LibRaw shim | MIT OR Apache-2.0 |
 | [pkg-config-rs contributors](https://github.com/rust-lang/pkg-config-rs) | Find native libraries | MIT OR Apache-2.0 |
 | [vcpkg-rs contributors](https://github.com/mcgoo/vcpkg-rs) | Find LibRaw on Windows | MIT OR Apache-2.0 |

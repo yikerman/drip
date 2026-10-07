@@ -6,7 +6,7 @@
 //! dependency stamp hashes kind, parameters, preview level, input names, source
 //! ports and upstream stamps. Matching stamps reuse results without inspecting
 //! pixels; changed stamps propagate recomputation through descendants. This
-//! relies on the laws of [`crate::node::NodeKernel`] and [`crate::value::EdgeValue`].
+//! relies on the laws of [`crate::node::NodeDeclaration`] and [`crate::value::EdgeValue`].
 //!
 //! [`crate::resource::Resources`] separately caches decoded files by path and
 //! payload type. [`Evaluator::fork`] shares these files with an empty node cache.
@@ -18,8 +18,9 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::graph::{Graph, NodeId, Port};
-use crate::node::{EvalContext, Evaluation, KernelError};
-use crate::param::Params;
+use crate::node::{EvalContext, KernelError, NodeDeclaration, TypedNode, check_inputs};
+use crate::param::{Parameters, Params};
+use crate::ports::InputTuple;
 use crate::resource::Resources;
 use crate::value::Value;
 
@@ -57,7 +58,11 @@ impl NodeError {
     }
 }
 
-pub type NodeResult = Result<Evaluation, NodeError>;
+pub type NodeResult = Result<Vec<Value>, NodeError>;
+
+/// Dependency stamp within one evaluator/resource lifetime.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Revision(u64);
 
 /// Keeps one result per node, and the files nodes have loaded, between
 /// evaluations.
@@ -90,6 +95,45 @@ impl Evaluator {
 
     pub fn result(&self, id: NodeId) -> Option<&NodeResult> {
         self.cache.0.get(&id).map(|entry| &entry.result)
+    }
+
+    pub fn revision(&self, id: NodeId) -> Option<Revision> {
+        self.cache.0.get(&id).map(|entry| Revision(entry.stamp))
+    }
+
+    /// Evaluate and borrow the validated inputs of a particular declaration.
+    /// Consumer results and failures are not stored in the computational cache.
+    pub fn with_inputs<N: NodeDeclaration, R>(
+        &mut self,
+        graph: &Graph,
+        id: NodeId,
+        level: u8,
+        declaration: &TypedNode<N>,
+        consume: impl FnOnce(
+            N::Parameters,
+            <N::Inputs as InputTuple>::Borrowed<'_>,
+            &EvalContext<'_>,
+        ) -> Result<R, KernelError>,
+    ) -> Result<R, NodeError> {
+        let node = graph.node(id).ok_or_else(|| NodeError::Failed("node does not exist".into()))?;
+        if !std::ptr::eq(node.kind, declaration.kind()) {
+            return Err(NodeError::Failed("consumer bound to a different node declaration".into()));
+        }
+        let sources: Vec<_> = sources(graph, id).collect();
+        self.evaluate(graph, level, &sources);
+        let inputs = self.cache.inputs(graph, id)?;
+        let ctx = EvalContext { level, resources: &self.resources };
+        let params = Params::validated(&node.params);
+        // A successful evaluation at this revision already checked these inputs.
+        let checked = self.cache.0.get(&id).is_some_and(|entry| {
+            entry.stamp == self.cache.stamp(graph, &ctx, id) && entry.result.is_ok()
+        });
+        if !checked {
+            check_inputs::<N>(params, &inputs, &ctx)
+                .map_err(|error| NodeError::from_kernel(node.kind, error))?;
+        }
+        consume(N::Parameters::read(params), N::Inputs::read(&inputs), &ctx)
+            .map_err(|error| NodeError::from_kernel(node.kind, error))
     }
 
     /// Root failures among these targets and their dependencies, including cached
@@ -221,7 +265,7 @@ impl Cache {
                     return Err(NodeError::Upstream(source.0));
                 };
                 let index = graph.node(source.0).expect("in graph").kind.output_index(&source.1);
-                Ok(Some(evaluated.outputs[index.expect("validated edge")].clone()))
+                Ok(Some(evaluated[index.expect("validated edge")].clone()))
             })
             .collect()
     }

@@ -1,9 +1,12 @@
 //! Optional node-specific presentation; ordinary nodes use schema controls.
 
+mod binding;
 mod controls;
 pub mod help;
-pub(super) use controls::Binding;
-pub use controls::{ControlCx, Controls};
+pub mod preview;
+pub mod scopes;
+pub use binding::{Binding, GuiNode, Prepare};
+pub use controls::ControlCx;
 mod image_view;
 pub mod parameters;
 pub mod ports;
@@ -43,13 +46,21 @@ pub trait NodeView: Sync {
 #[linkme::distributed_slice]
 pub(super) static BINDINGS: [Binding];
 
-/// Resolved controls and view; overriding either preserves the other's default.
+/// Resolved controls and view; each override retains the other's default.
 pub struct NodeUi {
-    pub controls: &'static dyn controls::ErasedControls,
+    binding: Option<&'static Binding>,
     pub view: &'static dyn NodeView,
 }
+impl NodeUi {
+    pub fn controls(&self, ui: &mut Ui, node: &mut NodeCx) {
+        match self.binding {
+            Some(binding) => binding.controls(ui, node),
+            None => parameters::schema(ui, node),
+        }
+    }
+}
 
-pub fn of(kind: &NodeKind) -> NodeUi {
+pub fn binding(kind: &NodeKind) -> Option<&'static Binding> {
     use std::{collections::BTreeMap, sync::LazyLock};
     static CUSTOM: LazyLock<BTreeMap<&'static str, &'static Binding>> = LazyLock::new(|| {
         let mut bindings = BTreeMap::new();
@@ -62,15 +73,15 @@ pub fn of(kind: &NodeKind) -> NodeUi {
         }
         bindings
     });
-    let custom = CUSTOM.get(kind.id);
-    NodeUi {
-        controls: custom.and_then(|binding| binding.controls()).unwrap_or(&controls::Schema),
-        view: custom.and_then(|binding| binding.view()).unwrap_or(if kind.has_view() {
-            &Viewer
-        } else {
-            &Plain
-        }),
-    }
+    CUSTOM.get(kind.id).copied().filter(|binding| std::ptr::eq(binding.kind(), kind))
+}
+
+pub fn of(kind: &NodeKind) -> NodeUi {
+    let binding = binding(kind);
+    let view = binding.and_then(Binding::view).unwrap_or_else(|| {
+        if binding.is_some_and(Binding::has_preparation) { &Viewer } else { &Plain }
+    });
+    NodeUi { binding, view }
 }
 
 /// A popped-out window: one part of one node.

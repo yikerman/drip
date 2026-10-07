@@ -1,7 +1,7 @@
 //! Sensor-space highlight repair before preview reduction and demosaicing.
 
 use crate::image::Mosaic;
-use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::node::{EvalContext, KernelError};
 use crate::param::ParamKind;
 use std::sync::Arc;
 mod opposed;
@@ -22,8 +22,8 @@ fn highlights(
     p: Highlights,
     (mosaic,): (&Mosaic,),
     _: &EvalContext<'_>,
-) -> Result<Evaluated<(Arc<Mosaic>,)>, KernelError> {
+) -> Result<(Arc<Mosaic>,), KernelError> {
     let data = opposed::process(mosaic, p.threshold);
     let data = crate::image::RawMat::from_samples(mosaic.width, mosaic.height, mosaic.scale, data);
-    Ok(Evaluated::new((Arc::new(mosaic.with_buffer(Arc::new(data))),)))
+    Ok((Arc::new(mosaic.with_buffer(Arc::new(data))),))
 }

@@ -7,12 +7,11 @@ use drip::image::{
     Colorimetry, LinearRgb, LinearRgbColorSpace, Linearity, RealMat, Rec2020, Rec2020Mat,
     Rec2020Rgb, Rgb, ScaleInvariant,
 };
-use drip::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
+use drip::node::{EvalContext, KernelError, NodeDeclaration, NodeKind};
 use drip::nodes;
 
 use drip::ports::{Input, Read, ReadMat};
 use drip::value::{TypeDescriptor, Value};
-use drip::view::{PreviewImage, ScopeAxes, View};
 use std::sync::{Arc, LazyLock};
 
 fn pixels() -> Arc<Rgb> {
@@ -47,18 +46,12 @@ impl LinearRgb for P3Interpretation {
 type LinearP3 = RealMat<3, P3Interpretation>;
 
 struct P3Source;
-impl NodeKernel for P3Source {
+impl NodeDeclaration for P3Source {
     type Parameters = ();
-    type View = ();
     type Inputs = ();
     type Outputs = (Arc<LinearP3>,);
-    fn eval(
-        _: Self::Parameters,
-        (): (),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-        Ok(Evaluated::new((Arc::new(LinearP3::from(pixels())),)))
-    }
+    const KERNEL: Option<drip::node::Kernel<Self>> =
+        Some(|_, (), _| Ok((Arc::new(LinearP3::from(pixels())),)));
 }
 #[drip::node]
 static P3_SOURCE: NodeKind = NodeKind::new::<P3Source>("test.p3", "test", "P3", &[], &["image"]);
@@ -76,7 +69,7 @@ fn generated_ancestor_evidence_agrees_with_borrows_without_copying_samples() {
     assert!(Arc::ptr_eq(linear.rgb(), &data));
     assert_eq!(color.interpretation.to_xyz_d65([1.0; 3]), Rec2020.to_xyz_d65([1.0; 3]));
     assert_eq!(rgb.interpretation.color_space().name, "Rec.2020");
-    assert!(Arc::ptr_eq(PreviewImage::from_input(&preview).rgb(), &data));
+    assert!(Arc::ptr_eq(preview.rgb(), &data));
     assert!(value.borrow::<ReadMat<1, dyn Linearity>>().is_none());
     let encoded = Value::new(Arc::new(EncodedMat::from(data)));
     assert!(encoded.borrow::<Read<Rec2020Mat>>().is_none());
@@ -125,7 +118,7 @@ fn exposure_preserves_concrete_p3_interpretation_and_propagates_it_before_eval()
     graph.set_param(exposure, "ev", 1.0.into()).unwrap();
     let mut eval = Evaluator::default();
     eval.evaluate(&graph, 0, &[exposure]);
-    let value = &eval.result(exposure).unwrap().as_ref().unwrap().outputs[0];
+    let value = &eval.result(exposure).unwrap().as_ref().unwrap()[0];
     let image = value.downcast_ref::<LinearP3>().unwrap();
     assert_eq!(image.rgb().pixels[0], [2.0, 0.0, 0.0]);
     assert_eq!(image.interpretation().color_space().name, "Display P3");
@@ -148,7 +141,7 @@ fn resolving_a_pending_preserved_output_rechecks_descendants_atomically() {
 }
 
 #[test]
-fn scopes_use_connected_color_space_and_cache_the_result() {
+fn scope_declarations_accept_p3_and_cache_input_validation() {
     let mut graph = Graph::default();
     let source = graph.add_node(&P3_SOURCE);
     let probes: Vec<_> =
@@ -173,23 +166,6 @@ fn scopes_use_connected_color_space_and_cache_the_result() {
     for &probe in &probes {
         assert!(evaluator.result(probe).unwrap().is_ok());
     }
-    let result = evaluator.result(probes[2]).unwrap().as_ref().unwrap();
-    let Some(View::Scope(scope)) = &result.view else { panic!("vectorscope") };
-    let ScopeAxes::Vectorscope { primaries, color_space } = scope.axes else {
-        panic!("chromaticity")
-    };
-    assert_eq!(color_space, "Display P3");
-    // Independently derive CIE u'v' for P3 red (x=.68, y=.32), relative to D65.
-    let expected: [f64; 2] = [
-        0.5 + 4.0 * 0.68 / (-2.0 * 0.68 + 12.0 * 0.32 + 3.0) - 0.1978300066,
-        0.5 - 9.0 * 0.32 / (-2.0 * 0.68 + 12.0 * 0.32 + 3.0) + 0.4683199949,
-    ];
-    for (actual, expected) in primaries[0].into_iter().zip(expected) {
-        assert!((f64::from(actual) - expected).abs() < 1e-6);
-    }
-    let [x, y] = expected.map(|v| (v * scope.size as f64) as usize);
-    assert_eq!(scope.counts[y * scope.size + x][0], 1);
-    assert_eq!(scope.counts.iter().map(|count| count[0]).sum::<u32>(), 1);
 }
 
 /// Every channel lies in [0, 1]; this promise is not closed under exposure.
@@ -197,7 +173,7 @@ fn scopes_use_connected_color_space_and_cache_the_result() {
 trait UnitRange: Rec2020Rgb {}
 #[drip::interpretation(UnitRange)]
 #[derive(Debug, Default, Reflect)]
-struct BoundedRec2020;
+pub struct BoundedRec2020;
 impl Linearity for BoundedRec2020 {}
 impl Colorimetry for BoundedRec2020 {
     fn to_xyz_d65(&self, sample: [f32; 3]) -> [f32; 3] {
@@ -216,8 +192,8 @@ fn bounded(
     _: (),
     (): (),
     _: &EvalContext<'_>,
-) -> Result<Evaluated<(Arc<RealMat<3, BoundedRec2020>>,)>, KernelError> {
-    Ok(Evaluated::new((Arc::new(RealMat::new(pixels(), BoundedRec2020)),)))
+) -> Result<(Arc<RealMat<3, BoundedRec2020>>,), KernelError> {
+    Ok((Arc::new(RealMat::new(pixels(), BoundedRec2020)),))
 }
 
 #[test]
@@ -248,7 +224,7 @@ fn sigmoid_accepts_rec2020_refinements_and_establishes_only_its_output_laws() {
     assert!(graph.output_type(&port(sigmoid)).unwrap().is::<Rec2020Mat>());
     let mut evaluator = Evaluator::default();
     evaluator.evaluate(&graph, 0, &[exposure]);
-    let value = &evaluator.result(sigmoid).unwrap().as_ref().unwrap().outputs[0];
+    let value = &evaluator.result(sigmoid).unwrap().as_ref().unwrap()[0];
     assert!(value.borrow::<ReadMat<3, dyn UnitRange>>().is_none());
     assert!(value.borrow::<ReadMat<3, dyn Rec2020Rgb>>().is_some());
     assert!(evaluator.result(exposure).unwrap().is_ok());

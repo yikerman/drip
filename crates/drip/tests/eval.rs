@@ -3,11 +3,10 @@ mod common;
 use common::*;
 use drip::eval::{Evaluator, NodeError, run_action};
 use drip::image::Rec2020Mat;
-use drip::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind, TypedAction};
+use drip::node::{NodeDeclaration, NodeKind, TypedAction};
 
 use drip::ports::{Optional, Read};
 use drip::project::Project;
-use drip::view::View;
 use serde_json::json;
 
 /// c1 ─┐
@@ -97,20 +96,15 @@ fn unconnected_input_is_an_error() {
 static OFFSET: NodeKind =
     NodeKind::new::<OffsetKernel>("test.offset", "test", "offset", &["base", "offset"], &["image"]);
 struct OffsetKernel;
-impl NodeKernel for OffsetKernel {
+impl NodeDeclaration for OffsetKernel {
     type Parameters = ();
-    type View = ();
     type Inputs = (Read<Rec2020Mat>, Optional<Read<Rec2020Mat>>);
     type Outputs = (std::sync::Arc<Rec2020Mat>,);
 
-    fn eval(
-        _: Self::Parameters,
-        (base, offset): (&Rec2020Mat, Option<&Rec2020Mat>),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+    const KERNEL: Option<drip::node::Kernel<Self>> = Some(|_, (base, offset), _| {
         let (a, b) = (base.rgb().pixels[0], offset.map_or([0.0; 3], |o| o.rgb().pixels[0]));
-        Ok(Evaluated::new((scene([a[0] + b[0], a[1] + b[1], a[2] + b[2]]),)))
-    }
+        Ok((scene([a[0] + b[0], a[1] + b[1], a[2] + b[2]]),))
+    });
 }
 
 #[test]
@@ -134,13 +128,14 @@ fn optional_inputs_may_stay_unconnected_but_not_fail() {
 }
 
 #[test]
-fn ui_only_nodes_present_views() {
+fn input_only_consumers_borrow_validated_upstream_values() {
     let (p, [_, _, _, view, _]) = diamond();
     let mut ev = Evaluator::default();
-    let result = eval(&mut ev, &p, view).as_ref().unwrap();
-    assert!(result.outputs.is_empty());
-    let Some(View::Image(image)) = &result.view else { panic!("no view") };
-    assert_eq!(image.rgb().pixels[0], [3.0, 8.0, 0.0]);
+    let pixel = ev
+        .with_inputs(&p.graph, view, PREVIEW, &VIEW, |_, (image,), _| Ok(image.rgb().pixels[0]))
+        .unwrap();
+    assert_eq!(pixel, [3.0, 8.0, 0.0]);
+    assert!(ev.result(view).is_none());
 }
 
 #[test]
@@ -283,7 +278,7 @@ mod release {
 
     use super::*;
     use drip::image::Rgb;
-    use drip::node::{Evaluated, NodeKind};
+    use drip::node::NodeKind;
 
     static PROBED: Mutex<Option<Weak<Rgb>>> = Mutex::new(None);
     static SEEN: Mutex<Option<(bool, [f32; 3])>> = Mutex::new(None);
@@ -292,31 +287,25 @@ mod release {
     static PROBE: NodeKind =
         NodeKind::new::<ProbeKernel>("test.probe", "test", "probe", &[], &["image"]);
     struct ProbeKernel;
-    impl NodeKernel for ProbeKernel {
+    impl NodeDeclaration for ProbeKernel {
         type Parameters = ();
-        type View = ();
         type Inputs = ();
         type Outputs = (Arc<Rec2020Mat>,);
 
-        fn eval(
-            _: Self::Parameters,
-            (): (),
-            _: &EvalContext<'_>,
-        ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+        const KERNEL: Option<drip::node::Kernel<Self>> = Some(|_, (), _| {
             let image =
                 Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[1.0, 2.0, 3.0]] });
             *PROBED.lock().unwrap() = Some(Arc::downgrade(&image));
-            Ok(Evaluated { outputs: (Arc::new(Rec2020Mat::from(image)),), view: () })
-        }
+            Ok((Arc::new(Rec2020Mat::from(image)),))
+        });
     }
 
     /// Records, while its action runs, whether the probe's output is alive.
     static CHECK: NodeKind =
         NodeKind::new::<CheckKernel>("test.check", "test", "check", &["image"], &[]);
     struct CheckKernel;
-    impl NodeKernel for CheckKernel {
+    impl NodeDeclaration for CheckKernel {
         type Parameters = ();
-        type View = ();
         type Inputs = (Read<TaggedMat>,);
         type Outputs = ();
         const ACTIONS: &'static [TypedAction<Self>] = &[TypedAction {
@@ -327,13 +316,6 @@ mod release {
                 Ok(())
             },
         }];
-        fn eval(
-            _: Self::Parameters,
-            _: (&TaggedMat,),
-            _: &EvalContext<'_>,
-        ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-            Ok(Evaluated::default())
-        }
     }
 
     /// Runs `check` on `probe → middle… → tonemap → check`.

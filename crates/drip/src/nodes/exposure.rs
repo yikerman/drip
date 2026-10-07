@@ -1,7 +1,7 @@
 //! Exposure multiplication preserves the input RGB interpretation.
 
 use crate::image::ScaleInvariant;
-use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::node::{EvalContext, KernelError};
 use crate::param::ParamKind;
 use crate::ports::{MatRef, Preserved};
 use rayon::prelude::*;
@@ -22,8 +22,8 @@ fn exposure(
     p: Exposure,
     (image,): (MatRef<'_, 3, dyn ScaleInvariant>,),
     _: &EvalContext<'_>,
-) -> Result<Evaluated<(Preserved<0>,)>, KernelError> {
+) -> Result<(Preserved<0>,), KernelError> {
     let gain = p.ev.exp2();
     let pixels = image.rgb().pixels.par_iter().map(|p| p.map(|v| v * gain)).collect();
-    Ok(Evaluated::new((image.preserve::<0>(pixels),)))
+    Ok((image.preserve::<0>(pixels),))
 }

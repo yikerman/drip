@@ -3,6 +3,82 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-07: Persistent GUI binding compilation tests
+
+- Retained a valid binding and four rejected bindings in `drip-gui/tests`, with
+  a standalone harness that compiles the real GUI source in a temporary workspace.
+  It checks error codes and primary source locations, so unrelated build failures
+  cannot satisfy a negative test. The identity case uses nodes with the same
+  parameter/input types to distinguish identity from structural compatibility.
+- Added the suite to Linux CI after workspace tests and removed the completed
+  coverage follow-up from TODO. The valid probe and all four negative cases pass.
+  Strict workspace Clippy, Rust formatting and diff whitespace checks passed.
+  Production code is unchanged from the reviewed rewrite.
+- Verified the harness runs from `/tmp`: source probes are temporary and Cargo
+  reuses the repository's `target/`. Python caches are ignored. Retained Python's
+  standard-library JSON parsing; a Bash version would need an additional parser
+  to preserve diagnostic checks.
+
+## 2026-10-07: Independent Codex and Claude Code reviews
+
+- Both reviews found no blocking correctness issues or substantial
+  overengineering. Codex inspected the rewrite, including untracked GUI modules,
+  and independently passed eight declaration tests and five worker tests.
+- Claude Code (Opus 5.5) completed a focused review of declarations, macros,
+  typed GUI adapters, evaluation and worker ownership/caching after its broader
+  review call timed out. It did not run tests or review every numerical module.
+  Its observations concerned bounded image-memory retention, single-resolution
+  caching and optional cleanup. Input observation despite a failed target kernel
+  is intentional and covered by the declaration regression test.
+- Tracked the actionable coverage follow-up: preserve the four isolated negative
+  GUI compilation probes as repository tests. No production code changed during
+  these reviews; neither review establishes native-window or platform coverage.
+
+## 2026-10-07: Computational and GUI node separation
+
+- Replaced `Evaluated` with direct output tuples and made `NodeDeclaration` the
+  shared contract for optional kernels, actions and input consumers. Semicolon
+  declarations retain schemas, help and ports without computational bodies.
+  Typed handles now retain declaration identity as well as parameter/input types.
+- Moved proofing, gamut checking, histogram and density preparation into GUI node
+  modules alongside their presentation types and drawing. Local `#[gui_node]`
+  implementations generate discovery. Default controls remain independent of
+  preparation and views; prepared values use trait dispatch rather than an enum.
+- Added typed input observation and a GUI preparation cache, including cached
+  failures. Export and shared ICC conversion remain in the library. Saved node
+  IDs, parameters and port contracts are unchanged. Moved numerical tests with
+  GUI algorithms and retained headless processing coverage.
+- Independent review found and resolved redundant input checks/observed-kernel
+  execution, lost worker allocation ownership on reset, unchecked declaration
+  signature positions, and underscore-name macro panics. A second review found
+  no remaining production blockers. Accepted GUI snapshots retain generations.
+- Validation: workspace tests passed 173 tests, including eight compile-fail
+  doctests, with the GPU test ignored by default; the GPU color-reference test
+  passed separately. Four isolated negative GUI builds rejected mismatched node
+  identity, input signature, presentation type and private binding construction.
+  Strict workspace Clippy, formatting and diff whitespace checks passed.
+  Warning-free Rustdoc passed with `drip-cli` excluded: its `drip` binary collides
+  with the library's documentation output path in a whole-workspace doc build.
+  Windows/macOS and the declared Rust 1.92 minimum were not exercised.
+
+## 2026-10-07: Preservation contract rationale
+
+- Clarified `Preserved` beside its definition and in DESIGN: it expresses a
+  same-interpretation input/output relationship through type erasure, enables
+  connection-time checking, and retains interpretation data as well as its type.
+  Recorded why the fixed-or-preserved model stays explicit instead of parsing
+  general generic signatures. No behavior changed; diff whitespace check passed.
+
+## 2026-10-07: GUI node boundary design
+
+- Recorded the agreed separation of node declarations, computational kernels,
+  explicit actions and typed GUI implementations. Kernels will return tuples
+  directly; preview and scope preparation will move to the GUI with its own
+  results and cache. GUI modules correspond by responsibility, not identical trees.
+- Added a short headless-library boundary notice to AGENTS.md and replaced
+  superseded presentation decisions in DESIGN. Migration is tracked in TODO;
+  implementation is unchanged. Documentation-only change; checked diff whitespace.
+
 ## 2026-10-06: Maintainability fixes
 
 - Unified handwritten and generated nodes on `NodeKernel::Parameters`: it supplies

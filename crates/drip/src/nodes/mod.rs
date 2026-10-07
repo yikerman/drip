@@ -5,7 +5,7 @@ mod demosaic;
 mod export;
 mod exposure;
 mod highlights;
-mod preview;
+pub mod preview;
 mod raw;
 pub mod scopes;
 pub mod sigmoid;

@@ -198,17 +198,21 @@ particular types, APIs or implementations.
   entry. It also declares stable ID, category, display name, output names and
   optional checks/actions. `Read<T>` requires the exact logical type;
   `MatRef<C, dyn Capability>` requests a layout and interpretation capability.
-  Optional ports are `Option` of either form. `NodeKernel` remains available for
+  Optional ports are `Option` of either form. `NodeDeclaration` remains available for
   handwritten extensions; generated and handwritten nodes use the same executor.
-  Both derive their schema from `NodeKernel::Parameters`; evaluation, actions
+  Both derive their schema from `NodeDeclaration::Parameters`; evaluation, actions
   and checks receive that type after conversion at the erased adapter boundary.
   There is no independent schema argument or raw-map kernel interface.
   Duplicate stable IDs are declaration errors.
 
-- **Decided:** Generated node constants are `TypedNode<P>`, retaining their
-  parameter struct type. The wrapper owns its immutable `NodeKind`, constructs
-  its schema from `P` and requires the same `P` as the kernel. Graph APIs borrow
-  the descriptor through deref coercion; heterogeneous lists use `.kind()`.
+- **Decided:** Typed node declarations retain node identity,
+  parameters and port contracts through `TypedNode<N>`. `NodeDeclaration` owns
+  the signature and an optional typed `KERNEL` callback. Computational implementations and GUI bindings derive
+  their types from that declaration. A declaration without a kernel has no output
+  ports; preview/scopes need no dummy kernel, and export may provide only an
+  explicit action. `#[node]` accepts a signature ending in `;` for these consumers
+  and type-checks it without generating a kernel. Headless tools can still load
+  and validate these declarations.
   Parameter structs exposed through public declarations are public, while fields
   may stay private behind domain-specific methods.
 
@@ -217,7 +221,7 @@ particular types, APIs or implementations.
   flattening shares profile/scope schemas without changing project keys.
   Rustdoc supplies technical field descriptions; Bevy reflection is confined to
   interpretation evidence, with no unused parameter-reflection layer. Node
-  function Rustdoc supplies operation help; `references = [(label, url), ...]`
+  declaration Rustdoc supplies operation help; `references = [(label, url), ...]`
   on the same declaration supplies links. The frontend renders this metadata
   with generated controls and port-contract help, without a separate help table.
 
@@ -228,27 +232,53 @@ particular types, APIs or implementations.
   field categories and the complete choice schema at compile time, including
   default membership, so an admitted JSON choice is readable by its field.
 
-- **Decided:** `Evaluated<Outputs, V>` declares headless presentation through
-  its return type. `V = ()` (the default) has no view; concrete image/scope results
-  and `View` have one; `Option<V>` permits an absent result while retaining its
-  presentation surface. The sealed `Presentation` trait supplies both conversion
-  and availability, so there is no separately maintained view flag. The GUI
-  provides a generic viewer even before successful evaluation. Custom
-  GUI bindings use `linkme` declarations beside their implementations; a generated
-  lookup rejects duplicate node IDs. No central node-to-widget table is maintained,
-  and no GUI dependency enters the library. Each binding independently overrides
-  typed controls and/or `NodeView` (body, sizing and pop-out windows).
-  Omitted controls use the parameter schema; an omitted view uses the node's
-  declared generic presentation. Custom controls therefore retain a generic
-  viewer without forwarding its methods.
+- **Decided:** Computational results carry no presentation or view availability. Kernels return `Result<Outputs, KernelError>`
+  directly, with tuples for output ports and `()` for none. The erased evaluator
+  caches output values and computational errors; frontend scheduling and cache
+  metadata do not enter kernel return types.
 
-- **Decided:** Custom controls bind `Controls<P>` to `TypedNode<P>` through one
-  constructor; its stored fields are private to a sibling module, preventing
-  node-specific modules from bypassing the type check with literals. Callbacks
-  receive `ControlCx<P>` with typed parameter reads and schema controls for
-  validated edits. Reads occur when requested, including after same-frame edits. Erasure
-  happens only inside the binding adapter. This checks structural parameter
-  compatibility, not a callback's intent when two nodes share a parameter type.
+- **Decided:** GUI nodes own preparation, presentation values,
+  drawing and local interaction state. Preview proofing, gamut overlays and scope
+  visualization live in `drip-gui`; export conversion and shared color kernels
+  stay in `drip`. Preparation is pure under an explicit resource context and runs
+  on the worker. Controls need only parameters; preparation borrows declared
+  inputs through `Evaluator::with_inputs`, which evaluates dependencies without
+  invoking the observed node's kernel. It reuses checks from a matching successful
+  evaluation or validates inputs once. Output observation can be added for a
+  concrete consumer, without a second DAG or arbitrary graph-query framework.
+
+- **Decided:** GUI bindings name the typed node declaration,
+  not only its parameter type. Private constructors/adapters enforce agreement
+  before type erasure. `#[gui_node]` on a local `GuiNode` impl generates discovery
+  with no maintained node-to-widget table. `Node`, `NODE` and `Prepared` associate
+  the declaration identity with its preparation signature; `IntoPrepared` and
+  `PreparedView` own packing and drawing without a central presentation enum. Controls and views remain independently optional. Schema
+  controls are the default, work with disconnected inputs, and route edits through
+  validation. Preparation returns its presentation type directly; availability
+  follows the GUI binding even before preparation succeeds.
+
+- **Decided:** GUI binding compilation tests build the actual binary crate in a
+  temporary source copy, without exposing private interfaces for a test library.
+  A valid probe must compile before the four negative probes run. Each rejection
+  must have the expected error code at the probe, covering declaration identity,
+  input/presentation signatures and private construction. Linux CI runs
+  `python3 crates/drip-gui/tests/check_bindings.py` after workspace tests.
+
+- **Decided:** GUI preparation caches track parameters,
+  declared data dependencies, resolution and resource snapshots. Canvas and
+  pop-outs share prepared results; navigation affects drawing only. Keep pending,
+  failed and successful presentation states distinct. The worker caches failures
+  too, rejects obsolete requests, and retains the accepted snapshot generation
+  while older results remain visible during evaluation. Resource invalidation
+  clears results but retains the worker's image-allocation ownership until other
+  references are released. Presentation failures do not contaminate computational
+  caches or independent export actions.
+
+- **Decided:** GUI modules correspond to library nodes by responsibility and name,
+  not an identical file tree. Complex nodes may split preparation, proofing,
+  controls and views into cohesive files. Default-only nodes need no GUI module;
+  shared drawing and interaction primitives remain shared. This keeps each node's
+  behavior locatable without duplicating its contract.
 
 - **Decided:** Outputs are fixed logical types or `Preserved<input_index>`.
   Preservation retains the concrete interpretation and its instance witness;
@@ -261,6 +291,18 @@ particular types, APIs or implementations.
   arbitrary bounded/calibrated refinements under exposure. Plain Rec.2020 has
   that law; `Rec2020Rgb` alone deliberately does not imply it. A refined type can
   be explicitly weakened by a node that constructs its base interpretation.
+
+- **Decided:** Keep preservation explicit rather than infer it from generic Rust
+  signatures. `Preserved<0>` expresses `RealMat<C, I> -> RealMat<C, I>` after a
+  capability input has erased the concrete `I`. The graph needs this relationship
+  to check downstream connections before execution; inspecting produced values
+  would postpone those diagnostics. Retaining the interpretation witness also
+  preserves its data, which same-type signatures alone do not guarantee.
+  Fixed types and input-type propagation suffice for current nodes. Parsing
+  general generics would still need these runtime contracts while adding macro
+  complexity; separate type-inference callbacks would duplicate declarations.
+  Generate adapters for this small model without adding unification or symbolic
+  type expressions. Pixel computations remain trusted to uphold the stated laws.
 
 - **Decided:** Connecting checks endpoints, single-source input replacement,
   cycles and all presently known type requirements. A candidate edit resolves
@@ -479,8 +521,8 @@ particular types, APIs or implementations.
 
 - **Decided:** Scopes inspect connected data without a display-profile transform:
   EV for channel exposure, exposure-independent u′v′ for chromaticity. Their
-  [kernels](../crates/drip/src/nodes/scopes/density.rs) and
-  [drawing](../crates/drip-gui/src/render/node_views.rs) define the coordinates
+  [preparation](../crates/drip-gui/src/node_ui/scopes/density.rs) and
+  [drawing](../crates/drip-gui/src/node_ui/scopes/view.rs) define the coordinates
   and annotation colors. Scopes use black; image previews use middle grey.
 
 - **Decided:** Preview stores an `interpolation` parameter, off by default for

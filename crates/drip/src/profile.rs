@@ -36,7 +36,7 @@ enum RenderingIntent {
 }
 
 #[derive(crate::Parameters)]
-pub(crate) struct Settings {
+pub struct Settings {
     #[param(ProfileSource::Srgb.schema())]
     profile: ProfileSource,
     #[param(ParamKind::Path { output: false })]
@@ -48,7 +48,7 @@ pub(crate) struct Settings {
 }
 
 /// Loaded output settings, retaining the original ICC bytes for embedding.
-pub(crate) struct Output {
+pub struct Output {
     pub profile: Profile,
     pub icc: Vec<u8>,
     pub intent: Intent,
@@ -112,7 +112,7 @@ impl Output {
 const PIXEL_CHUNK: usize = 16 * 1024;
 
 /// The caller supplies a Sync transform (LCMS requires NO_CACHE).
-pub(crate) fn convert_pixels<I: Sync, O: Default + Clone + Send>(
+pub fn convert_pixels<I: Sync, O: Default + Clone + Send>(
     pixels: &[I],
     convert: impl Fn(&[I], &mut [O]) + Sync,
 ) -> Vec<O> {
@@ -124,7 +124,7 @@ pub(crate) fn convert_pixels<I: Sync, O: Default + Clone + Send>(
     result
 }
 
-pub(crate) fn convert_in_place<T: Send>(pixels: &mut [T], convert: impl Fn(&mut [T]) + Sync) {
+pub fn convert_in_place<T: Send>(pixels: &mut [T], convert: impl Fn(&mut [T]) + Sync) {
     pixels.par_chunks_mut(PIXEL_CHUNK).for_each(&convert);
 }
 

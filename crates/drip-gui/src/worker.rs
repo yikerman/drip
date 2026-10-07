@@ -11,7 +11,7 @@ use drip::param::ParamKind;
 
 use crate::render::node_views::{Prepared, PreparedView};
 
-pub type Presentation = Result<Option<PreparedView>, NodeError>;
+pub type Presentation = Result<Option<Arc<dyn PreparedView>>, NodeError>;
 type Snapshot = BTreeMap<NodeId, Presentation>;
 
 struct Request {
@@ -78,6 +78,7 @@ pub struct Worker {
     in_flight: bool,
     pending: Option<Request>,
     views: Snapshot,
+    views_generation: Option<u64>,
     failures: BTreeMap<NodeId, Failure>,
     collect: bool,
     failed: bool,
@@ -105,6 +106,7 @@ impl Worker {
             in_flight: false,
             pending: None,
             views: Snapshot::new(),
+            views_generation: None,
             failures: BTreeMap::new(),
             collect: false,
             failed: false,
@@ -113,6 +115,11 @@ impl Worker {
 
     pub fn result(&self, id: NodeId) -> Option<&Presentation> {
         self.views.get(&id)
+    }
+
+    /// Every displayed result belongs to one accepted request snapshot.
+    pub fn showing_previous(&self) -> bool {
+        self.views_generation.is_some_and(|generation| generation != self.generation)
     }
 
     pub fn busy(&self) -> bool {
@@ -146,6 +153,7 @@ impl Worker {
         self.generation += 1;
         self.pending = None;
         self.views.clear();
+        self.views_generation = None;
         self.failures.clear();
         log::debug!("reset preview generation={}", self.generation);
         self.collect = true;
@@ -192,6 +200,7 @@ impl Worker {
                     });
                     self.failures = failures;
                     self.views = views;
+                    self.views_generation = Some(generation);
                     notices.push(Notice::Evaluated(error.map_or(Ok(()), Err)));
                 }
                 Event::Action(result) => {
@@ -255,12 +264,16 @@ impl Drop for Worker {
 fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
     let mut evaluator = Evaluator::default();
     let mut prepared = Prepared::default();
+    let mut presentations = BTreeMap::new();
     for command in commands {
         match command {
             Command::Evaluate(request) => {
-                notify.send(evaluate(&request, &mut evaluator, &mut prepared));
+                notify.send(evaluate(&request, &mut evaluator, &mut prepared, &mut presentations));
             }
-            Command::Reset | Command::Invalidate => evaluator = Evaluator::default(),
+            Command::Reset | Command::Invalidate => {
+                evaluator = Evaluator::default();
+                presentations.clear();
+            }
             Command::Action { graph, id, name } => {
                 let evaluator = evaluator.fork();
                 let notify = notify.clone();
@@ -274,7 +287,14 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
     }
 }
 
-fn evaluate(request: &Request, evaluator: &mut Evaluator, prepared: &mut Prepared) -> Event {
+type CachedPresentations = BTreeMap<NodeId, (drip::eval::Revision, Presentation)>;
+
+fn evaluate(
+    request: &Request,
+    evaluator: &mut Evaluator,
+    prepared: &mut Prepared,
+    presentations: &mut CachedPresentations,
+) -> Event {
     let start = Instant::now();
     log::debug!(
         "preview started generation={} level={} targets={}",
@@ -284,7 +304,7 @@ fn evaluate(request: &Request, evaluator: &mut Evaluator, prepared: &mut Prepare
     );
     let computed = evaluator.evaluate(&request.graph, request.level, &request.targets);
     let evaluated = start.elapsed();
-    let failures: BTreeMap<_, _> = evaluator
+    let mut failures: BTreeMap<_, _> = evaluator
         .failures(&request.graph, &request.targets)
         .map(|(id, error)| {
             (
@@ -296,16 +316,38 @@ fn evaluate(request: &Request, evaluator: &mut Evaluator, prepared: &mut Prepare
             )
         })
         .collect();
+    presentations.retain(|id, _| request.graph.node(*id).is_some());
     let views = request
         .targets
         .iter()
         .map(|&id| {
-            let result = evaluator
-                .result(id)
-                .expect("evaluated target")
-                .as_ref()
-                .map(|result| result.view.as_ref().map(|view| prepared.view(view)))
-                .map_err(Clone::clone);
+            let node = request.graph.node(id).expect("requested node");
+            let revision = evaluator.revision(id).expect("evaluated target");
+            let result = if let Some((_, result)) =
+                presentations.get(&id).filter(|(stamp, _)| *stamp == revision)
+            {
+                result.clone()
+            } else {
+                let result =
+                    match crate::node_ui::binding(node.kind).filter(|b| b.has_preparation()) {
+                        Some(binding) => {
+                            binding.prepare(evaluator, &request.graph, id, request.level, prepared)
+                        }
+                        None => evaluator
+                            .result(id)
+                            .expect("evaluated target")
+                            .as_ref()
+                            .map(|_| None)
+                            .map_err(Clone::clone),
+                    };
+                presentations.insert(id, (revision, result.clone()));
+                result
+            };
+            if let Err(error) = &result
+                && !matches!(error, NodeError::Upstream(_))
+            {
+                failures.insert(id, Failure { kind: node.kind.id, error: error.clone() });
+            }
             (id, result)
         })
         .collect();
@@ -351,14 +393,14 @@ fn run_action(evaluator: Evaluator, graph: &Graph, id: NodeId, name: &str) -> Re
 #[cfg(test)]
 mod tests {
     use drip::image::Rec2020Mat;
-    use drip::node::{EvalContext, KernelError, NodeKernel, TypedAction};
+    use drip::node::{KernelError, NodeDeclaration, TypedAction};
 
     use drip::ports::Read;
 
     use super::*;
     use drip::graph::Port;
     use drip::image::Rgb;
-    use drip::node::{Evaluated, NodeKind};
+    use drip::node::NodeKind;
     use drip::nodes;
     use drip::param::ParamKind;
     use serde_json::json;
@@ -367,16 +409,13 @@ mod tests {
 
     const TIMEOUT: Duration = Duration::from_secs(5);
 
-    fn image(value: f32, scale: u32) -> Evaluated<(Arc<Rec2020Mat>,)> {
-        Evaluated {
-            outputs: (Arc::new(Rec2020Mat::from(Arc::new(Rgb {
-                width: 1,
-                height: 1,
-                scale,
-                pixels: vec![[value, scale as f32, 0.0]],
-            }))),),
-            view: (),
-        }
+    fn image(value: f32, scale: u32) -> (Arc<Rec2020Mat>,) {
+        (Arc::new(Rec2020Mat::from(Arc::new(Rgb {
+            width: 1,
+            height: 1,
+            scale,
+            pixels: vec![[value, scale as f32, 0.0]],
+        }))),)
     }
 
     fn graph(source: &'static NodeKind) -> (Graph, NodeId, NodeId, NodeId) {
@@ -404,10 +443,8 @@ mod tests {
     }
 
     fn pixel(worker: &Worker, id: NodeId) -> [f32; 4] {
-        let Some(PreparedView::Image(image, _)) = worker.result(id).unwrap().as_ref().unwrap()
-        else {
-            panic!("image");
-        };
+        let prepared = worker.result(id).unwrap().as_ref().unwrap().as_ref().unwrap();
+        let image = &prepared.downcast_ref::<crate::render::node_views::ImageView>().unwrap().image;
         std::array::from_fn(|c| {
             half::f16::from_bits(u16::from_ne_bytes([image.texels[c * 2], image.texels[c * 2 + 1]]))
                 .to_f32()
@@ -452,22 +489,15 @@ mod tests {
             #[param(State::Incomplete.schema())]
             state: State,
         }
-        impl NodeKernel for Source {
+        impl NodeDeclaration for Source {
             type Parameters = Self;
-            type View = ();
             type Inputs = ();
             type Outputs = (Arc<Rec2020Mat>,);
-            fn eval(
-                p: Self::Parameters,
-                (): (),
-                _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-                match p.state {
-                    State::Incomplete => Err(KernelError::Incomplete("choose a file")),
-                    State::Failed => Err("decode failed".into()),
-                    State::Ok => Ok(image(1.0, 1)),
-                }
-            }
+            const KERNEL: Option<drip::node::Kernel<Self>> = Some(|p, (), _| match p.state {
+                State::Incomplete => Err(KernelError::Incomplete("choose a file")),
+                State::Failed => Err("decode failed".into()),
+                State::Ok => Ok(image(1.0, 1)),
+            });
         }
         let (mut graph, source, preview, histogram) = graph(&SOURCE);
         let mut worker = Worker::new(|| {});
@@ -533,17 +563,12 @@ mod tests {
             #[param(ParamKind::Bool { default: false })]
             block: bool,
         }
-        impl NodeKernel for SourceKernel {
+        impl NodeDeclaration for SourceKernel {
             type Parameters = Self;
-            type View = ();
             type Inputs = ();
             type Outputs = (Arc<Rec2020Mat>,);
 
-            fn eval(
-                p: Self::Parameters,
-                (): (),
-                ctx: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+            const KERNEL: Option<drip::node::Kernel<Self>> = Some(|p, (), ctx| {
                 let value = p.value;
                 CALLS.lock().unwrap().push(value);
                 if p.block {
@@ -553,7 +578,7 @@ mod tests {
                     release.recv_timeout(TIMEOUT).unwrap();
                 }
                 Ok(image(value, ctx.scale()))
-            }
+            });
         }
 
         let (started, entered) = mpsc::channel();
@@ -634,22 +659,17 @@ mod tests {
             #[param(ParamKind::Path { output: false })]
             path: Option<std::path::PathBuf>,
         }
-        impl NodeKernel for FileKernel {
+        impl NodeDeclaration for FileKernel {
             type Parameters = Self;
-            type View = ();
             type Inputs = ();
             type Outputs = (Arc<Rec2020Mat>,);
 
-            fn eval(
-                p: Self::Parameters,
-                (): (),
-                ctx: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+            const KERNEL: Option<drip::node::Kernel<Self>> = Some(|p, (), ctx| {
                 let value = ctx.resources().load(p.path.as_deref().unwrap(), |path| {
                     std::fs::read_to_string(path).map_err(|e| e.to_string())
                 })?;
                 Ok(image(value.parse().unwrap(), ctx.scale()))
-            }
+            });
         }
 
         static WRITE: NodeKind =
@@ -659,9 +679,8 @@ mod tests {
             #[param(ParamKind::Path { output: true })]
             path: Option<std::path::PathBuf>,
         }
-        impl NodeKernel for WriteKernel {
+        impl NodeDeclaration for WriteKernel {
             type Parameters = Self;
-            type View = ();
             type Inputs = (Read<Rec2020Mat>,);
             type Outputs = ();
             const ACTIONS: &'static [TypedAction<Self>] = &[TypedAction {
@@ -675,13 +694,6 @@ mod tests {
                     .map_err(|e| KernelError::Failed(e.to_string()))
                 },
             }];
-            fn eval(
-                _: Self::Parameters,
-                _: (&Rec2020Mat,),
-                _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-                Ok(Evaluated::default())
-            }
         }
 
         let input = std::env::temp_dir().join(format!("drip-worker-input-{}", std::process::id()));
@@ -727,8 +739,100 @@ mod tests {
         worker.request(&graph, 3, vec![preview]).unwrap();
         wait(&mut worker);
         assert_eq!(pixel(&worker, preview), [3.0, 8.0, 0.0, 1.0]);
+        graph.set_param(preview, "mode", json!("softproof")).unwrap();
+        graph.set_param(preview, "profile", json!("file")).unwrap();
+        graph
+            .set_param(preview, "profile_file", json!(input.with_extension("missing.icc")))
+            .unwrap();
+        worker.request(&graph, 3, vec![preview]).unwrap();
+        wait(&mut worker);
+        assert!(worker.result(preview).unwrap().is_err());
+        worker.action(&graph, export, "write").unwrap();
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            if worker.poll().into_iter().any(|notice| match notice {
+                Notice::Action(result) => {
+                    result.unwrap();
+                    true
+                }
+                _ => false,
+            }) {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            std::fs::read_to_string(&output).unwrap(),
+            "[3.0, 1.0, 0.0]",
+            "GUI preparation failures do not block independent export actions"
+        );
+        assert!(worker.result(preview).unwrap().is_err());
         std::fs::remove_file(input).unwrap();
         std::fs::remove_file(output).unwrap();
+    }
+
+    mod preparation_probe {
+        use super::*;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        pub static CALLS: AtomicUsize = AtomicUsize::new(0);
+
+        #[derive(drip::Parameters)]
+        pub struct Settings {
+            #[param(ParamKind::Bool { default: true })]
+            fail: bool,
+        }
+
+        #[drip::node(kind = PROBE, id = "test.preparation_cache", category = "test", name = "Preparation cache", outputs = [])]
+        fn probe(_: Settings, (): (), _: &drip::node::EvalContext<'_>) -> Result<(), KernelError>;
+
+        struct ProbeGui;
+        impl crate::node_ui::GuiNode for ProbeGui {
+            type Node = ProbeNode;
+            type Prepared = ();
+            const NODE: &'static drip::node::TypedNode<Self::Node> = &PROBE;
+            const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|settings, (), _| {
+                CALLS.fetch_add(1, Ordering::Relaxed);
+                if settings.fail { Err("preparation failed".into()) } else { Ok(()) }
+            });
+        }
+        #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
+        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<ProbeGui>();
+    }
+
+    #[test]
+    fn preparation_caches_failures_and_success_until_dependencies_change() {
+        use preparation_probe::{CALLS, PROBE};
+        use std::sync::atomic::Ordering;
+
+        let mut graph = Graph::default();
+        let id = graph.add_node(&PROBE);
+        let mut worker = Worker::new(|| {});
+        for _ in 0..2 {
+            worker.request(&graph, 1, vec![id]).unwrap();
+            wait(&mut worker);
+            assert!(
+                matches!(worker.result(id), Some(Err(NodeError::Failed(error))) if error == "preparation failed")
+            );
+        }
+        assert_eq!(CALLS.load(Ordering::Relaxed), 1);
+        graph.set_param(id, "fail", json!(false)).unwrap();
+        worker.request(&graph, 1, vec![id]).unwrap();
+        wait(&mut worker);
+        let first = worker.result(id).unwrap().as_ref().unwrap().as_ref().unwrap().clone();
+        worker.request(&graph, 1, vec![id]).unwrap();
+        wait(&mut worker);
+        let second = worker.result(id).unwrap().as_ref().unwrap().as_ref().unwrap();
+        assert!(Arc::ptr_eq(&first, second));
+        assert_eq!(CALLS.load(Ordering::Relaxed), 2);
+        worker.request(&graph, 2, vec![id]).unwrap();
+        wait(&mut worker);
+        assert_eq!(CALLS.load(Ordering::Relaxed), 3);
+        worker.invalidate().unwrap();
+        worker.request(&graph, 2, vec![id]).unwrap();
+        wait(&mut worker);
+        assert_eq!(CALLS.load(Ordering::Relaxed), 4);
     }
 
     #[test]
@@ -736,19 +840,13 @@ mod tests {
         static PANIC: NodeKind =
             NodeKind::new::<PanicKernel>("test.panic", "test", "panic", &[], &[]);
         struct PanicKernel;
-        impl NodeKernel for PanicKernel {
+        impl NodeDeclaration for PanicKernel {
             type Parameters = ();
-            type View = ();
             type Inputs = ();
             type Outputs = ();
 
-            fn eval(
-                _: Self::Parameters,
-                (): (),
-                _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-                panic!("test worker failure")
-            }
+            const KERNEL: Option<drip::node::Kernel<Self>> =
+                Some(|_, (), _| panic!("test worker failure"));
         }
 
         let mut graph = Graph::default();

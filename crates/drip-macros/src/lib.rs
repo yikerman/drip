@@ -76,11 +76,23 @@ pub fn interpretation(args: TokenStream, input: TokenStream) -> TokenStream {
 /// Include a locally defined node in the executable's generated catalogue.
 /// Function Rustdoc supplies inspector help; optional `references = [(label, url), ...]`
 /// supplies links. Keep implementation rationale in ordinary comments inside the function.
-/// `Evaluated<Outputs, Presentation>` supplies view metadata from its result type.
+/// Functions return output tuples; a signature ending in `;` declares a consumer without a kernel.
 #[proc_macro_attribute]
 pub fn node(args: TokenStream, input: TokenStream) -> TokenStream {
     if let Ok(function) = syn::parse::<syn::ItemFn>(input.clone()) {
-        return match node_function(args.into(), function) {
+        return match node_function(args.into(), function, false) {
+            Ok(tokens) => tokens.into(),
+            Err(e) => e.into_compile_error().into(),
+        };
+    }
+    if let Ok(declaration) = syn::parse::<syn::ForeignItemFn>(input.clone()) {
+        let function = syn::ItemFn {
+            attrs: declaration.attrs,
+            vis: declaration.vis,
+            sig: declaration.sig,
+            block: Box::new(syn::parse_quote!({})),
+        };
+        return match node_function(args.into(), function, true) {
             Ok(tokens) => tokens.into(),
             Err(e) => e.into_compile_error().into(),
         };
@@ -93,6 +105,37 @@ pub fn node(args: TokenStream, input: TokenStream) -> TokenStream {
         #[::drip::__private::linkme::distributed_slice(::drip::node::NODE_KINDS)]
         #[linkme(crate = ::drip::__private::linkme)]
         static #entry: &'static ::drip::node::NodeKind = &#name;
+    }
+    .into()
+}
+
+/// Discover a concrete GUI implementation beside its `GuiNode` impl.
+/// Runtime adapters belong to drip-gui; this emits only the local binding entry.
+#[proc_macro_attribute]
+pub fn gui_node(args: TokenStream, input: TokenStream) -> TokenStream {
+    if !args.is_empty() {
+        return syn::Error::new(proc_macro2::Span::call_site(), "gui_node takes no options")
+            .into_compile_error()
+            .into();
+    }
+    let item = parse_macro_input!(input as syn::ItemImpl);
+    let syn::Type::Path(path) = &*item.self_ty else {
+        return syn::Error::new_spanned(&item.self_ty, "expected a concrete GUI type")
+            .into_compile_error()
+            .into();
+    };
+    if !item.generics.params.is_empty() {
+        return syn::Error::new_spanned(&item.generics, "GUI discovery requires a concrete type")
+            .into_compile_error()
+            .into();
+    }
+    let ty = &item.self_ty;
+    let name = &path.path.segments.last().expect("type path").ident;
+    let entry = format_ident!("__DRIP_GUI_{}", name.to_string().to_uppercase());
+    quote! {
+        #item
+        #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
+        static #entry: crate::node_ui::Binding = crate::node_ui::Binding::new::<#ty>();
     }
     .into()
 }
@@ -298,6 +341,7 @@ fn type_arguments<'a>(ty: &'a syn::Type, wrapper: &str) -> syn::Result<Vec<&'a s
 fn node_function(
     args: proc_macro2::TokenStream,
     function: syn::ItemFn,
+    declaration: bool,
 ) -> syn::Result<proc_macro2::TokenStream> {
     use syn::parse::Parser;
     let meta = syn::punctuated::Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated
@@ -364,29 +408,24 @@ fn node_function(
     let syn::ReturnType::Type(_, return_type) = &function.sig.output else {
         return Err(syn::Error::new_spanned(
             &function.sig,
-            "expected Result<Evaluated<Outputs>, KernelError>",
+            "expected Result<Outputs, KernelError>",
         ));
     };
     let result = type_arguments(return_type, "Result")?;
-    let [evaluated, _error] = result.as_slice() else {
-        return Err(syn::Error::new_spanned(
-            return_type,
-            "expected Result<Evaluated<Outputs, Presentation>, KernelError>",
-        ));
-    };
-    let evaluated = type_arguments(evaluated, "Evaluated")?;
-    let (output_types, view_type) = match evaluated.as_slice() {
-        [outputs] => (*outputs, quote!(())),
-        [outputs, view] => (*outputs, quote!(#view)),
-        _ => {
-            return Err(syn::Error::new_spanned(
-                return_type,
-                "expected Evaluated<Outputs> or Evaluated<Outputs, Presentation>",
-            ));
-        }
+    let [output_types, _error] = result.as_slice() else {
+        return Err(syn::Error::new_spanned(return_type, "expected Result<Outputs, KernelError>"));
     };
     let name = &function.sig.ident;
-    let kernel = format_ident!("__DripNode_{}", name);
+    let identity = name
+        .to_string()
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            chars.next().unwrap().to_uppercase().collect::<String>() + chars.as_str()
+        })
+        .collect::<String>();
+    let kernel = format_ident!("{}Node", identity);
     let entry = format_ident!("__DRIP_ENTRY_{}", name.to_string().to_uppercase());
     let docs = documentation(&function.attrs);
     let references = options.get("references").cloned().unwrap_or_else(|| syn::parse_quote!([]));
@@ -396,23 +435,29 @@ fn node_function(
     let checks = callbacks(options.get("checks"))?.into_iter().map(
         |(label, callback)| quote!(::drip::node::TypedCheck { name: #label, check: #callback }),
     );
+    let arg_types = function.sig.inputs.iter().map(|arg| match arg {
+        syn::FnArg::Typed(arg) => &arg.ty,
+        _ => unreachable!("node functions have no receiver"),
+    });
+    let implementation = if declaration {
+        quote! { const _: Option<::drip::node::Kernel<#kernel>> = None::<fn(#(#arg_types),*) -> #return_type>; }
+    } else {
+        quote!(#function)
+    };
+    let callback = if declaration { quote!(None) } else { quote!(Some(#name)) };
     Ok(quote! {
-        #[allow(clippy::type_complexity)]
-        #function
+        #implementation
         #[allow(non_camel_case_types)]
-        struct #kernel;
-        impl ::drip::node::NodeKernel for #kernel {
+        pub struct #kernel;
+        impl ::drip::node::NodeDeclaration for #kernel {
             type Parameters = #params_type;
-            type View = #view_type;
             type Inputs = (#(#inputs,)*);
             type Outputs = #output_types;
             const ACTIONS: &'static [::drip::node::TypedAction<Self>] = &[#(#actions),*];
             const CHECKS: &'static [::drip::node::TypedCheck<Self>] = &[#(#checks),*];
-            fn eval(params: Self::Parameters, inputs: <Self::Inputs as ::drip::ports::InputTuple>::Borrowed<'_>, ctx: &::drip::node::EvalContext<'_>) -> Result<::drip::node::Evaluated<Self::Outputs, Self::View>, ::drip::node::KernelError> {
-                #name(params, inputs, ctx)
-            }
+            const KERNEL: Option<::drip::node::Kernel<Self>> = #callback;
         }
-        pub static #kind: ::drip::node::TypedNode<#params_type> = ::drip::node::TypedNode::new::<#kernel>(#id, #category, #label, &[#(#names),*], &#outputs).documented(#docs).references(&#references);
+        pub static #kind: ::drip::node::TypedNode<#kernel> = ::drip::node::TypedNode::new(#id, #category, #label, &[#(#names),*], &#outputs).documented(#docs).references(&#references);
         #[::drip::__private::linkme::distributed_slice(::drip::node::NODE_KINDS)]
         #[linkme(crate = ::drip::__private::linkme)]
         static #entry: &'static ::drip::node::NodeKind = #kind.kind();

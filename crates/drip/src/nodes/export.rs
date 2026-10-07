@@ -11,7 +11,7 @@ use tiff::encoder::{Compression, DirectoryEncoder, Rational, TiffEncoder, TiffKi
 use tiff::tags::{Tag, Type};
 
 use crate::image::{RawMetadata, Rec2020Rgb, Rgb};
-use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::node::{EvalContext, KernelError};
 use crate::param::ParamKind;
 use crate::ports::MatRef;
 use crate::profile;
@@ -67,10 +67,7 @@ fn tiff(
     _: Export,
     (image, metadata): (MatRef<'_, 3, dyn Rec2020Rgb>, Option<&RawMetadata>),
     _: &EvalContext<'_>,
-) -> Result<Evaluated<()>, KernelError> {
-    let _ = (image, metadata);
-    Ok(Evaluated::default())
-}
+) -> Result<(), KernelError>;
 
 fn export(
     p: Export,

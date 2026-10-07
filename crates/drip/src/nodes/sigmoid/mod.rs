@@ -1,7 +1,7 @@
 //! Creative tone mapping in linear Rec.2020; algorithm settings also serve frontend curve plots.
 
 use crate::image::{Rec2020Mat, Rec2020Rgb, Rgb};
-use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::node::{EvalContext, KernelError};
 use crate::param::ParamKind;
 use crate::ports::MatRef;
 use std::sync::Arc;
@@ -34,11 +34,8 @@ fn sigmoid(
     p: Settings,
     (image,): (MatRef<'_, 3, dyn Rec2020Rgb>,),
     _: &EvalContext<'_>,
-) -> Result<Evaluated<(Arc<Rec2020Mat>,)>, KernelError> {
+) -> Result<(Arc<Rec2020Mat>,), KernelError> {
     let input = image.rgb();
     let pixels = p.curve().process(&input.pixels);
-    Ok(Evaluated {
-        outputs: (Arc::new(Rec2020Mat::from(Arc::new(Rgb { pixels, ..**input }))),),
-        view: (),
-    })
+    Ok((Arc::new(Rec2020Mat::from(Arc::new(Rgb { pixels, ..**input }))),))
 }

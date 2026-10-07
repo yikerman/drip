@@ -770,7 +770,9 @@ dependencies = [
 name = "drip-gui"
 version = "0.1.0-dev"
 dependencies = [
+ "bevy_reflect",
  "drip",
+ "drip-macros",
  "egui",
  "egui-wgpu",
  "egui-winit",
@@ -781,8 +783,10 @@ dependencies = [
  "linkme",
  "log",
  "pollster 1.0.1",
+ "rayon",
  "rfd",
  "serde_json",
+ "tiff",
  "wayland-client",
  "wayland-protocols",
  "wgpu",

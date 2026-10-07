@@ -131,6 +131,8 @@ impl<I: Input> Input for Optional<I> {
     }
 }
 
+/// Output contracts resolve either to a fixed type or to an input's type.
+/// This lets graph edits check downstream compatibility before running kernels.
 #[derive(Debug, Clone, Copy)]
 pub enum OutputType {
     Fixed(TypeDescriptor),
@@ -144,7 +146,17 @@ impl OutputType {
         }
     }
 }
-/// Output with a logical type propagated from a named input position.
+/// New samples retaining the full interpretation of input `INPUT` (zero-based).
+///
+/// This expresses the relationship `RealMat<C, I> -> RealMat<C, I>` when the
+/// input exposes only a capability and its concrete `I` is erased. For example,
+/// exposure accepts any `ScaleInvariant` interpretation; `Preserved<0>` lets the
+/// graph propagate that input's logical type before evaluating the pixels.
+///
+/// Evaluation checks that the output shares the indicated input's interpretation
+/// witness, not merely its Rust type: interpretation values may carry calibration
+/// data. Construct through [`MatRef::preserve`]. The kernel remains responsible
+/// for ensuring the new samples satisfy that interpretation's laws.
 #[derive(Debug, Clone)]
 pub struct Preserved<const INPUT: usize>(Value);
 

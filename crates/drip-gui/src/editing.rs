@@ -120,8 +120,8 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
     }
 
     /// The view of the node's latest result, if it has one.
-    pub fn view(&self) -> Option<&'a PreparedView> {
-        (self.frame.results)(self.id)?.as_ref().ok()?.as_ref()
+    pub fn view(&self) -> Option<&'a dyn PreparedView> {
+        (self.frame.results)(self.id)?.as_ref().ok()?.as_deref()
     }
 
     pub fn set_param(&mut self, name: &str, value: Json) {

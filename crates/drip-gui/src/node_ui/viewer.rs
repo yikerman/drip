@@ -1,6 +1,5 @@
 use super::{NodeView, PAD, Part};
 use crate::editing::{NodeCx, pair};
-use crate::render::node_views;
 use crate::widgets::BUTTON;
 use crate::{theme, widgets};
 use drip::graph::Node;
@@ -35,7 +34,7 @@ impl NodeView for Viewer {
             });
         } else if let Some(view) = node.view() {
             let font = FontId::proportional(theme::SMALL_SIZE);
-            node_views::draw(ui.painter(), rect, ui.id().with("view"), view, &font);
+            view.draw(ui.painter(), rect, ui.id().with("view"), &font);
         }
         // Over the view, so on a backdrop.
         let button = Rect::from_min_size(rect.right_top() - vec2(BUTTON, 0.0), Vec2::splat(BUTTON));
@@ -52,13 +51,7 @@ impl NodeView for Viewer {
 
     fn window(&self, ui: &mut Ui, _name: &'static str, node: &mut NodeCx) {
         if let Some(view) = node.view() {
-            if let node_views::PreparedView::Image(image, interpolation) = view {
-                super::image_view::show(ui, image, *interpolation);
-                return;
-            }
-            let (rect, font) =
-                (ui.available_rect_before_wrap(), FontId::proportional(theme::BODY_SIZE));
-            node_views::draw(ui.painter(), rect, ui.id().with("view"), view, &font);
+            view.window(ui);
         }
     }
 }

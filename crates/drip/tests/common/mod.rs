@@ -6,7 +6,6 @@ use drip::image::{
     Colorimetry, LinearRgb, LinearRgbColorSpace, Linearity, RealMat, Rec2020, Rec2020Mat,
     Rec2020Rgb,
 };
-use drip::ports::MatRef;
 
 // A distinct test-only nominal interpretation with the same RGB capabilities.
 #[drip::interpretation(Rec2020Rgb)]
@@ -26,20 +25,18 @@ impl LinearRgb for TaggedRec2020 {
 impl Rec2020Rgb for TaggedRec2020 {}
 pub type TaggedMat = RealMat<3, TaggedRec2020>;
 
-use drip::node::{EvalContext, KernelError, NodeKernel, TypedAction};
+use drip::node::{KernelError, NodeDeclaration, TypedAction};
 
 use drip::ports::{Read, ReadMat};
-use drip::view::PreviewImage;
 use std::sync::Arc;
 
 use drip::eval::{Evaluator, NodeResult};
 use drip::graph::{NodeId, Port};
 use drip::image::Rgb;
-use drip::node::{Evaluated, NodeKind, Registry};
+use drip::node::{NodeKind, Registry};
 use drip::param::ParamKind;
 use drip::project::Project;
 use drip::value::Value;
-use drip::view::View;
 
 pub fn scene(pixel: [f32; 3]) -> Arc<Rec2020Mat> {
     Arc::new(Rec2020Mat::from(Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![pixel] })))
@@ -57,94 +54,61 @@ struct ConstKernel {
     #[param(ParamKind::Float { min: -10.0, max: 10.0, default: 1.0 })]
     value: f32,
 }
-impl NodeKernel for ConstKernel {
+impl NodeDeclaration for ConstKernel {
     type Parameters = Self;
-    type View = ();
     type Inputs = ();
     type Outputs = (Arc<Rec2020Mat>,);
 
-    fn eval(
-        p: Self::Parameters,
-        (): (),
-        ctx: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-        Ok(Evaluated { outputs: (scene([p.value, ctx.scale() as f32, 0.0]),), view: () })
-    }
+    const KERNEL: Option<drip::node::Kernel<Self>> =
+        Some(|p, (), ctx| Ok((scene([p.value, ctx.scale() as f32, 0.0]),)));
 }
 
 pub static ADD: NodeKind =
     NodeKind::new::<AddKernel>("test.add", "test", "add", &["a", "b"], &["sum"]);
 struct AddKernel;
-impl NodeKernel for AddKernel {
+impl NodeDeclaration for AddKernel {
     type Parameters = ();
-    type View = ();
     type Inputs = (Read<Rec2020Mat>, Read<Rec2020Mat>);
     type Outputs = (Arc<Rec2020Mat>,);
 
-    fn eval(
-        _: Self::Parameters,
-        (input0, input1): (&Rec2020Mat, &Rec2020Mat),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+    const KERNEL: Option<drip::node::Kernel<Self>> = Some(|_, (input0, input1), _| {
         let (a, b) = (input0.rgb().pixels[0], input1.rgb().pixels[0]);
-        Ok(Evaluated { outputs: (scene([a[0] + b[0], a[1] + b[1], a[2] + b[2]]),), view: () })
-    }
+        Ok((scene([a[0] + b[0], a[1] + b[1], a[2] + b[2]]),))
+    });
 }
 
 /// Identity producing a distinct nominal interpretation for exact-port tests.
 pub static TONEMAP: NodeKind =
     NodeKind::new::<TonemapKernel>("test.tonemap", "test", "tonemap", &["scene"], &["display"]);
 struct TonemapKernel;
-impl NodeKernel for TonemapKernel {
+impl NodeDeclaration for TonemapKernel {
     type Parameters = ();
-    type View = ();
     type Inputs = (Read<Rec2020Mat>,);
     type Outputs = (Arc<TaggedMat>,);
 
-    fn eval(
-        _: Self::Parameters,
-        (input0,): (&Rec2020Mat,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-        Ok(Evaluated { outputs: (Arc::new(TaggedMat::from(input0.rgb().clone())),), view: () })
-    }
+    const KERNEL: Option<drip::node::Kernel<Self>> =
+        Some(|_, (input0,), _| Ok((Arc::new(TaggedMat::from(input0.rgb().clone())),)));
 }
 
 pub static FAIL: NodeKind =
     NodeKind::new::<FailKernel>("test.fail", "test", "fail", &["image"], &["image"]);
 struct FailKernel;
-impl NodeKernel for FailKernel {
+impl NodeDeclaration for FailKernel {
     type Parameters = ();
-    type View = ();
     type Inputs = (Read<Rec2020Mat>,);
     type Outputs = (Arc<Rec2020Mat>,);
 
-    fn eval(
-        _: Self::Parameters,
-        _: (&Rec2020Mat,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-        Err("boom".into())
-    }
+    const KERNEL: Option<drip::node::Kernel<Self>> = Some(|_, _, _| Err("boom".into()));
 }
 
 /// A UI-only node: no outputs, presents its input.
-pub static VIEW: NodeKind =
-    NodeKind::new::<ViewKernel>("test.view", "test", "view", &["image"], &[]);
-struct ViewKernel;
-impl NodeKernel for ViewKernel {
+pub static VIEW: drip::node::TypedNode<ViewKernel> =
+    drip::node::TypedNode::new("test.view", "test", "view", &["image"], &[]);
+pub struct ViewKernel;
+impl NodeDeclaration for ViewKernel {
     type Parameters = ();
-    type View = Option<View>;
     type Inputs = (ReadMat<3, dyn Rec2020Rgb>,);
     type Outputs = ();
-
-    fn eval(
-        _: Self::Parameters,
-        (input0,): (MatRef<'_, 3, dyn Rec2020Rgb>,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-        Ok(Evaluated { outputs: (), view: Some(View::Image(PreviewImage::from_input(&input0))) })
-    }
 }
 
 /// A sink whose `write` action stores its input pixel at `path`.
@@ -156,9 +120,8 @@ struct WriteKernel {
     #[external]
     path: Option<std::path::PathBuf>,
 }
-impl NodeKernel for WriteKernel {
+impl NodeDeclaration for WriteKernel {
     type Parameters = Self;
-    type View = ();
     type Inputs = (Read<TaggedMat>,);
     type Outputs = ();
     const ACTIONS: &'static [TypedAction<Self>] = &[TypedAction {
@@ -169,13 +132,6 @@ impl NodeKernel for WriteKernel {
                 .map_err(|e| KernelError::Failed(e.to_string()))
         },
     }];
-    fn eval(
-        _: Self::Parameters,
-        _: (&TaggedMat,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-        Ok(Evaluated::default())
-    }
 }
 
 /// Multiplies its input by `gain`.
@@ -186,20 +142,15 @@ struct GainKernel {
     #[param(ParamKind::Float { min: 0.0, max: 10.0, default: 1.0 })]
     gain: f32,
 }
-impl NodeKernel for GainKernel {
+impl NodeDeclaration for GainKernel {
     type Parameters = Self;
-    type View = ();
     type Inputs = (Read<Rec2020Mat>,);
     type Outputs = (Arc<Rec2020Mat>,);
 
-    fn eval(
-        p: Self::Parameters,
-        (input0,): (&Rec2020Mat,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+    const KERNEL: Option<drip::node::Kernel<Self>> = Some(|p, (input0,), _| {
         let g = p.gain;
-        Ok(Evaluated { outputs: (scene(input0.rgb().pixels[0].map(|c| c * g)),), view: () })
-    }
+        Ok((scene(input0.rgb().pixels[0].map(|c| c * g)),))
+    });
 }
 
 /// Outputs the length of the file at `path`, read through the resource store.
@@ -210,26 +161,21 @@ struct FileKernel {
     #[param(ParamKind::Path { output: false })]
     path: Option<std::path::PathBuf>,
 }
-impl NodeKernel for FileKernel {
+impl NodeDeclaration for FileKernel {
     type Parameters = Self;
-    type View = ();
     type Inputs = ();
     type Outputs = (Arc<Rec2020Mat>,);
 
-    fn eval(
-        p: Self::Parameters,
-        (): (),
-        ctx: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+    const KERNEL: Option<drip::node::Kernel<Self>> = Some(|p, (), ctx| {
         let len = ctx.resources().load(p.path.as_deref().ok_or("no path set")?, |path| {
             std::fs::read(path).map(|bytes| bytes.len()).map_err(|e| e.to_string())
         })?;
-        Ok(Evaluated { outputs: (scene([*len as f32, 0.0, 0.0]),), view: () })
-    }
+        Ok((scene([*len as f32, 0.0, 0.0]),))
+    });
 }
 
 pub fn registry() -> Registry {
-    [&CONST, &ADD, &TONEMAP, &FAIL, &VIEW, &WRITE, &GAIN, &FILE]
+    [&CONST, &ADD, &TONEMAP, &FAIL, VIEW.kind(), &WRITE, &GAIN, &FILE]
         .into_iter()
         .fold(Registry::default(), Registry::with)
 }
@@ -248,5 +194,5 @@ pub fn eval<'a>(evaluator: &'a mut Evaluator, project: &Project, id: NodeId) -> 
 }
 
 pub fn output(result: &NodeResult) -> [f32; 3] {
-    pixel(&result.as_ref().unwrap().outputs[0])
+    pixel(&result.as_ref().unwrap()[0])
 }

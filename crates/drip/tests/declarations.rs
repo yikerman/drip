@@ -3,7 +3,7 @@ use bevy_reflect::Reflect;
 use drip::eval::{Evaluator, NodeError};
 use drip::graph::{Graph, Port};
 use drip::image::{Linearity, RawMat, RealMat};
-use drip::node::{EvalContext, Evaluated, KernelError};
+use drip::node::{EvalContext, KernelError};
 use drip::param::{ParamKind, Parameters as _};
 use drip::ports::{MatRef, Preserved};
 use drip::{Parameters, capability, interpretation, node};
@@ -13,12 +13,12 @@ use std::sync::{
 };
 
 #[capability]
-trait Measured: Linearity {
+pub trait Measured: Linearity {
     fn unit(&self) -> u32;
 }
 #[interpretation(Measured)]
 #[derive(Debug, Reflect)]
-struct Measurement {
+pub struct Measurement {
     unit: u32,
 }
 impl Linearity for Measurement {}
@@ -48,12 +48,12 @@ fn source(
     p: Source,
     (): (),
     _: &EvalContext<'_>,
-) -> Result<Evaluated<(Arc<RealMat<1, Measurement>>,)>, KernelError> {
+) -> Result<(Arc<RealMat<1, Measurement>>,), KernelError> {
     let width = p.geometry.width as usize;
-    Ok(Evaluated::new((Arc::new(RealMat::new(
+    Ok((Arc::new(RealMat::new(
         Arc::new(RawMat { width, height: 1, scale: 1, pixels: vec![[1.0]; width] }),
         Measurement { unit: p.unit as u32 },
-    )),)))
+    )),))
 }
 
 fn compatible(
@@ -87,11 +87,11 @@ fn sum(
     _: (),
     (a, b): (MatRef<'_, 1, dyn Measured>, MatRef<'_, 1, dyn Measured>),
     _: &EvalContext<'_>,
-) -> Result<Evaluated<(Preserved<0>,)>, KernelError> {
+) -> Result<(Preserved<0>,), KernelError> {
     EVALUATIONS.fetch_add(1, Ordering::Relaxed);
     let pixels =
         a.buffer().pixels.iter().zip(&b.buffer().pixels).map(|(a, b)| [a[0] + b[0]]).collect();
-    Ok(Evaluated::new((a.preserve::<0>(pixels),)))
+    Ok((a.preserve::<0>(pixels),))
 }
 
 #[test]
@@ -125,10 +125,7 @@ fn runtime_relationships_gate_both_evaluation_and_actions_and_recheck_edits() {
     graph.set_param(b, "width", 2.into()).unwrap();
     eval.evaluate(&graph, 0, &[sum]);
     let result = eval.result(sum).unwrap().as_ref().unwrap();
-    assert_eq!(
-        result.outputs[0].downcast_ref::<RealMat<1, Measurement>>().unwrap().samples(),
-        &[2.0, 2.0]
-    );
+    assert_eq!(result[0].downcast_ref::<RealMat<1, Measurement>>().unwrap().samples(), &[2.0, 2.0]);
     assert_eq!(EVALUATIONS.load(Ordering::Relaxed), 1);
     eval.fork().run_action(&graph, sum, "record").unwrap();
     assert_eq!(ACTIONS.load(Ordering::Relaxed), 1);
@@ -152,9 +149,9 @@ fn wrong_source(
     _: (),
     (a, b): (MatRef<'_, 1, dyn Measured>, MatRef<'_, 1, dyn Measured>),
     _: &EvalContext<'_>,
-) -> Result<Evaluated<(Preserved<0>,)>, KernelError> {
+) -> Result<(Preserved<0>,), KernelError> {
     let _ = a;
-    Ok(Evaluated::new((b.preserve::<0>(b.buffer().pixels.clone()),)))
+    Ok((b.preserve::<0>(b.buffer().pixels.clone()),))
 }
 #[test]
 fn preservation_checks_the_actual_input_witness_even_for_the_same_nominal_type() {
@@ -172,23 +169,158 @@ fn preservation_checks_the_actual_input_witness_even_for_the_same_nominal_type()
     );
 }
 
-#[node(kind = OPTIONAL_VIEW, id = "contract.optional_view", category = "test", name = "Optional view", outputs = [])]
-fn optional_view(
+#[node(kind = OBSERVER, id = "contract.observer", category = "test", name = "Observer", outputs = [])]
+fn observer(
     _: (),
-    (): (),
+    (samples,): (MatRef<'_, 1, dyn Measured>,),
     _: &EvalContext<'_>,
-) -> Result<Evaluated<(), Option<drip::view::PreviewImage>>, KernelError> {
-    Ok(Evaluated::view(None))
+) -> Result<(), KernelError>;
+
+#[test]
+fn declaration_only_nodes_provide_validated_inputs_without_computation() {
+    let mut graph = Graph::default();
+    let source = graph.add_node(&SOURCE);
+    let observer = graph.add_node(&OBSERVER);
+    graph.connect(Port(source, "samples".into()), Port(observer, "samples".into())).unwrap();
+    let mut evaluator = Evaluator::default();
+    let samples = evaluator
+        .with_inputs(&graph, observer, 0, &OBSERVER, |_, (samples,), _| {
+            Ok(samples.buffer().pixels.clone())
+        })
+        .unwrap();
+    assert_eq!(samples, vec![[1.0], [1.0]]);
+    assert!(evaluator.result(observer).is_none());
 }
 
 #[test]
-fn presentation_availability_follows_the_return_type_even_without_data() {
-    assert!(!SOURCE.has_view());
-    assert!(drip::nodes::PREVIEW.has_view());
-    assert!(OPTIONAL_VIEW.has_view());
+fn input_consumers_reject_a_different_declaration() {
     let mut graph = Graph::default();
-    let id = graph.add_node(&OPTIONAL_VIEW);
+    let source = graph.add_node(&SOURCE);
     let mut evaluator = Evaluator::default();
-    evaluator.evaluate(&graph, 0, &[id]);
-    assert!(evaluator.result(id).unwrap().as_ref().unwrap().view.is_none());
+    let error = evaluator.with_inputs(&graph, source, 0, &OBSERVER, |_, _, _| Ok(())).unwrap_err();
+    assert!(
+        matches!(error, NodeError::Failed(message) if message.contains("different node declaration"))
+    );
+}
+
+#[test]
+fn consumer_failures_leave_computational_results_reusable() {
+    let mut graph = Graph::default();
+    let source = graph.add_node(&SOURCE);
+    let observer = graph.add_node(&OBSERVER);
+    graph.connect(Port(source, "samples".into()), Port(observer, "samples".into())).unwrap();
+    let mut evaluator = Evaluator::default();
+    let result = evaluator.with_inputs(&graph, observer, 0, &OBSERVER, |_, _, _| {
+        Err::<(), _>(KernelError::Failed("consumer failed".into()))
+    });
+    assert_eq!(result, Err(NodeError::Failed("consumer failed".into())));
+    assert!(evaluator.result(source).unwrap().is_ok());
+    assert!(evaluator.result(observer).is_none());
+    let revision = evaluator.revision(source);
+    evaluator.with_inputs(&graph, observer, 0, &OBSERVER, |_, _, _| Ok(())).unwrap();
+    assert_eq!(evaluator.revision(source), revision);
+}
+
+#[test]
+#[should_panic(expected = "outputs require a kernel")]
+fn declarations_cannot_advertise_outputs_without_a_kernel() {
+    struct NoKernel;
+    impl drip::node::NodeDeclaration for NoKernel {
+        type Parameters = ();
+        type Inputs = ();
+        type Outputs = (Arc<RealMat<1, Measurement>>,);
+    }
+    let _ =
+        drip::node::NodeKind::new::<NoKernel>("test.invalid", "test", "Invalid", &[], &["samples"]);
+}
+
+mod observed_kernel {
+    use super::*;
+
+    static CHECKS: AtomicUsize = AtomicUsize::new(0);
+    static KERNEL_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    #[derive(Parameters)]
+    pub struct Settings {
+        #[param(ParamKind::Bool { default: true })]
+        fail: bool,
+    }
+
+    fn check(
+        _: Settings,
+        inputs: (MatRef<'_, 1, dyn Measured>, MatRef<'_, 1, dyn Measured>),
+        ctx: &EvalContext<'_>,
+    ) -> Result<(), String> {
+        CHECKS.fetch_add(1, Ordering::Relaxed);
+        compatible((), inputs, ctx)
+    }
+
+    #[node(kind = PROBE, id = "contract.observed_kernel", category = "test", name = "Observed kernel", outputs = ["samples"], checks = [("matching geometry and units", check)])]
+    fn probe(
+        settings: Settings,
+        (a, b): (MatRef<'_, 1, dyn Measured>, MatRef<'_, 1, dyn Measured>),
+        _: &EvalContext<'_>,
+    ) -> Result<(Preserved<0>,), KernelError> {
+        KERNEL_CALLS.fetch_add(1, Ordering::Relaxed);
+        let _ = b;
+        if settings.fail {
+            return Err("kernel failed".into());
+        }
+        Ok((a.preserve::<0>(a.buffer().pixels.clone()),))
+    }
+
+    #[test]
+    fn input_observation_skips_the_kernel_and_reuses_successful_contract_checks() {
+        let mut graph = Graph::default();
+        let a = graph.add_node(&SOURCE);
+        let b = graph.add_node(&SOURCE);
+        let probe = graph.add_node(&PROBE);
+        graph.connect(Port(a, "samples".into()), Port(probe, "a".into())).unwrap();
+        graph.connect(Port(b, "samples".into()), Port(probe, "b".into())).unwrap();
+        let mut evaluator = Evaluator::default();
+        evaluator
+            .with_inputs(&graph, probe, 0, &PROBE, |_, (a, _), _| {
+                assert_eq!(a.buffer().pixels, vec![[1.0], [1.0]]);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(CHECKS.load(Ordering::Relaxed), 1);
+        assert_eq!(KERNEL_CALLS.load(Ordering::Relaxed), 0);
+        assert!(evaluator.result(probe).is_none());
+
+        evaluator.evaluate(&graph, 0, &[probe]);
+        assert!(
+            matches!(evaluator.result(probe), Some(Err(NodeError::Failed(error))) if error == "kernel failed")
+        );
+        evaluator.with_inputs(&graph, probe, 0, &PROBE, |_, _, _| Ok(())).unwrap();
+        assert_eq!(
+            KERNEL_CALLS.load(Ordering::Relaxed),
+            1,
+            "a cached kernel failure neither blocks input observation nor reruns the kernel"
+        );
+        assert!(evaluator.result(probe).unwrap().is_err());
+
+        graph.set_param(probe, "fail", false.into()).unwrap();
+        evaluator.evaluate(&graph, 0, &[probe]);
+        let checks = CHECKS.load(Ordering::Relaxed);
+        assert!(evaluator.result(probe).unwrap().is_ok());
+        evaluator.with_inputs(&graph, probe, 0, &PROBE, |_, _, _| Ok(())).unwrap();
+        assert_eq!(
+            CHECKS.load(Ordering::Relaxed),
+            checks,
+            "the current successful evaluation already checked this input contract"
+        );
+        assert_eq!(KERNEL_CALLS.load(Ordering::Relaxed), 2);
+
+        graph.set_param(b, "unit", 1.into()).unwrap();
+        let result =
+            evaluator.with_inputs(&graph, probe, 0, &PROBE, |_, _, _| -> Result<(), KernelError> {
+                panic!("incompatible inputs must not reach the consumer")
+            });
+        assert!(
+            matches!(result, Err(NodeError::Constraint(error)) if error.detail == "measurement units differ")
+        );
+        assert_eq!(CHECKS.load(Ordering::Relaxed), checks + 1);
+        assert_eq!(KERNEL_CALLS.load(Ordering::Relaxed), 2);
+    }
 }

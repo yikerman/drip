@@ -33,7 +33,7 @@ pub fn focus_name(ctx: &egui::Context, id: drip::graph::NodeId) {
 
 pub fn controls(ui: &mut Ui, cx: &mut NodeCx) {
     let kind = cx.node().kind;
-    crate::node_ui::of(kind).controls.show(ui, cx);
+    crate::node_ui::of(kind).controls(ui, cx);
     for action in kind.actions() {
         if ui.add_enabled(!cx.action_running(), egui::Button::new(action.name)).clicked() {
             cx.run(action.name);

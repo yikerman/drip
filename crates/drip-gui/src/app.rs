@@ -278,7 +278,10 @@ impl App {
                 ui.label(RichText::new("previews clipped to sRGB").color(theme::ERROR));
             }
             if self.worker.busy() {
-                ui.label("evaluating…");
+                let label = ui.label("evaluating…");
+                if self.worker.showing_previous() {
+                    label.on_hover_text("Views retain the previous completed evaluation while the current request runs.");
+                }
             }
             if let Some(action) = self.action {
                 ui.label(format!("running {action}…"));
@@ -386,11 +389,11 @@ impl App {
 #[cfg(test)]
 mod tests {
     use drip::image::Rec2020Mat;
-    use drip::node::{EvalContext, KernelError, NodeKernel};
+    use drip::node::{EvalContext, KernelError, NodeDeclaration};
 
-    use drip::view::PreviewImage;
+    use crate::node_ui::{preview::PreviewImage, scopes::Histogram};
 
-    use crate::render::node_views::PreparedView as View;
+    use crate::render::node_views::ImageView;
     use drip::param::ParamKind;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
@@ -519,19 +522,34 @@ mod tests {
             assert!(has_view(app, name), "{name}");
         }
         let id = app.project.graph.find("Preview").unwrap();
-        let Some(View::Image(image, _)) = app.worker.result(id).unwrap().as_ref().unwrap().clone()
-        else {
-            panic!("an image")
-        };
+        let image = app
+            .worker
+            .result(id)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .downcast_ref::<ImageView>()
+            .unwrap()
+            .image
+            .clone();
         assert_eq!(app.level, DEFAULT_LEVEL);
         assert_eq!(image.width, 3984, "1/2 preview with full-size RCD");
         h.get_by_label("Invalidate cache").click();
         settle(&mut h);
-        let Some(View::Image(refreshed, _)) =
-            h.state().worker.result(id).unwrap().as_ref().unwrap()
-        else {
-            panic!("an image")
-        };
+        let refreshed = &h
+            .state()
+            .worker
+            .result(id)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .downcast_ref::<ImageView>()
+            .unwrap()
+            .image;
         assert!(!std::sync::Arc::ptr_eq(&image, refreshed));
         assert_eq!(image.texels, refreshed.texels);
         h.get_by_label("Preview detail").click();
@@ -540,16 +558,29 @@ mod tests {
         settle(&mut h);
         assert_eq!(h.state().level, 2);
         let app = h.state();
-        let Some(View::Image(image, _)) = app.worker.result(id).unwrap().as_ref().unwrap() else {
-            panic!("an image")
-        };
+        let image = &app
+            .worker
+            .result(id)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .downcast_ref::<ImageView>()
+            .unwrap()
+            .image;
         assert_eq!(image.width, 1992);
         let histogram = app.project.graph.find("Histogram").unwrap();
-        let Some(View::Histogram(histogram)) =
-            app.worker.result(histogram).unwrap().as_ref().unwrap()
-        else {
-            panic!("a histogram")
-        };
+        let histogram = app
+            .worker
+            .result(histogram)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .downcast_ref::<Histogram>()
+            .unwrap();
         assert_eq!(
             histogram.counts.iter().map(|bin| bin[0] as usize).sum::<usize>(),
             image.width * image.height
@@ -574,7 +605,7 @@ mod tests {
 
     #[test]
     fn evaluation_is_independent_of_node_positions() {
-        use drip::node::{Evaluated, NodeKind};
+        use drip::node::NodeKind;
 
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -587,20 +618,16 @@ mod tests {
             #[param(ParamKind::Bool { default: false })]
             value: bool,
         }
-        impl NodeKernel for OffscreenKernel {
+        impl NodeDeclaration for OffscreenKernel {
             type Parameters = Self;
-            type View = ();
             type Inputs = ();
             type Outputs = ();
 
-            fn eval(
-                Self { value: _value }: Self::Parameters,
-                (): (),
-                _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-                CALLS.fetch_add(1, Ordering::SeqCst);
-                Ok(Evaluated::default())
-            }
+            const KERNEL: Option<drip::node::Kernel<Self>> =
+                Some(|Self { value: _value }: Self::Parameters, (): (), _: &EvalContext<'_>| {
+                    CALLS.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                });
         }
 
         let mut project = Project::default();
@@ -633,42 +660,44 @@ mod tests {
     #[test]
     fn evaluating_message_keeps_the_ui_and_previous_preview_available() {
         use drip::image::Rgb;
-        use drip::node::{Evaluated, NodeKind};
 
         use std::sync::{Arc, Mutex, mpsc};
         use std::time::{Duration, Instant};
         static GATE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
-        static SLOW: NodeKind = NodeKind::new::<SlowKernel>("test.slow", "test", "slow", &[], &[]);
+        static SLOW: drip::node::TypedNode<SlowKernel> =
+            drip::node::TypedNode::new("test.slow", "test", "slow", &[], &[]);
         #[derive(drip::Parameters)]
         struct SlowKernel {
             #[param(ParamKind::Bool { default: false })]
             block: bool,
         }
-        impl NodeKernel for SlowKernel {
+        impl NodeDeclaration for SlowKernel {
             type Parameters = Self;
-            type View = Option<drip::view::View>;
             type Inputs = ();
             type Outputs = ();
-
-            fn eval(
-                p: Self::Parameters,
-                (): (),
-                _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+        }
+        struct SlowGui;
+        impl crate::node_ui::GuiNode for SlowGui {
+            type Node = SlowKernel;
+            type Prepared = PreviewImage;
+            const NODE: &'static drip::node::TypedNode<Self::Node> = &SLOW;
+            const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|p, (), _| {
                 if p.block {
                     let gate = GATE.lock().unwrap();
                     let (started, release) = gate.as_ref().unwrap();
                     started.send(()).unwrap();
                     release.recv_timeout(Duration::from_secs(5)).unwrap();
                 }
-                Ok(Evaluated {
-                    outputs: (),
-                    view: Some(drip::view::View::Image(PreviewImage::new(&Rec2020Mat::from(
-                        Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[0.5; 3]] }),
-                    )))),
-                })
-            }
+                Ok(PreviewImage::new(&Rec2020Mat::from(Arc::new(Rgb {
+                    width: 1,
+                    height: 1,
+                    scale: 1,
+                    pixels: vec![[0.5; 3]],
+                }))))
+            });
         }
+        #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
+        static SLOW_UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<SlowGui>();
 
         let (started, entered) = mpsc::channel();
         let (release, resume) = mpsc::channel();
@@ -679,10 +708,18 @@ mod tests {
         app.set_project(project, None).unwrap();
         let mut h = harness(app);
         settle(&mut h);
-        let Some(View::Image(before, _)) = h.state().worker.result(id).unwrap().as_ref().unwrap()
-        else {
-            panic!("image")
-        };
+        let before = &h
+            .state()
+            .worker
+            .result(id)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .downcast_ref::<ImageView>()
+            .unwrap()
+            .image;
         let before = before.clone();
         set_param(&mut h, id, "block", json!(true));
         h.step();
@@ -690,10 +727,18 @@ mod tests {
         let start = Instant::now();
         h.step();
         assert!(h.query_by_label("evaluating…").is_some());
-        let Some(View::Image(shown, _)) = h.state().worker.result(id).unwrap().as_ref().unwrap()
-        else {
-            panic!("previous image")
-        };
+        let shown = &h
+            .state()
+            .worker
+            .result(id)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .downcast_ref::<ImageView>()
+            .unwrap()
+            .image;
         assert!(Arc::ptr_eq(shown, &before));
         h.get_by_label("Preview detail").click();
         h.run();
@@ -798,23 +843,22 @@ mod tests {
     #[test]
     fn undocumented_nodes_show_generated_port_help() {
         use drip::image::LinearRgb;
-        use drip::node::{Evaluated, NodeKind};
+        use drip::node::NodeKind;
         use drip::ports::{MatRef, Preserved, ReadMat};
         static GENERIC: NodeKind =
             NodeKind::new::<Generic>("test.generic", "test", "generic", &["image"], &["image"]);
         struct Generic;
-        impl NodeKernel for Generic {
+        impl NodeDeclaration for Generic {
             type Parameters = ();
-            type View = ();
             type Inputs = (ReadMat<3, dyn LinearRgb>,);
             type Outputs = (Preserved<0>,);
-            fn eval(
-                _: Self::Parameters,
-                (image,): (MatRef<'_, 3, dyn LinearRgb>,),
-                _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
-                Ok(Evaluated::new((image.preserve::<0>(image.rgb().pixels.clone()),)))
-            }
+            const KERNEL: Option<drip::node::Kernel<Self>> = Some(
+                |_: Self::Parameters,
+                 (image,): (MatRef<'_, 3, dyn LinearRgb>,),
+                 _: &EvalContext<'_>| {
+                    Ok((image.preserve::<0>(image.rgb().pixels.clone()),))
+                },
+            );
         }
 
         let mut project = Project::default();
@@ -840,8 +884,11 @@ mod tests {
         let histogram = graph.find("Histogram").unwrap();
         let with_params: Vec<_> =
             graph.nodes().filter(|(_, n)| !n.kind.params.is_empty()).map(|(id, _)| id).collect();
-        let viewers: Vec<_> =
-            graph.nodes().filter(|(_, n)| n.kind.has_view()).map(|(id, _)| id).collect();
+        let viewers: Vec<_> = graph
+            .nodes()
+            .filter(|(_, n)| crate::node_ui::binding(n.kind).is_some_and(|b| b.has_preparation()))
+            .map(|(id, _)| id)
+            .collect();
         assert_eq!(h.get_all_by_label("⚙").count(), with_params.len());
         assert_eq!(h.get_all_by_label("🗗").count(), viewers.len());
         // AccessKit bounds ignore the canvas transform, so clicks go by action.
@@ -889,15 +936,19 @@ mod tests {
     }
 
     #[test]
-    fn new_view_node_gets_a_popout_before_evaluation_without_a_gui_binding() {
+    fn declared_gui_view_gets_a_popout_before_preparation_succeeds() {
         #[drip::node(kind = VIEW, id = "test.declared_view", category = "test", name = "Declared view", outputs = [])]
-        fn view(
-            _: (),
-            (): (),
-            _: &EvalContext<'_>,
-        ) -> Result<drip::node::Evaluated<(), drip::view::View>, KernelError> {
-            Err(KernelError::Incomplete("no view yet"))
+        fn view(_: (), (): (), _: &EvalContext<'_>) -> Result<(), KernelError>;
+        struct TestGui;
+        impl crate::node_ui::GuiNode for TestGui {
+            type Node = ViewNode;
+            type Prepared = PreviewImage;
+            const NODE: &'static drip::node::TypedNode<Self::Node> = &VIEW;
+            const PREPARE: Option<crate::node_ui::Prepare<Self>> =
+                Some(|_, (), _| Err(KernelError::Incomplete("no view yet")));
         }
+        #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
+        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<TestGui>();
         let mut project = Project::default();
         let id = project.graph.add_node(&VIEW);
         let mut app = App::new(None, true, || {});
@@ -920,27 +971,31 @@ mod tests {
             enabled: bool,
         }
         #[drip::node(kind = VIEW, id = "test.custom_controls_view", category = "test", name = "Custom controls view", outputs = [])]
-        fn view(
-            _: Settings,
-            (): (),
-            _: &EvalContext<'_>,
-        ) -> Result<drip::node::Evaluated<(), drip::view::View>, KernelError> {
-            Err(KernelError::Incomplete("no view yet"))
-        }
+        fn view(_: Settings, (): (), _: &EvalContext<'_>) -> Result<(), KernelError>;
         fn controls(
             ui: &mut egui::Ui,
-            cx: &mut crate::node_ui::ControlCx<'_, '_, '_, '_, Settings>,
+            cx: &mut crate::node_ui::ControlCx<'_, '_, '_, '_, ViewNode>,
         ) {
             cx.schema(ui);
             ui.label("Custom view controls");
             ui.label(format!("Typed enabled: {}", cx.parameters().enabled));
         }
+        struct TestGui;
+        impl crate::node_ui::GuiNode for TestGui {
+            type Node = ViewNode;
+            type Prepared = PreviewImage;
+            const NODE: &'static drip::node::TypedNode<Self::Node> = &VIEW;
+            const PREPARE: Option<crate::node_ui::Prepare<Self>> =
+                Some(|_, (), _| Err(KernelError::Incomplete("no view yet")));
+            fn controls(
+                ui: &mut egui::Ui,
+                cx: &mut crate::node_ui::ControlCx<'_, '_, '_, '_, Self::Node>,
+            ) {
+                controls(ui, cx);
+            }
+        }
         #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
-        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new(
-            &VIEW,
-            Some(&crate::node_ui::Controls::new(controls)),
-            None,
-        );
+        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<TestGui>();
         let mut project = Project::default();
         let id = project.graph.add_node(&VIEW);
         let mut app = App::new(None, true, || {});

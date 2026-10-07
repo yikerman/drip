@@ -2,7 +2,7 @@
 //! interpolation, after sensor-space processing such as highlight reconstruction.
 
 use crate::image::{CameraRgb, Mosaic, Rgb};
-use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::node::{EvalContext, KernelError};
 use std::sync::Arc;
 mod bin2x2;
 mod rcd;
@@ -17,14 +17,14 @@ fn rcd(
     _: (),
     (mosaic,): (&Mosaic,),
     ctx: &EvalContext<'_>,
-) -> Result<Evaluated<(Arc<CameraRgb>,)>, KernelError> {
+) -> Result<(Arc<CameraRgb>,), KernelError> {
     let mosaic = preview(mosaic, ctx);
     let pixels = rcd::process(&mosaic);
     let image = Rgb { width: mosaic.width, height: mosaic.height, scale: mosaic.scale, pixels };
-    Ok(Evaluated::new((Arc::new(CameraRgb {
+    Ok((Arc::new(CameraRgb {
         data: Arc::new(image),
         interpretation: mosaic.interpretation().camera.clone(),
-    }),)))
+    }),))
 }
 
 /// Borrow full detail, allocate only when a lower-resolution mosaic is needed.

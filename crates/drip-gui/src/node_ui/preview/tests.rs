@@ -1,9 +1,11 @@
 use super::*;
-use crate::color::{self, D65, REC709, REC2020};
-use crate::graph::Graph;
-use crate::image::Rec2020Mat;
-use crate::ports::ReadMat;
-use crate::project::Project;
+use drip::color::{self, D65, REC709, REC2020};
+use drip::graph::Graph;
+use drip::image::Rec2020Mat;
+use drip::nodes::preview::PREVIEW;
+use drip::ports::ReadMat;
+use drip::project::Project;
+use lcms2::{Intent, PixelFormat, Profile, Transform};
 use serde_json::json;
 
 fn preview(image: &Rec2020Mat, params: serde_json::Value) -> Result<PreviewImage, KernelError> {
@@ -12,14 +14,14 @@ fn preview(image: &Rec2020Mat, params: serde_json::Value) -> Result<PreviewImage
     for (name, value) in params.as_object().unwrap() {
         graph.set_param(id, name, value.clone()).unwrap();
     }
-    let context = EvalContext { level: 0, resources: &Default::default() };
-    let value = crate::value::Value::new(Arc::new(image.clone()));
+    let resources = Default::default();
+    let context = EvalContext::new(0, &resources).unwrap();
+    let value = drip::value::Value::new(Arc::new(image.clone()));
     let image = value.borrow::<ReadMat<3, dyn Rec2020Rgb>>().unwrap();
-    let params = <Preview as crate::param::Parameters>::read(crate::param::Params::validated(
+    let params = <Preview as drip::param::Parameters>::read(drip::param::Params::validated(
         &graph.node(id).unwrap().params,
     ));
-    let result = super::preview(params, (image,), &context)?;
-    Ok(result.view)
+    super::prepare(params, (image,), &context)
 }
 
 fn image(pixels: Vec<[f32; 3]>) -> Arc<Rgb> {
@@ -211,6 +213,6 @@ fn proof_settings_round_trip_as_ordinary_node_parameters() {
     ] {
         project.graph.set_param(id, name, value).unwrap();
     }
-    let loaded = Project::from_json(&project.to_json(), &crate::nodes::registry()).unwrap();
+    let loaded = Project::from_json(&project.to_json(), &drip::nodes::registry()).unwrap();
     assert_eq!(loaded, project);
 }
