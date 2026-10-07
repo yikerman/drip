@@ -1,9 +1,9 @@
 //! The built-in nodes on synthetic data with independently known results.
 
-use drip::image::{DisplayRec2020, LinearThreeChannelMatrix, SceneRec2020};
+use drip::image::{Linearity, Rec2020Mat};
 use drip::node::{EvalContext, KernelError, NodeKernel};
-use drip::param::Params;
-use drip::ports::Read;
+
+use drip::ports::ReadMat;
 use std::sync::Arc;
 
 use drip::color::{self, D65, REC2020};
@@ -44,11 +44,11 @@ fn normalization_subtracts_every_black_component() {
     let expected =
         [site(10 + 5), site(20 + 7), site(10 + 5), site(20 + 7), site(40 + 5), site(30 + 7)];
     let close = |a: &[f32], b: &[f32]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6);
-    assert!(close(&m.data[..4], &expected[..4]), "{:?}", m.data);
-    assert!(close(&m.data[4..6], &expected[4..]), "{:?}", m.data);
-    assert_eq!(m.cfa, Cfa { size: 2, colors: vec![0, 1, 3, 2] });
+    assert!(close(&m.samples()[..4], &expected[..4]), "{:?}", m.samples());
+    assert!(close(&m.samples()[4..6], &expected[4..]), "{:?}", m.samples());
+    assert_eq!(m.interpretation().cfa, Cfa { size: 2, colors: vec![0, 1, 3, 2] });
     assert_eq!(
-        m.camera.white_balance,
+        m.interpretation().camera.white_balance,
         [2.0, 1.0, 1.5, 1.0],
         "second green falls back to the first"
     );
@@ -61,7 +61,7 @@ fn small_black_patterns_fold_into_channels_before_the_common_part() {
     let mut r = raw(2, 2, vec![650; 4]);
     r.channel_black = [0, 100, 100, 100];
     r.pattern = BlackPattern { height: 2, width: 2, values: vec![100, 0, 0, 0] };
-    assert_eq!(nodes::normalize(&r).unwrap().data, [0.5; 4]);
+    assert_eq!(nodes::normalize(&r).unwrap().samples(), [0.5; 4]);
 }
 
 #[test]
@@ -72,21 +72,24 @@ fn large_black_patterns_keep_their_own_common_part() {
     r.pattern = BlackPattern { height: 3, width: 3, values: vec![4, 5, 6, 7, 8, 9, 10, 11, 12] };
     let m = nodes::normalize(&r).unwrap();
     let denominator = (1100 - (100 + 10 + 4)) as f32;
-    assert_eq!(m.data[0], (600 - 100 - 10 - 4) as f32 / denominator);
-    assert_eq!(m.data[3], (600 - 100 - 30 - 8) as f32 / denominator);
+    assert_eq!(m.samples()[0], (600 - 100 - 10 - 4) as f32 / denominator);
+    assert_eq!(m.samples()[3], (600 - 100 - 30 - 8) as f32 / denominator);
 }
 
 #[test]
 fn second_green_keeps_its_own_multiplier() {
     let mut r = raw(2, 2, vec![0; 4]);
     r.as_shot = [2.0, 1.0, 1.5, 2.0];
-    assert_eq!(nodes::normalize(&r).unwrap().camera.white_balance, [2.0, 1.0, 1.5, 2.0]);
+    assert_eq!(
+        nodes::normalize(&r).unwrap().interpretation().camera.white_balance,
+        [2.0, 1.0, 1.5, 2.0]
+    );
 }
 
 #[test]
 fn values_below_black_and_above_white_are_kept() {
     let m = nodes::normalize(&raw(2, 2, vec![50, 2100, 100, 1100])).unwrap();
-    assert_eq!(m.data, [-0.05, 2.0, 0.0, 1.0]);
+    assert_eq!(m.samples(), [-0.05, 2.0, 0.0, 1.0]);
 }
 
 #[test]
@@ -100,9 +103,9 @@ fn binning_keeps_the_bayer_phase_and_crops_partial_cells() {
         sites.iter().map(|&(r, c)| (r * 10 + c) as f32).sum::<f32>() / 4000.0
     };
     // Output site (0, 1) is green at phase (0, 1): input rows 0, 2, columns 1, 3.
-    assert!((m.data[1] - mean([(0, 1), (0, 3), (2, 1), (2, 3)])).abs() < 1e-7);
+    assert!((m.samples()[1] - mean([(0, 1), (0, 3), (2, 1), (2, 3)])).abs() < 1e-7);
     // Output site (1, 2) is red of the second cell: rows 1, 3, columns 4, 6.
-    assert!((m.data[4 + 2] - mean([(1, 4), (1, 6), (3, 4), (3, 6)])).abs() < 1e-7);
+    assert!((m.samples()[4 + 2] - mean([(1, 4), (1, 6), (3, 4), (3, 6)])).abs() < 1e-7);
 }
 
 #[test]
@@ -118,7 +121,7 @@ fn repeated_downsampling_matches_direct_averages_with_patterned_black_and_all_ba
             let scale = 1 << level;
             assert_eq!((m.width, m.height), (19 / (2 * scale) * 2, 17 / (2 * scale) * 2));
             assert_eq!(m.scale, scale as u32);
-            assert_eq!(m.cfa.colors, cfa.concat());
+            assert_eq!(m.interpretation().cfa.colors, cfa.concat());
             for row in 0..m.height {
                 for col in 0..m.width {
                     let mut sum = 0.0f64;
@@ -133,7 +136,7 @@ fn repeated_downsampling_matches_direct_averages_with_patterned_black_and_all_ba
                         }
                     }
                     let expected = sum / (995.0 * (scale * scale) as f64);
-                    assert!((f64::from(m.data[row * m.width + col]) - expected).abs() < 2e-7);
+                    assert!((f64::from(m.samples()[row * m.width + col]) - expected).abs() < 2e-7);
                 }
             }
             m = nodes::downsample(&m);
@@ -189,48 +192,55 @@ fn camera_matrix_is_neutral_preserving_and_ignores_channel_gains() {
 
 /// A source node emitting a fixed 4 × 2 RGGB mosaic.
 static MOSAIC: NodeKind =
-    NodeKind::new::<MosaicKernel>("test.mosaic", "test", "mosaic", &[], &[], &["mosaic"]);
+    NodeKind::new::<MosaicKernel>("test.mosaic", "test", "mosaic", &[], &["mosaic"]);
 struct MosaicKernel;
 impl NodeKernel for MosaicKernel {
+    type Parameters = ();
+    type View = ();
     type Inputs = ();
     type Outputs = (Arc<Mosaic>,);
 
     fn eval(
-        _: Params<'_>,
+        _: Self::Parameters,
         (): (),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
         let camera =
             Arc::new(Camera { xyz_to_cam: [[0.0; 3]; 3], white_balance: [2.0, 1.0, 4.0, 3.0] });
         let cfa = Cfa { size: 2, colors: vec![0, 1, 3, 2] };
         let data = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
-        let mosaic = Mosaic { width: 4, height: 2, scale: 1, cfa, data, camera, white: [1.0; 4] };
-        Ok(Evaluated { outputs: (Arc::new(mosaic),), view: None })
+        let mosaic = Mosaic::new(
+            Arc::new(drip::image::RawMat::from_samples(4, 2, 1, data)),
+            drip::image::SensorMosaic { cfa, white: [1.0; 4], camera },
+        );
+        Ok(Evaluated { outputs: (Arc::new(mosaic),), view: () })
     }
 }
 
 /// A source node emitting the scene-referred pixels given as `pixels`.
 static SCENE: NodeKind =
-    NodeKind::new::<SceneKernel>("test.scene", "test", "scene", &[], &[], &["image"]);
+    NodeKind::new::<SceneKernel>("test.scene", "test", "scene", &[], &["image"]);
 struct SceneKernel;
 impl NodeKernel for SceneKernel {
+    type Parameters = ();
+    type View = ();
     type Inputs = ();
-    type Outputs = (Arc<SceneRec2020>,);
+    type Outputs = (Arc<Rec2020Mat>,);
 
     fn eval(
-        _: Params<'_>,
+        _: Self::Parameters,
         (): (),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
         let pixels = vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]];
         Ok(Evaluated {
-            outputs: (Arc::new(SceneRec2020::from(Arc::new(Rgb {
+            outputs: (Arc::new(Rec2020Mat::from(Arc::new(Rgb {
                 width: 2,
                 height: 1,
                 scale: 1,
                 pixels,
             }))),),
-            view: None,
+            view: (),
         })
     }
 }
@@ -250,7 +260,7 @@ fn chain(source: &'static NodeKind, kinds: &[&'static NodeKind]) -> (Project, No
     (p, last)
 }
 
-fn evaluate(p: &Project, id: NodeId) -> Evaluated {
+fn evaluate(p: &Project, id: NodeId) -> drip::node::Evaluation {
     let mut ev = Evaluator::default();
     ev.evaluate(&p.graph, 0, &[id]);
     ev.result(id).unwrap().clone().unwrap()
@@ -262,25 +272,25 @@ fn white_balance_scales_each_site_by_its_color() {
     let out = evaluate(&p, wb);
     // Rows alternate R G R G / G2 B G2 B.
     let expected = [0.1 * 2.0, 0.2, 0.3 * 2.0, 0.4, 0.5 * 3.0, 0.6 * 4.0, 0.7 * 3.0, 0.8 * 4.0];
-    assert_eq!(out.outputs[0].downcast_ref::<Mosaic>().unwrap().data, expected);
+    assert_eq!(out.outputs[0].downcast_ref::<Mosaic>().unwrap().samples(), expected);
 }
 
 #[test]
 fn binning_debayer_averages_greens_and_halves_resolution() {
     let (p, bin) = chain(&MOSAIC, &[&nodes::BIN_2X2]);
     let out = evaluate(&p, bin);
-    let image = out.outputs[0].borrow::<Read<dyn LinearThreeChannelMatrix>>().unwrap().rgb();
+    let image = out.outputs[0].borrow::<ReadMat<3, dyn Linearity>>().unwrap().rgb().clone();
     assert_eq!((image.width, image.height, image.scale), (2, 1, 2));
     // Cells: [0.1 0.2 / 0.5 0.6] and [0.3 0.4 / 0.7 0.8], RGGB.
     assert_eq!(image.pixels, [[0.1, (0.2 + 0.5) / 2.0, 0.6], [0.3, (0.4 + 0.7) / 2.0, 0.8]]);
 }
 
 #[test]
-fn exposure_is_scene_linear_and_sigmoid_outputs_finite_display_values() {
+fn exposure_scales_linear_rgb_and_sigmoid_reinterprets_its_finite_output() {
     let (mut p, exposure) = chain(&SCENE, &[&nodes::EXPOSURE]);
     p.graph.set_param(exposure, "ev", json!(1.0)).unwrap();
     let rgb = evaluate(&p, exposure).outputs[0]
-        .borrow::<Read<dyn LinearThreeChannelMatrix>>()
+        .borrow::<ReadMat<3, dyn Linearity>>()
         .unwrap()
         .rgb()
         .clone();
@@ -288,10 +298,10 @@ fn exposure_is_scene_linear_and_sigmoid_outputs_finite_display_values() {
     let sigmoid = p.graph.add_node(&nodes::SIGMOID);
     p.graph.connect(Port(exposure, "image".into()), Port(sigmoid, "image".into())).unwrap();
     let out = evaluate(&p, sigmoid);
-    assert!(out.outputs[0].downcast_ref::<DisplayRec2020>().is_some());
+    assert!(out.outputs[0].downcast_ref::<Rec2020Mat>().is_some());
     assert!(
         out.outputs[0]
-            .borrow::<Read<dyn LinearThreeChannelMatrix>>()
+            .borrow::<ReadMat<3, dyn Linearity>>()
             .unwrap()
             .rgb()
             .pixels
@@ -299,6 +309,14 @@ fn exposure_is_scene_linear_and_sigmoid_outputs_finite_display_values() {
             .flatten()
             .all(|v| v.is_finite())
     );
+    // Creative output still denotes linear light; later exposure is allowed.
+    let later = p.graph.add_node(&nodes::EXPOSURE);
+    p.graph.set_param(later, "ev", json!(1.0)).unwrap();
+    p.graph.connect(Port(sigmoid, "image".into()), Port(later, "image".into())).unwrap();
+    let later_output = evaluate(&p, later);
+    let before = out.outputs[0].downcast_ref::<Rec2020Mat>().unwrap();
+    let after = later_output.outputs[0].downcast_ref::<Rec2020Mat>().unwrap();
+    assert_eq!(after.pixels, before.pixels.iter().map(|p| p.map(|v| v * 2.0)).collect::<Vec<_>>());
 }
 
 #[test]
@@ -333,33 +351,30 @@ fn preview_presents_its_input() {
 #[test]
 fn highlights_reconstruct_before_preview_averaging() {
     static SOURCE: NodeKind =
-        NodeKind::new::<SourceKernel>("test.clipped", "test", "clipped", &[], &[], &["mosaic"]);
+        NodeKind::new::<SourceKernel>("test.clipped", "test", "clipped", &[], &["mosaic"]);
     struct SourceKernel;
     impl NodeKernel for SourceKernel {
+        type Parameters = ();
+        type View = ();
         type Inputs = ();
         type Outputs = (Arc<Mosaic>,);
 
         fn eval(
-            _: Params<'_>,
+            _: Self::Parameters,
             (): (),
             _: &EvalContext<'_>,
-        ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+        ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
             let cfa = Cfa { size: 2, colors: vec![0, 1, 3, 2] };
             let mut data: Vec<_> =
                 (0..64).map(|i| if cfa.color(i / 8, i % 8) == 0 { 0.2 } else { 2.0 }).collect();
             data[0] = 1.0;
             let camera = Arc::new(Camera { xyz_to_cam: [[0.0; 3]; 3], white_balance: [1.0; 4] });
             Ok(Evaluated {
-                outputs: (Arc::new(Mosaic {
-                    width: 8,
-                    height: 8,
-                    scale: 1,
-                    cfa,
-                    data,
-                    camera,
-                    white: [1.0, 4.0, 4.0, 4.0],
-                }),),
-                view: None,
+                outputs: (Arc::new(Mosaic::new(
+                    Arc::new(drip::image::RawMat::from_samples(8, 8, 1, data)),
+                    drip::image::SensorMosaic { cfa, white: [1.0, 4.0, 4.0, 4.0], camera },
+                )),),
+                view: (),
             })
         }
     }
@@ -375,24 +390,15 @@ fn highlights_reconstruct_before_preview_averaging() {
     let result = |id| &ev.result(id).unwrap().as_ref().unwrap().outputs[0];
     assert_eq!(result(highlights).downcast_ref::<Mosaic>().unwrap().scale, 1);
     assert_eq!(result(highlights).downcast_ref::<Mosaic>().unwrap().width, 8);
-    assert_eq!(
-        result(repaired).borrow::<Read<dyn LinearThreeChannelMatrix>>().unwrap().rgb().scale,
-        2
-    );
-    assert_eq!(
-        result(repaired).borrow::<Read<dyn LinearThreeChannelMatrix>>().unwrap().rgb().width,
-        4
-    );
+    assert_eq!(result(repaired).borrow::<ReadMat<3, dyn Linearity>>().unwrap().rgb().scale, 2);
+    assert_eq!(result(repaired).borrow::<ReadMat<3, dyn Linearity>>().unwrap().rgb().width, 4);
     assert!(
-        (result(repaired).borrow::<Read<dyn LinearThreeChannelMatrix>>().unwrap().rgb().pixels[0]
-            [0]
-            - 0.65)
+        (result(repaired).borrow::<ReadMat<3, dyn Linearity>>().unwrap().rgb().pixels[0][0] - 0.65)
             .abs()
             < 1e-6
     );
     assert!(
-        (result(bypass).borrow::<Read<dyn LinearThreeChannelMatrix>>().unwrap().rgb().pixels[0][0]
-            - 0.4)
+        (result(bypass).borrow::<ReadMat<3, dyn Linearity>>().unwrap().rgb().pixels[0][0] - 0.4)
             .abs()
             < 1e-6
     );
@@ -402,7 +408,7 @@ fn highlights_reconstruct_before_preview_averaging() {
 fn white_balance_scales_saturation_with_each_channel() {
     let (p, wb) = chain(&MOSAIC, &[&nodes::WHITE_BALANCE]);
     assert_eq!(
-        evaluate(&p, wb).outputs[0].downcast_ref::<Mosaic>().unwrap().white,
+        evaluate(&p, wb).outputs[0].downcast_ref::<Mosaic>().unwrap().interpretation().white,
         [2.0, 1.0, 4.0, 3.0]
     );
     let mut r = raw(4, 4, vec![600; 16]);
@@ -414,18 +420,18 @@ fn white_balance_scales_saturation_with_each_channel() {
             let c = r.cfa[row % 2][col % 2] as usize;
             let saturation =
                 (r.maximum - r.black - r.channel_black[c] - r.pattern.at(row, col)) as f32 / 989.0;
-            assert!(m.white[c] <= saturation + 1e-6);
+            assert!(m.interpretation().white[c] <= saturation + 1e-6);
         }
     }
 }
 
 #[test]
 fn scopes_evaluate_through_the_graph() {
-    for kind in [&nodes::WAVEFORM, &nodes::VECTORSCOPE] {
+    for kind in [nodes::WAVEFORM.kind(), nodes::VECTORSCOPE.kind()] {
         let (p, id) = chain(&SCENE, &[kind]);
         let Some(View::Scope(scope)) = evaluate(&p, id).view else { panic!("no scope") };
         assert_eq!(scope.counts.len(), scope.size * scope.size);
-        let expected = if kind == &nodes::WAVEFORM { 6 } else { 2 };
+        let expected = if kind == nodes::WAVEFORM.kind() { 6 } else { 2 };
         assert_eq!(scope.counts.iter().flatten().sum::<u32>(), expected);
     }
 }

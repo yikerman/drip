@@ -10,7 +10,9 @@ fn connect_rejects_incompatible_types() {
     let mut g = Graph::default();
     let (c, w) = (g.add_node(&CONST), g.add_node(&WRITE));
     let err = g.connect(port(c, "image"), port(w, "image")).unwrap_err();
-    assert_eq!(err, GraphError::TypeMismatch { input: "image".into(), found: "SceneRec2020" });
+    assert!(
+        matches!(err, GraphError::TypeMismatch { input, mismatch } if input == port(w, "image") && mismatch.actual == "Rec2020")
+    );
     assert_eq!(g.edges().count(), 0);
 }
 

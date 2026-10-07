@@ -1,8 +1,8 @@
 //! TIFF export, read back and checked against independently computed values.
 
-use drip::image::{DisplayRec2020, RawMetadata};
+use drip::image::{RawMetadata, Rec2020Mat};
 use drip::node::{EvalContext, KernelError, NodeKernel};
-use drip::param::Params;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -26,34 +26,38 @@ const PIXELS: [[f32; 3]; 4] =
     [[1.0, 1.0, 1.0], [0.18, 0.18, 0.18], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]];
 
 static DISPLAY: NodeKind =
-    NodeKind::new::<DisplayKernel>("test.display", "test", "display", &[], &[], &["image"]);
+    NodeKind::new::<DisplayKernel>("test.display", "test", "display", &[], &["image"]);
 struct DisplayKernel;
 impl NodeKernel for DisplayKernel {
+    type Parameters = ();
+    type View = ();
     type Inputs = ();
-    type Outputs = (Arc<DisplayRec2020>,);
+    type Outputs = (Arc<Rec2020Mat>,);
 
     fn eval(
-        _: Params<'_>,
+        _: Self::Parameters,
         (): (),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
         let image = Rgb { width: 2, height: 2, scale: 1, pixels: PIXELS.to_vec() };
-        Ok(Evaluated { outputs: (Arc::new(DisplayRec2020::from(Arc::new(image))),), view: None })
+        Ok(Evaluated { outputs: (Arc::new(Rec2020Mat::from(Arc::new(image))),), view: () })
     }
 }
 
 static METADATA: NodeKind =
-    NodeKind::new::<MetadataKernel>("test.metadata", "test", "metadata", &[], &[], &["metadata"]);
+    NodeKind::new::<MetadataKernel>("test.metadata", "test", "metadata", &[], &["metadata"]);
 struct MetadataKernel;
 impl NodeKernel for MetadataKernel {
+    type Parameters = ();
+    type View = ();
     type Inputs = ();
     type Outputs = (Arc<RawMetadata>,);
 
     fn eval(
-        _: Params<'_>,
+        _: Self::Parameters,
         (): (),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
         Ok(Evaluated::new((Arc::new(RawMetadata {
             make: "Sony".into(),
             model: "ILCE-7RM3".into(),

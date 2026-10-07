@@ -1,44 +1,31 @@
 //! Histogram evaluation and its integer reduction.
 
-use crate::image::LinearThreeChannelMatrix;
-use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
-use crate::param::Params;
-use crate::ports::Read;
-use crate::view::{Histogram, View};
+use crate::image::Linearity;
+use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::ports::MatRef;
+use crate::view::Histogram;
 use rayon::prelude::*;
 use std::sync::Arc;
 
 const BINS: usize = 256;
 
-/// Counts stops from `min_ev` to `max_ev`, for plotting on a linear or log
-/// `scale`. The bounds lie on either side of 0 EV, so the range is never empty
-/// and always shows where 1.0 falls.
-pub static HISTOGRAM: NodeKind = NodeKind::new::<HistogramNode>(
-    "view.histogram",
-    "view",
-    "Histogram",
-    super::EXPOSURE_PARAMS,
-    &["image"],
-    &[],
-);
-
-struct HistogramNode;
-impl NodeKernel for HistogramNode {
-    type Inputs = (Read<dyn LinearThreeChannelMatrix>,);
-    type Outputs = ();
-    fn eval(
-        p: Params<'_>,
-        (image,): (&dyn LinearThreeChannelMatrix,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-        let (min, max) = (p.int("min_ev") as f32, p.int("max_ev") as f32);
-        let thresholds =
-            std::array::from_fn(|i| 2f32.powf(min + i as f32 * (max - min) / BINS as f32));
-        let counts = count(&image.rgb().pixels, &thresholds);
-        let log = p.choice("scale") == "log";
-        let histogram = Histogram { min_stop: min, max_stop: max, counts, log };
-        Ok(Evaluated { outputs: (), view: Some(View::Histogram(Arc::new(histogram))) })
-    }
+/// Count each channel of a linear input, camera RGB included, in log2(x) bins,
+/// with 0 EV at x = 1.
+///
+/// Out-of-range values accumulate in the end bins. Scale selects linear or logarithmic
+/// count display. Produces a channel histogram view.
+#[crate::node(kind = HISTOGRAM, id = "view.histogram", category = "view", name = "Histogram", outputs = [])]
+fn histogram(
+    p: super::ExposureSettings,
+    (image,): (MatRef<'_, 3, dyn Linearity>,),
+    _: &EvalContext<'_>,
+) -> Result<Evaluated<(), Arc<Histogram>>, KernelError> {
+    let (min, max) = (p.min_ev as f32, p.max_ev as f32);
+    let thresholds = std::array::from_fn(|i| 2f32.powf(min + i as f32 * (max - min) / BINS as f32));
+    let counts = count(&image.rgb().pixels, &thresholds);
+    let log = p.scale.logarithmic();
+    let histogram = Histogram { min_stop: min, max_stop: max, counts, log };
+    Ok(Evaluated::view(Arc::new(histogram)))
 }
 
 fn count(input: &[[f32; 3]], thresholds: &[f32; BINS]) -> Vec<[u32; 3]> {

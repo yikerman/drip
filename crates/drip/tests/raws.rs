@@ -1,7 +1,7 @@
 //! The pipeline on a real raw.
 
-use drip::image::{LinearThreeChannelMatrix, Mosaic};
-use drip::ports::Read;
+use drip::image::{Linearity, Mosaic};
+use drip::ports::ReadMat;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -23,7 +23,9 @@ fn pipeline(raw: &Path, tail: &[&'static drip::node::NodeKind]) -> (Project, Vec
     p.graph.set_param(read, "path", json!(raw)).unwrap();
     let mut ids = vec![read];
     for kind in
-        [&nodes::WHITE_BALANCE, &nodes::BIN_2X2, &nodes::CAMERA_TO_REC2020].iter().chain(tail)
+        [nodes::WHITE_BALANCE.kind(), nodes::BIN_2X2.kind(), nodes::CAMERA_TO_REC2020.kind()]
+            .iter()
+            .chain(tail)
     {
         let (last, id) = (*ids.last().unwrap(), p.graph.add_node(kind));
         let output = p.graph.node(last).unwrap().kind.outputs().next().unwrap().name;
@@ -44,7 +46,7 @@ fn pipeline_matches_libraw() {
     let mut ev = Evaluator::default();
     ev.evaluate(&p.graph, 0, &[ids[3]]);
     let ours = ev.result(ids[3]).unwrap().as_ref().unwrap().outputs[0]
-        .borrow::<Read<dyn LinearThreeChannelMatrix>>()
+        .borrow::<ReadMat<3, dyn Linearity>>()
         .unwrap()
         .rgb()
         .clone();
@@ -133,14 +135,17 @@ fn built_in_template_takes_the_raw_and_output_paths() {
 
     let cached = ev.result(raw).unwrap().as_ref().unwrap().outputs[0].downcast::<Mosaic>().unwrap();
     let previous = Arc::downgrade(&cached);
-    let expected = cached.data.clone();
+    let expected = cached.samples().to_vec();
     drop(cached);
     ev.evaluate(&p.graph, 2, &[raw]);
     assert!(previous.upgrade().is_none(), "old normalized levels are not retained");
     ev.evaluate(&p.graph, 3, &[raw]);
     assert_eq!(
         expected,
-        ev.result(raw).unwrap().as_ref().unwrap().outputs[0].downcast_ref::<Mosaic>().unwrap().data
+        ev.result(raw).unwrap().as_ref().unwrap().outputs[0]
+            .downcast_ref::<Mosaic>()
+            .unwrap()
+            .samples()
     );
 
     let other = p.graph.add_node(&nodes::READ);
@@ -152,7 +157,7 @@ fn built_in_template_takes_the_raw_and_output_paths() {
         fork.result(other).unwrap().as_ref().unwrap().outputs[0]
             .downcast_ref::<Mosaic>()
             .unwrap()
-            .data
+            .samples()
     );
     fork.evaluate(&p.graph, 0, &[other]);
     ev.evaluate(&p.graph, 0, &[raw]);
@@ -160,15 +165,19 @@ fn built_in_template_takes_the_raw_and_output_paths() {
         fork.result(other).unwrap().as_ref().unwrap().outputs[0]
             .downcast_ref::<Mosaic>()
             .unwrap()
-            .data,
-        ev.result(raw).unwrap().as_ref().unwrap().outputs[0].downcast_ref::<Mosaic>().unwrap().data,
+            .samples(),
+        ev.result(raw).unwrap().as_ref().unwrap().outputs[0]
+            .downcast_ref::<Mosaic>()
+            .unwrap()
+            .samples(),
     );
     let demosaic = p.graph.find("Demosaic").unwrap();
     ev.evaluate(&p.graph, 31, &[demosaic]);
     let smallest = ev.result(demosaic).unwrap().as_ref().unwrap().outputs[0]
-        .borrow::<Read<dyn LinearThreeChannelMatrix>>()
+        .borrow::<ReadMat<3, dyn Linearity>>()
         .unwrap()
-        .rgb();
+        .rgb()
+        .clone();
     assert!(smallest.pixels.is_empty());
     assert_eq!(smallest.scale, 1 << 31);
     let sensor =

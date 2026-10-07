@@ -8,6 +8,8 @@ use serde_json::Value as Json;
 
 use crate::node::NodeKind;
 use crate::param::ParamMap;
+use crate::ports::{OutputType, TypeMismatch};
+use crate::value::TypeDescriptor;
 
 /// Stable within a project; never reused while the graph is alive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -37,8 +39,8 @@ pub enum GraphError {
     UnknownNode(NodeId),
     #[error("node {0:?} has no {1} port `{2}`")]
     UnknownPort(NodeId, &'static str, String),
-    #[error("input `{input}` does not accept {found:?}")]
-    TypeMismatch { input: String, found: &'static str },
+    #[error("input {input:?}: {mismatch}")]
+    TypeMismatch { input: Port, mismatch: TypeMismatch },
     #[error("connection would create a cycle")]
     Cycle,
     #[error("node {0:?} has no parameter `{1}`")]
@@ -120,20 +122,59 @@ impl Graph {
     /// Connects `output` to `input`, replacing the input's previous source.
     pub fn connect(&mut self, output: Port, input: Port) -> Result<(), GraphError> {
         let source = self.node(output.0).ok_or(GraphError::UnknownNode(output.0))?.kind;
-        let ty = source.outputs().find(|p| p.name == output.1).map(|p| p.ty);
-        let ty = ty.ok_or_else(|| GraphError::UnknownPort(output.0, "output", output.1.clone()))?;
+        if source.output_index(&output.1).is_none() {
+            return Err(GraphError::UnknownPort(output.0, "output", output.1.clone()));
+        }
         let sink = self.node(input.0).ok_or(GraphError::UnknownNode(input.0))?.kind;
-        let spec = sink.input(&input.1);
-        let spec =
-            spec.ok_or_else(|| GraphError::UnknownPort(input.0, "input", input.1.clone()))?;
-        if !spec.requirement.accepts(ty) {
-            return Err(GraphError::TypeMismatch { input: input.1, found: ty.name });
+        if sink.input(&input.1).is_none() {
+            return Err(GraphError::UnknownPort(input.0, "input", input.1.clone()));
         }
         if self.reaches(input.0, output.0) {
             return Err(GraphError::Cycle);
         }
-        self.edges.insert(input, output);
+        let previous = self.edges.insert(input.clone(), output);
+        // A new source changes every preserving descendant's logical type.
+        // Validate the candidate graph as a whole before publishing the edit.
+        if let Some(error) = self.type_errors().into_iter().next() {
+            if let Some(previous) = previous {
+                self.edges.insert(input, previous);
+            } else {
+                self.edges.remove(&input);
+            }
+            return Err(error);
+        }
         Ok(())
+    }
+
+    /// Logical output before evaluating pixels. None means the output does not
+    /// exist or depends on an unconnected preserving input; it is not evidence
+    /// of compatibility. Fixed outputs remain known while their inputs are absent.
+    pub fn output_type(&self, port: &Port) -> Option<TypeDescriptor> {
+        let mut port = port.clone();
+        loop {
+            let node = self.node(port.0)?;
+            match node.kind.outputs().find(|p| p.name == port.1)?.ty {
+                OutputType::Fixed(ty) => return Some(ty),
+                OutputType::Preserve(index) => {
+                    let input = node.kind.inputs().nth(index)?;
+                    port = self.source(&Port(port.0, input.name.into()))?.clone();
+                }
+            }
+        }
+    }
+
+    pub fn type_errors(&self) -> Vec<GraphError> {
+        self.edges
+            .iter()
+            .filter_map(|(input, output)| {
+                let ty = self.output_type(output)?;
+                let spec = self.node(input.0)?.kind.input(&input.1)?;
+                spec.requirement
+                    .check(&ty)
+                    .err()
+                    .map(|mismatch| GraphError::TypeMismatch { input: input.clone(), mismatch })
+            })
+            .collect()
     }
 
     pub fn disconnect(&mut self, input: &Port) -> Option<Port> {

@@ -9,23 +9,43 @@ use rayon::prelude::*;
 
 use crate::color::{D65, P3, REC709, REC2020};
 use crate::node::KernelError;
-use crate::param::{ParamKind, ParamSpec, Params};
+use crate::param::ParamKind;
 
-pub(crate) const PROFILE: ParamSpec = ParamSpec::new(
-    "profile",
-    ParamKind::Choice { options: &["srgb", "display_p3", "rec2020", "file"], default: "srgb" },
-);
-pub(crate) const PROFILE_FILE: ParamSpec =
-    ParamSpec::new("profile_file", ParamKind::Path { output: false });
-pub(crate) const INTENT: ParamSpec = ParamSpec::new(
-    "intent",
-    ParamKind::Choice {
-        options: &["perceptual", "relative", "saturation", "absolute"],
-        default: "relative",
-    },
-);
-pub(crate) const BLACK_POINT_COMPENSATION: ParamSpec =
-    ParamSpec::new("black_point_compensation", ParamKind::Bool { default: true });
+#[derive(Clone, Copy, crate::Choice)]
+pub enum ProfileSource {
+    #[choice("srgb")]
+    Srgb,
+    #[choice("display_p3")]
+    DisplayP3,
+    #[choice("rec2020")]
+    Rec2020,
+    #[choice("file")]
+    File,
+}
+
+#[derive(Clone, Copy, crate::Choice)]
+enum RenderingIntent {
+    #[choice("perceptual")]
+    Perceptual,
+    #[choice("relative")]
+    Relative,
+    #[choice("saturation")]
+    Saturation,
+    #[choice("absolute")]
+    Absolute,
+}
+
+#[derive(crate::Parameters)]
+pub(crate) struct Settings {
+    #[param(ProfileSource::Srgb.schema())]
+    profile: ProfileSource,
+    #[param(ParamKind::Path { output: false })]
+    profile_file: Option<std::path::PathBuf>,
+    #[param(RenderingIntent::Relative.schema())]
+    intent: RenderingIntent,
+    #[param(ParamKind::Bool { default: true })]
+    black_point_compensation: bool,
+}
 
 /// Loaded output settings, retaining the original ICC bytes for embedding.
 pub(crate) struct Output {
@@ -36,29 +56,31 @@ pub(crate) struct Output {
 }
 
 impl Output {
-    pub fn load(p: Params<'_>) -> Result<Self, KernelError> {
-        let (profile, icc) = match p.choice("profile") {
-            "file" => {
+    pub fn load(p: &Settings, resources: &crate::resource::Resources) -> Result<Self, KernelError> {
+        let (profile, icc) = match p.profile.built_in() {
+            None => {
                 let file = p
-                    .path("profile_file")
+                    .profile_file
+                    .as_deref()
                     .ok_or(KernelError::Incomplete("no output profile file chosen"))?;
                 let in_file = |e| format!("{}: {e}", file.display());
-                let icc = std::fs::read(file).map_err(|e| in_file(e.to_string()))?;
+                let icc = resources
+                    .load(file, |file| std::fs::read(file).map_err(|e| in_file(e.to_string())))?;
+                let icc = (*icc).clone();
                 (output_profile(&icc).map_err(in_file)?, icc)
             }
-            name => {
-                let profile = built_in(name);
+            Some(profile) => {
                 let icc = profile.icc().map_err(|e| e.to_string())?;
                 (profile, icc)
             }
         };
-        let intent = match p.choice("intent") {
-            "perceptual" => Intent::Perceptual,
-            "relative" => Intent::RelativeColorimetric,
-            "saturation" => Intent::Saturation,
-            _ => Intent::AbsoluteColorimetric,
+        let intent = match p.intent {
+            RenderingIntent::Perceptual => Intent::Perceptual,
+            RenderingIntent::Relative => Intent::RelativeColorimetric,
+            RenderingIntent::Saturation => Intent::Saturation,
+            RenderingIntent::Absolute => Intent::AbsoluteColorimetric,
         };
-        let flags = if p.bool("black_point_compensation") {
+        let flags = if p.black_point_compensation {
             Flags::BLACKPOINT_COMPENSATION
         } else {
             Flags::default()
@@ -106,13 +128,15 @@ pub(crate) fn convert_in_place<T: Send>(pixels: &mut [T], convert: impl Fn(&mut 
     pixels.par_chunks_mut(PIXEL_CHUNK).for_each(&convert);
 }
 
-/// Constructs the built-in profile selected by the output parameter schema.
-pub fn built_in(name: &str) -> Profile {
-    match name {
-        "srgb" => rgb("sRGB", REC709, srgb_curve()),
-        "display_p3" => rgb("Display P3", P3, srgb_curve()),
-        "rec2020" => rgb("Rec. 2020", REC2020, rec2020_curve()),
-        _ => unreachable!("parameter schemas only admit built-in names"),
+impl ProfileSource {
+    /// Construct a built-in profile, or request external ICC bytes for `File`.
+    pub fn built_in(self) -> Option<Profile> {
+        match self {
+            Self::Srgb => Some(rgb("sRGB", REC709, srgb_curve())),
+            Self::DisplayP3 => Some(rgb("Display P3", P3, srgb_curve())),
+            Self::Rec2020 => Some(rgb("Rec. 2020", REC2020, rec2020_curve())),
+            Self::File => None,
+        }
     }
 }
 

@@ -1,42 +1,36 @@
 //! As-shot white balance in camera space.
 
 use crate::image::Mosaic;
-use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
-use crate::param::Params;
-use crate::ports::Read;
+use crate::node::{EvalContext, Evaluated, KernelError};
 use rayon::prelude::*;
 use std::sync::Arc;
 
-/// Multiplies each site by the camera's as-shot multiplier for its color.
-pub static WHITE_BALANCE: NodeKind = NodeKind::new::<WhiteBalance>(
-    "color.white_balance",
-    "color",
-    "White balance",
-    &[],
-    &["mosaic"],
-    &["mosaic"],
-);
-
-struct WhiteBalance;
-impl NodeKernel for WhiteBalance {
-    type Inputs = (Read<Mosaic>,);
-    type Outputs = (Arc<Mosaic>,);
-    fn eval(
-        _: Params<'_>,
-        (m,): (&Mosaic,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-        let wb = m.camera.white_balance;
-        let gains: Vec<_> = m.cfa.colors.iter().map(|&c| wb[c as usize]).collect();
-        let data = process(&m.data, m.width, m.cfa.size, &gains);
-        Ok(Evaluated::new((Arc::new(Mosaic {
+/// Multiply Bayer samples by the as-shot gains relative to the first green channel.
+///
+/// Apply once before highlight reconstruction.
+#[crate::node(kind = WHITE_BALANCE, id = "color.white_balance", category = "color", name = "White balance", outputs = ["mosaic"])]
+fn white_balance(
+    _: (),
+    (mosaic,): (&Mosaic,),
+    _: &EvalContext<'_>,
+) -> Result<Evaluated<(Arc<Mosaic>,)>, KernelError> {
+    let wb = mosaic.interpretation().camera.white_balance;
+    let gains: Vec<_> =
+        mosaic.interpretation().cfa.colors.iter().map(|&c| wb[c as usize]).collect();
+    let data = process(mosaic.samples(), mosaic.width, mosaic.interpretation().cfa.size, &gains);
+    Ok(Evaluated::new((Arc::new(Mosaic::new(
+        Arc::new(crate::image::RawMat::from_samples(
+            mosaic.width,
+            mosaic.height,
+            mosaic.scale,
             data,
-            white: std::array::from_fn(|c| m.white[c] * wb[c]),
-            camera: m.camera.clone(),
-            cfa: m.cfa.clone(),
-            ..*m
-        }),)))
-    }
+        )),
+        crate::image::SensorMosaic {
+            cfa: mosaic.interpretation().cfa.clone(),
+            white: std::array::from_fn(|c| mosaic.interpretation().white[c] * wb[c]),
+            camera: mosaic.interpretation().camera.clone(),
+        },
+    )),)))
 }
 
 pub(super) fn process(input: &[f32], width: usize, cfa_size: usize, gains: &[f32]) -> Vec<f32> {

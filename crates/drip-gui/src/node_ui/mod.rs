@@ -1,7 +1,9 @@
 //! Optional node-specific presentation; ordinary nodes use schema controls.
 
-mod documentation;
+mod controls;
 pub mod help;
+pub(super) use controls::Binding;
+pub use controls::{ControlCx, Controls};
 mod image_view;
 pub mod parameters;
 pub mod ports;
@@ -10,7 +12,6 @@ mod viewer;
 use crate::editing::NodeCx;
 use drip::graph::{Node, NodeId};
 use drip::node::NodeKind;
-use drip::nodes::{HISTOGRAM, PREVIEW, VECTORSCOPE, WAVEFORM};
 use egui::{Rect, Ui, Vec2, vec2};
 use viewer::Viewer;
 
@@ -19,11 +20,8 @@ pub const WIDTH: f32 = 160.0;
 /// Space around a node's contents, in graph units.
 pub const PAD: f32 = 6.0;
 
-pub trait NodeUi: Sync {
-    fn controls(&self, ui: &mut Ui, node: &mut NodeCx) {
-        parameters::schema(ui, node);
-    }
-
+/// Canvas body and its pop-out views, independent of parameter controls.
+pub trait NodeView: Sync {
     /// The size of the node's body, below its ports, in graph units. Its
     /// width is the node's.
     fn size(&self, _node: &Node) -> Vec2 {
@@ -42,16 +40,37 @@ pub trait NodeUi: Sync {
     fn window(&self, _ui: &mut Ui, _name: &'static str, _node: &mut NodeCx) {}
 }
 
-/// The GUI of nodes of `kind`.
-pub fn of(kind: &NodeKind) -> &'static dyn NodeUi {
-    static GUIS: &[(&NodeKind, &dyn NodeUi)] = &[
-        (&PREVIEW, &Viewer),
-        (&HISTOGRAM, &Viewer),
-        (&WAVEFORM, &Viewer),
-        (&VECTORSCOPE, &Viewer),
-        (&drip::nodes::SIGMOID, &sigmoid::Controls),
-    ];
-    GUIS.iter().find(|(k, _)| *k == kind).map_or(&Plain, |(_, gui)| *gui)
+#[linkme::distributed_slice]
+pub(super) static BINDINGS: [Binding];
+
+/// Resolved controls and view; overriding either preserves the other's default.
+pub struct NodeUi {
+    pub controls: &'static dyn controls::ErasedControls,
+    pub view: &'static dyn NodeView,
+}
+
+pub fn of(kind: &NodeKind) -> NodeUi {
+    use std::{collections::BTreeMap, sync::LazyLock};
+    static CUSTOM: LazyLock<BTreeMap<&'static str, &'static Binding>> = LazyLock::new(|| {
+        let mut bindings = BTreeMap::new();
+        for binding in BINDINGS {
+            assert!(
+                bindings.insert(binding.kind().id, binding).is_none(),
+                "duplicate node UI: {}",
+                binding.kind().id
+            );
+        }
+        bindings
+    });
+    let custom = CUSTOM.get(kind.id);
+    NodeUi {
+        controls: custom.and_then(|binding| binding.controls()).unwrap_or(&controls::Schema),
+        view: custom.and_then(|binding| binding.view()).unwrap_or(if kind.has_view() {
+            &Viewer
+        } else {
+            &Plain
+        }),
+    }
 }
 
 /// A popped-out window: one part of one node.
@@ -87,7 +106,7 @@ impl Popped {
     pub fn size(self, node: &Node) -> Vec2 {
         match self.part {
             Part::Parameters => vec2(360.0, 240.0),
-            Part::Gui(name) => of(node.kind).window_size(name, node),
+            Part::Gui(name) => of(node.kind).view.window_size(name, node),
         }
     }
 
@@ -98,7 +117,7 @@ impl Popped {
                 let used = ui.scope(|ui| parameters::panel(ui, node)).response.rect;
                 fit_window(ui.ctx(), used);
             }
-            Part::Gui(name) => of(node.node().kind).window(ui, name, node),
+            Part::Gui(name) => of(node.node().kind).view.window(ui, name, node),
         }
     }
 }
@@ -123,4 +142,4 @@ pub fn fitted(ctx: &egui::Context) -> Option<Vec2> {
 
 struct Plain;
 
-impl NodeUi for Plain {}
+impl NodeView for Plain {}

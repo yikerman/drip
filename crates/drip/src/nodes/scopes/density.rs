@@ -12,61 +12,44 @@ use rayon::prelude::*;
 #[cfg(test)]
 use crate::color::REC2020;
 use crate::color::{self, D65};
-use crate::image::{ColorspaceRgbMatrix, LinearThreeChannelMatrix, Rgb};
-use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
-use crate::param::Params;
-use crate::ports::Read;
-use crate::view::{Scope, ScopeAxes, View};
+use crate::image::{LinearRgb, Linearity, Rgb};
+use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::ports::MatRef;
+use crate::view::{Scope, ScopeAxes};
 
 const SIZE: usize = 256;
 const RADIUS: f32 = 0.5;
 
-pub static WAVEFORM: NodeKind = NodeKind::new::<Waveform>(
-    "view.waveform",
-    "view",
-    "Waveform",
-    super::EXPOSURE_PARAMS,
-    &["image"],
-    &[],
-);
-
-struct Waveform;
-impl NodeKernel for Waveform {
-    type Inputs = (Read<dyn LinearThreeChannelMatrix>,);
-    type Outputs = ();
-    fn eval(
-        p: Params<'_>,
-        (image,): (&dyn LinearThreeChannelMatrix,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-        let (min, max) = (p.int("min_ev") as f32, p.int("max_ev") as f32);
-        let counts = waveform_counts(image.rgb(), min, max);
-        scope(
-            counts,
-            ScopeAxes::Waveform { min_stop: min, max_stop: max },
-            p.choice("scale") == "log",
-        )
-    }
+/// Plot channel values of a linear input by image column.
+///
+/// Levels are log2(x), with 0 EV at x = 1. Brightness indicates sample count.
+/// Produces a channel waveform view.
+#[crate::node(kind = WAVEFORM, id = "view.waveform", category = "view", name = "Waveform", outputs = [])]
+fn waveform(
+    p: super::ExposureSettings,
+    (image,): (MatRef<'_, 3, dyn Linearity>,),
+    _: &EvalContext<'_>,
+) -> Result<Evaluated<(), Arc<Scope>>, KernelError> {
+    let (min, max) = (p.min_ev as f32, p.max_ev as f32);
+    let counts = waveform_counts(image.rgb(), min, max);
+    scope(counts, ScopeAxes::Waveform { min_stop: min, max_stop: max }, p.scale.logarithmic())
 }
 
-pub static VECTORSCOPE: NodeKind =
-    NodeKind::new::<Vectorscope>("view.vectorscope", "view", "Vectorscope", &[], &["image"], &[]);
-
-struct Vectorscope;
-impl NodeKernel for Vectorscope {
-    type Inputs = (Read<dyn ColorspaceRgbMatrix>,);
-    type Outputs = ();
-    fn eval(
-        _: Params<'_>,
-        (image,): (&dyn ColorspaceRgbMatrix,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-        let space = image.color_space();
-        let matrix = &space.to_xyz_d65;
-        let counts = vector_counts(&image.rgb().pixels, matrix);
-        let primaries = color::transpose(*matrix).map(|primary| position(uv(primary)));
-        scope(counts, ScopeAxes::Vectorscope { primaries, color_space: space.name }, true)
-    }
+/// Plot CIE u'v' chromaticity relative to D65 using the input's color space.
+///
+/// Markers show that color space's primaries. Black is omitted. Negative channels are
+/// clipped for this view only. Produces a chromaticity scope view.
+#[crate::node(kind = VECTORSCOPE, id = "view.vectorscope", category = "view", name = "Vectorscope", outputs = [], references = [("CIE: u’v’ chromaticity", "https://cie.co.at/eilvterm/17-23-073")])]
+fn vectorscope(
+    _: (),
+    (image,): (MatRef<'_, 3, dyn LinearRgb>,),
+    _: &EvalContext<'_>,
+) -> Result<Evaluated<(), Arc<Scope>>, KernelError> {
+    let space = image.interpretation.color_space();
+    let matrix = &space.to_xyz_d65;
+    let counts = vector_counts(&image.rgb().pixels, matrix);
+    let primaries = color::transpose(*matrix).map(|primary| position(uv(primary)));
+    scope(counts, ScopeAxes::Vectorscope { primaries, color_space: space.name }, true)
 }
 
 fn waveform_counts(image: &Rgb, min: f32, max: f32) -> Vec<[u32; 3]> {
@@ -144,11 +127,12 @@ fn vector_counts(pixels: &[[f32; 3]], matrix: &color::Mat3) -> Vec<[u32; 3]> {
         )
 }
 
-fn scope(counts: Vec<[u32; 3]>, axes: ScopeAxes, log: bool) -> Result<Evaluated<()>, KernelError> {
-    Ok(Evaluated {
-        outputs: (),
-        view: Some(View::Scope(Arc::new(Scope { size: SIZE, counts, axes, log }))),
-    })
+fn scope(
+    counts: Vec<[u32; 3]>,
+    axes: ScopeAxes,
+    log: bool,
+) -> Result<Evaluated<(), Arc<Scope>>, KernelError> {
+    Ok(Evaluated { outputs: (), view: Arc::new(Scope { size: SIZE, counts, axes, log }) })
 }
 
 #[cfg(test)]

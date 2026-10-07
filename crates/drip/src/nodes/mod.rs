@@ -25,21 +25,5 @@ pub use white_balance::WHITE_BALANCE;
 use crate::node::Registry;
 
 pub fn registry() -> Registry {
-    [
-        &READ,
-        &WHITE_BALANCE,
-        &HIGHLIGHTS,
-        &BIN_2X2,
-        &RCD,
-        &CAMERA_TO_REC2020,
-        &EXPOSURE,
-        &SIGMOID,
-        &PREVIEW,
-        &HISTOGRAM,
-        &WAVEFORM,
-        &VECTORSCOPE,
-        &TIFF,
-    ]
-    .into_iter()
-    .fold(Registry::default(), Registry::with)
+    crate::node::NODE_KINDS.iter().copied().fold(Registry::default(), Registry::with)
 }

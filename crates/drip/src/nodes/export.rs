@@ -10,62 +10,83 @@ use tiff::encoder::compression::DeflateLevel;
 use tiff::encoder::{Compression, DirectoryEncoder, Rational, TiffEncoder, TiffKind, TiffValue};
 use tiff::tags::{Tag, Type};
 
-use crate::image::{DisplayRec2020, RawMetadata, Rgb, ThreeChannelMatrix};
-use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind, TypedAction};
-use crate::param::{ParamKind, ParamSpec, Params};
-use crate::ports::{Optional, Read};
+use crate::image::{RawMetadata, Rec2020Rgb, Rgb};
+use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::param::ParamKind;
+use crate::ports::MatRef;
 use crate::profile;
 
-pub static TIFF: NodeKind = NodeKind::new::<TiffExport>(
-    "export.tiff",
-    "export",
-    "Export",
-    &[
-        ParamSpec::new("path", ParamKind::Path { output: true }).external(),
-        profile::PROFILE,
-        profile::PROFILE_FILE,
-        profile::INTENT,
-        profile::BLACK_POINT_COMPENSATION,
-        ParamSpec::new("depth", ParamKind::Choice { options: &["u16", "f32"], default: "u16" }),
-        ParamSpec::new(
-            "compression",
-            ParamKind::Choice { options: &["none", "deflate"], default: "deflate" },
-        ),
-        ParamSpec::new(
-            "deflate_level",
-            ParamKind::Choice { options: &["fast", "balanced", "best"], default: "balanced" },
-        ),
-    ],
-    &["image", "metadata"],
-    &[],
-);
-struct TiffExport;
-impl NodeKernel for TiffExport {
-    type Inputs = (Read<DisplayRec2020>, Optional<Read<RawMetadata>>);
-    type Outputs = ();
-    const ACTIONS: &'static [TypedAction<Self>] = &[TypedAction { name: "export", run: export }];
-    fn eval(
-        _: Params<'_>,
-        _: (&DisplayRec2020, Option<&RawMetadata>),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<()>, KernelError> {
-        Ok(Evaluated::default())
-    }
+#[derive(Clone, Copy, crate::Choice)]
+enum Depth {
+    #[choice("u16")]
+    U16,
+    #[choice("f32")]
+    F32,
+}
+
+#[derive(Clone, Copy, crate::Choice)]
+enum CompressionMode {
+    #[choice("none")]
+    None,
+    #[choice("deflate")]
+    Deflate,
+}
+
+#[derive(Clone, Copy, crate::Choice)]
+enum CompressionLevel {
+    #[choice("fast")]
+    Fast,
+    #[choice("balanced")]
+    Balanced,
+    #[choice("best")]
+    Best,
+}
+
+#[derive(crate::Parameters)]
+pub struct Export {
+    #[param(ParamKind::Path { output: true })]
+    #[external]
+    path: Option<std::path::PathBuf>,
+    #[param(flatten)]
+    output: profile::Settings,
+    #[param(Depth::U16.schema())]
+    depth: Depth,
+    #[param(CompressionMode::Deflate.schema())]
+    compression: CompressionMode,
+    #[param(CompressionLevel::Balanced.schema())]
+    deflate_level: CompressionLevel,
+}
+
+/// Export Rec.2020 RGB to a TIFF file at full detail through the selected RGB ICC
+/// profile, including its transfer encoding.
+///
+/// Tone mapping beforehand is optional. u16 saturates out-of-range values.
+/// RAW metadata, if connected, is also copied.
+#[crate::node(kind = TIFF, id = "export.tiff", category = "export", name = "Export", outputs = [], actions = [("export", export)])]
+fn tiff(
+    _: Export,
+    (image, metadata): (MatRef<'_, 3, dyn Rec2020Rgb>, Option<&RawMetadata>),
+    _: &EvalContext<'_>,
+) -> Result<Evaluated<()>, KernelError> {
+    let _ = (image, metadata);
+    Ok(Evaluated::default())
 }
 
 fn export(
-    p: Params,
-    (input, metadata): (&DisplayRec2020, Option<&RawMetadata>),
-    _: &EvalContext,
+    p: Export,
+    (input, metadata): (MatRef<'_, 3, dyn Rec2020Rgb>, Option<&RawMetadata>),
+    ctx: &EvalContext,
 ) -> Result<(), KernelError> {
-    let path = p.path("path").ok_or(KernelError::Incomplete("no output file chosen"))?;
+    let path = p.path.as_deref().ok_or(KernelError::Incomplete("no output file chosen"))?;
     let in_file = |e: &dyn std::fmt::Display, path: &Path| format!("{}: {e}", path.display());
-    let output = profile::Output::load(p)?;
-    let compression = match (p.choice("compression"), p.choice("deflate_level")) {
-        ("none", _) => Compression::Uncompressed,
-        (_, "fast") => Compression::Deflate(DeflateLevel::Fast),
-        (_, "balanced") => Compression::Deflate(DeflateLevel::Balanced),
-        _ => Compression::Deflate(DeflateLevel::Best),
+    let output = profile::Output::load(&p.output, ctx.resources())?;
+    let compression = match p.compression {
+        CompressionMode::None => Compression::Uncompressed,
+        CompressionMode::Deflate => Compression::Deflate(match p.deflate_level {
+            CompressionLevel::Fast => DeflateLevel::Fast,
+            CompressionLevel::Balanced => DeflateLevel::Balanced,
+            CompressionLevel::Best => DeflateLevel::Best,
+        }),
     };
     let image = input.rgb();
     // Encoded in memory and written at once, so every I/O error is reported
@@ -77,15 +98,15 @@ fn export(
         encode(&mut tiff).map_err(|e| e.to_string())?;
         std::fs::write(path, bytes.into_inner()).map_err(|e| in_file(&e, path))
     };
-    Ok(match p.choice("depth") {
-        "u16" => {
+    Ok(match p.depth {
+        Depth::U16 => {
             // LittleCMS saturates out-of-range values when encoding to 16 bit.
             let pixels: Vec<[u16; 3]> = output.convert(PixelFormat::RGB_16, &image.pixels)?;
             write(&|tiff| {
                 write_image::<RGB16>(tiff, image, &output.icc, metadata, pixels.as_flattened())
             })
         }
-        _ => {
+        Depth::F32 => {
             let pixels: Vec<[f32; 3]> = output.convert(PixelFormat::RGB_FLT, &image.pixels)?;
             let data = pixels.as_flattened();
             write(&|tiff| write_image::<RGB32Float>(tiff, image, &output.icc, metadata, data))

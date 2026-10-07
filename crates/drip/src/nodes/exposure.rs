@@ -1,33 +1,29 @@
-//! Scene-linear exposure, independent of the display transform.
+//! Exposure multiplication preserves the input RGB interpretation.
 
-use crate::image::{Rgb, SceneRec2020, ThreeChannelMatrix};
-use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
-use crate::param::{ParamKind, ParamSpec, Params};
-use crate::ports::Read;
+use crate::image::ScaleInvariant;
+use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::param::ParamKind;
+use crate::ports::{MatRef, Preserved};
 use rayon::prelude::*;
-use std::sync::Arc;
 
-pub static EXPOSURE: NodeKind = NodeKind::new::<Exposure>(
-    "color.exposure",
-    "color",
-    "Exposure",
-    &[ParamSpec::new("ev", ParamKind::Float { min: -10.0, max: 10.0, default: 0.0 })],
-    &["image"],
-    &["image"],
-);
+#[derive(crate::Parameters)]
+pub struct Exposure {
+    /// Multiplication by 2^ev in the input's linear RGB coordinates.
+    #[param(ParamKind::Float { min: -10.0, max: 10.0, default: 0.0 })]
+    ev: f32,
+}
 
-struct Exposure;
-impl NodeKernel for Exposure {
-    type Inputs = (Read<SceneRec2020>,);
-    type Outputs = (Arc<SceneRec2020>,);
-    fn eval(
-        p: Params<'_>,
-        (input,): (&SceneRec2020,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-        let image = input.rgb();
-        let gain = (p.float("ev") as f32).exp2();
-        let pixels = image.pixels.par_iter().map(|p| p.map(|v| v * gain)).collect();
-        Ok(Evaluated::new((Arc::new(SceneRec2020::from(Arc::new(Rgb { pixels, ..**image }))),)))
-    }
+/// Multiply linear RGB by 2^ev: x * 2^ev.
+///
+/// Requires linear RGB whose full interpretation permits positive scaling.
+/// The output keeps the input's type and is pending until the input has one.
+#[crate::node(kind = EXPOSURE, id = "color.exposure", category = "color", name = "Exposure", outputs = ["image"])]
+fn exposure(
+    p: Exposure,
+    (image,): (MatRef<'_, 3, dyn ScaleInvariant>,),
+    _: &EvalContext<'_>,
+) -> Result<Evaluated<(Preserved<0>,)>, KernelError> {
+    let gain = p.ev.exp2();
+    let pixels = image.rgb().pixels.par_iter().map(|p| p.map(|v| v * gain)).collect();
+    Ok(Evaluated::new((image.preserve::<0>(pixels),)))
 }

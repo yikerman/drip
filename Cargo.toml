@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/drip", "crates/drip-cli", "crates/drip-gui", "crates/drip-libraw"]
+members = ["crates/drip", "crates/drip-cli", "crates/drip-gui", "crates/drip-libraw", "crates/drip-macros"]
 
 [workspace.package]
 version = "0.1.0-dev"

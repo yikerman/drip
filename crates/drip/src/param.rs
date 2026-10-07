@@ -3,14 +3,13 @@
 //! representation; the schema validates them where they enter (editing,
 //! loading, binding arguments) and evaluation reads them unchecked.
 
-use std::path::Path;
-
 use serde_json::{Map, Value as Json};
 
 pub type ParamMap = Map<String, Json>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParamSpec {
+    pub documentation: &'static str,
     pub name: &'static str,
     pub kind: ParamKind,
     /// Whether new nodes expose the parameter as an input of their template,
@@ -20,7 +19,7 @@ pub struct ParamSpec {
 
 impl ParamSpec {
     pub const fn new(name: &'static str, kind: ParamKind) -> Self {
-        ParamSpec { name, kind, external: false }
+        ParamSpec { name, kind, external: false, documentation: "" }
     }
 
     pub const fn external(self) -> Self {
@@ -91,23 +90,136 @@ impl<'a> Params<'a> {
         Self(values)
     }
 
-    pub fn float(&self, name: &str) -> f64 {
-        self.0[name].as_f64().expect("validated float")
+    pub fn get<T: serde::de::DeserializeOwned>(&self, name: &str) -> T {
+        T::deserialize(&self.0[name]).expect("validated parameter and generated field type")
     }
+}
 
-    pub fn int(&self, name: &str) -> i64 {
-        self.0[name].as_i64().expect("validated int")
+/// Implemented by the Parameters derive; node metadata and typed reads use the
+/// same fields and flattened shared configurations.
+/// A schema incompatible with its field is a declaration error:
+///
+/// ```compile_fail,E0080
+/// use drip::param::{Parameters, ParamKind};
+/// #[derive(drip::Parameters)]
+/// struct Bad { #[param(ParamKind::Bool { default: false })] flag: f32 }
+/// const SPECS: &[drip::param::ParamSpec] = Bad::SPECS;
+/// ```
+/// Choice schemas must describe exactly the enum's persisted spellings:
+///
+/// ```compile_fail,E0080
+/// use drip::param::{Parameters, ParamKind};
+/// #[derive(drip::Choice)]
+/// enum Mode { #[choice("linear")] Linear }
+/// #[derive(drip::Parameters)]
+/// struct Bad {
+///     #[param(ParamKind::Choice { options: &["linear", "unknown"], default: "linear" })]
+///     mode: Mode,
+/// }
+/// const SPECS: &[drip::param::ParamSpec] = Bad::SPECS;
+/// ```
+pub trait Parameters: Sized {
+    const SPECS: &'static [ParamSpec];
+    fn read(params: Params<'_>) -> Self;
+}
+impl Parameters for () {
+    const SPECS: &'static [ParamSpec] = &[];
+    fn read(_: Params<'_>) {}
+}
+#[doc(hidden)]
+pub const fn concat_specs<const N: usize>(groups: &[&[ParamSpec]]) -> [ParamSpec; N] {
+    let mut result = [ParamSpec::new("", ParamKind::Bool { default: false }); N];
+    let (mut group, mut index) = (0, 0);
+    while group < groups.len() {
+        let mut field = 0;
+        while field < groups[group].len() {
+            let spec = groups[group][field];
+            let mut prior = 0;
+            while prior < index {
+                assert!(
+                    !same_name(result[prior].name, spec.name),
+                    "duplicate flattened parameter key"
+                );
+                prior += 1;
+            }
+            result[index] = spec;
+            index += 1;
+            field += 1;
+        }
+        group += 1;
     }
+    assert!(index == N);
+    result
+}
+const fn same_name(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
 
-    pub fn bool(&self, name: &str) -> bool {
-        self.0[name].as_bool().expect("validated bool")
-    }
+/// Field/schema compatibility, checked when a generated parameter schema is built.
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub enum FieldType {
+    Float,
+    Int,
+    Bool,
+    Choice(&'static [&'static str]),
+    Path,
+}
 
-    pub fn choice(&self, name: &str) -> &'a str {
-        self.0[name].as_str().expect("validated choice")
+impl FieldType {
+    pub const fn accepts(self, kind: &ParamKind) -> bool {
+        match (self, kind) {
+            (Self::Float, ParamKind::Float { .. })
+            | (Self::Int, ParamKind::Int { .. })
+            | (Self::Bool, ParamKind::Bool { .. })
+            | (Self::Path, ParamKind::Path { .. }) => true,
+            (Self::Choice(names), ParamKind::Choice { options, default }) => {
+                if names.len() != options.len() {
+                    return false;
+                }
+                let mut i = 0;
+                let mut has_default = false;
+                while i < names.len() {
+                    if !same_name(names[i], options[i]) {
+                        return false;
+                    }
+                    has_default |= same_name(names[i], default);
+                    i += 1;
+                }
+                has_default
+            }
+            _ => false,
+        }
     }
+}
 
-    pub fn path(&self, name: &str) -> Option<&'a Path> {
-        self.0[name].as_str().map(Path::new)
-    }
+#[doc(hidden)]
+pub trait ParameterField: serde::de::DeserializeOwned {
+    const TYPE: FieldType;
+}
+impl ParameterField for f64 {
+    const TYPE: FieldType = FieldType::Float;
+}
+impl ParameterField for f32 {
+    const TYPE: FieldType = FieldType::Float;
+}
+impl ParameterField for i64 {
+    const TYPE: FieldType = FieldType::Int;
+}
+impl ParameterField for bool {
+    const TYPE: FieldType = FieldType::Bool;
+}
+impl ParameterField for Option<std::path::PathBuf> {
+    const TYPE: FieldType = FieldType::Path;
 }

@@ -1,36 +1,29 @@
 //! Half-size Bayer cell averaging.
 
 use crate::image::{CameraRgb, Mosaic, Rgb};
-use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
-use crate::param::Params;
-use crate::ports::Read;
+use crate::node::{EvalContext, Evaluated, KernelError};
 use rayon::prelude::*;
 use std::sync::Arc;
 
-/// Naive debayering: each 2 × 2 Bayer cell becomes one pixel, averaging its
-/// two greens. Halves the resolution.
-pub static BIN_2X2: NodeKind =
-    NodeKind::new::<Bin2x2>("demosaic.bin2x2", "demosaic", "Debayer", &[], &["mosaic"], &["image"]);
-
-struct Bin2x2;
-impl NodeKernel for Bin2x2 {
-    type Inputs = (Read<Mosaic>,);
-    type Outputs = (Arc<CameraRgb>,);
-    fn eval(
-        _: Params<'_>,
-        (input,): (&Mosaic,),
-        ctx: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-        let m = super::preview(input, ctx);
-        let (width, height) = (m.width / 2, m.height / 2);
-        // The second green (3) joins the first.
-        let colors: Vec<u32> = m.cfa.colors.iter().map(|&c| [0, 1, 2, 1][c as usize]).collect();
-        let pixels = debayer(&m.data, m.width, m.height, m.cfa.size, &colors);
-        Ok(Evaluated::new((Arc::new(CameraRgb {
-            data: Arc::new(Rgb { width, height, scale: m.scale * 2, pixels }),
-            camera: m.camera.clone(),
-        }),)))
-    }
+/// Average each 2 × 2 Bayer cell into one camera RGB pixel, combining its two greens.
+///
+/// Output width and height are halved after preview reduction.
+#[crate::node(kind = BIN_2X2, id = "demosaic.bin2x2", category = "demosaic", name = "Debayer", outputs = ["image"])]
+fn bin2x2(
+    _: (),
+    (mosaic,): (&Mosaic,),
+    ctx: &EvalContext<'_>,
+) -> Result<Evaluated<(Arc<CameraRgb>,)>, KernelError> {
+    let m = super::preview(mosaic, ctx);
+    let (width, height) = (m.width / 2, m.height / 2);
+    // The second green (3) joins the first.
+    let colors: Vec<u32> =
+        m.interpretation().cfa.colors.iter().map(|&c| [0, 1, 2, 1][c as usize]).collect();
+    let pixels = debayer(m.samples(), m.width, m.height, m.interpretation().cfa.size, &colors);
+    Ok(Evaluated::new((Arc::new(CameraRgb {
+        data: Arc::new(Rgb { width, height, scale: m.scale * 2, pixels }),
+        interpretation: m.interpretation().camera.clone(),
+    }),)))
 }
 
 pub fn debayer(

@@ -1,4 +1,4 @@
-use super::{NodeUi, PAD, Part};
+use super::{NodeView, PAD, Part};
 use crate::editing::{NodeCx, pair};
 use crate::render::node_views;
 use crate::widgets::BUTTON;
@@ -20,7 +20,7 @@ fn view_size(node: &Node) -> Vec2 {
     pair(&node.ui["size"]).unwrap_or(VIEW)
 }
 
-impl NodeUi for Viewer {
+impl NodeView for Viewer {
     fn size(&self, node: &Node) -> Vec2 {
         view_size(node) + vec2(0.0, PAD)
     }

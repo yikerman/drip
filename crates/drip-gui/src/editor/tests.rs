@@ -163,14 +163,14 @@ fn invalid_port_targets_keep_the_pending_connection_and_existing_source() {
     let mut h = harness(1.0);
     let source = h.state().node;
     let target = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(400.0, 100.0));
-    let display = add_node(&mut h, &drip::nodes::SIGMOID, vec2(100.0, 300.0));
+    let camera = add_node(&mut h, &drip::nodes::RCD, vec2(100.0, 300.0));
     h.state_mut().graph.connect(image_port(source), image_port(target)).unwrap();
     let before = h.state().graph.clone();
     click_port(&mut h, target, Direction::Input, Secondary);
     let pending = h.state().editor.wire.clone();
     for (id, direction, error) in [
         (source, Direction::Input, "Choose an output port"),
-        (display, Direction::Output, "does not accept"),
+        (camera, Direction::Output, "Exposure 2 · image requires scale invariant, got camera"),
         (target, Direction::Output, "cycle"),
     ] {
         click_port(&mut h, id, direction, Secondary);

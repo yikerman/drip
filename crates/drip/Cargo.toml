@@ -7,6 +7,9 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+drip-macros = { path = "../drip-macros" }
+bevy_reflect = { version = "=0.19.1", default-features = false, features = ["std"] }
+linkme = "0.3.37"
 drip-libraw.workspace = true
 lcms2 = "6.2.0"
 log = "0.4.34"

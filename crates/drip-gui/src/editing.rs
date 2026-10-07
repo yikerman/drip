@@ -1,6 +1,6 @@
 //! Applies frontend graph edits and owns their redraw/evaluation effects.
 
-use crate::node_ui::{Part, Popped};
+use crate::node_ui::{Part, Popped, ports};
 use crate::render::node_views::PreparedView;
 use crate::worker::Presentation;
 use drip::graph::{Graph, GraphError, Node, NodeId, Port};
@@ -87,7 +87,7 @@ impl<'a> Frame<'a> {
                 added
             }
             Err(e) => {
-                self.report.refused = Some(e.to_string());
+                self.report.refused = Some(refusal(graph, &e));
                 None
             }
         }
@@ -109,6 +109,10 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
 
     pub fn id(&self) -> NodeId {
         self.id
+    }
+
+    pub fn graph(&self) -> &Graph {
+        self.graph
     }
 
     pub fn node(&self) -> &Node {
@@ -172,5 +176,21 @@ pub fn pair(value: &Json) -> Option<Vec2> {
     match value.as_array()?.iter().map(|v| v.as_f64()).collect::<Option<Vec<_>>>()?.as_slice() {
         [x, y] => Some(vec2(*x as f32, *y as f32)),
         _ => None,
+    }
+}
+
+/// Names the refused input in node terms. Connecting rechecks descendants,
+/// so the input may lie downstream of the new edge.
+fn refusal(graph: &Graph, error: &GraphError) -> String {
+    match error {
+        GraphError::TypeMismatch { input, mismatch } => format!(
+            "{} · {} requires {}, got {} ({})",
+            graph.node(input.0).expect("checked input").name,
+            input.1,
+            ports::name(mismatch.expected),
+            ports::name(mismatch.actual),
+            mismatch.reason,
+        ),
+        error => error.to_string(),
     }
 }

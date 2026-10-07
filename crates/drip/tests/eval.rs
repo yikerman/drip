@@ -2,9 +2,9 @@ mod common;
 
 use common::*;
 use drip::eval::{Evaluator, NodeError, run_action};
-use drip::image::{DisplayRec2020, SceneRec2020, ThreeChannelMatrix};
+use drip::image::Rec2020Mat;
 use drip::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind, TypedAction};
-use drip::param::Params;
+
 use drip::ports::{Optional, Read};
 use drip::project::Project;
 use drip::view::View;
@@ -94,24 +94,20 @@ fn unconnected_input_is_an_error() {
 }
 
 /// `base`, plus `offset` when connected.
-static OFFSET: NodeKind = NodeKind::new::<OffsetKernel>(
-    "test.offset",
-    "test",
-    "offset",
-    &[],
-    &["base", "offset"],
-    &["image"],
-);
+static OFFSET: NodeKind =
+    NodeKind::new::<OffsetKernel>("test.offset", "test", "offset", &["base", "offset"], &["image"]);
 struct OffsetKernel;
 impl NodeKernel for OffsetKernel {
-    type Inputs = (Read<SceneRec2020>, Optional<Read<SceneRec2020>>);
-    type Outputs = (std::sync::Arc<SceneRec2020>,);
+    type Parameters = ();
+    type View = ();
+    type Inputs = (Read<Rec2020Mat>, Optional<Read<Rec2020Mat>>);
+    type Outputs = (std::sync::Arc<Rec2020Mat>,);
 
     fn eval(
-        _: Params<'_>,
-        (base, offset): (&SceneRec2020, Option<&SceneRec2020>),
+        _: Self::Parameters,
+        (base, offset): (&Rec2020Mat, Option<&Rec2020Mat>),
         _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+    ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
         let (a, b) = (base.rgb().pixels[0], offset.map_or([0.0; 3], |o| o.rgb().pixels[0]));
         Ok(Evaluated::new((scene([a[0] + b[0], a[1] + b[1], a[2] + b[2]]),)))
     }
@@ -294,30 +290,34 @@ mod release {
 
     /// Remembers its output allocation so tests can see when it is freed.
     static PROBE: NodeKind =
-        NodeKind::new::<ProbeKernel>("test.probe", "test", "probe", &[], &[], &["image"]);
+        NodeKind::new::<ProbeKernel>("test.probe", "test", "probe", &[], &["image"]);
     struct ProbeKernel;
     impl NodeKernel for ProbeKernel {
+        type Parameters = ();
+        type View = ();
         type Inputs = ();
-        type Outputs = (Arc<SceneRec2020>,);
+        type Outputs = (Arc<Rec2020Mat>,);
 
         fn eval(
-            _: Params<'_>,
+            _: Self::Parameters,
             (): (),
             _: &EvalContext<'_>,
-        ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+        ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
             let image =
                 Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[1.0, 2.0, 3.0]] });
             *PROBED.lock().unwrap() = Some(Arc::downgrade(&image));
-            Ok(Evaluated { outputs: (Arc::new(SceneRec2020::from(image)),), view: None })
+            Ok(Evaluated { outputs: (Arc::new(Rec2020Mat::from(image)),), view: () })
         }
     }
 
     /// Records, while its action runs, whether the probe's output is alive.
     static CHECK: NodeKind =
-        NodeKind::new::<CheckKernel>("test.check", "test", "check", &[], &["image"], &[]);
+        NodeKind::new::<CheckKernel>("test.check", "test", "check", &["image"], &[]);
     struct CheckKernel;
     impl NodeKernel for CheckKernel {
-        type Inputs = (Read<DisplayRec2020>,);
+        type Parameters = ();
+        type View = ();
+        type Inputs = (Read<TaggedMat>,);
         type Outputs = ();
         const ACTIONS: &'static [TypedAction<Self>] = &[TypedAction {
             name: "check",
@@ -328,10 +328,10 @@ mod release {
             },
         }];
         fn eval(
-            _: Params<'_>,
-            _: (&DisplayRec2020,),
+            _: Self::Parameters,
+            _: (&TaggedMat,),
             _: &EvalContext<'_>,
-        ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+        ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
             Ok(Evaluated::default())
         }
     }

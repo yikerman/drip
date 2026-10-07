@@ -19,7 +19,8 @@ pub fn raw_to_tiff() -> Project {
         g.set_ui(id, ui).expect("just added");
         id
     };
-    let kinds = [&READ, &WHITE_BALANCE, &HIGHLIGHTS, &RCD, &CAMERA_TO_REC2020, &EXPOSURE, &SIGMOID];
+    let kinds: [&NodeKind; 7] =
+        [&READ, &WHITE_BALANCE, &HIGHLIGHTS, &RCD, &CAMERA_TO_REC2020, &EXPOSURE, &SIGMOID];
     let chain: Vec<_> = kinds
         .iter()
         .enumerate()

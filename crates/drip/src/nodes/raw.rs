@@ -6,35 +6,33 @@ use drip_libraw::Raw;
 
 use crate::color::{self, D65, REC2020};
 use crate::image::{Camera, Cfa, Mosaic, RawMetadata};
-use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
-use crate::param::{ParamKind, ParamSpec, Params};
+use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::param::ParamKind;
 
-pub static READ: NodeKind = NodeKind::new::<ReadRaw>(
-    "raw.read",
-    "raw",
-    "RAW",
-    &[ParamSpec::new("path", ParamKind::Path { output: false }).external()],
-    &[],
-    &["mosaic", "metadata"],
-);
+#[derive(crate::Parameters)]
+pub struct RawSource {
+    #[param(ParamKind::Path { output: false })]
+    #[external]
+    path: Option<std::path::PathBuf>,
+}
 
-struct ReadRaw;
-impl NodeKernel for ReadRaw {
-    type Inputs = ();
-    type Outputs = (Arc<Mosaic>, Arc<RawMetadata>);
-    fn eval(
-        p: Params<'_>,
-        (): (),
-        ctx: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-        let path = p.path("path").ok_or(KernelError::Incomplete("no raw file chosen"))?;
-        let raw = ctx.resources().load(path, |path| {
-            drip_libraw::decode(path).map_err(|e| format!("{}: {e}", path.display()))
-        })?;
-        let mosaic = normalize(&raw)?;
-        let outputs = (Arc::new(mosaic), Arc::new(raw.metadata.clone()));
-        Ok(Evaluated { outputs, view: None })
-    }
+/// Decode a Bayer RAW, subtract its black levels and normalize using sensor saturation.
+///
+/// Camera characterization and as-shot white balance remain attached to the mosaic.
+/// RAW metadata is also available as a separate output.
+#[crate::node(kind = READ, id = "raw.read", category = "raw", name = "RAW", outputs = ["mosaic", "metadata"])]
+fn read(
+    p: RawSource,
+    (): (),
+    ctx: &EvalContext<'_>,
+) -> Result<Evaluated<(Arc<Mosaic>, Arc<RawMetadata>)>, KernelError> {
+    let path = p.path.as_deref().ok_or(KernelError::Incomplete("no raw file chosen"))?;
+    let raw = ctx.resources().load(path, |path| {
+        drip_libraw::decode(path).map_err(|e| format!("{}: {e}", path.display()))
+    })?;
+    let mosaic = normalize(&raw)?;
+    let outputs = (Arc::new(mosaic), Arc::new(raw.metadata.clone()));
+    Ok(Evaluated { outputs, view: () })
 }
 
 /// Subtracts black and scales sensor saturation to 1, cropping partial Bayer
@@ -101,5 +99,8 @@ pub fn normalize(raw: &Raw) -> Result<Mosaic, String> {
     }
     let cfa = Cfa { size: 2, colors: raw.cfa.concat() };
     let camera = Arc::new(Camera { xyz_to_cam: raw.xyz_to_cam, white_balance });
-    Ok(Mosaic { width, height, scale: 1, cfa, data, camera, white })
+    Ok(Mosaic::new(
+        Arc::new(crate::image::RawMat::from_samples(width, height, 1, data)),
+        crate::image::SensorMosaic { cfa, white, camera },
+    ))
 }

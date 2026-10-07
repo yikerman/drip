@@ -1,24 +1,25 @@
 use super::*;
 use crate::color::{self, D65, REC709, REC2020};
 use crate::graph::Graph;
-use crate::image::SceneRec2020;
+use crate::image::Rec2020Mat;
+use crate::ports::ReadMat;
 use crate::project::Project;
 use serde_json::json;
 
-fn preview(
-    image: &dyn RgbIn<Rec2020>,
-    params: serde_json::Value,
-) -> Result<PreviewImage, KernelError> {
+fn preview(image: &Rec2020Mat, params: serde_json::Value) -> Result<PreviewImage, KernelError> {
     let mut graph = Graph::default();
     let id = graph.add_node(&PREVIEW);
     for (name, value) in params.as_object().unwrap() {
         graph.set_param(id, name, value.clone()).unwrap();
     }
     let context = EvalContext { level: 0, resources: &Default::default() };
-    let result =
-        Preview::eval(Params::validated(&graph.node(id).unwrap().params), (image,), &context)?;
-    let Some(View::Image(image)) = result.view else { panic!("image view") };
-    Ok(image)
+    let value = crate::value::Value::new(Arc::new(image.clone()));
+    let image = value.borrow::<ReadMat<3, dyn Rec2020Rgb>>().unwrap();
+    let params = <Preview as crate::param::Parameters>::read(crate::param::Params::validated(
+        &graph.node(id).unwrap().params,
+    ));
+    let result = super::preview(params, (image,), &context)?;
+    Ok(result.view)
 }
 
 fn image(pixels: Vec<[f32; 3]>) -> Arc<Rgb> {
@@ -32,11 +33,11 @@ fn close(actual: [f32; 3], expected: [f32; 3]) {
 }
 
 #[test]
-fn none_reuses_scene_and_display_pixels_without_loading_a_profile() {
+fn none_reuses_linear_rec2020_pixels_without_loading_a_profile() {
     let rgb = image(vec![[-0.2, 0.18, 2.0]]);
-    let scene = SceneRec2020::from(rgb.clone());
-    let display = DisplayRec2020::from(rgb.clone());
-    for input in [&scene as &dyn RgbIn<Rec2020>, &display] {
+    let input = Rec2020Mat::from(rgb.clone());
+    {
+        let input = &input;
         let shown = preview(input, json!({ "profile": "file" })).unwrap();
         assert!(Arc::ptr_eq(shown.rgb(), &rgb));
         assert!(!shown.interpolation);
@@ -49,7 +50,7 @@ fn none_reuses_scene_and_display_pixels_without_loading_a_profile() {
 #[test]
 fn softproof_bounds_the_target_gamut_and_keeps_image_geometry() {
     let rgb = image(vec![[0.0; 3], [0.18; 3], [1.0; 3], [0.0, 1.0, 0.0], [-0.1; 3], [2.0; 3]]);
-    let shown = preview(&SceneRec2020::from(rgb.clone()), json!({ "mode": "softproof" })).unwrap();
+    let shown = preview(&Rec2020Mat::from(rgb.clone()), json!({ "mode": "softproof" })).unwrap();
     let shown = shown.rgb();
     assert_eq!((shown.width, shown.height, shown.scale), (rgb.width, rgb.height, rgb.scale));
     let rec_to_srgb = color::mul(
@@ -67,7 +68,7 @@ fn softproof_bounds_the_target_gamut_and_keeps_image_geometry() {
 #[test]
 fn gamutcheck_marks_colors_against_the_selected_profile() {
     let rgb = image(vec![[0.0; 3], [0.18; 3], [1.0; 3], [0.0, 1.0, 0.0]]);
-    let input = DisplayRec2020::from(rgb.clone());
+    let input = Rec2020Mat::from(rgb.clone());
     for target in ["srgb", "display_p3", "rec2020"] {
         let shown = preview(&input, json!({ "mode": "gamutcheck", "profile": target })).unwrap();
         for i in 0..3 {
@@ -83,7 +84,7 @@ fn gamutcheck_preserves_dark_neutrals_and_interior_colors() {
     let mut pixels: Vec<_> = [-6, -5, -4, -3, -2, -1, 0].map(|ev| [10.0f32.powi(ev); 3]).into();
     pixels.extend([[0.002, 0.003, 0.002], [0.02, 0.03, 0.02], [0.2, 0.3, 0.2]]);
     let rgb = image(pixels);
-    let shown = preview(&DisplayRec2020::from(rgb.clone()), json!({"mode":"gamutcheck"})).unwrap();
+    let shown = preview(&Rec2020Mat::from(rgb.clone()), json!({"mode":"gamutcheck"})).unwrap();
     for (&got, &want) in shown.rgb().pixels.iter().zip(&rgb.pixels) {
         close(got, want);
     }
@@ -99,7 +100,7 @@ fn proofing_is_identical_across_worker_counts_and_chunk_boundaries() {
             _ => [0.2, 0.3, 0.2],
         })
         .collect();
-    let input = DisplayRec2020::from(image(pixels));
+    let input = Rec2020Mat::from(image(pixels));
     let run = |workers, mode| {
         rayon::ThreadPoolBuilder::new()
             .num_threads(workers)
@@ -116,7 +117,7 @@ fn proofing_is_identical_across_worker_counts_and_chunk_boundaries() {
 fn gamut_warnings_agree_with_lcms_round_trips_away_from_the_boundary() {
     use lcms2::CIELabExt;
     let lab = Profile::new_lab4_context(lcms2::GlobalContext::new(), lcms2::CIExyY::d50()).unwrap();
-    let target = profile::built_in("srgb");
+    let target = profile::ProfileSource::Srgb.built_in().unwrap();
     let working = profile::rec2020_linear();
     let to_lab = Transform::new(
         &working,
@@ -151,7 +152,7 @@ fn gamut_warnings_agree_with_lcms_round_trips_away_from_the_boundary() {
         })
         .collect();
     let rgb = image(pixels);
-    let shown = preview(&DisplayRec2020::from(rgb.clone()), json!({"mode":"gamutcheck"})).unwrap();
+    let shown = preview(&Rec2020Mat::from(rgb.clone()), json!({"mode":"gamutcheck"})).unwrap();
     let mut original = vec![[0.0f64; 3]; rgb.pixels.len()];
     to_lab.transform_pixels(&rgb.pixels, &mut original);
     let mut device = vec![[0u16; 3]; original.len()];
@@ -189,7 +190,7 @@ fn gamut_warnings_agree_with_lcms_round_trips_away_from_the_boundary() {
 
 #[test]
 fn active_modes_report_missing_profiles() {
-    let input = DisplayRec2020::from(image(vec![[0.18; 3]]));
+    let input = Rec2020Mat::from(image(vec![[0.18; 3]]));
     for mode in ["softproof", "gamutcheck"] {
         let error = preview(&input, json!({ "mode": mode, "profile": "file" })).unwrap_err();
         assert_eq!(error, KernelError::Incomplete("no output profile file chosen"));

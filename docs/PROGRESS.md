@@ -3,6 +3,449 @@
 Current outcomes and verification limits. Decisions are in [DESIGN](DESIGN.md),
 unimplemented work in [TODO](../TODO.md); older experiments remain in Git history.
 
+## 2026-10-06: Maintainability fixes
+
+- Unified handwritten and generated nodes on `NodeKernel::Parameters`: it supplies
+  the schema and the values passed to evaluation, actions and checks. Removed the
+  independent schema argument, macro conversion wrappers and unused raw getters;
+  migrated handwritten test kernels to typed fields.
+- Parameter reads deserialize borrowed JSON without cloning it first. Removed
+  Bevy documentation reflection and the redundant test dependency; node/field help
+  still comes from the declaration macros. Port roles now use an enum, with labels
+  derived separately from hover behavior.
+- Updated the design and dependency credits and removed the completed review
+  items from TODO. Workspace tests passed 168 tests, including eight compile-fail
+  docs; the GPU-dependent test remains ignored. Strict workspace Clippy,
+  formatting and diff whitespace checks passed. Rustdoc built with Cargo's
+  existing library/CLI `drip` output-filename collision warning.
+
+## 2026-10-06: Maintainability review
+
+- Reviewed the pending changes for unnecessary abstractions, duplicated contracts
+  and code smells against the recorded DAG requirements. Local declarations,
+  capability projection and discovery serve explicit requirements.
+- Identified an independent schema path for handwritten kernels despite their
+  associated parameter type. Smaller cleanup candidates are JSON cloning during
+  typed reads, unused production reflection-documentation support, and port-role
+  strings controlling formatting. Tracked these in TODO; implementation unchanged.
+- Static review only; tests were not rerun. No architecture change decided.
+
+## 2026-10-06: Typed computational/frontend boundary
+
+- Replaced the node `view` flag with the presentation type in
+  `Evaluated<Outputs, V>`. Sealed presentation implementations supply availability
+  and conversion together; optional results retain their surface while empty.
+  Preview, histogram and scopes now return concrete presentation values.
+- Generated node constants retain their parameter struct in `TypedNode<P>`;
+  graph/discovery APIs borrow its erased descriptor. The typed constructor
+  derives its schema from the same parameters as the kernel. Migrated manual
+  test kernels and heterogeneous declaration lists to the revised API.
+- Custom controls bind through `Binding::new` with the same parameter type as
+  their node. `ControlCx<P>` supplies typed reads after edits, generic schema
+  controls and their graph-validated edits. Sigmoid no longer reads a raw map
+  through a separate untyped settings helper.
+- Independent review identified a Rust module-privacy bypass in the first
+  binding layout. Moved the binding into the controls sibling module with private
+  fields and read-only accessors, requiring custom node modules to use its typed
+  constructor. Mathematical laws and callback intent remain trusted contracts.
+- Validation: full workspace suite passed 168 tests, including eight compile-fail
+  docs, with one GPU test ignored. Final GUI regression run passed all 52 tests.
+  Isolated negative GUI builds rejected mismatched controls with E0308 and private
+  binding literals with E0451. Strict workspace Clippy, Rustdoc, formatting and
+  diff whitespace checks passed; prior platform/MSRV verification limits remain.
+
+## 2026-10-06: Independent controls and view presentation
+
+- Split custom parameter controls from `NodeView` body/window behavior. Local
+  bindings override either independently; omitted components retain their
+  schema/node-metadata defaults. Sigmoid now supplies only a controls callback,
+  and preview/scopes keep the generic viewer. No built-in currently needs both.
+- Added a GUI regression combining custom controls with a declared view while
+  evaluation is incomplete, exercising view pop-out/open/close and retained
+  inspector controls without any viewer forwarding in the binding.
+- Validation: all 52 GUI tests passed (one GPU test ignored), along with strict
+  GUI Clippy, formatting and diff whitespace checks. Library behavior is unchanged.
+
+## 2026-10-06: Local presentation and typed choices
+
+- Replaced the central node-to-widget table with node-local `view = true`
+  metadata and `linkme` custom bindings beside GUI implementations. A generic
+  viewer is available before evaluation; sigmoid's custom controls declare their
+  own binding. Duplicate custom bindings are declaration errors.
+- Added `Choice` for finite enums: explicit persisted variant names generate
+  JSON serialization/deserialization and choice schemas. Migrated profile,
+  intent, preview mode, scope scale, export depth/compression/level to exhaustive
+  typed matches, preserving all project strings and defaults. Profile construction
+  now accepts `ProfileSource` rather than an unchecked string.
+- Replaced numeric parameter-kind tags with named field categories. Choice
+  fields check the whole admitted schema and default at compile time, not just
+  that the JSON representation is a string. Removed the completed TODO entries.
+- Validation: 58 targeted core tests, 51 GUI tests (one GPU test ignored), five
+  compile-fail docs and the macro declaration-rejection test passed. New coverage
+  includes every built-in choice's project round trip, invalid-choice rejection,
+  and a new view node's pop-out before it has any evaluated data or GUI binding.
+- Independent review found no actionable issues in correctness, contained
+  complexity or GUI/library separation. Strict workspace Clippy, Rustdoc,
+  formatting and diff whitespace checks passed. Platform/MSRV verification
+  limits from the production migration still apply.
+
+## 2026-10-06: Remaining declaration-table audit
+
+- Found a manual node-to-UI table in `node_ui::of`: four viewer bindings and
+  sigmoid controls. Choice parameters also repeat admitted string values in
+  schemas and implementation branches; wildcard branches can hide missing cases
+  after a schema extension. Recorded both follow-ups in TODO.
+- Node discovery and interpretation dictionaries are generated/runtime lookup
+  structures, without manually enumerated members. Template node lists encode
+  a particular pipeline. The closed presentation enums and renderer matches
+  represent distinct rendering implementations. No processing code changed.
+
+## 2026-10-06: Node-local documentation
+
+- Moved every built-in node's operation help to Rustdoc on its typed function.
+  The existing macro supplies `NodeKind.documentation`; optional reference links
+  now live in the same `#[node(...)]` declaration and feed `NodeKind.references`.
+  View/file results are described in the operation text, alongside assumptions.
+- Removed the frontend's node-help table. The inspector renders node metadata
+  and generated port contracts below the type ID; pop-outs remain controls/views
+  only. Updated the development guideline to reflect this ownership change.
+- Validation: three declaration tests and 50 GUI tests passed (one GPU test
+  ignored). The inspector regression verifies the generated description's
+  placement and absence from pop-outs. Strict workspace Clippy, Rustdoc,
+  formatting and whitespace checks passed.
+
+## 2026-10-06: Production semantic DAG migration
+
+- Migrated all built-in nodes and the GUI to logical interpretations over
+  `RawMat<C>` storage. Mosaics are `RealMat<1, SensorMosaic>`, RGB values are
+  `RealMat<3, I>`. Removed scene/display type gates; sigmoid explicitly produces
+  linear-colorimetric Rec.2020, including for later creative processing.
+- Added `drip-macros`: capability parent projection through Bevy, immutable
+  interpretation dictionaries, typed parameter schemas and function-derived
+  node adapters/discovery. Node declarations generate their ports and linked
+  catalogue entries; no manual built-in registry or type list remains.
+  Shared parameter structs flatten to the existing JSON keys. Stable node IDs,
+  port names and serialized parameter names remain unchanged.
+- Graph edits resolve preserving chains and transactionally reject incompatible
+  downstream consequences. Pending outputs remain explicit. The executor checks
+  the same input requirements, named value relationships and preservation witness
+  before allowing consumers/actions. Tests exercise differing runtime units and
+  geometry despite identical Rust TypeIds, plus incorrect preservation provenance.
+- Exposure additionally requires `ScaleInvariant: LinearRgb`: all promises of
+  the input interpretation must survive positive uniform scaling. This avoids
+  silently retaining future range/calibration refinements. Rec.2020 and the P3
+  extension test establish the law; a bounded Rec.2020 interpretation can preview
+  but cannot pass preserving exposure without explicitly weakening its contract.
+- RAW and ICC resources now share explicit context-owned snapshots. Dependency
+  stamps and manual invalidation semantics are retained; no filesystem watcher.
+  Numerical algorithms, their notices and the wide-gamut shader path are retained.
+- Claude MCP resolved `opus` to Opus 5.5. Its session denied writes/Cargo, so it
+  returned a frontend patch; the primary workspace applied, reviewed and tested
+  it. The editor shows resolved/pending types, names refused downstream ports,
+  derives generic help from contracts and uses generated parameter tooltips.
+  Existing node-specific frontend help remains optional and separate from Rustdoc.
+- Validation: full workspace run passed 156 tests and four compile-fail docs are
+  included in that count; its GPU test was ignored in the normal run and passed
+  when separately enabled. After the final closure-law/review changes, all 55
+  affected core tests and 50 GUI tests passed. Strict workspace Clippy, formatting,
+  API documentation with warnings denied and diff whitespace checks passed.
+- Remaining verification limits: Linux/rustc 1.96.1 only; declared added dependency
+  MSRVs fit 1.92, but 1.92 and Windows/macOS execution were not run. Mathematical
+  trait laws and external-data validation remain trusted; reflection is not a
+  numerical proof. Earlier CLR/presentation experiments below remain unchanged.
+
+- Independent review found sigmoid's exact nominal input unnecessarily rejected
+  valid Rec.2020 refinements. Changed it to `Rec2020Rgb` capability input with a
+  fresh plain Rec.2020 output and added a refinement-dropping regression. Also
+  shared callback-list parsing in the macro and removed production parameter
+  `Reflect` derives: parameter schemas/docs come directly from `Parameters`.
+  Reflection remains on interpretation evidence; optional derive interoperability
+  is exercised separately in tests. Focused re-review confirmed the issue fixed
+  and found no remaining blockers; it judged the infrastructure reasonably
+  contained, with shared checks and explicit trusted-law limits.
+
+## 2026-10-06: DAG contracts from first principles
+
+- User settled the naming split: memory layout `RealMat<CHANNELS, I>`,
+  interpretation `I`, capability trait bounds. User requires mechanically
+  maintained registration to be generated, eliminating separate registry
+  authoring. Recorded both requirements without revisiting semantic definitions.
+- Built `/tmp/drip-semantic-dag-probe` using bevy_reflect 0.19.1, linkme 0.3.37,
+  syn/quote and three small macros: capability superclass exposure, interpretation
+  dictionaries and node adapters/discovery. The macros total 180 formatted lines;
+  this is a restricted feasibility implementation. Ordinary Rust implementations
+  supply the documented laws and colorimetric operations. Existing `color.rs`
+  supplies matrix calculations; no algorithms or dependencies were added to Drip.
+- Fourteen tests pass: automatic dictionaries without TypeRegistry, superclass
+  exposure and cross-module capability extension without central edits, rejection
+  of encoded RGB despite identical storage, checking before pixels, concrete
+  interpretation propagation through exposure/creative processing, matching
+  preflight/runtime errors, zero-copy input storage, retained runtime matrix
+  evidence, cycle rejection, generated discovery, reflected parameter docs,
+  ingress shape validation, channel-count checks and parameter-type checks.
+  Two temporary negative declarations fail compilation: a false capability
+  exposure and an encoded interpretation passed to a linear-RGB kernel.
+- The semantic probe implements only one required matrix input and one output
+  explicitly preserving its interpretation. It stores `I` directly for typed
+  values (unit markers are zero-sized), then retains an owned reflected witness
+  across graph erasure. No manual node list, capability list or global type registry
+  is required. An interpretation names its strongest capabilities; generated
+  helpers recursively expose parents using Bevy adapters. This was tested with
+  object-safe, nongeneric capabilities, including a capability in another module.
+- Remaining work includes fixed/changed output interpretations, general layouts,
+  optional/multiple ports, resource/global context integration, value constraints
+  on parameters, full diagnostics/persistence/cache invalidation and equality of
+  runtime logical type arguments. `MatrixRgb`'s Rust TypeId alone does not identify
+  its particular basis. The toy DAG uses recursive evaluation and no caching;
+  it is not a proposed replacement for production scheduling. Tests used Linux
+  and rustc 1.96.1. Production code remains unchanged; documentation passes
+  `git diff --check`.
+- User corrected the foundational model: graph types are logical/semantic types;
+  `f32` matrices are their shared storage representation, analogous to physical
+  quantities sharing numeric storage. Capabilities classify the semantic types.
+  Superseded the storage-first descriptor recommendation and reopened the concrete
+  trait/typeclass evidence bridge. Runtime type descriptions remain possible,
+  but storage identity cannot determine graph compatibility. The earlier probe
+  demonstrates mechanical adapters/reflection only, not adoption of its type model.
+- Investigated a concrete implementation split: typed payload descriptions,
+  ordinary contract functions, Bevy parameter inspection, a narrow node macro
+  and linkme discovery. Recorded the method as tentative, retaining the agreed
+  `LinearRgb` semantics and unresolved-fact execution policy. Kept unrelated
+  processing/platform design material unchanged.
+- Built `/tmp/drip-contract-method-probe` with bevy_reflect 0.19.1, linkme 0.3.37
+  and a 73-line proof-of-concept procedural macro. Twelve tests pass: generated
+  discovery/port names, static parameter attributes/docs without a TypeRegistry,
+  transactional parameter rejection including NaN, checking before pixels,
+  shared preflight/evaluation errors, payload mismatch rejection, pending versus
+  unestablished facts, creative linear-RGB interpretation, grid correspondence,
+  mask bounds, generated multi-input execution and a metadata refinement rule.
+  Two deliberately invalid declarations fail compilation for mismatched contract
+  and kernel output types. No production code or dependencies changed.
+- The new probe covers required borrowed inputs and one output, using exact
+  payload casts plus instance descriptors. It does not implement the complete
+  evaluator, source-result refinement lifecycle, optional/multiple outputs,
+  resource invalidation, structured node/port attribution, serialization or GUI
+  integration. Parameter validation is tested separately from its generated
+  dispatch; an integration must expose only validated parameter snapshots.
+  Macro size is feasibility evidence, not a production-infrastructure estimate.
+  Validation used Linux and rustc 1.96.1; project MSRV 1.92 and other platforms
+  were not tested. Test-only helpers produce dead-code warnings in the library
+  build. The local crate's doc-retention feature is `reflect_documentation`.
+- User defined `LinearRgb` as data intended to be linear and colorimetric.
+  Recorded this as a requirement, distinct from linearity of the producing
+  operation and preservation of original capture relationships.
+- Audited the clarified model: creative reinterpretation is coherent, but the
+  design is not yet a complete soundness specification. Exact capability laws,
+  preservation/re-establishment rules, unresolved-precondition policy and
+  descriptor/execution consistency still need concrete definitions and tests.
+- User clarified that creative operations really are physically/mathematically
+  nonlinear; their outputs are deliberately reinterpreted as new light values.
+  Corrected the case study and requirements: this is an explicit node contract,
+  not a weakened linearity definition, unknown fact or per-use assumption override.
+- Reorganized only the DAG redesign material in DESIGN into philosophy/goals,
+  case studies and requirements. Recorded pipeline freedom, conditional formal
+  guarantees and bounded implementation complexity. Verified that the surrounding
+  design text, including existing implementation and platform decisions, is
+  unchanged by this cleanup.
+- Reviewed darktable 5.6 documentation for modern calibration/grading, tone/color
+  equalizers, blur/diffusion, profiled denoise, lens/perspective correction,
+  retouch, masks/blending, compositing and display transforms. Consulted the
+  development manual separately, without treating its additional modules as
+  established 5.6 features. This is requirements research, not an algorithm port.
+- User clarified that multi-frame RAW processing normally stays inside a node
+  accepting multiple paths and producing one demosaiced image. Corrected the
+  earlier suggestion of mandatory graph-level frame/alignment structures; track
+  resources while permitting private algorithms and future typed payloads.
+- Expanded the design scope after user clarification: future operations are
+  open-ended, with masking, pixel math, blur and lens correction as stress tests.
+  Recorded sampled-field domains, input relationships, explicit guarantee
+  propagation, reusable sampling maps and separate execution footprints. Reviewed
+  Lensfun's correction decomposition and OpenImageIO's alpha-association contracts
+  as examples; no dependency choice or implementation follows from this review.
+- Read the RAW, WB, highlights, demosaic, camera conversion, exposure, sigmoid,
+  scope, export and presentation contracts as requirements for a fresh design.
+  Distinguished storage, color interpretation, algorithm linearity and exposure
+  meaning; identified calibration, CFA, numerical reference and grid relations
+  as concrete contract candidates. Existing WB and scene/display policy is open
+  for reconsideration, not silently carried into a replacement.
+- Reviewed Bevy field attributes/documentation and trait adapters, clap's help
+  derivation, Rust procedural macros and linkme's distributed catalogues.
+  Proposed generated node plumbing with a small image-contract vocabulary;
+  automatic discovery removes manual lists but does not eliminate catalogue data.
+- User added consistent frontend errors as a goal. Recorded structured diagnostics
+  from the same contract checks, shared across editing, loading and evaluation.
+- Re-read the existing isolated Bevy probe as prior evidence. This session made
+  documentation changes only; no new prototype, dependency or runtime validation.
+
+## 2026-10-06: .NET rewrite handoff
+
+- Populated `../drip.net/AGENTS.md` and `../drip.net/HANDOFF.md`; verified the
+  instructions are byte-for-byte identical to this repository's `AGENTS.md`.
+- Recorded scaffold → tests → library → GUI, F# wherever practical, Windows 11
+  22H2+ and correct color on all three compositor paths. The user requires the
+  DAG type system to be designed again from first principles around F#; the
+  handoff deliberately does not prescribe a replacement architecture.
+- Recorded `gpt-6.1-sol` with high reasoning for well-defined delegated tasks,
+  with architecture and unresolved issues retained by the coordinating agent.
+  No rewrite implementation started; native Windows/macOS and physical color
+  validation remain outstanding.
+
+## 2026-10-06: SDL presentation extension investigation
+
+- Built an isolated SDL 3.4.16 Vulkan extension under
+  `/tmp/drip-gui-probes/sdl-extension`: 30 added/four replaced backend lines,
+  plus a 220-line application Wayland adapter and generated protocol bindings.
+  No production code, dependencies or desktop settings changed.
+- A pre-claim property selects FP16 passthrough from initial creation. The
+  per-claim choice is immutable, support queries and creation share the same
+  color-space selection, and incompatible composition changes are rejected.
+  Vulkan's Wayland ownership contract and Mesa 26.2.3 source support this design:
+  passthrough leaves the color-management surface to the application. Initial
+  passthrough also avoids ambiguity around SDL's deferred swapchain replacement.
+- C# drove two explicitly described windows for 599 frames/ten seconds, including
+  main-window resize and popup hide/show. Protocol logs show two application
+  descriptions with BT.709/ext-linear encoding, luminances 0/80/80, Rec.2020/D65
+  target primaries and relative intent; no competing driver color owner or
+  protocol error. GPU FP16 error remained 0.000410676. This checks transport and
+  metadata, not physical output. Original probe against the patched library
+  without opt-in also passed (603 frames), retaining its original driver metadata.
+- Combined C# + Dear ImGui + patched SDL execution passed for 602 frames/ten
+  seconds. Existing GPU checks for UI sRGB decoding, alpha blending over neutral
+  and extended-gamut images, and negative/above-one image channels all passed.
+  Its protocol log contains one explicit application description with the same
+  target/luminance policy. This closes the local composition-plus-metadata probe;
+  automatic ImGui Wayland viewports remain unavailable, and the two-window SDL
+  test does not implement a complete ImGui multi-window UI.
+- Reviewed production gaps: compositor-description failure/fallback, zero-extent
+  initial claims, device-loss/reclaim and other drivers/compositors. Unsupported
+  FP16/passthrough fails rather than silently changing the declared encoding;
+  fallback must remove application ownership before restoring a driver-owned
+  swapchain. The probe does not implement the full recovery policy.
+- Windows/macOS source audit found no need to replace stock SDL's D3D12/Metal
+  presenters for managed output. Windows needs explicit Advanced Color mode
+  detection: ACM SDR uses display-relative white 1, HDR uses 80-nit scRGB white
+  and desktop-white scaling, and unmanaged output requires LittleCMS/profile
+  invalidation. Legacy DWM's 8-bit limitation is not solved by an SDL format
+  extension. Metal already tags FP16 extended-linear output; future HDR must
+  distinguish current from potential EDR headroom. Hardware tests remain open.
+
+## 2026-10-06: Native GUI color probes
+
+- User requires correct display color on Wayland, Windows and macOS. Delegated
+  isolated GTK4/Gir.Core, SDL3 and Avalonia probes under `/tmp/drip-gui-probes`;
+  stopped Avalonia before GUI launch at the user's request and reassigned that
+  agent to Dear ImGui. No production dependencies or desktop settings changed.
+- Existing Rust GPU preview/output reference test passed on Intel LNL / Mesa
+  26.2.3 Vulkan. This checks shader values and FP16 storage, not physical output.
+- GTK 4.22.5 / Gir.Core 0.8.1 built and ran two Wayland windows with float image
+  patches and controls. FP16 compositor buffers were used, but GTK disabled color
+  management because KWin did not advertise the deprecated named sRGB transfer
+  function. No surface image description was sent. GTK's audited macOS output
+  remains sRGB/BGRA8; Windows wide-gamut/legacy-ICC presentation was not established.
+- SDL 3.4.16 / .NET 10 presented 603 frames in ten seconds. GPU FP16 blit/readback
+  retained negative and above-one RGB (maximum error 0.000410676). Actual Mesa
+  Wayland requests declared BT.709/ext-linear without wider target primaries;
+  the protocol consequently leaves the Rec.2020 test colors outside its declared
+  target volume undefined. Correct numerical transport is insufficient.
+- SDL Windows/macOS source exposes the expected scRGB/extended-linear Metal
+  tagging, but hardware runs remain outstanding. Windows also requires correct
+  SDR-white scaling, Advanced Color state handling and legacy ICC output.
+  No physical color measurements, cross-monitor tests or Windows/macOS runs were
+  performed. Per-probe source, pinned upstream evidence and logs remain in `/tmp`.
+- Dear ImGui docking commit `0f4b927e819823006a878bcb7fe93be129fd8d3f`
+  (1.93.0 WIP) ran through a small native SDL3/SDL_GPU bridge driven by C# controls
+  and state. A modified Vulkan vertex shader decodes UI RGB while preserving
+  alpha coverage; image texture RGB is already linear. The final run presented
+  604 frames/ten seconds; GPU readback verified opaque UI gray, partial-alpha
+  blending over neutral and extended-gamut images, and negative/above-one image
+  channels. This establishes composition, not final display color:
+  the same SDL/Mesa target-volume omission remains. Automatic Wayland viewports
+  reported unavailable; application-owned pop-outs were not implemented in this
+  probe. Windows/macOS shader variants and native execution remain outstanding.
+
+## 2026-10-06: Bevy reflection alternative
+
+- Follow-up compiled standalone `bevy_reflect` 0.19.1 with default features
+  disabled and `std` enabled under `/tmp/drip-bevy-reflect-probe`. Copied current
+  image definitions, added opaque reflection/marker type paths, and reused the
+  actual color module. The unrelated LibRaw metadata re-export was omitted;
+  this is an isolated adapter prototype, not a complete library migration.
+- Seven tests passed: connection evidence before payload creation, inherited
+  capability helpers, allocation-preserving borrows/Arc recovery, scene/display
+  separation, optional input/type-error distinction, absent automatic parent
+  registration, generic basis-specific metadata and registry mutation failure
+  (some tests cover multiple properties). Direct `#[reflect_trait]` on `RgbIn<C>`
+  separately failed compilation with E0107. Both a fixed-basis bridge and a
+  small generic `TypeData` projection worked; the latter avoids one bridge per
+  basis. No production dependency or implementation changed.
+- A deliberately mis-keyed adapter passed a metadata-presence predicate but
+  returned `None` when borrowing. This is a registry-construction invariant,
+  not memory unsafety or a project-file exploit. Keep typed registration helpers
+  and an immutable registry; Bevy does not prove pixel semantics or discover
+  arbitrary Rust trait implementations automatically. Full DAG integration,
+  foreign metadata handling and performance remain untested.
+
+- Reviewed `bevy_reflect` trait adapters, type registration, opaque derives and
+  function reflection against Drip's capability descriptors and typed ports.
+  Generated trait adapters address the hand-written projections without replacing
+  the GUI. Explicit capability registration and graph-specific adapters remain.
+- Recorded a Bevy-first feasibility proposal alongside the open CLR evaluation.
+  Initial pass was documentation-only; the follow-up above supplies adapter evidence.
+
+## 2026-10-06: CLR rewrite feasibility
+
+- Inspected typed ports, payload storage, tiled RCD, native decoding and the
+  FP16/Wayland presentation path. Researched CLR assignability, F# interop,
+  native resource lifetimes, GC, SIMD, Native AOT and candidate GUI backends.
+- Ran an isolated F# probe in `/tmp/drip-clr-evaluation/probe.fsx` on .NET 10.0.12:
+  all 11 checks passed for inherited capabilities, scene/display and color-basis
+  separation, shared object identity, typed record schemas and optional ports.
+  This is a type-system feasibility probe, not a graph implementation or benchmark.
+- Avalonia 12.1 supports native Wayland, but its public surface-hosting gap is
+  directly relevant to independent color-managed previews. GTK4/Gir.Core exposes
+  color-state-aware float textures. SDL3 exposes FP16 extended-linear output,
+  but its Vulkan scRGB selection does not reproduce Drip's explicit passthrough
+  declaration by itself. Recorded the migration question and prototype gates
+  as open/tentative; no production code or dependencies changed.
+- No GUI prototype, display measurement, numerical port or performance comparison
+  was run. Cross-platform presentation and managed-buffer costs remain unverified.
+
+## 2026-10-06: DAG type-system inspection
+
+- Traced typed kernel tuples, capability registration, connection/load validation
+  and evaluator borrowing. Rust checks kernel signatures and registration trait
+  bounds; runtime graph edits check compatibility and cycles. Pixel semantics and
+  custom adapter laws remain implementer obligations.
+- Source inspection only; no runtime code changed or tests run.
+
+### Runtime boundary follow-up
+
+- Built-in exact/capability acceptance and borrowing share descriptor evidence;
+  optional inputs preserve compatibility and propagate connected-source errors.
+- Reproduced a project boundary bug: loading node ID `u64::MAX - 1` succeeds,
+  then adding a node panics on ID increment with overflow checks enabled.
+  Tracked allocator exhaustion in TODO.
+- A temporary probe also confirmed that custom `EdgeValue` implementations can
+  copy another type's descriptor, pass its exact-input predicate, and panic on
+  borrowing. This violates the documented `Describe::<Self>` law; ordinary
+  project data cannot declare such implementations.
+- Validation: all 36 graph, project, typed-port and evaluation tests passed;
+  both temporary probes reproduced their expected panics and were removed.
+  No runtime implementation changed; this was not a decoder or numeric audit.
+
+## 2026-10-06: unwrap/expect inspection
+
+- Inspected production panic sites and their validation boundaries. Parameter,
+  graph and typed-port reads generally rely on established internal contracts;
+  public callers can still violate contracts such as `Params::validated` and
+  passing an existing node to `Evaluator::run_action`.
+- Preview-thread creation uses `expect` on an OS operation that can fail.
+  Follow-up inspection found action dispatch also uses infallible `thread::spawn`;
+  failure reaches the preview worker's panic boundary instead of an action error.
+  Resource-cache lock poisoning can propagate an earlier loader panic. This
+  inspection does not establish that every panic site is unreachable; no runtime
+  code changed or tests run.
+
 ## 2026-10-06: editor geometry and worker handlers
 
 - Added `CanvasLayout` as the frame's geometry snapshot, sharing node bounds and

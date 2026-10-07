@@ -151,7 +151,7 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
         source: wgpu::ShaderSource::Wgsl(compositor::SHADER.into()),
     });
     let source_profile = profile::rec2020_linear();
-    let destination_profile = profile::built_in("srgb");
+    let destination_profile = profile::ProfileSource::Srgb.built_in().unwrap();
     let convert = Transform::new(
         &source_profile,
         PixelFormat::RGB_FLT,

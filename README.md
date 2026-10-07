@@ -226,7 +226,9 @@ what's planned.
 ## Under the hood
 
 Drip is written in Rust, with Rayon for processing and wgpu/egui for the GUI.
-The processing library is independent of the interface. Several algorithms
+The processing library is independent of the interface. Typed node functions and
+interpretation traits generate DAG contracts through local macros and Bevy reflection.
+Several algorithms
 come from darktable; sources and credits are in [THIRD_PARTY.md](THIRD_PARTY.md).
 
 For development, see the [library design and reading guide](crates/drip/src/lib.rs)

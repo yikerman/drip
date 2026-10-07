@@ -4,60 +4,64 @@ use std::sync::Arc;
 
 use lcms2::{Flags, Intent, PixelFormat, Profile, ThreadContext, Transform};
 
-use crate::image::{DisplayRec2020, Rec2020, Rgb, RgbIn};
-use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
-use crate::param::{ParamKind, ParamSpec, Params};
-use crate::ports::Read;
+use crate::image::{Rec2020Mat, Rec2020Rgb, Rgb};
+use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::param::ParamKind;
+use crate::ports::MatRef;
 use crate::profile;
-use crate::view::{PreviewImage, View};
+use crate::view::PreviewImage;
 
 #[cfg(test)]
 mod tests;
 
-/// Shows a Rec.2020 image; the frontend handles the display transform.
-pub static PREVIEW: NodeKind = NodeKind::new::<Preview>(
-    "view.preview",
-    "view",
-    "Preview",
-    &[
-        ParamSpec::new("interpolation", ParamKind::Bool { default: false }),
-        ParamSpec::new(
-            "mode",
-            ParamKind::Choice { options: &["none", "softproof", "gamutcheck"], default: "none" },
-        ),
-        profile::PROFILE,
-        profile::PROFILE_FILE,
-        profile::INTENT,
-        profile::BLACK_POINT_COMPENSATION,
-    ],
-    &["image"],
-    &[],
-);
+#[derive(Clone, Copy, crate::Choice)]
+enum Mode {
+    #[choice("none")]
+    None,
+    #[choice("softproof")]
+    Softproof,
+    #[choice("gamutcheck")]
+    Gamutcheck,
+}
 
-struct Preview;
-impl NodeKernel for Preview {
-    type Inputs = (Read<dyn RgbIn<Rec2020>>,);
-    type Outputs = ();
-    fn eval(
-        p: Params<'_>,
-        (image,): (&dyn RgbIn<Rec2020>,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-        let mut view = if p.choice("mode") == "none" {
-            PreviewImage::new(image)
-        } else {
-            let output = profile::Output::load(p)?;
-            let input = image.rgb();
-            let pixels = match p.choice("mode") {
-                "softproof" => softproof(&output, &input.pixels)?,
-                _ => gamutcheck(&output, &input.pixels)?,
-            };
-            let proof = DisplayRec2020::from(Arc::new(Rgb { pixels, ..**input }));
+/// Shows a Rec.2020 image; the frontend handles the display transform.
+#[derive(crate::Parameters)]
+pub struct Preview {
+    #[param(ParamKind::Bool { default: false })]
+    interpolation: bool,
+    #[param(Mode::None.schema())]
+    mode: Mode,
+    #[param(flatten)]
+    output: profile::Settings,
+}
+
+/// Preview Rec.2020 RGB as linear light, without tone mapping.
+///
+/// Softproof simulates the selected profile and intent. Gamutcheck highlights possible
+/// gamut clipping in cyan. Interpolation selects bilinear display sampling; off
+/// preserves discrete pixels. Produces an image preview view.
+#[crate::node(kind = PREVIEW, id = "view.preview", category = "view", name = "Preview", outputs = [])]
+fn preview(
+    p: Preview,
+    (image,): (MatRef<'_, 3, dyn Rec2020Rgb>,),
+    ctx: &EvalContext<'_>,
+) -> Result<Evaluated<(), PreviewImage>, KernelError> {
+    let input = image.rgb();
+    let output = || profile::Output::load(&p.output, ctx.resources());
+    let pixels = match p.mode {
+        Mode::None => None,
+        Mode::Softproof => Some(softproof(&output()?, &input.pixels)?),
+        Mode::Gamutcheck => Some(gamutcheck(&output()?, &input.pixels)?),
+    };
+    let mut view = match pixels {
+        None => PreviewImage::from_input(&image),
+        Some(pixels) => {
+            let proof = Rec2020Mat::from(Arc::new(Rgb { pixels, ..**input }));
             PreviewImage::new(&proof)
-        };
-        view.interpolation = p.bool("interpolation");
-        Ok(Evaluated { outputs: (), view: Some(View::Image(view)) })
-    }
+        }
+    };
+    view.interpolation = p.interpolation;
+    Ok(Evaluated::view(view))
 }
 
 fn softproof(output: &profile::Output, pixels: &[[f32; 3]]) -> Result<Vec<[f32; 3]>, String> {

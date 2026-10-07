@@ -42,8 +42,10 @@
 
 ## User-facing documentation
 
-- Keep node help in the frontend, separate from code comments. Show it below the
-  type ID in the main inspector, not in pop-outs.
+- Define node help in Rustdoc on the node function, with reference links in its
+  `#[node(...)]` declaration. Keep implementation rationale in ordinary code
+  comments. The frontend shows generated help below the type ID in the main
+  inspector, not in pop-outs.
 
 - Briefly state the operation, assumptions and inputs/outputs. Be technical and
   precise: prefer `x * 2^ev` to vague brightness advice. Link references for

@@ -1,36 +1,29 @@
 //! Sensor-space highlight repair before preview reduction and demosaicing.
 
 use crate::image::Mosaic;
-use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
-use crate::param::{ParamKind, ParamSpec, Params};
-use crate::ports::Read;
+use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::param::ParamKind;
 use std::sync::Arc;
 mod opposed;
 
-pub static HIGHLIGHTS: NodeKind = NodeKind::new::<ReconstructHighlights>(
-    "raw.highlights",
-    "raw",
-    "Highlights",
-    &[ParamSpec::new("threshold", ParamKind::Float { min: 0.5, max: 1.0, default: 0.98 })],
-    &["mosaic"],
-    &["mosaic"],
-);
+#[derive(crate::Parameters)]
+pub struct Highlights {
+    /// Fraction of the per-channel saturation threshold used for reconstruction.
+    #[param(ParamKind::Float { min: 0.5, max: 1.0, default: 0.98 })]
+    threshold: f32,
+}
 
-struct ReconstructHighlights;
-impl NodeKernel for ReconstructHighlights {
-    type Inputs = (Read<Mosaic>,);
-    type Outputs = (Arc<Mosaic>,);
-    fn eval(
-        p: Params<'_>,
-        (input,): (&Mosaic,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-        let data = opposed::process(input, p.float("threshold") as f32);
-        Ok(Evaluated::new((Arc::new(Mosaic {
-            data,
-            cfa: input.cfa.clone(),
-            camera: input.camera.clone(),
-            ..*input
-        }),)))
-    }
+/// Reconstruct clipped Bayer samples with inpaint opposed.
+///
+/// Assumes white-balanced input. Threshold is a fraction of each channel's saturation
+/// level. Runs before preview reduction.
+#[crate::node(kind = HIGHLIGHTS, id = "raw.highlights", category = "raw", name = "Highlights", outputs = ["mosaic"], references = [("darktable: inpaint opposed", "https://docs.darktable.org/usermanual/5.6/en/module-reference/processing-modules/highlight-reconstruction/")])]
+fn highlights(
+    p: Highlights,
+    (mosaic,): (&Mosaic,),
+    _: &EvalContext<'_>,
+) -> Result<Evaluated<(Arc<Mosaic>,)>, KernelError> {
+    let data = opposed::process(mosaic, p.threshold);
+    let data = crate::image::RawMat::from_samples(mosaic.width, mosaic.height, mosaic.scale, data);
+    Ok(Evaluated::new((Arc::new(mosaic.with_buffer(Arc::new(data))),)))
 }

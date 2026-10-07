@@ -2,41 +2,29 @@
 //! interpolation, after sensor-space processing such as highlight reconstruction.
 
 use crate::image::{CameraRgb, Mosaic, Rgb};
-use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
-use crate::param::Params;
-use crate::ports::Read;
+use crate::node::{EvalContext, Evaluated, KernelError};
 use std::sync::Arc;
 mod bin2x2;
 mod rcd;
 
 pub use bin2x2::BIN_2X2;
 
-pub static RCD: NodeKind = NodeKind::new::<RcdDemosaic>(
-    "demosaic.rcd",
-    "demosaic",
-    "Demosaic",
-    &[],
-    &["mosaic"],
-    &["image"],
-);
-
-struct RcdDemosaic;
-impl NodeKernel for RcdDemosaic {
-    type Inputs = (Read<Mosaic>,);
-    type Outputs = (Arc<CameraRgb>,);
-    fn eval(
-        _: Params<'_>,
-        (input,): (&Mosaic,),
-        ctx: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-        let mosaic = preview(input, ctx);
-        let pixels = rcd::process(&mosaic);
-        let image = Rgb { width: mosaic.width, height: mosaic.height, scale: mosaic.scale, pixels };
-        Ok(Evaluated::new((Arc::new(CameraRgb {
-            data: Arc::new(image),
-            camera: mosaic.camera.clone(),
-        }),)))
-    }
+/// Bayer demosaicing with Ratio Corrected Demosaicing (RCD) and a bilinear border.
+///
+/// Preview reduction precedes interpolation. Produces camera RGB.
+#[crate::node(kind = RCD, id = "demosaic.rcd", category = "demosaic", name = "Demosaic", outputs = ["image"], references = [("RCD algorithm", "https://github.com/LuisSR/RCD-Demosaicing")])]
+fn rcd(
+    _: (),
+    (mosaic,): (&Mosaic,),
+    ctx: &EvalContext<'_>,
+) -> Result<Evaluated<(Arc<CameraRgb>,)>, KernelError> {
+    let mosaic = preview(mosaic, ctx);
+    let pixels = rcd::process(&mosaic);
+    let image = Rgb { width: mosaic.width, height: mosaic.height, scale: mosaic.scale, pixels };
+    Ok(Evaluated::new((Arc::new(CameraRgb {
+        data: Arc::new(image),
+        interpretation: mosaic.interpretation().camera.clone(),
+    }),)))
 }
 
 /// Borrow full detail, allocate only when a lower-resolution mosaic is needed.
@@ -58,18 +46,13 @@ pub fn downsample(m: &Mosaic) -> Mosaic {
             let (r, c) = (row / 2 * 4 + row % 2, col / 2 * 4 + col % 2);
             let i = r * m.width + c;
             data.push(
-                (m.data[i] + m.data[i + 2] + m.data[i + 2 * m.width] + m.data[i + 2 * m.width + 2])
+                (m.samples()[i]
+                    + m.samples()[i + 2]
+                    + m.samples()[i + 2 * m.width]
+                    + m.samples()[i + 2 * m.width + 2])
                     * 0.25,
             );
         }
     }
-    Mosaic {
-        width,
-        height,
-        scale: m.scale * 2,
-        data,
-        cfa: m.cfa.clone(),
-        camera: m.camera.clone(),
-        white: m.white,
-    }
+    m.with_buffer(Arc::new(crate::image::RawMat::from_samples(width, height, m.scale * 2, data)))
 }

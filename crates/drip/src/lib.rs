@@ -12,9 +12,9 @@
 //! # Reading order
 //!
 //! 1. [`image`]: data structures, capability hierarchy and semantic laws.
-//! 2. [`value`] and [`ports`]: capability registration and tuple adapters that
+//! 2. [`value`] and [`ports`]: generated capability evidence and tuple adapters that
 //!    connect typed kernels to a heterogeneous graph.
-//! 3. [`node`] and [`nodes`]: signatures, processing and explicit actions. Read
+//! 3. [`mod@node`] and [`nodes`]: signatures, processing and explicit actions. Read
 //!    `nodes/exposure.rs` for a small node, `nodes/scopes/density.rs` for capability inputs,
 //!    and `nodes/export.rs` for file-writing actions.
 //! 4. [`graph`]: nodes, named edges, connection validation and DAG traversal.
@@ -39,3 +39,13 @@ pub mod resource;
 pub mod templates;
 pub mod value;
 pub mod view;
+
+extern crate self as drip;
+pub use drip_macros::{Choice, Parameters, capability, interpretation, node};
+
+#[doc(hidden)]
+pub mod __private {
+    pub use bevy_reflect;
+    pub use linkme;
+    pub use serde;
+}

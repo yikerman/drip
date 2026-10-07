@@ -385,9 +385,9 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use drip::image::DisplayRec2020;
+    use drip::image::Rec2020Mat;
     use drip::node::{EvalContext, KernelError, NodeKernel};
-    use drip::param::Params;
+
     use drip::view::PreviewImage;
 
     use crate::render::node_views::PreparedView as View;
@@ -575,29 +575,29 @@ mod tests {
     #[test]
     fn evaluation_is_independent_of_node_positions() {
         use drip::node::{Evaluated, NodeKind};
-        use drip::param::ParamSpec;
+
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         static CALLS: AtomicUsize = AtomicUsize::new(0);
-        static NODE: NodeKind = NodeKind::new::<OffscreenKernel>(
-            "test.offscreen",
-            "test",
-            "offscreen",
-            &[ParamSpec::new("value", ParamKind::Bool { default: false })],
-            &[],
-            &[],
-        );
-        struct OffscreenKernel;
+        static NODE: NodeKind =
+            NodeKind::new::<OffscreenKernel>("test.offscreen", "test", "offscreen", &[], &[]);
+        #[derive(drip::Parameters)]
+        struct OffscreenKernel {
+            #[param(ParamKind::Bool { default: false })]
+            value: bool,
+        }
         impl NodeKernel for OffscreenKernel {
+            type Parameters = Self;
+            type View = ();
             type Inputs = ();
             type Outputs = ();
 
             fn eval(
-                _: Params<'_>,
+                Self { value: _value }: Self::Parameters,
                 (): (),
                 _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
                 CALLS.fetch_add(1, Ordering::SeqCst);
                 Ok(Evaluated::default())
             }
@@ -634,29 +634,28 @@ mod tests {
     fn evaluating_message_keeps_the_ui_and_previous_preview_available() {
         use drip::image::Rgb;
         use drip::node::{Evaluated, NodeKind};
-        use drip::param::ParamSpec;
+
         use std::sync::{Arc, Mutex, mpsc};
         use std::time::{Duration, Instant};
         static GATE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
-        static SLOW: NodeKind = NodeKind::new::<SlowKernel>(
-            "test.slow",
-            "test",
-            "slow",
-            &[ParamSpec::new("block", ParamKind::Bool { default: false })],
-            &[],
-            &[],
-        );
-        struct SlowKernel;
+        static SLOW: NodeKind = NodeKind::new::<SlowKernel>("test.slow", "test", "slow", &[], &[]);
+        #[derive(drip::Parameters)]
+        struct SlowKernel {
+            #[param(ParamKind::Bool { default: false })]
+            block: bool,
+        }
         impl NodeKernel for SlowKernel {
+            type Parameters = Self;
+            type View = Option<drip::view::View>;
             type Inputs = ();
             type Outputs = ();
 
             fn eval(
-                p: Params<'_>,
+                p: Self::Parameters,
                 (): (),
                 _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-                if p.bool("block") {
+            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+                if p.block {
                     let gate = GATE.lock().unwrap();
                     let (started, release) = gate.as_ref().unwrap();
                     started.send(()).unwrap();
@@ -664,13 +663,8 @@ mod tests {
                 }
                 Ok(Evaluated {
                     outputs: (),
-                    view: Some(drip::view::View::Image(PreviewImage::new(&*Arc::new(
-                        DisplayRec2020::from(Arc::new(Rgb {
-                            width: 1,
-                            height: 1,
-                            scale: 1,
-                            pixels: vec![[0.5; 3]],
-                        })),
+                    view: Some(drip::view::View::Image(PreviewImage::new(&Rec2020Mat::from(
+                        Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[0.5; 3]] }),
                     )))),
                 })
             }
@@ -762,11 +756,13 @@ mod tests {
         let mut h = harness(app);
         h.run();
         let kind = h.get_by_label("tone.sigmoid").rect();
-        let input = h.get_by_label("scn rec2020 img").rect();
-        let output = h.get_by_label("disp rec2020 img").rect();
+        let description = h.get_by_label(drip::nodes::SIGMOID.documentation).rect();
+        let input = h.get_by_label("rec2020 rgb").rect();
+        let output = h.get_by_label("rec2020").rect();
         let control = h.get_by_label("contrast").rect();
         assert!(h.query_by_label("darktable: sigmoid").is_some());
-        assert!(kind.bottom() <= input.top());
+        assert!(kind.bottom() <= description.top());
+        assert!(description.bottom() <= input.top());
         assert!(input.bottom() <= output.top());
         assert!(output.bottom() <= control.top());
 
@@ -778,9 +774,10 @@ mod tests {
         popup.run();
         assert!(popup.query_by_label("tone.sigmoid").is_some());
         assert!(popup.query_by_label("contrast").is_some());
-        assert!(popup.query_by_label("scn rec2020 img").is_none());
-        assert!(popup.query_by_label("disp rec2020 img").is_none());
+        assert!(popup.query_by_label("rec2020").is_none());
+        assert!(popup.query_by_label("rec2020 rgb").is_none());
         assert!(popup.query_by_label("darktable: sigmoid").is_none());
+        assert!(popup.query_by_label(drip::nodes::SIGMOID.documentation).is_none());
     }
 
     #[test]
@@ -791,11 +788,47 @@ mod tests {
         h.run();
         let kind = h.get_by_label("demosaic.rcd").rect();
         let input = h.get_by_label("sensor mosaic").rect();
-        let output = h.get_by_label("camera RGB img").rect();
+        let output = h.get_by_label("camera").rect();
         let reference = h.get_by_label("RCD algorithm").rect();
         assert!(kind.bottom() <= input.top());
         assert!(input.bottom() <= output.top());
         assert!(output.bottom() <= reference.top());
+    }
+
+    #[test]
+    fn undocumented_nodes_show_generated_port_help() {
+        use drip::image::LinearRgb;
+        use drip::node::{Evaluated, NodeKind};
+        use drip::ports::{MatRef, Preserved, ReadMat};
+        static GENERIC: NodeKind =
+            NodeKind::new::<Generic>("test.generic", "test", "generic", &["image"], &["image"]);
+        struct Generic;
+        impl NodeKernel for Generic {
+            type Parameters = ();
+            type View = ();
+            type Inputs = (ReadMat<3, dyn LinearRgb>,);
+            type Outputs = (Preserved<0>,);
+            fn eval(
+                _: Self::Parameters,
+                (image,): (MatRef<'_, 3, dyn LinearRgb>,),
+                _: &EvalContext<'_>,
+            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+                Ok(Evaluated::new((image.preserve::<0>(image.rgb().pixels.clone()),)))
+            }
+        }
+
+        let mut project = Project::default();
+        let id = project.graph.add_node(&GENERIC);
+        let mut app = App::new(None, true, || {});
+        app.set_project(project, None).unwrap();
+        app.selected = Some(id);
+        let mut h = harness(app);
+        h.run();
+        let kind = h.get_by_label("test.generic").rect();
+        let input = h.get_by_label("linear rgb").rect();
+        let output = h.get_by_label("pending").rect();
+        assert!(kind.bottom() <= input.top() && input.bottom() <= output.top());
+        assert!(h.query_by_label("same type as input image").is_some());
     }
 
     #[test]
@@ -807,14 +840,8 @@ mod tests {
         let histogram = graph.find("Histogram").unwrap();
         let with_params: Vec<_> =
             graph.nodes().filter(|(_, n)| !n.kind.params.is_empty()).map(|(id, _)| id).collect();
-        let viewers: Vec<_> = graph
-            .nodes()
-            .filter(|(_, n)| {
-                [&nodes::PREVIEW, &nodes::HISTOGRAM, &nodes::WAVEFORM, &nodes::VECTORSCOPE]
-                    .contains(&n.kind)
-            })
-            .map(|(id, _)| id)
-            .collect();
+        let viewers: Vec<_> =
+            graph.nodes().filter(|(_, n)| n.kind.has_view()).map(|(id, _)| id).collect();
         assert_eq!(h.get_all_by_label("⚙").count(), with_params.len());
         assert_eq!(h.get_all_by_label("🗗").count(), viewers.len());
         // AccessKit bounds ignore the canvas transform, so clicks go by action.
@@ -845,7 +872,7 @@ mod tests {
 
     #[test]
     fn scope_nodes_offer_popouts() {
-        for kind in [&nodes::WAVEFORM, &nodes::VECTORSCOPE] {
+        for kind in [nodes::WAVEFORM.kind(), nodes::VECTORSCOPE.kind()] {
             let mut project = Project::default();
             let id = project.graph.add_node(kind);
             let mut app = App::new(None, true, || {});
@@ -859,6 +886,83 @@ mod tests {
             assert_eq!(windows[0].popped.node, id);
             assert_eq!(windows[0].title, format!("{} view · Drip", kind.name));
         }
+    }
+
+    #[test]
+    fn new_view_node_gets_a_popout_before_evaluation_without_a_gui_binding() {
+        #[drip::node(kind = VIEW, id = "test.declared_view", category = "test", name = "Declared view", outputs = [])]
+        fn view(
+            _: (),
+            (): (),
+            _: &EvalContext<'_>,
+        ) -> Result<drip::node::Evaluated<(), drip::view::View>, KernelError> {
+            Err(KernelError::Incomplete("no view yet"))
+        }
+        let mut project = Project::default();
+        let id = project.graph.add_node(&VIEW);
+        let mut app = App::new(None, true, || {});
+        app.set_project(project, None).unwrap();
+        let mut h = harness(app);
+        h.run();
+        h.get_by_label("🗗").click_accesskit();
+        h.run();
+        let windows = h.state().windows();
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].popped.node, id);
+        assert_eq!(windows[0].title, "Declared view view · Drip");
+    }
+
+    #[test]
+    fn custom_controls_keep_the_generic_view_and_popout() {
+        #[derive(drip::Parameters)]
+        pub struct Settings {
+            #[param(drip::param::ParamKind::Bool { default: false })]
+            enabled: bool,
+        }
+        #[drip::node(kind = VIEW, id = "test.custom_controls_view", category = "test", name = "Custom controls view", outputs = [])]
+        fn view(
+            _: Settings,
+            (): (),
+            _: &EvalContext<'_>,
+        ) -> Result<drip::node::Evaluated<(), drip::view::View>, KernelError> {
+            Err(KernelError::Incomplete("no view yet"))
+        }
+        fn controls(
+            ui: &mut egui::Ui,
+            cx: &mut crate::node_ui::ControlCx<'_, '_, '_, '_, Settings>,
+        ) {
+            cx.schema(ui);
+            ui.label("Custom view controls");
+            ui.label(format!("Typed enabled: {}", cx.parameters().enabled));
+        }
+        #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
+        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new(
+            &VIEW,
+            Some(&crate::node_ui::Controls::new(controls)),
+            None,
+        );
+        let mut project = Project::default();
+        let id = project.graph.add_node(&VIEW);
+        let mut app = App::new(None, true, || {});
+        app.set_project(project, None).unwrap();
+        app.selected = Some(id);
+        let mut h = harness(app);
+        h.run();
+        assert!(h.query_by_label("Custom view controls").is_some());
+        assert!(h.query_by_label("Typed enabled: false").is_some());
+        h.get_by_role(egui::accesskit::Role::CheckBox).click();
+        h.run();
+        assert!(h.query_by_label("Typed enabled: true").is_some());
+        h.get_by_label("🗗").click_accesskit();
+        h.run();
+        let popped = Popped { node: id, part: crate::node_ui::Part::Gui("view") };
+        assert_eq!(h.state().windows()[0].popped, popped);
+        assert!(h.query_by_label("shown in its window").is_some());
+        assert!(h.query_by_label("Custom view controls").is_some());
+        h.state_mut().close_window(popped);
+        h.run();
+        assert!(h.query_by_label("shown in its window").is_none());
+        assert!(h.query_by_label("Custom view controls").is_some());
     }
 
     #[test]

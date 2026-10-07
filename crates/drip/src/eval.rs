@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::graph::{Graph, NodeId, Port};
-use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::node::{EvalContext, Evaluation, KernelError};
 use crate::param::Params;
 use crate::resource::Resources;
 use crate::value::Value;
@@ -37,18 +37,27 @@ pub enum NodeError {
     UnknownAction(String),
     #[error("{0}")]
     Failed(String),
+    #[error("input `{input}`: {mismatch}")]
+    Contract { input: &'static str, mismatch: crate::ports::TypeMismatch },
+    #[error(transparent)]
+    Constraint(crate::node::ConstraintError),
 }
 
-impl From<KernelError> for NodeError {
-    fn from(error: KernelError) -> Self {
+impl NodeError {
+    fn from_kernel(kind: &crate::node::NodeKind, error: KernelError) -> Self {
         match error {
             KernelError::Incomplete(message) => Self::Incomplete(message),
             KernelError::Failed(message) => Self::Failed(message),
+            KernelError::Contract { index, mismatch } => Self::Contract {
+                input: kind.inputs().nth(index).expect("checked input index").name,
+                mismatch,
+            },
+            KernelError::Constraint(error) => Self::Constraint(error),
         }
     }
 }
 
-pub type NodeResult = Result<Evaluated, NodeError>;
+pub type NodeResult = Result<Evaluation, NodeError>;
 
 /// Keeps one result per node, and the files nodes have loaded, between
 /// evaluations.
@@ -113,7 +122,9 @@ impl Evaluator {
         }
         let inputs = self.cache.inputs(graph, id)?;
         let ctx = EvalContext { level: 0, resources: &self.resources };
-        action.run(Params(&node.params), &inputs, &ctx).map_err(NodeError::from)
+        action
+            .run(Params(&node.params), &inputs, &ctx)
+            .map_err(|error| NodeError::from_kernel(node.kind, error))
     }
 
     /// With `release`, successful results retire after their last consumer
@@ -188,7 +199,8 @@ impl Cache {
     fn compute(&self, graph: &Graph, ctx: &EvalContext, id: NodeId) -> NodeResult {
         let node = graph.node(id).expect("in graph");
         let inputs = self.inputs(graph, id)?;
-        (node.kind.eval)(Params(&node.params), &inputs, ctx).map_err(NodeError::from)
+        (node.kind.eval)(Params(&node.params), &inputs, ctx)
+            .map_err(|error| NodeError::from_kernel(node.kind, error))
     }
 
     /// The values on node `id`'s inputs, from its sources' cached results;

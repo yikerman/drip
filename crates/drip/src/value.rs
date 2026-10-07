@@ -1,160 +1,107 @@
-//! Shared edge payloads and the capability evidence retained after type erasure.
-//!
-//! Connections are checked before images exist; cached values are heterogeneous.
-//! Both use [`EdgeValue::TYPE`]: [`Describe`] builds the evidence for connection
-//! checks and input borrowing from one declaration.
-//!
-//! Rust's `Any` can recover a concrete type, but cannot discover which other
-//! traits it implements. Capability registration is the explicit bridge: adding
-//! an image type registers its strongest exposed capability once; adding a new
-//! capability requires a descriptor projection here and a matching `Read`
-//! implementation in [`crate::ports`]. Keep those two in sync. Stronger builders
-//! include parent capabilities so individual payload registrations need not.
+//! Immutable erased values retain their logical type and generated capability
+//! evidence. Storage identity and semantic identity are checked independently.
 
-use std::any::{Any, TypeId};
-use std::fmt::{self, Debug};
-use std::marker::PhantomData;
-use std::sync::Arc;
-
-use crate::image::{
-    CameraRgb, ColorspaceRgbMatrix, DisplayRec2020, LinearThreeChannelMatrix, Mosaic, RawMetadata,
-    Rec2020, RgbIn, SceneRec2020, ThreeChannelMatrix,
+use crate::image::{Interpretation, RawMat, RealMat};
+use bevy_reflect::{Reflect, TypeRegistration};
+use std::{
+    any::{Any, TypeId},
+    fmt,
+    sync::Arc,
 };
 
-pub(crate) type Erased = dyn Any + Send + Sync;
-type Projection<Capability> = for<'a> fn(&'a Erased) -> &'a Capability;
+type Erased = dyn Any + Send + Sync;
 
-/// Runtime evidence for one concrete edge type; projections borrow capabilities
-/// from its existing allocation rather than copying or converting the image.
+#[derive(Clone, Copy)]
 pub struct TypeDescriptor {
     pub name: &'static str,
-    pub(crate) id: fn() -> TypeId,
-    pub(crate) channels: Option<Projection<dyn ThreeChannelMatrix>>,
-    pub(crate) linear: Option<Projection<dyn LinearThreeChannelMatrix>>,
-    pub(crate) color: Option<Projection<dyn ColorspaceRgbMatrix>>,
-    pub(crate) rec2020: Option<Projection<dyn RgbIn<Rec2020>>>,
+    id: fn() -> TypeId,
+    layout: fn() -> TypeId,
+    dictionary: fn() -> Option<Arc<TypeRegistration>>,
 }
-
-impl Debug for TypeDescriptor {
+impl TypeDescriptor {
+    pub const fn of<T: EdgeValue>() -> Self {
+        Self { name: T::NAME, id: TypeId::of::<T>, layout: T::layout, dictionary: T::dictionary }
+    }
+    pub fn is<T: 'static>(&self) -> bool {
+        (self.id)() == TypeId::of::<T>()
+    }
+    pub fn has_layout<T: 'static>(&self) -> bool {
+        (self.layout)() == TypeId::of::<T>()
+    }
+    pub fn dictionary(&self) -> Option<Arc<TypeRegistration>> {
+        (self.dictionary)()
+    }
+}
+impl PartialEq for TypeDescriptor {
+    fn eq(&self, other: &Self) -> bool {
+        (self.id)() == (other.id)()
+    }
+}
+impl Eq for TypeDescriptor {}
+impl fmt::Debug for TypeDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name)
     }
 }
 
-/// A registered graph payload. The builder ties all projections to this same
-/// concrete type; node input lists never repeat these capabilities.
-///
-/// # Laws
-/// Build `TYPE` with `Describe::<Self>`, and expose only capabilities whose
-/// semantic laws the payload obeys. The builder checks trait bounds, not those
-/// laws. A payload and its interpretation must remain unchanged while cached;
-/// interior mutation would invalidate dependency-stamp reuse.
-pub trait EdgeValue: Any + Send + Sync + Debug {
-    const TYPE: TypeDescriptor;
+/// Local payload implementation; its identity always comes from the actual T.
+/// Published values are immutable and obey their documented interpretation laws.
+pub trait EdgeValue: Any + Send + Sync + fmt::Debug {
+    const NAME: &'static str;
+    fn layout() -> TypeId {
+        TypeId::of::<Self>()
+    }
+    fn dictionary() -> Option<Arc<TypeRegistration>> {
+        None
+    }
+    fn matrix(&self) -> Option<MatrixParts> {
+        None
+    }
 }
 
-/// Register capabilities only when the payload has the corresponding trait impl.
-/// `T` is the concrete payload; its semantic laws remain an implementer obligation.
-///
-/// ```compile_fail,E0277
-/// use drip::image::Mosaic;
-/// use drip::value::Describe;
-/// let invalid = Describe::<Mosaic>::new("sensor").rec2020().build();
-/// ```
-pub struct Describe<T> {
-    descriptor: TypeDescriptor,
-    payload: PhantomData<T>,
+/// Generated/typed matrix erasure; fields are private so callers cannot supply
+/// an unrelated dictionary, interpretation or reconstruction adapter.
+#[derive(Clone)]
+pub struct MatrixParts {
+    pub(crate) storage: Arc<Erased>,
+    pub(crate) interpretation: Arc<dyn Reflect>,
+    rebuild: fn(Arc<Erased>, Arc<dyn Reflect>) -> Arc<Erased>,
 }
-
-// T: concrete edge payload.
-impl<T> Describe<T>
-where
-    T: EdgeValue,
-{
-    pub const fn new(name: &'static str) -> Self {
-        Self {
-            descriptor: TypeDescriptor {
-                name,
-                id: TypeId::of::<T>,
-                channels: None,
-                linear: None,
-                color: None,
-                rec2020: None,
+impl<const C: usize, I: Interpretation> EdgeValue for RealMat<C, I> {
+    const NAME: &'static str = I::NAME;
+    fn layout() -> TypeId {
+        TypeId::of::<RawMat<C>>()
+    }
+    fn dictionary() -> Option<Arc<TypeRegistration>> {
+        Some(I::dictionary())
+    }
+    fn matrix(&self) -> Option<MatrixParts> {
+        Some(MatrixParts {
+            storage: self.data.clone(),
+            interpretation: self.interpretation.clone(),
+            rebuild: |storage, interpretation| {
+                let interpretation: Arc<Erased> = interpretation;
+                Arc::new(Self {
+                    data: storage.downcast().expect("typed matrix layout"),
+                    interpretation: interpretation.downcast().expect("typed interpretation"),
+                })
             },
-            payload: PhantomData,
-        }
-    }
-    pub const fn channels(mut self) -> Self
-    where
-        T: ThreeChannelMatrix,
-    {
-        self.descriptor.channels =
-            Some(|value| value.downcast_ref::<T>().expect("descriptor identifies payload"));
-        self
-    }
-    pub const fn linear(mut self) -> Self
-    where
-        T: LinearThreeChannelMatrix,
-    {
-        self = self.channels();
-        self.descriptor.linear =
-            Some(|value| value.downcast_ref::<T>().expect("descriptor identifies payload"));
-        self
-    }
-    pub const fn color(mut self) -> Self
-    where
-        T: ColorspaceRgbMatrix,
-    {
-        self = self.linear();
-        self.descriptor.color =
-            Some(|value| value.downcast_ref::<T>().expect("descriptor identifies payload"));
-        self
-    }
-    pub const fn rec2020(mut self) -> Self
-    where
-        T: RgbIn<Rec2020>,
-    {
-        self = self.color();
-        self.descriptor.rec2020 =
-            Some(|value| value.downcast_ref::<T>().expect("descriptor identifies payload"));
-        self
-    }
-    pub const fn build(self) -> TypeDescriptor {
-        self.descriptor
+        })
     }
 }
 
-// Built-in payloads expose only their strongest capability; parent registrations
-// come from Describe, so this list cannot forget channel access on a color image.
-macro_rules! edge_type {
-    ($payload:ty $(, $capability:ident)?) => {
-        impl EdgeValue for $payload {
-            const TYPE: TypeDescriptor = Describe::<Self>::new(stringify!($payload))
-                $(.$capability())?.build();
-        }
-    };
-}
-edge_type!(Mosaic);
-edge_type!(RawMetadata);
-edge_type!(CameraRgb, linear);
-edge_type!(SceneRec2020, rec2020);
-edge_type!(DisplayRec2020, rec2020);
-
-/// An immutable, shared payload at the heterogeneous graph/cache boundary.
-/// Erasure preserves its concrete semantic type and allocation identity; it is
-/// not a conversion to a common RGB type. Cache stamps describe dependencies,
-/// so evaluating cache validity never compares the image pixels here.
 #[derive(Clone)]
 pub struct Value {
-    pub(crate) descriptor: &'static TypeDescriptor,
-    pub(crate) payload: Arc<Erased>,
+    descriptor: TypeDescriptor,
+    payload: Arc<Erased>,
+    pub(crate) matrix: Option<MatrixParts>,
 }
 impl Value {
     pub fn new<T: EdgeValue>(payload: Arc<T>) -> Self {
-        Self { descriptor: &T::TYPE, payload }
+        Self { descriptor: TypeDescriptor::of::<T>(), matrix: payload.matrix(), payload }
     }
-    pub fn descriptor(&self) -> &'static TypeDescriptor {
-        self.descriptor
+    pub fn descriptor(&self) -> &TypeDescriptor {
+        &self.descriptor
     }
     pub fn downcast_ref<T: EdgeValue>(&self) -> Option<&T> {
         self.payload.downcast_ref()
@@ -162,12 +109,31 @@ impl Value {
     pub fn downcast<T: EdgeValue>(&self) -> Option<Arc<T>> {
         self.payload.clone().downcast().ok()
     }
-    /// Inspects a cached result through an exact type or a registered capability.
-    pub fn borrow<Requirement: crate::ports::Input>(&self) -> Option<Requirement::Borrowed<'_>> {
-        Requirement::REQUIREMENT.accepts(self.descriptor).then(|| Requirement::read(self))
+    pub fn borrow<R: crate::ports::Input>(&self) -> Option<R::Borrowed<'_>> {
+        R::REQUIREMENT.accepts(&self.descriptor).then(|| R::read(self))
+    }
+    pub(crate) fn preserves(&self, source: &Self) -> bool {
+        self.descriptor == source.descriptor
+            && match (&self.matrix, &source.matrix) {
+                (Some(output), Some(input)) => {
+                    Arc::ptr_eq(&output.interpretation, &input.interpretation)
+                }
+                _ => false,
+            }
+    }
+    pub(crate) fn with_matrix<const C: usize>(&self, data: Arc<RawMat<C>>) -> Self {
+        let parts = self.matrix.as_ref().expect("matrix input");
+        debug_assert!(self.descriptor.has_layout::<RawMat<C>>());
+        debug_assert_eq!(data.width.checked_mul(data.height), Some(data.pixels.len()));
+        let payload = (parts.rebuild)(data.clone(), parts.interpretation.clone());
+        Self {
+            descriptor: self.descriptor,
+            payload,
+            matrix: Some(MatrixParts { storage: data, ..parts.clone() }),
+        }
     }
 }
-impl Debug for Value {
+impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct(self.descriptor.name).finish_non_exhaustive()
     }

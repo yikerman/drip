@@ -6,7 +6,7 @@
 //! draws each node's frame (header, ports, error) and its kind's GUI the body.
 
 use crate::editing::{Edit, Frame, NodeCx, pair};
-use crate::node_ui::{self, Part};
+use crate::node_ui::{self, Part, ports::PortText};
 use crate::widgets::{self, BUTTON};
 use crate::worker::Presentation;
 use drip::eval::NodeError;
@@ -228,24 +228,16 @@ impl Editor {
             return None;
         }
         let node = graph.node(l.id).expect("laid out from the graph");
-        let descriptor = node.kind;
         let (kind, kind_params) = (node_ui::of(node.kind), node.kind.params);
-        paint(&painter, l, node, *selected == Some(l.id));
-        let inputs = l
-            .inputs
-            .iter()
-            .zip(descriptor.inputs())
-            .map(|((name, pos), spec)| (Direction::Input, *name, *pos, spec.requirement.name));
-        let outputs = l
-            .outputs
-            .iter()
-            .zip(descriptor.outputs())
-            .map(|((name, pos), spec)| (Direction::Output, *name, *pos, spec.ty.name));
-        for (direction, name, pos, contract) in inputs.chain(outputs) {
+        let texts = node_ui::ports::texts(graph, l.id);
+        paint(&painter, l, node, &texts, *selected == Some(l.id));
+        let inputs = l.inputs.iter().map(|&(name, pos)| (Direction::Input, name, pos));
+        let outputs = l.outputs.iter().map(|&(name, pos)| (Direction::Output, name, pos));
+        for ((direction, name, pos), text) in inputs.chain(outputs).zip(&texts) {
             let endpoint = Endpoint { port: Port(l.id, name.into()), direction };
             let response = ui
                 .interact(hit(pos), ui.id().with((l.id, name, direction)), Sense::click_and_drag())
-                .on_hover_text(node_ui::ports::label(contract));
+                .on_hover_text(text.hover());
             self.pan(&response);
             if response.secondary_clicked() {
                 egui::Popup::close_all(ui.ctx());
@@ -272,7 +264,7 @@ impl Editor {
             );
             widgets::pop_out(ui, button, &mut cx, Part::Parameters);
         }
-        kind.body(&mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body)), &mut cx);
+        kind.view.body(&mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body)), &mut cx);
         if body.hovered() {
             painter.rect_stroke(
                 l.rect,
@@ -430,25 +422,19 @@ fn peer_menu(ui: &mut Ui, graph: &Graph, endpoint: &Endpoint) -> Option<NodeId> 
 }
 
 /// Paints a node's frame: its fill, label, ports and error.
-fn paint(painter: &Painter, l: &NodeLayout, node: &Node, selected: bool) {
+fn paint(painter: &Painter, l: &NodeLayout, node: &Node, texts: &[PortText], selected: bool) {
     let (font, small) =
         (FontId::proportional(theme::BODY_SIZE), FontId::proportional(theme::SMALL_SIZE));
     let fill = if selected { theme::LIGHTER } else { theme::DARKER };
     painter.rect_filled(l.rect, 0.0, fill);
     let title = l.rect.min + vec2(8.0, HEADER / 2.0);
     painter.text(title, Align2::LEFT_CENTER, &node.name, font, theme::TEXT);
-    let inputs = l.inputs.iter().zip(node.kind.inputs()).map(|(p, spec)| {
-        (p, node_ui::ports::label(spec.requirement.name), 8.0, Align2::LEFT_CENTER)
-    });
-    let outputs = l
-        .outputs
-        .iter()
-        .zip(node.kind.outputs())
-        .map(|(p, spec)| (p, node_ui::ports::label(spec.ty.name), -8.0, Align2::RIGHT_CENTER));
-    for ((_, pos), label, offset, align) in inputs.chain(outputs) {
-        painter.circle_filled(*pos, PORT, theme::TEXT);
+    let inputs = l.inputs.iter().map(|(_, pos)| (*pos, 8.0, Align2::LEFT_CENTER));
+    let outputs = l.outputs.iter().map(|(_, pos)| (*pos, -8.0, Align2::RIGHT_CENTER));
+    for ((pos, offset, align), text) in inputs.chain(outputs).zip(texts) {
+        painter.circle_filled(pos, PORT, theme::TEXT);
         let mut job = egui::text::LayoutJob::simple(
-            label.into(),
+            text.label.clone(),
             small.clone(),
             theme::WEAK,
             l.rect.width() - 16.0,
@@ -456,7 +442,7 @@ fn paint(painter: &Painter, l: &NodeLayout, node: &Node, selected: bool) {
         job.wrap.max_rows = 1;
         job.wrap.break_anywhere = true;
         let galley = painter.layout_job(job);
-        let rect = align.anchor_size(*pos + vec2(offset, 0.0), galley.size());
+        let rect = align.anchor_size(pos + vec2(offset, 0.0), galley.size());
         painter.galley(rect.min, galley, theme::WEAK);
     }
     if let Some((at, error)) = &l.error {
@@ -471,7 +457,7 @@ fn layout(id: NodeId, node: &Node, result: Option<&Presentation>) -> NodeLayout 
         Some(Err(NodeError::Upstream(_))) | Some(Ok(_)) | None => None,
         Some(Err(e)) => Some(e.to_string()),
     };
-    let size = node_ui::of(node.kind).size(node);
+    let size = node_ui::of(node.kind).view.size(node);
     let body_top = ports(node) + if error.is_some() { ROW } else { 0.0 };
     let pos = position(&node.ui, id).to_pos2();
     let port = |i: usize, x: f32| pos + vec2(x, HEADER + ROW * (i as f32 + 0.5));
@@ -503,7 +489,7 @@ fn position(ui: &Json, id: NodeId) -> Vec2 {
 
 /// A node's rectangle in graph units, without an error row.
 fn bounds(id: NodeId, node: &Node) -> Rect {
-    let size = node_ui::of(node.kind).size(node);
+    let size = node_ui::of(node.kind).view.size(node);
     Rect::from_min_size(position(&node.ui, id).to_pos2(), vec2(size.x, ports(node) + size.y))
 }
 

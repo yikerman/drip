@@ -8,7 +8,7 @@ use crate::node_ui::{help, parameters};
 
 pub fn selected_node(ui: &mut Ui, cx: &mut NodeCx) {
     parameters::heading(ui, cx);
-    help::show(ui, cx.node().kind);
+    help::show(ui, cx.graph(), cx.id());
     parameters::controls(ui, cx);
 }
 
@@ -23,8 +23,12 @@ pub fn inputs(ui: &mut Ui, graph: &mut Graph, frame: &mut Frame) {
     egui::Grid::new("inputs").num_columns(2).show(ui, |ui| {
         for (id, param) in inputs {
             let node = graph.node(id).expect("listed");
-            ui.label(format!("{} · {param}", node.name));
-            let kind = node.kind.param(param).expect("listed").kind;
+            let spec = node.kind.param(param).expect("listed");
+            let label = ui.label(format!("{} · {param}", node.name));
+            if !spec.documentation.is_empty() {
+                label.on_hover_text(spec.documentation);
+            }
+            let kind = spec.kind;
             let value = node.params[param].clone();
             if let Some(value) =
                 parameters::edit_value(ui, egui::Id::new(("input", id, param)), &kind, &value)

@@ -33,7 +33,7 @@ pub fn focus_name(ctx: &egui::Context, id: drip::graph::NodeId) {
 
 pub fn controls(ui: &mut Ui, cx: &mut NodeCx) {
     let kind = cx.node().kind;
-    crate::node_ui::of(kind).controls(ui, cx);
+    crate::node_ui::of(kind).controls.show(ui, cx);
     for action in kind.actions() {
         if ui.add_enabled(!cx.action_running(), egui::Button::new(action.name)).clicked() {
             cx.run(action.name);
@@ -48,8 +48,12 @@ pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
         for spec in node.kind.params {
             let external = node.external.contains(spec.name);
             let text = if external { format!("{} (input)", spec.name) } else { spec.name.into() };
-            let name =
-                ui.label(text).interact(Sense::click()).on_hover_text("right-click to change");
+            // Generated from the parameter's doc comment; empty when undocumented.
+            let hint = match spec.documentation {
+                "" => "right-click to change".to_owned(),
+                doc => format!("{doc}\n\nright-click to change"),
+            };
+            let name = ui.label(text).interact(Sense::click()).on_hover_text(hint);
             if let Some(value) =
                 edit_value(ui, egui::Id::new((id, spec.name)), &spec.kind, &node.params[spec.name])
             {

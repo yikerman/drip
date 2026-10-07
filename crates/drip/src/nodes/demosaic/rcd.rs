@@ -21,10 +21,10 @@ const STRIDE: usize = SIDE + 2 * BORDER;
 const EPS: f32 = 1e-5;
 
 pub(super) fn process(m: &Mosaic) -> Vec<[f32; 3]> {
-    if m.data.is_empty() {
+    if m.samples().is_empty() {
         return Vec::new();
     }
-    let mut output = vec![[0.0; 3]; m.data.len()];
+    let mut output = vec![[0.0; 3]; m.samples().len()];
     output.par_chunks_mut(m.width * SIDE).enumerate().for_each(|(band, rows)| {
         let y = band * SIDE;
         for x in (0..m.width).step_by(SIDE) {
@@ -52,7 +52,7 @@ pub(super) fn process(m: &Mosaic) -> Vec<[f32; 3]> {
 }
 
 fn color(m: &Mosaic, row: usize, col: usize) -> usize {
-    [0, 1, 2, 1][m.cfa.color(row, col) as usize]
+    [0, 1, 2, 1][m.interpretation().cfa.color(row, col) as usize]
 }
 
 fn bilinear(m: &Mosaic, row: usize, col: usize) -> [f32; 3] {
@@ -61,12 +61,12 @@ fn bilinear(m: &Mosaic, row: usize, col: usize) -> [f32; 3] {
     for r in row.saturating_sub(1)..=(row + 1).min(m.height - 1) {
         for c in col.saturating_sub(1)..=(col + 1).min(m.width - 1) {
             let channel = color(m, r, c);
-            sum[channel] += m.data[r * m.width + c].max(0.0);
+            sum[channel] += m.samples()[r * m.width + c].max(0.0);
             count[channel] += 1;
         }
     }
     let mut pixel = std::array::from_fn(|c| sum[c] / count[c].max(1) as f32);
-    pixel[color(m, row, col)] = m.data[row * m.width + col].max(0.0);
+    pixel[color(m, row, col)] = m.samples()[row * m.width + col].max(0.0);
     pixel
 }
 
@@ -97,7 +97,7 @@ impl Tile {
         };
         for r in 0..height {
             for c in 0..width {
-                let v = m.data[(top + r) * m.width + left + c].max(0.0);
+                let v = m.samples()[(top + r) * m.width + left + c].max(0.0);
                 let i = r * STRIDE + c;
                 tile.cfa[i] = v;
                 // Upstream initializes both colors present in this sensor row.
@@ -253,17 +253,21 @@ mod tests {
     use std::sync::Arc;
     const PHASES: [[u8; 4]; 4] = [[0, 1, 3, 2], [1, 0, 2, 3], [3, 2, 0, 1], [2, 3, 1, 0]];
     fn mosaic(width: usize, height: usize, phase: usize) -> Mosaic {
-        Mosaic {
-            width,
-            height,
-            scale: 1,
-            white: [1.0; 4],
-            cfa: Cfa { size: 2, colors: PHASES[phase].to_vec() },
-            camera: Arc::new(Camera { xyz_to_cam: [[0.0; 3]; 3], white_balance: [1.0; 4] }),
-            data: (0..width * height)
-                .map(|i| ((i * 137 + i / width * 29) % 2048) as f32 / 1024.0 - 0.03)
-                .collect(),
-        }
+        Mosaic::new(
+            Arc::new(crate::image::RawMat::from_samples(
+                width,
+                height,
+                1,
+                (0..width * height)
+                    .map(|i| ((i * 137 + i / width * 29) % 2048) as f32 / 1024.0 - 0.03)
+                    .collect(),
+            )),
+            crate::image::SensorMosaic {
+                cfa: Cfa { size: 2, colors: PHASES[phase].to_vec() },
+                white: [1.0; 4],
+                camera: Arc::new(Camera { xyz_to_cam: [[0.0; 3]; 3], white_balance: [1.0; 4] }),
+            },
+        )
     }
     #[test]
     fn matches_upstream_c_across_phases_and_tile_seams() {
@@ -297,7 +301,8 @@ mod tests {
                 let mut m = mosaic(w, h, phase);
                 for r in 0..h {
                     for c in 0..w {
-                        m.data[r * w + c] = [0.2, 0.4, 0.6][color(&m, r, c)];
+                        Arc::make_mut(&mut m.data).pixels.as_flattened_mut()[r * w + c] =
+                            [0.2, 0.4, 0.6][color(&m, r, c)];
                     }
                 }
                 let out = process(&m);
@@ -305,7 +310,7 @@ mod tests {
                     for c in 0..w {
                         let pixel = out[r * w + c];
                         let ch = color(&m, r, c);
-                        assert_eq!(pixel[ch], m.data[r * w + c]);
+                        assert_eq!(pixel[ch], m.samples()[r * w + c]);
                         for (v, e) in pixel.into_iter().zip([0.2, 0.4, 0.6]) {
                             assert!((v - e).abs() < 1e-4, "{r},{c}: {pixel:?}");
                         }

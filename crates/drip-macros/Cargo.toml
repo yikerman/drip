@@ -1,0 +1,18 @@
+[package]
+name = "drip-macros"
+description = "Declaration adapters for Drip semantic types and nodes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+
+[lints]
+workspace = true

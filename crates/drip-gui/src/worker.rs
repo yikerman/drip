@@ -350,9 +350,9 @@ fn run_action(evaluator: Evaluator, graph: &Graph, id: NodeId, name: &str) -> Re
 
 #[cfg(test)]
 mod tests {
-    use drip::image::{DisplayRec2020, ThreeChannelMatrix};
+    use drip::image::Rec2020Mat;
     use drip::node::{EvalContext, KernelError, NodeKernel, TypedAction};
-    use drip::param::Params;
+
     use drip::ports::Read;
 
     use super::*;
@@ -360,22 +360,22 @@ mod tests {
     use drip::image::Rgb;
     use drip::node::{Evaluated, NodeKind};
     use drip::nodes;
-    use drip::param::{ParamKind, ParamSpec};
+    use drip::param::ParamKind;
     use serde_json::json;
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
     const TIMEOUT: Duration = Duration::from_secs(5);
 
-    fn image(value: f32, scale: u32) -> Evaluated<(Arc<DisplayRec2020>,)> {
+    fn image(value: f32, scale: u32) -> Evaluated<(Arc<Rec2020Mat>,)> {
         Evaluated {
-            outputs: (Arc::new(DisplayRec2020::from(Arc::new(Rgb {
+            outputs: (Arc::new(Rec2020Mat::from(Arc::new(Rgb {
                 width: 1,
                 height: 1,
                 scale,
                 pixels: vec![[value, scale as f32, 0.0]],
             }))),),
-            view: None,
+            view: (),
         }
     }
 
@@ -436,33 +436,36 @@ mod tests {
         log::set_logger(&Capture).unwrap();
         log::set_max_level(log::LevelFilter::Trace);
 
-        static SOURCE: NodeKind = NodeKind::new::<Source>(
-            "test.diagnostics",
-            "test",
-            "diagnostics",
-            &[ParamSpec::new(
-                "state",
-                ParamKind::Choice {
-                    options: &["incomplete", "failed", "ok"],
-                    default: "incomplete",
-                },
-            )],
-            &[],
-            &["image"],
-        );
-        struct Source;
+        static SOURCE: NodeKind =
+            NodeKind::new::<Source>("test.diagnostics", "test", "diagnostics", &[], &["image"]);
+        #[derive(drip::Choice)]
+        enum State {
+            #[choice("incomplete")]
+            Incomplete,
+            #[choice("failed")]
+            Failed,
+            #[choice("ok")]
+            Ok,
+        }
+        #[derive(drip::Parameters)]
+        struct Source {
+            #[param(State::Incomplete.schema())]
+            state: State,
+        }
         impl NodeKernel for Source {
+            type Parameters = Self;
+            type View = ();
             type Inputs = ();
-            type Outputs = (Arc<DisplayRec2020>,);
+            type Outputs = (Arc<Rec2020Mat>,);
             fn eval(
-                p: Params<'_>,
+                p: Self::Parameters,
                 (): (),
                 _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-                match p.choice("state") {
-                    "incomplete" => Err(KernelError::Incomplete("choose a file")),
-                    "failed" => Err("decode failed".into()),
-                    _ => Ok(image(1.0, 1)),
+            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+                match p.state {
+                    State::Incomplete => Err(KernelError::Incomplete("choose a file")),
+                    State::Failed => Err("decode failed".into()),
+                    State::Ok => Ok(image(1.0, 1)),
                 }
             }
         }
@@ -521,30 +524,29 @@ mod tests {
     fn latest_targets_win_and_project_reset_rejects_old_results() {
         static GATE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
         static CALLS: Mutex<Vec<f32>> = Mutex::new(Vec::new());
-        static SOURCE: NodeKind = NodeKind::new::<SourceKernel>(
-            "test.blocking",
-            "test",
-            "blocking",
-            &[
-                ParamSpec::new("value", ParamKind::Float { min: 0.0, max: 10.0, default: 1.0 }),
-                ParamSpec::new("block", ParamKind::Bool { default: false }),
-            ],
-            &[],
-            &["image"],
-        );
-        struct SourceKernel;
+        static SOURCE: NodeKind =
+            NodeKind::new::<SourceKernel>("test.blocking", "test", "blocking", &[], &["image"]);
+        #[derive(drip::Parameters)]
+        struct SourceKernel {
+            #[param(ParamKind::Float { min: 0.0, max: 10.0, default: 1.0 })]
+            value: f32,
+            #[param(ParamKind::Bool { default: false })]
+            block: bool,
+        }
         impl NodeKernel for SourceKernel {
+            type Parameters = Self;
+            type View = ();
             type Inputs = ();
-            type Outputs = (Arc<DisplayRec2020>,);
+            type Outputs = (Arc<Rec2020Mat>,);
 
             fn eval(
-                p: Params<'_>,
+                p: Self::Parameters,
                 (): (),
                 ctx: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-                let value = p.float("value") as f32;
+            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+                let value = p.value;
                 CALLS.lock().unwrap().push(value);
-                if p.bool("block") {
+                if p.block {
                     let gate = GATE.lock().unwrap();
                     let (started, release) = gate.as_ref().unwrap();
                     started.send(()).unwrap();
@@ -625,56 +627,59 @@ mod tests {
 
     #[test]
     fn exports_follow_invalidation_order_and_always_use_full_detail() {
-        static FILE: NodeKind = NodeKind::new::<FileKernel>(
-            "test.file",
-            "test",
-            "file",
-            &[ParamSpec::new("path", ParamKind::Path { output: false })],
-            &[],
-            &["image"],
-        );
-        struct FileKernel;
+        static FILE: NodeKind =
+            NodeKind::new::<FileKernel>("test.file", "test", "file", &[], &["image"]);
+        #[derive(drip::Parameters)]
+        struct FileKernel {
+            #[param(ParamKind::Path { output: false })]
+            path: Option<std::path::PathBuf>,
+        }
         impl NodeKernel for FileKernel {
+            type Parameters = Self;
+            type View = ();
             type Inputs = ();
-            type Outputs = (Arc<DisplayRec2020>,);
+            type Outputs = (Arc<Rec2020Mat>,);
 
             fn eval(
-                p: Params<'_>,
+                p: Self::Parameters,
                 (): (),
                 ctx: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-                let value = ctx.resources().load(p.path("path").unwrap(), |path| {
+            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
+                let value = ctx.resources().load(p.path.as_deref().unwrap(), |path| {
                     std::fs::read_to_string(path).map_err(|e| e.to_string())
                 })?;
                 Ok(image(value.parse().unwrap(), ctx.scale()))
             }
         }
 
-        static WRITE: NodeKind = NodeKind::new::<WriteKernel>(
-            "test.write",
-            "test",
-            "write",
-            &[ParamSpec::new("path", ParamKind::Path { output: true })],
-            &["image"],
-            &[],
-        );
-        struct WriteKernel;
+        static WRITE: NodeKind =
+            NodeKind::new::<WriteKernel>("test.write", "test", "write", &["image"], &[]);
+        #[derive(drip::Parameters)]
+        struct WriteKernel {
+            #[param(ParamKind::Path { output: true })]
+            path: Option<std::path::PathBuf>,
+        }
         impl NodeKernel for WriteKernel {
-            type Inputs = (Read<DisplayRec2020>,);
+            type Parameters = Self;
+            type View = ();
+            type Inputs = (Read<Rec2020Mat>,);
             type Outputs = ();
             const ACTIONS: &'static [TypedAction<Self>] = &[TypedAction {
                 name: "write",
                 run: |p, (input0,), ctx| {
                     assert_eq!(ctx.scale(), 1);
-                    std::fs::write(p.path("path").unwrap(), format!("{:?}", input0.rgb().pixels[0]))
-                        .map_err(|e| KernelError::Failed(e.to_string()))
+                    std::fs::write(
+                        p.path.as_deref().unwrap(),
+                        format!("{:?}", input0.rgb().pixels[0]),
+                    )
+                    .map_err(|e| KernelError::Failed(e.to_string()))
                 },
             }];
             fn eval(
-                _: Params<'_>,
-                _: (&DisplayRec2020,),
+                _: Self::Parameters,
+                _: (&Rec2020Mat,),
                 _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
                 Ok(Evaluated::default())
             }
         }
@@ -729,17 +734,19 @@ mod tests {
     #[test]
     fn panic_wakes_the_ui_and_ends_the_busy_state() {
         static PANIC: NodeKind =
-            NodeKind::new::<PanicKernel>("test.panic", "test", "panic", &[], &[], &[]);
+            NodeKind::new::<PanicKernel>("test.panic", "test", "panic", &[], &[]);
         struct PanicKernel;
         impl NodeKernel for PanicKernel {
+            type Parameters = ();
+            type View = ();
             type Inputs = ();
             type Outputs = ();
 
             fn eval(
-                _: Params<'_>,
+                _: Self::Parameters,
                 (): (),
                 _: &EvalContext<'_>,
-            ) -> Result<Evaluated<Self::Outputs>, KernelError> {
+            ) -> Result<Evaluated<Self::Outputs, Self::View>, KernelError> {
                 panic!("test worker failure")
             }
         }

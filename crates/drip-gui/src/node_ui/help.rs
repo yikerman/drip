@@ -1,32 +1,33 @@
-//! Inspector help. Port descriptions follow the kernel's declared contracts.
+//! Inspector help: the node's documentation, then its port
+//! contracts as the current graph resolves them.
 
-use super::{documentation, ports};
-use drip::node::NodeKind;
+use super::ports;
+use drip::graph::{Graph, NodeId};
 use egui::Ui;
 
-pub fn show(ui: &mut Ui, kind: &NodeKind) {
-    let doc = documentation::of(kind);
-    if let Some(doc) = doc {
-        ui.label(doc.description);
+pub fn show(ui: &mut Ui, graph: &Graph, id: NodeId) {
+    let kind = graph.node(id).expect("selected node exists").kind;
+    if !kind.documentation.is_empty() {
+        ui.label(kind.documentation);
     }
-    egui::Grid::new(("node help", kind.id)).num_columns(2).show(ui, |ui| {
-        for input in kind.inputs() {
-            ui.weak(if input.requirement.optional { "optional input" } else { "input" });
-            ui.label(ports::label(input.requirement.name));
+    egui::Grid::new(("node help", id)).num_columns(2).show(ui, |ui| {
+        for port in ports::texts(graph, id) {
+            ui.weak(format!("{} {}", port.role.label(), port.port));
+            ui.horizontal(|ui| {
+                ui.label(port.label);
+                if let Some(input) = port.origin {
+                    ui.weak(format!("same type as input {input}"));
+                }
+            });
             ui.end_row();
         }
-        for output in kind.outputs() {
-            ui.weak("output");
-            ui.label(ports::label(output.ty.name));
-            ui.end_row();
-        }
-        if let Some((kind, name)) = doc.and_then(|doc| doc.result) {
-            ui.weak(kind);
-            ui.label(name);
+        for check in kind.checks() {
+            ui.weak("requires at evaluation");
+            ui.label(check);
             ui.end_row();
         }
     });
-    if let Some((name, url)) = doc.and_then(|doc| doc.reference) {
+    for &(name, url) in kind.references {
         crate::widgets::link(ui, name, url);
     }
     ui.add_space(6.0);

@@ -206,7 +206,7 @@ fn draw_scope(painter: &Painter, rect: Rect, scope: &Scope, mesh: &egui::Mesh, f
 
 #[cfg(test)]
 mod tests {
-    use drip::image::DisplayRec2020;
+    use drip::image::Rec2020Mat;
     use drip::view::PreviewImage;
 
     use super::*;
@@ -237,7 +237,7 @@ mod tests {
         let source =
             Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[-1.0, 0.5, 2.0]] });
         let raw = Arc::downgrade(&source);
-        let mut value = PreviewImage::new(&DisplayRec2020::from(source));
+        let mut value = PreviewImage::new(&Rec2020Mat::from(source));
         let view = View::Image(value.clone());
         let mut prepared = Prepared::default();
         let PreparedView::Image(first, false) = prepared.view(&view) else { panic!("image") };

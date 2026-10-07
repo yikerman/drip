@@ -1,45 +1,44 @@
-//! Scene-to-display mapping; algorithm settings also serve frontend curve plots.
+//! Creative tone mapping in linear Rec.2020; algorithm settings also serve frontend curve plots.
 
-use crate::image::{DisplayRec2020, Rgb, SceneRec2020, ThreeChannelMatrix};
-use crate::node::{EvalContext, Evaluated, KernelError, NodeKernel, NodeKind};
-use crate::param::{ParamKind, ParamSpec, Params};
-use crate::ports::Read;
+use crate::image::{Rec2020Mat, Rec2020Rgb, Rgb};
+use crate::node::{EvalContext, Evaluated, KernelError};
+use crate::param::ParamKind;
+use crate::ports::MatRef;
 use std::sync::Arc;
 
 mod algorithm;
 pub use algorithm::{GREY, Sigmoid};
 
-pub static SIGMOID: NodeKind = NodeKind::new::<SigmoidNode>(
-    "tone.sigmoid",
-    "tone",
-    "Sigmoid",
-    &[
-        ParamSpec::new("contrast", ParamKind::Float { min: 0.5, max: 4.0, default: 1.5 }),
-        ParamSpec::new("skew", ParamKind::Float { min: -1.0, max: 1.0, default: -0.2 }),
-        ParamSpec::new("preserve_hue", ParamKind::Float { min: 0.0, max: 1.0, default: 0.0 }),
-    ],
-    &["image"],
-    &["image"],
-);
-
-struct SigmoidNode;
-impl NodeKernel for SigmoidNode {
-    type Inputs = (Read<SceneRec2020>,);
-    type Outputs = (Arc<DisplayRec2020>,);
-    fn eval(
-        p: Params<'_>,
-        (image,): (&SceneRec2020,),
-        _: &EvalContext<'_>,
-    ) -> Result<Evaluated<Self::Outputs>, KernelError> {
-        let input = image.rgb();
-        let pixels = settings(p).process(&input.pixels);
-        Ok(Evaluated {
-            outputs: (Arc::new(DisplayRec2020::from(Arc::new(Rgb { pixels, ..**input }))),),
-            view: None,
-        })
+#[derive(crate::Parameters)]
+pub struct Settings {
+    #[param(ParamKind::Float { min: 0.5, max: 4.0, default: 1.5 })]
+    contrast: f32,
+    #[param(ParamKind::Float { min: -1.0, max: 1.0, default: -0.2 })]
+    skew: f32,
+    #[param(ParamKind::Float { min: 0.0, max: 1.0, default: 0.0 })]
+    preserve_hue: f32,
+}
+impl Settings {
+    pub fn curve(&self) -> Sigmoid {
+        Sigmoid::new(self.contrast, self.skew, self.preserve_hue)
     }
 }
 
-pub fn settings(p: Params<'_>) -> Sigmoid {
-    Sigmoid::new(p.float("contrast") as f32, p.float("skew") as f32, p.float("preserve_hue") as f32)
+/// Creative S-curve on linear Rec.2020.
+///
+/// Assumes middle grey at 0.18 and keeps it fixed. Black is 0 and the curve approaches 1.
+/// The output is interpreted as linear Rec.2020 for further processing; additional
+/// input guarantees are dropped. Preview and export do not require tone mapping.
+#[crate::node(kind = SIGMOID, id = "tone.sigmoid", category = "tone", name = "Sigmoid", outputs = ["image"], references = [("darktable: sigmoid", "https://docs.darktable.org/usermanual/5.6/en/module-reference/processing-modules/sigmoid/")])]
+fn sigmoid(
+    p: Settings,
+    (image,): (MatRef<'_, 3, dyn Rec2020Rgb>,),
+    _: &EvalContext<'_>,
+) -> Result<Evaluated<(Arc<Rec2020Mat>,)>, KernelError> {
+    let input = image.rgb();
+    let pixels = p.curve().process(&input.pixels);
+    Ok(Evaluated {
+        outputs: (Arc::new(Rec2020Mat::from(Arc::new(Rgb { pixels, ..**input }))),),
+        view: (),
+    })
 }
