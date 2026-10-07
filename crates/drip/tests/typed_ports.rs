@@ -7,7 +7,7 @@ use drip::image::{
     Colorimetry, LinearRgb, LinearRgbColorSpace, Linearity, RealMat, Rec2020, Rec2020Mat,
     Rec2020Rgb, Rgb, ScaleInvariant,
 };
-use drip::node::{EvalContext, KernelError, NodeDeclaration, NodeKind};
+use drip::node::{EvalContext, KernelError};
 use drip::nodes;
 
 use drip::ports::{Input, Read, ReadMat};
@@ -26,7 +26,7 @@ type EncodedMat = RealMat<3, Encoded>;
 // No edits to a capability catalogue or consuming nodes accompany this type.
 #[drip::interpretation(ScaleInvariant)]
 #[derive(Debug, Default, Reflect)]
-struct P3Interpretation;
+pub struct P3Interpretation;
 impl Linearity for P3Interpretation {}
 impl ScaleInvariant for P3Interpretation {}
 impl Colorimetry for P3Interpretation {
@@ -45,16 +45,10 @@ impl LinearRgb for P3Interpretation {
 }
 type LinearP3 = RealMat<3, P3Interpretation>;
 
-struct P3Source;
-impl NodeDeclaration for P3Source {
-    type Parameters = ();
-    type Inputs = ();
-    type Outputs = (Arc<LinearP3>,);
-    const KERNEL: Option<drip::node::Kernel<Self>> =
-        Some(|_, (), _| Ok((Arc::new(LinearP3::from(pixels())),)));
+#[drip::node(kind = P3_SOURCE, id = "test.p3", category = "test", name = "P3", outputs = ["image"])]
+fn p3_source(_: (), (): (), _: &EvalContext<'_>) -> Result<(Arc<LinearP3>,), KernelError> {
+    Ok((Arc::new(LinearP3::from(pixels())),))
 }
-#[drip::node]
-static P3_SOURCE: NodeKind = NodeKind::new::<P3Source>("test.p3", "test", "P3", &[], &["image"]);
 
 #[test]
 fn generated_ancestor_evidence_agrees_with_borrows_without_copying_samples() {

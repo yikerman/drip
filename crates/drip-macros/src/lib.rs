@@ -77,6 +77,9 @@ pub fn interpretation(args: TokenStream, input: TokenStream) -> TokenStream {
 /// Function Rustdoc supplies inspector help; optional `references = [(label, url), ...]`
 /// supplies links. Keep implementation rationale in ordinary comments inside the function.
 /// Functions return output tuples; a signature ending in `;` declares a consumer without a kernel.
+/// Input syntax is `&T`, `MatRef<'_, C, dyn Capability>`, or `Option` of either;
+/// qualified paths are accepted, but aliases for these wrappers are not resolved.
+/// The function `foo_bar` declares `FooBarNode` and the typed handle named by `kind`.
 #[proc_macro_attribute]
 pub fn node(args: TokenStream, input: TokenStream) -> TokenStream {
     if let Ok(function) = syn::parse::<syn::ItemFn>(input.clone()) {
@@ -97,15 +100,11 @@ pub fn node(args: TokenStream, input: TokenStream) -> TokenStream {
             Err(e) => e.into_compile_error().into(),
         };
     }
-    let item = parse_macro_input!(input as syn::ItemStatic);
-    let name = &item.ident;
-    let entry = format_ident!("__DRIP_NODE_{}", name);
-    quote! {
-        #item
-        #[::drip::__private::linkme::distributed_slice(::drip::node::NODE_KINDS)]
-        #[linkme(crate = ::drip::__private::linkme)]
-        static #entry: &'static ::drip::node::NodeKind = &#name;
-    }
+    syn::Error::new_spanned(
+        proc_macro2::TokenStream::from(input),
+        "node requires a function body or a function signature ending in ;",
+    )
+    .into_compile_error()
     .into()
 }
 
@@ -292,7 +291,7 @@ fn matrix_input(ty: &syn::Type) -> syn::Result<proc_macro2::TokenStream> {
             let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
                 return Err(syn::Error::new_spanned(
                     ty,
-                    "input must be &T, MatRef<'_, C, dyn Capability>, or Option of either",
+                    "input must be &T, MatRef<'_, C, dyn Capability>, or Option of either; wrapper aliases are not resolved",
                 ));
             };
             if segment.ident == "Option" {
@@ -312,7 +311,10 @@ fn matrix_input(ty: &syn::Type) -> syn::Result<proc_macro2::TokenStream> {
                 }
                 Ok(quote!(::drip::ports::ReadMat<#(#args),*>))
             } else {
-                Err(syn::Error::new_spanned(ty, "unsupported input: use &T or MatRef"))
+                Err(syn::Error::new_spanned(
+                    ty,
+                    "unsupported input: use &T or MatRef; wrapper aliases are not resolved",
+                ))
             }
         }
         _ => Err(syn::Error::new_spanned(ty, "unsupported input: use &T or MatRef")),
@@ -486,7 +488,22 @@ fn callbacks(expr: Option<&syn::Expr>) -> syn::Result<Vec<(&syn::Expr, &syn::Exp
 
 #[cfg(test)]
 mod tests {
-    use super::choice_impl;
+    use super::{choice_impl, matrix_input};
+
+    #[test]
+    fn input_syntax_accepts_qualified_wrappers_and_rejects_aliases() {
+        for ty in [
+            "&ImageAlias",
+            "drip::ports::MatRef<'_, 3, dyn LinearRgb>",
+            "std::option::Option<drip::ports::MatRef<'_, 3, dyn LinearRgb>>",
+        ] {
+            assert!(matrix_input(&syn::parse_str(ty).unwrap()).is_ok(), "{ty}");
+        }
+        for ty in ["ImageInput", "ImageInput<'_>", "Option<ImageInput<'_>>"] {
+            let error = matrix_input(&syn::parse_str(ty).unwrap()).unwrap_err();
+            assert!(error.to_string().contains("wrapper aliases are not resolved"), "{error}");
+        }
+    }
 
     #[test]
     fn choices_reject_ambiguous_or_nonfinite_declarations() {

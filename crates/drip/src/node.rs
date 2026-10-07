@@ -155,6 +155,8 @@ pub struct NodeKind {
     output_types: &'static [OutputType],
     /// Deterministic and side-effect free: dependency stamps cache the result.
     pub(crate) eval: Evaluate,
+    // CHECKS/ACTIONS contain callbacks typed by their owning declaration. Accessors
+    // erase that owner without allocating or maintaining a second metadata table.
     check_count: usize,
     check_at: fn(usize) -> &'static str,
     action_count: usize,
@@ -256,14 +258,6 @@ impl NodeKind {
             action_count: K::ACTIONS.len(),
             action_at: |index| Action { name: K::ACTIONS[index].name, index, run: run_action::<K> },
         }
-    }
-    pub const fn documented(mut self, documentation: &'static str) -> Self {
-        self.documentation = documentation;
-        self
-    }
-    pub const fn references(mut self, references: &'static [(&'static str, &'static str)]) -> Self {
-        self.references = references;
-        self
     }
     pub fn inputs(&self) -> impl ExactSizeIterator<Item = InputSpec> + '_ {
         self.input_names
