@@ -8,6 +8,12 @@ in [TODO](../TODO.md). Status: requirement, decided, tentative, or open.
 
 - **Decided:** v0.1 priorities: production-pipeline validation, editing UI/UX,
   SpyderX verification, then packaging. CLI expansion and optimization follow.
+- **Decided:** Frontend binaries use their package names: `drip-cli` and
+  `drip-gui`. This keeps CLI Rustdoc output separate from the `drip` library.
+- **Decided:** Keep `gpu-allocator` and the pinned `wgpu-hal` on the same
+  `windows` crate version (currently 0.62.2); their DX12 interfaces cross crate
+  boundaries. CI uses `--locked` to validate the committed dependency resolution.
+- **Requirement:** Rust 1.95 is the minimum supported toolchain.
 - **Requirement:** Correct display color on Wayland, macOS and Windows. Linux is
   the primary development platform; X11 is unsupported. A replacement GUI must
   cover all three color paths.

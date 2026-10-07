@@ -9,7 +9,7 @@ Open work. Deferred ideas need a concrete use or measurement before implementati
 | Display portability | Next | Verify Wayland, macOS and Windows tagging, reference white, monitor/profile changes and Windows Advanced Color on/off. Legacy Windows needs explicit ICC output. |
 | SpyderX verification | Planned | Measure the complete display path before release. |
 | Packaging and v0.1 | Planned | Follow processing, workflow and color verification. |
-| Build portability | Open | Verify Rust 1.92 and Windows/macOS builds and linker discovery. |
+| Build portability | Open | Verify Rust 1.95 and Windows/macOS builds and linker discovery. |
 | RAW metadata extraction | Open | Canon EOS D30 (#1307): unusable as-shot WB. Samsung GX-1L (#8115): unusable WB and zero camera matrix. Both excluded from active corpus. IDs refer to raw.pixls.us. |
 | DNG matrix extraction | Open | Sigma fp 8-bit (#7280) and 14-bit (#7273): nonzero ColorMatrix1/2, but LibRaw 0.22.2 returns zero `cam_xyz` after unpack. Excluded from active corpus. |
 | Panic-time native teardown | Open | Investigate NVIDIA/Wayland segmentation fault during unwind after the now-fixed image-view panic. |

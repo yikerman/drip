@@ -51,7 +51,7 @@ Drip is an early **0.1.0-dev** prototype for Bayer RAW photos, developed on Linu
 with Wayland. You'll need to build it from source; Windows and macOS packaging
 hasn't been verified yet.
 
-Install [Rust](https://rustup.rs/) 1.92 or newer, then the dependencies for your
+Install [Rust](https://rustup.rs/) 1.95 or newer, then the dependencies for your
 platform:
 
 <details>

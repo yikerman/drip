@@ -9,8 +9,18 @@ work in [TODO](../TODO.md), implementation history in Git.
   corpus, plus seven compile-fail doctests. Follow-up graph, typed-port and scope
   checks passed all 22 tests, including new camera/working RGB scope parity.
 - Strict workspace Clippy, formatting and five GUI binding compilation probes
-  passed. Warning-free Rustdoc passed excluding `drip-cli`, whose binary name
-  collides with the library's documentation output path.
+  passed. `cargo doc --no-deps` now passes without warnings across the workspace
+  after renaming the CLI binary to `drip-cli`; `cargo build -p drip-cli --bin
+  drip-cli` also passed.
+- Windows CI failed first at `2156c28`: `cb27708` had changed `gpu-allocator`'s
+  locked `windows` dependency to 0.58.0 while `wgpu-hal` retained 0.62.2, breaking
+  DX12 interface types. Restored their shared 0.62.2 resolution and added
+  `--locked` to CI Cargo builds, lint and tests. The Windows MSVC `wgpu-hal`
+  check (including DX12), Linux workspace/all-targets build and formatting pass.
+  A full native Windows build remains for CI.
+- Repeated the build and Windows backend checks after raising the Rust minimum
+  to 1.95 and refreshing dependencies. Checks used 1.96.1; the minimum toolchain
+  remains unverified.
 - Validation used Linux/rustc 1.96.1. The GPU color-reference test passed before
   the DAG rewrite and was not rerun afterwards; display code was unchanged.
 
