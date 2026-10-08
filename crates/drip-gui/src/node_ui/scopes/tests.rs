@@ -5,7 +5,7 @@ use super::{
 use std::sync::Arc;
 
 use drip::graph::Graph;
-use drip::image::{Camera, CameraRgb, Rec2020Mat, Rgb};
+use drip::image::{Camera, CameraRgb, ColorImage, Rgb};
 use drip::node::EvalContext;
 use drip::nodes::scopes::{ExposureSettings, HISTOGRAM, Scale};
 use drip::param::{Parameters, Params};
@@ -23,7 +23,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
         scale: 1,
         pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36], [1.0, 0.5, 2.0], [0.25; 3]],
     });
-    let working = Value::new(Arc::new(Rec2020Mat::from(pixels.clone())));
+    let working = Value::new(Arc::new(ColorImage::from(pixels.clone())));
     let camera = Value::new(Arc::new(CameraRgb::new(
         pixels,
         Camera {
@@ -34,7 +34,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
     let resources = Default::default();
     let context = EvalContext::new(0, &resources).unwrap();
     let prepare = |value: &Value| {
-        let image = value.borrow::<ReadEither<Rec2020Mat, CameraRgb>>().unwrap();
+        let image = value.borrow::<ReadEither<ColorImage, CameraRgb>>().unwrap();
         let settings = || ExposureSettings { min_ev: -12, max_ev: 4, scale: Scale::Log };
         (
             histogram(settings(), (image,), &context).unwrap(),
@@ -50,7 +50,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
 
 #[test]
 fn histogram_bins_by_stops() {
-    let value = Value::new(Arc::new(Rec2020Mat::from(Arc::new(Rgb {
+    let value = Value::new(Arc::new(ColorImage::from(Arc::new(Rgb {
         width: 2,
         height: 1,
         scale: 1,
@@ -62,7 +62,7 @@ fn histogram_bins_by_stops() {
     let context = EvalContext::new(0, &resources).unwrap();
     let prepare = |graph: &Graph| {
         let params = ExposureSettings::read(Params::validated(&graph.node(id).unwrap().params));
-        let image = value.borrow::<ReadEither<Rec2020Mat, CameraRgb>>().unwrap();
+        let image = value.borrow::<ReadEither<ColorImage, CameraRgb>>().unwrap();
         histogram(params, (image,), &context).unwrap()
     };
     let h = prepare(&graph);
@@ -85,14 +85,14 @@ fn histogram_bins_by_stops() {
 
 #[test]
 fn vectorscope_uses_working_rec2020_coordinates() {
-    let source = Rec2020Mat::from(Arc::new(Rgb {
+    let source = ColorImage::from(Arc::new(Rgb {
         width: 1,
         height: 1,
         scale: 1,
         pixels: vec![[1.0, 0.0, 0.0]],
     }));
     let value = Value::new(Arc::new(source));
-    let image = value.borrow::<Read<Rec2020Mat>>().unwrap();
+    let image = value.borrow::<Read<ColorImage>>().unwrap();
     let resources = Default::default();
     let context = EvalContext::new(0, &resources).unwrap();
     let scope = vectorscope((), (image,), &context).unwrap();
@@ -111,4 +111,43 @@ fn vectorscope_uses_working_rec2020_coordinates() {
     let [x, y] = expected.map(|v| (v * scope.size as f64) as usize);
     assert_eq!(scope.counts[y * scope.size + x][0], 1);
     assert_eq!(scope.counts.iter().map(|count| count[0]).sum::<u32>(), 1);
+}
+
+#[test]
+fn vectorscope_rejects_unsupported_coordinates_but_accepts_rendered_color() {
+    use drip::image::{ColorCoordinates, ColorMeaning, SceneRelationship};
+    let pixels = Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[0.18; 3]] });
+    let resources = Default::default();
+    let context = EvalContext::new(0, &resources).unwrap();
+    for coordinates in [ColorCoordinates::Oklab, ColorCoordinates::Unspecified] {
+        let image = ColorImage::new(
+            pixels.clone(),
+            ColorMeaning { coordinates, scene: SceneRelationship::Unspecified },
+        );
+        assert!(vectorscope((), (&image,), &context).is_err());
+        // Raw channel diagnostics stay meaningful without that color refinement.
+        let settings = || ExposureSettings { min_ev: -12, max_ev: 4, scale: Scale::Linear };
+        let channel_input = drip::ports::Either::First(&image);
+        assert_eq!(
+            histogram(settings(), (channel_input,), &context)
+                .unwrap()
+                .counts
+                .iter()
+                .flatten()
+                .sum::<u32>(),
+            3
+        );
+        assert_eq!(
+            waveform(settings(), (channel_input,), &context)
+                .unwrap()
+                .counts
+                .iter()
+                .flatten()
+                .sum::<u32>(),
+            3
+        );
+    }
+    let rendered = ColorImage::new(pixels, ColorMeaning::rec2020().after_rendering());
+    let result = vectorscope((), (&rendered,), &context).unwrap();
+    assert_eq!(result.counts.iter().flatten().sum::<u32>(), 1);
 }

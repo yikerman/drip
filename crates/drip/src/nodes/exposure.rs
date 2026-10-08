@@ -1,29 +1,44 @@
-//! Exposure multiplication preserves the input RGB interpretation.
+//! Uniform exposure multiplication in additive color coordinates.
 
-use crate::image::{Rec2020Mat, Rgb};
+use crate::image::{ColorImage, Gpu};
 use crate::node::{EvalContext, KernelError};
 use crate::param::ParamKind;
-use rayon::prelude::*;
 use std::sync::Arc;
 
 #[derive(crate::Parameters)]
 pub struct Exposure {
-    /// Multiplication by 2^ev in the input's linear RGB coordinates.
+    /// Stops: multiply the represented light by 2^ev.
     #[param(ParamKind::Float { min: -10.0, max: 10.0, default: 0.0 })]
     ev: f32,
 }
 
-/// Multiply linear RGB by 2^ev: x * 2^ev.
+/// Multiply ColorImage samples by 2^ev in additive color coordinates.
 ///
-/// Input and output use linear Rec.2020 coordinates. After creative tone mapping,
-/// this scales the rendered light rather than restoring scene exposure.
+/// Requires additive coordinates, not a claim of original scene accuracy. The
+/// output retains color coordinates and scales an existing scene estimate; after
+/// rendering it scales the represented light without restoring scene provenance.
 #[crate::node(kind = EXPOSURE, id = "color.exposure", category = "color", name = "Exposure", outputs = ["image"])]
 fn exposure(
-    p: Exposure,
-    (image,): (&Rec2020Mat,),
-    _: &EvalContext<'_>,
-) -> Result<(Arc<Rec2020Mat>,), KernelError> {
+    #[params] p: Exposure,
+    image: &ColorImage<Gpu>,
+    #[context] ctx: &EvalContext<'_>,
+) -> Result<(Arc<ColorImage<Gpu>>,), KernelError> {
+    let image = image.require_additive_color()?;
     let gain = p.ev.exp2();
-    let pixels = image.rgb().pixels.par_iter().map(|p| p.map(|v| v * gain)).collect();
-    Ok((Arc::new(Rec2020Mat::from(Arc::new(Rgb { pixels, ..**image.rgb() }))),))
+    let meaning = image.interpretation().after_exposure(gain)?;
+    let output = super::gpu::pointwise(
+        ctx.compute()?,
+        "exposure",
+        image.gpu_buffer(),
+        image.gpu_buffer().len(),
+        image.gpu_buffer().len(),
+        &[gain],
+    )?;
+    Ok((Arc::new(ColorImage::from_gpu(
+        output,
+        image.width(),
+        image.height(),
+        image.scale(),
+        meaning,
+    )?),))
 }

@@ -2,8 +2,8 @@
 
 use super::ControlCx;
 use crate::render::node_views::{Drawable, ImageCache, IntoDrawable};
-use drip::eval::{Evaluator, NodeError};
-use drip::graph::{Graph, NodeId};
+use drip::eval::{Evaluation, NodeError};
+use drip::graph::NodeId;
 use drip::node::{EvalContext, KernelError, NodeDeclaration, NodeKind, TypedNode};
 use drip::ports::InputTuple;
 use egui::Ui;
@@ -16,7 +16,9 @@ pub type Prepare<G> = for<'i, 'c, 'r> fn(
 ) -> Result<<G as GuiNode>::Presentation, KernelError>;
 
 /// Preparation has the declaration's exact signature. Controls can run without
-/// inputs; preparation runs on the worker only for bindings that provide it.
+/// inputs; preparation consumes one immutable evaluation snapshot. Runtime
+/// refinements used by presentation are checked inside PREPARE, because requesting
+/// inputs does not execute the declaration's numerical kernel or its checks.
 pub trait GuiNode: Sized + 'static {
     type Node: NodeDeclaration;
     type Presentation: IntoDrawable;
@@ -29,7 +31,7 @@ pub trait GuiNode: Sized + 'static {
 }
 
 type PrepareErased =
-    fn(&mut Evaluator, &Graph, NodeId, u8, &mut ImageCache) -> Result<Arc<dyn Drawable>, NodeError>;
+    fn(&Evaluation, NodeId, &mut ImageCache) -> Result<Arc<dyn Drawable>, NodeError>;
 
 pub struct Binding {
     kind: &'static NodeKind,
@@ -43,11 +45,9 @@ impl Binding {
             kind: G::NODE.kind(),
             controls: |ui, node| G::controls(ui, &mut ControlCx::new(node)),
             prepare: if G::PREPARE.is_some() {
-                Some(|evaluator, graph, id, level, cache| {
-                    let value = evaluator.with_inputs(
-                        graph,
+                Some(|evaluation, id, cache| {
+                    let value = evaluation.with_inputs(
                         id,
-                        level,
                         G::NODE,
                         G::PREPARE.expect("declared preparation"),
                     )?;
@@ -70,12 +70,10 @@ impl Binding {
     }
     pub fn prepare(
         &self,
-        evaluator: &mut Evaluator,
-        graph: &Graph,
+        evaluation: &Evaluation,
         id: NodeId,
-        level: u8,
         cache: &mut ImageCache,
     ) -> Result<Option<Arc<dyn Drawable>>, NodeError> {
-        self.prepare.map(|prepare| prepare(evaluator, graph, id, level, cache)).transpose()
+        self.prepare.map(|prepare| prepare(evaluation, id, cache)).transpose()
     }
 }

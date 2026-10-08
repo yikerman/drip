@@ -4,6 +4,7 @@ mod camera;
 mod demosaic;
 mod export;
 mod exposure;
+mod gpu;
 mod highlights;
 pub mod preview;
 mod raw;

@@ -67,22 +67,26 @@ pub struct Gpu {
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    pub compute: Arc<drip::compute::Compute>,
 }
 
 impl Gpu {
     /// Picks an adapter that can present to `window` and sets up the window's
     /// display; the app's other windows are on the same display.
     pub fn new(window: Arc<Window>) -> Result<(Self, Display), String> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let surface = instance.create_surface(window.clone()).map_err(|e| e.to_string())?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             compatible_surface: Some(&surface),
             ..Default::default()
         }))
         .map_err(|e| e.to_string())?;
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .map_err(|e| e.to_string())?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: adapter.limits(),
+            ..Default::default()
+        }))
+        .map_err(|e| e.to_string())?;
         let info = adapter.get_info();
         log::info!(
             "GPU adapter={} backend={:?} driver={} {}",
@@ -91,7 +95,8 @@ impl Gpu {
             info.driver,
             info.driver_info
         );
-        let gpu = Gpu { instance, adapter, device, queue };
+        let compute = drip::compute::Compute::from_device(device.clone(), queue.clone());
+        let gpu = Gpu { instance, adapter, device, queue, compute };
         let display = Display::with_surface(&gpu, window, surface)?;
         Ok((gpu, display))
     }
@@ -256,11 +261,12 @@ impl Display {
                 .forget_lifetime();
             self.egui.render(&mut pass, jobs, &screen);
         }
-        image::end_frame(&mut self.egui);
+        let retained_images = image::end_frame(&mut self.egui);
         let view = frame.texture.create_view(&Default::default());
         self.compositor.draw(&mut encoder, &view);
         commands.push(encoder.finish());
         self.gpu.queue.submit(commands);
+        self.gpu.queue.on_submitted_work_done(move || drop(retained_images));
         // On Wayland, winit then holds back redraws until the compositor asks
         // for a frame, so frames never pile up waiting for a free image.
         self.window.pre_present_notify();

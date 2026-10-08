@@ -1,4 +1,4 @@
-//! Worker-prepared node drawing and shared image packing.
+//! Worker-prepared node drawing and shared host presentation images.
 
 use std::{any::Any, sync::Arc};
 
@@ -34,7 +34,7 @@ pub trait IntoDrawable {
     fn into_drawable(self, cache: &mut ImageCache) -> Arc<dyn Drawable>;
 }
 
-/// Packed images by source, so an unchanged image is packed once. The owner
+/// Host presentation images shared by source identity. The owner
 /// keeps every image until nothing else does, so the last drop happens there.
 #[derive(Default)]
 pub struct ImageCache(Vec<(Arc<Rgb>, Arc<Image>)>);
@@ -68,14 +68,14 @@ impl IntoDrawable for () {
 mod tests {
     use super::*;
     use crate::node_ui::preview::{ImageView, PreviewImage};
-    use drip::image::Rec2020Mat;
+    use drip::image::ColorImage;
 
     #[test]
     fn preparation_reuses_images_and_keeps_destruction_on_its_owner() {
         let source =
             Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[-1.0, 0.5, 2.0]] });
         let raw = Arc::downgrade(&source);
-        let mut value = PreviewImage::new(&Rec2020Mat::from(source));
+        let mut value = PreviewImage::new(&ColorImage::from(source));
         let mut images = ImageCache::default();
         let first = {
             let view = value.clone().into_drawable(&mut images);
@@ -91,13 +91,7 @@ mod tests {
             view.image.clone()
         };
         assert!(Arc::ptr_eq(&first, &second));
-        assert_eq!(
-            first.texels,
-            [0xbc00u16, 0x3800, 0x4000, 0x3c00]
-                .into_iter()
-                .flat_map(u16::to_ne_bytes)
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(first.host_pixels().unwrap().pixels, [[-1.0, 0.5, 2.0]]);
         let pixels = Arc::downgrade(&first);
         drop(first);
         images.collect();

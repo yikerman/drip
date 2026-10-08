@@ -11,57 +11,47 @@ use crate::resource::Resources;
 use crate::value::{TypeDescriptor, Value};
 use std::collections::BTreeMap;
 
-/// A signature determines both connection checking and evaluator adaptation.
+/// A pure computation of context × parameters × inputs → outputs.
 ///
-/// # Laws
-/// Evaluation is deterministic in parameters, inputs and evaluation context,
-/// with no external writes. Outputs must obey their semantic image contracts;
-/// Rust checks their types, not the pixels' meaning. These obligations allow
-/// dependency stamps to reuse results without rerunning a kernel. External
-/// effects such as export belong in explicit actions, outside cached evaluation.
+/// The signature fixes concrete payload families and CPU/GPU placement. Runtime
+/// predicates refine their meaning inside the kernel: a color coordinate system
+/// does not itself establish a scene measurement or an applicable noise model.
+/// Implementations must explicitly preserve, transform or drop those claims.
+/// External effects belong to actions; observing inputs never runs an action.
 ///
-/// Generated nodes derive their runtime signature from the function's Rust types.
-/// Returning another interpretation fails before the node can enter a catalogue:
+/// The macro binds named arguments without a separate registry or signature:
 ///
 /// ```compile_fail,E0308
+/// use drip::node::KernelError;
+/// #[drip::node(kind = BAD, id = "bad", category = "test", name = "Bad", outputs = [])]
+/// fn bad() -> Result<(), KernelError> { Ok(123) }
+/// ```
+///
+/// Placement is part of the concrete signature; transferring samples is an
+/// evaluator operation, not an implicit Rust cast inside a kernel:
+///
+/// ```compile_fail,E0308
+/// use drip::{image::{ColorImage, Cpu, Gpu}, node::KernelError};
 /// use std::sync::Arc;
-/// use drip::image::{CameraRgb, Rec2020Mat};
-/// use drip::node::{EvalContext, KernelError};
 /// #[drip::node(kind = BAD, id = "bad", category = "test", name = "Bad", outputs = ["image"])]
-/// fn bad(_: (), (image,): (&CameraRgb,), _: &EvalContext<'_>)
-///     -> Result<(Arc<Rec2020Mat>,), KernelError>
-/// {
-///     Ok((Arc::new(image.clone()),))
+/// fn bad(image: &ColorImage<Gpu>) -> Result<Arc<ColorImage<Cpu>>, KernelError> {
+///     Ok(Arc::new(image.clone()))
 /// }
 /// ```
 ///
-/// Input-only declarations omit the body. Their signatures are still checked;
-/// they cannot advertise outputs that no kernel produces.
+/// An input-only declaration cannot promise an output without computation:
 ///
 /// ```compile_fail,E0080
-/// use drip::{node, node::{EvalContext, KernelError}, image::Rec2020Mat};
+/// use drip::{image::{ColorImage, Cpu}, node::KernelError};
 /// use std::sync::Arc;
-/// #[node(kind = BAD, id = "bad", category = "test", name = "Bad", outputs = ["image"])]
-/// fn bad(_: (), (): (), _: &EvalContext<'_>) -> Result<(Arc<Rec2020Mat>,), KernelError>;
-/// ```
-///
-/// ```compile_fail,E0308
-/// use drip::{node, node::EvalContext};
-/// #[node(kind = BAD, id = "bad", category = "test", name = "Bad", outputs = [])]
-/// fn bad(_: (), (): (), _: &EvalContext<'_>) -> Result<(), String>;
-/// ```
-///
-/// ```compile_fail,E0308
-/// use drip::{node, node::KernelError};
-/// #[node(kind = BAD, id = "bad", category = "test", name = "Bad", outputs = [])]
-/// fn bad(_: (), (): (), _: &()) -> Result<(), KernelError>;
+/// #[drip::node(kind = BAD, id = "bad", category = "test", name = "Bad", outputs = ["image"])]
+/// fn bad() -> Result<Arc<ColorImage<Cpu>>, KernelError>;
 /// ```
 pub trait NodeDeclaration: Sized + 'static {
     type Parameters: Parameters;
     type Inputs: InputTuple;
     type Outputs: OutputTuple;
     const ACTIONS: &'static [TypedAction<Self>] = &[];
-    const CHECKS: &'static [TypedCheck<Self>] = &[];
 
     /// Absent for declarations consumed through actions or external observers.
     const KERNEL: Option<Kernel<Self>> = None;
@@ -82,8 +72,6 @@ pub enum KernelError {
     Failed(String),
     #[error("input {index}: {mismatch}")]
     Contract { index: usize, mismatch: crate::ports::TypeMismatch },
-    #[error(transparent)]
-    Constraint(ConstraintError),
 }
 
 impl From<String> for KernelError {
@@ -98,7 +86,19 @@ impl From<&str> for KernelError {
     }
 }
 
-// K: owning declaration, shared by kernels, actions and checks.
+impl From<crate::compute::ComputeError> for KernelError {
+    fn from(error: crate::compute::ComputeError) -> Self {
+        Self::Failed(error.to_string())
+    }
+}
+
+impl From<crate::image::ImageError> for KernelError {
+    fn from(error: crate::image::ImageError) -> Self {
+        Self::Failed(error.to_string())
+    }
+}
+
+// K: owning declaration, shared by kernels and actions.
 type TypedActionFn<K> = for<'inputs, 'context, 'resources> fn(
     <K as NodeDeclaration>::Parameters,
     <<K as NodeDeclaration>::Inputs as InputTuple>::Borrowed<'inputs>,
@@ -112,24 +112,6 @@ where
 {
     pub name: &'static str,
     pub run: TypedActionFn<K>,
-}
-
-/// A value-dependent relationship, checked before computation and explicit actions.
-/// A declaration stays pending during graph editing until its inputs are available.
-pub struct TypedCheck<K: NodeDeclaration> {
-    pub name: &'static str,
-    pub check: TypedCheckFn<K>,
-}
-type TypedCheckFn<K> = for<'i, 'c, 'r> fn(
-    <K as NodeDeclaration>::Parameters,
-    <<K as NodeDeclaration>::Inputs as InputTuple>::Borrowed<'i>,
-    &'c EvalContext<'r>,
-) -> Result<(), String>;
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{name}: {detail}")]
-pub struct ConstraintError {
-    pub name: &'static str,
-    pub detail: String,
 }
 
 type Evaluate =
@@ -153,12 +135,8 @@ pub struct NodeKind {
     output_names: &'static [&'static str],
     input_types: &'static [InputRequirement],
     output_types: &'static [TypeDescriptor],
-    /// Deterministic and side-effect free: dependency stamps cache the result.
+    /// Deterministic, side-effect-free computation; results live for one evaluation.
     pub(crate) eval: Evaluate,
-    // CHECKS/ACTIONS contain callbacks typed by their owning declaration. Accessors
-    // erase that owner without allocating or maintaining a second metadata table.
-    check_count: usize,
-    check_at: fn(usize) -> &'static str,
     action_count: usize,
     action_at: fn(usize) -> Action,
 }
@@ -170,9 +148,9 @@ pub struct NodeKind {
 /// ```compile_fail,E0308
 /// use drip::{node, node::{EvalContext, KernelError, TypedNode}};
 /// #[node(kind = FIRST, id = "first", category = "test", name = "First", outputs = [])]
-/// fn first(_: (), (): (), _: &EvalContext<'_>) -> Result<(), KernelError>;
+/// fn first() -> Result<(), KernelError>;
 /// #[node(kind = SECOND, id = "second", category = "test", name = "Second", outputs = [])]
-/// fn second(_: (), (): (), _: &EvalContext<'_>) -> Result<(), KernelError>;
+/// fn second() -> Result<(), KernelError>;
 /// let _: &TypedNode<FirstNode> = &SECOND;
 /// ```
 pub struct TypedNode<N: NodeDeclaration> {
@@ -231,8 +209,6 @@ impl NodeKind {
         assert!(inputs.len() == K::Inputs::REQUIREMENTS.len(), "input names must match tuple");
         assert!(outputs.len() == K::Outputs::TYPES.len(), "output names must match tuple");
         Self {
-            check_count: K::CHECKS.len(),
-            check_at: |i| K::CHECKS[i].name,
             documentation: "",
             references: &[],
             id,
@@ -256,10 +232,6 @@ impl NodeKind {
     }
     pub fn outputs(&self) -> impl ExactSizeIterator<Item = OutputSpec> + '_ {
         self.output_names.iter().zip(self.output_types).map(|(&name, &ty)| OutputSpec { name, ty })
-    }
-    /// Named value relationships; these cannot be discharged from type IDs alone.
-    pub fn checks(&self) -> impl ExactSizeIterator<Item = &'static str> + '_ {
-        (0..self.check_count).map(self.check_at)
     }
     pub fn actions(&self) -> impl ExactSizeIterator<Item = Action> + '_ {
         (0..self.action_count).map(self.action_at)
@@ -343,9 +315,9 @@ where
 }
 
 pub(crate) fn check_inputs<K: NodeDeclaration>(
-    params: Params<'_>,
+    _params: Params<'_>,
     inputs: &[Option<Value>],
-    ctx: &EvalContext<'_>,
+    _ctx: &EvalContext<'_>,
 ) -> Result<(), KernelError> {
     if inputs.len() != K::Inputs::REQUIREMENTS.len() {
         return Err(KernelError::Failed("input arity differs from node signature".into()));
@@ -353,18 +325,13 @@ pub(crate) fn check_inputs<K: NodeDeclaration>(
     for (index, (input, requirement)) in inputs.iter().zip(K::Inputs::REQUIREMENTS).enumerate() {
         match input {
             Some(value) => requirement
-                .check(value.descriptor())
+                .check_exact(value.descriptor())
                 .map_err(|mismatch| KernelError::Contract { index, mismatch })?,
             None if !requirement.optional => {
                 return Err(KernelError::Incomplete("missing required input"));
             }
             None => (),
         }
-    }
-    for check in K::CHECKS {
-        (check.check)(K::Parameters::read(params), K::Inputs::read(inputs), ctx).map_err(
-            |detail| KernelError::Constraint(ConstraintError { name: check.name, detail }),
-        )?;
     }
     Ok(())
 }
@@ -391,6 +358,12 @@ impl<'a> EvalContext<'a> {
     /// Demosaic adapters downsample by it after sensor-space processing.
     pub fn scale(&self) -> u32 {
         1 << self.level
+    }
+
+    /// The shared WGSL device and queue, initialized only when computation or
+    /// transfer needs them. CPU-only resource nodes do not initialize a device.
+    pub fn compute(&self) -> Result<&crate::compute::Compute, KernelError> {
+        self.resources.compute().map_err(KernelError::Failed)
     }
 
     pub fn resources(&self) -> &Resources {

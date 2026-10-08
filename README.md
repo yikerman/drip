@@ -56,6 +56,12 @@ platform. Cargo builds pinned LibRaw, JPEG, zlib and LittleCMS sources staticall
 system installations of those libraries are unnecessary. Linux uses the system
 C++ runtime (`libstdc++` with GCC).
 
+Processing uses FP32 WGSL kernels through wgpu. A supported GPU driver is enough;
+CUDA libraries are not required. A software Vulkan adapter such as Mesa lavapipe
+runs the same kernels when hardware is unavailable. Whole-image allocations must
+fit the adapter's storage-buffer limit and the compute budget (2 GiB by default);
+large-image tiling is not implemented yet.
+
 <details>
 <summary>Fedora (Tier 0 Support!)</summary>
 
@@ -118,8 +124,6 @@ cargo xtask dist --target x86_64-unknown-linux-gnu
 ```
 
 ## Usage
-
-AI SLOP TO BE CLEANED UP
 
 Launch the installed editor with `drip-gui`, or run it from the checkout:
 
@@ -241,3 +245,17 @@ Logs go to stderr: `RUST_LOG=warn,drip=debug` for diagnostics,
 
 AGPL-3.0-or-later; see [LICENSE](LICENSE).
 RUST_LOG=warn,drip_gui::frame=trace
+
+## Library example
+
+Run the complete RAW pipeline with resident GPU intermediates and an explicit
+CPU consumer, without opening a window:
+
+```sh
+cargo run --release -p drip --example gpu_pipeline -- photo.arw 2
+```
+
+The final argument selects preview scale: `0` is full resolution, `2` is one
+quarter along each axis. The demo checks finite output and reports image transfers.
+The node examples `calibration_dag` and `masked_edit_dag` show local declarations,
+runtime interpretation checks and a mixed CPU/GPU graph.

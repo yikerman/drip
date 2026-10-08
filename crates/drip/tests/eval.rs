@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use drip::eval::{Evaluator, NodeError, run_action};
-use drip::image::Rec2020Mat;
+use drip::image::ColorImage;
 use drip::node::{NodeDeclaration, NodeKind, TypedAction};
 
 use drip::ports::{Optional, Read};
@@ -41,19 +41,17 @@ fn evaluates_only_ancestors_of_targets() {
 }
 
 #[test]
-fn recomputes_only_what_changed() {
+fn every_request_recomputes_dependencies_without_retaining_intermediates() {
     let (mut p, [c1, c2, add, view, _]) = diamond();
     let mut ev = Evaluator::default();
-    ev.evaluate(&p.graph, PREVIEW, &[view]);
-    assert!(ev.evaluate(&p.graph, PREVIEW, &[view]).is_empty());
-
+    assert_eq!(ev.evaluate(&p.graph, PREVIEW, &[view]), [c1, c2, add]);
+    assert!(ev.result(add).is_none(), "successful intermediates retire");
+    assert_eq!(ev.evaluate(&p.graph, PREVIEW, &[view]), [c1, c2, add]);
     p.graph.set_param(c1, "value", json!(5.0)).unwrap();
-    assert_eq!(ev.evaluate(&p.graph, PREVIEW, &[view]), [c1, add, view]);
+    assert_eq!(ev.evaluate(&p.graph, PREVIEW, &[add]), [c1, c2, add]);
     assert_eq!(output(ev.result(add).unwrap()), [7.0, 8.0, 0.0]);
-
-    // Rewiring changes the stamp downstream even though no params changed.
     p.graph.connect(port(c2, "image"), port(add, "a")).unwrap();
-    assert_eq!(ev.evaluate(&p.graph, PREVIEW, &[view]), [add, view]);
+    assert_eq!(ev.evaluate(&p.graph, PREVIEW, &[add]), [c2, add]);
     assert_eq!(output(ev.result(add).unwrap()), [4.0, 8.0, 0.0]);
 }
 
@@ -98,8 +96,8 @@ static OFFSET: NodeKind =
 struct OffsetKernel;
 impl NodeDeclaration for OffsetKernel {
     type Parameters = ();
-    type Inputs = (Read<Rec2020Mat>, Optional<Read<Rec2020Mat>>);
-    type Outputs = (std::sync::Arc<Rec2020Mat>,);
+    type Inputs = (Read<ColorImage>, Optional<Read<ColorImage>>);
+    type Outputs = (std::sync::Arc<ColorImage>,);
 
     const KERNEL: Option<drip::node::Kernel<Self>> = Some(|_, (base, offset), _| {
         let (a, b) = (base.rgb().pixels[0], offset.map_or([0.0; 3], |o| o.rgb().pixels[0]));
@@ -206,12 +204,12 @@ fn an_unconfigured_raw_is_incomplete_instead_of_a_processing_failure() {
 }
 
 #[test]
-fn editing_an_unrelated_node_recomputes_nothing() {
-    let (mut p, [_, _, _, view, c3]) = diamond();
+fn editing_an_unrelated_node_does_not_expand_the_request() {
+    let (mut p, [c1, c2, add, view, c3]) = diamond();
     let mut ev = Evaluator::default();
     ev.evaluate(&p.graph, PREVIEW, &[view]);
     p.graph.set_param(c3, "value", json!(9.0)).unwrap();
-    assert!(ev.evaluate(&p.graph, PREVIEW, &[view]).is_empty());
+    assert_eq!(ev.evaluate(&p.graph, PREVIEW, &[view]), [c1, c2, add]);
 }
 
 #[test]
@@ -240,7 +238,11 @@ fn files_are_reread_after_cache_invalidation() {
     assert_eq!(output(eval(&mut ev, &p, f))[0], 3.0);
 
     std::fs::write(&path, "abcdef").unwrap();
-    assert!(ev.evaluate(&p.graph, PREVIEW, &[f]).is_empty(), "changes on disk are not watched");
+    assert_eq!(
+        ev.evaluate(&p.graph, PREVIEW, &[f]),
+        [f],
+        "source kernel reruns; resource snapshot is stable"
+    );
     assert_eq!(ev.evaluate(&p.graph, 0, &[f]), [f]);
     assert_eq!(output(ev.result(f).unwrap())[0], 3.0, "a new scale reuses what was loaded");
 
@@ -273,7 +275,7 @@ fn actions_share_resources_with_preview_and_survive_invalidation() {
     assert_eq!(std::fs::read_to_string(&out).unwrap(), "[3.0, 0.0, 0.0]");
     ev.fork().run_action(&p.graph, w, "write").unwrap();
     assert_eq!(std::fs::read_to_string(&out).unwrap(), "[6.0, 0.0, 0.0]");
-    assert!(ev.evaluate(&p.graph, PREVIEW, &[f]).is_empty(), "actions keep the preview cache");
+    assert_eq!(ev.evaluate(&p.graph, PREVIEW, &[f]), [f], "there is no preview result cache");
     std::fs::remove_file(path).unwrap();
     std::fs::remove_file(out).unwrap();
 }
@@ -295,13 +297,13 @@ mod release {
     impl NodeDeclaration for ProbeKernel {
         type Parameters = ();
         type Inputs = ();
-        type Outputs = (Arc<Rec2020Mat>,);
+        type Outputs = (Arc<ColorImage>,);
 
         const KERNEL: Option<drip::node::Kernel<Self>> = Some(|_, (), _| {
             let image =
                 Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[1.0, 2.0, 3.0]] });
             *PROBED.lock().unwrap() = Some(Arc::downgrade(&image));
-            Ok((Arc::new(Rec2020Mat::from(image)),))
+            Ok((Arc::new(ColorImage::from(image)),))
         });
     }
 
@@ -348,4 +350,50 @@ mod release {
         assert_eq!(run(&[&GAIN]), (false, [1.0, 2.0, 3.0]), "consumed by gain, then freed");
         assert_eq!(run(&[&ADD]), (false, [2.0, 4.0, 6.0]), "one source feeding both inputs");
     }
+}
+
+#[test]
+fn invalid_output_requests_do_not_contaminate_valid_ports_or_downstream_branches() {
+    use drip::eval::Request;
+    let (project, [source, _, add, _, _]) = diamond();
+    let invalid = port(source, "missing");
+    let valid = port(source, "image");
+    let downstream = port(add, "sum");
+    let evaluator = Evaluator::default();
+
+    for valid_requests in [
+        vec![Request::Output(valid.clone())],
+        vec![Request::Output(downstream.clone())],
+        vec![Request::Output(valid.clone()), Request::Output(downstream.clone())],
+    ] {
+        for invalid_first in [false, true] {
+            let mut requests = valid_requests.clone();
+            requests.insert(
+                if invalid_first { 0 } else { requests.len() },
+                Request::Output(invalid.clone()),
+            );
+            let report = evaluator.request(&project.graph, 0, &requests);
+            assert_eq!(report.request_errors().count(), 1);
+            assert_eq!(report.failures().count(), 1);
+            assert!(matches!(report.output(&invalid), Err(NodeError::Failed(message))
+                if message.contains("unknown output")));
+            for request in &valid_requests {
+                let Request::Output(port) = request else { unreachable!() };
+                let value = report.output(port).unwrap();
+                assert_eq!(pixel(value)[0], if port.0 == source { 1.0 } else { 3.0 });
+                assert!(report.result(port.0).unwrap().is_ok());
+            }
+        }
+    }
+}
+
+#[test]
+fn unknown_consumer_requests_keep_the_original_target_error() {
+    use drip::eval::Request;
+    use drip::graph::{Graph, NodeId};
+    let missing = NodeId(999);
+    let report = Evaluator::default().request(&Graph::default(), 0, &[Request::Inputs(missing)]);
+    let error = report.with_inputs(missing, &VIEW, |_, _, _| Ok(())).unwrap_err();
+    assert!(matches!(error, NodeError::Failed(message) if message.contains("no node")));
+    assert_eq!(report.request_errors().count(), 1);
 }

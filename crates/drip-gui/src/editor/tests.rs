@@ -170,7 +170,7 @@ fn invalid_port_targets_keep_the_pending_connection_and_existing_source() {
     let pending = h.state().editor.wire.clone();
     for (id, direction, error) in [
         (source, Direction::Input, "Choose an output port"),
-        (camera, Direction::Output, "Exposure 2 · image requires Rec.2020 RGB, got Camera RGB"),
+        (camera, Direction::Output, "Exposure 2 · image requires Color image, got Camera RGB"),
         (target, Direction::Output, "cycle"),
     ] {
         click_port(&mut h, id, direction, Secondary);

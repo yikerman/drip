@@ -101,29 +101,23 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
         [-0.01; 3],
     ];
     let width = rgb.len() as u32;
-    let source = texture(&device, width, CANVAS);
-    let bytes: Vec<u8> = rgb
-        .iter()
-        .flat_map(|&[r, g, b]| [r, g, b, 1.0])
-        .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
-        .collect();
-    queue.write_texture(
-        source.as_image_copy(),
-        &bytes,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(width * 8),
-            rows_per_image: None,
-        },
-        source.size(),
-    );
+    use wgpu::util::DeviceExt;
+    let bytes: Vec<u8> = rgb.as_flattened().iter().flat_map(|v: &f32| v.to_ne_bytes()).collect();
+    let source = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("resident preview test samples"),
+        contents: &bytes,
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let info = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: None,
+        contents: &[width, 1, 0, 0].map(u32::to_ne_bytes).concat(),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("preview"),
         source: wgpu::ShaderSource::Wgsl(crate::render::image::SHADER.into()),
     });
     let pipeline = create_pipeline(&device, &shader, "fs", CANVAS);
-    let source_view = source.create_view(&Default::default());
-    let sampler = device.create_sampler(&Default::default());
     let rect = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
         size: 16,
@@ -135,11 +129,8 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
         label: None,
         layout: &pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&source_view),
-            },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+            wgpu::BindGroupEntry { binding: 0, resource: source.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: info.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 2, resource: rect.as_entire_binding() },
         ],
     });
@@ -382,4 +373,72 @@ fn read(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture) -> 
         .unwrap();
     rx.recv().unwrap().unwrap();
     buffer.get_mapped_range(..).unwrap().to_vec()
+}
+
+/// Storage-buffer sampling matches clamp-to-edge texel centers, including a
+/// one-pixel image. This checks the actual presentation shader, not a CPU copy.
+#[test]
+#[ignore = "requires a GPU adapter; run with --ignored"]
+fn resident_preview_sampling_matches_nearest_and_bilinear_reference() {
+    use wgpu::util::DeviceExt;
+    let compute = drip::compute::Compute::new().unwrap();
+    let (device, queue) = (compute.device(), compute.queue());
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("preview sampling"),
+        source: wgpu::ShaderSource::Wgsl(crate::render::image::SHADER.into()),
+    });
+    let pipeline = create_pipeline(device, &shader, "fs", CANVAS);
+    let rect = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: None,
+        contents: &[-1.0f32, 1.0, 1.0, -1.0].map(f32::to_ne_bytes).concat(),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    for (samples, expected_nearest, expected_linear) in [
+        (vec![0.1f32, 0.9], [0.1f64, 0.1, 0.9, 0.9], [0.1f64, 0.3, 0.7, 0.9]),
+        (vec![0.42f32], [0.42f64; 4], [0.42f64; 4]),
+    ] {
+        let samples_rgb: Vec<f32> = samples.iter().flat_map(|&v| [v; 3]).collect();
+        let resident = compute.upload_f32(&samples_rgb).unwrap();
+        for (interpolation, expected) in [expected_nearest, expected_linear].into_iter().enumerate()
+        {
+            let info = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: &[samples.len() as u32, 1, interpolation as u32, 0]
+                    .map(u32::to_ne_bytes)
+                    .concat(),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: resident.raw().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry { binding: 1, resource: info.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: rect.as_entire_binding() },
+                ],
+            });
+            let canvas = texture(device, 4, CANVAS);
+            draw(device, queue, &pipeline, &group, &canvas, 6);
+            let bytes = read(device, queue, &canvas);
+            for (i, linear) in expected.into_iter().enumerate() {
+                let encoded = if linear <= 0.0031308 {
+                    12.92 * linear
+                } else {
+                    1.055 * linear.powf(1.0 / 2.4) - 0.055
+                };
+                for channel in 0..3 {
+                    let offset = i * 8 + channel * 2;
+                    let got = half::f16::from_ne_bytes([bytes[offset], bytes[offset + 1]]).to_f64();
+                    assert!(
+                        (got - encoded).abs() < 0.001,
+                        "width {}, interpolation {interpolation}, pixel {i}: {got} != {encoded}",
+                        samples.len()
+                    );
+                }
+            }
+        }
+    }
 }

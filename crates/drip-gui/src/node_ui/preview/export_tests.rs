@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use drip::eval::{Evaluator, run_action};
 use drip::graph::{NodeId, Port};
-use drip::image::{Rec2020Mat, Rgb};
+use drip::image::{ColorImage, Rgb};
 use drip::node::{NodeDeclaration, NodeKind};
 use drip::project::Project;
 use drip::{nodes, profile};
@@ -22,10 +22,10 @@ struct Display;
 impl NodeDeclaration for Display {
     type Parameters = ();
     type Inputs = ();
-    type Outputs = (Arc<Rec2020Mat>,);
+    type Outputs = (Arc<ColorImage>,);
     const KERNEL: Option<drip::node::Kernel<Self>> = Some(|(), (), _| {
         let image = Rgb { width: 2, height: 2, scale: 1, pixels: PIXELS.to_vec() };
-        Ok((Arc::new(Rec2020Mat::from(Arc::new(image))),))
+        Ok((Arc::new(ColorImage::from(Arc::new(image))),))
     });
 }
 

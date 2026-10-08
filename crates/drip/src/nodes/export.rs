@@ -10,7 +10,7 @@ use tiff::encoder::compression::DeflateLevel;
 use tiff::encoder::{Compression, DirectoryEncoder, Rational, TiffEncoder, TiffKind, TiffValue};
 use tiff::tags::{Tag, Type};
 
-use crate::image::{RawMetadata, Rec2020Mat, Rgb};
+use crate::image::{ColorCoordinates, ColorImage, RawMetadata, Rgb};
 use crate::node::{EvalContext, KernelError};
 use crate::param::ParamKind;
 use crate::profile;
@@ -56,23 +56,29 @@ pub struct Export {
     deflate_level: CompressionLevel,
 }
 
-/// Export Rec.2020 RGB to a TIFF file at full detail through the selected RGB ICC
+/// Export a CPU ColorImage in additive Rec.2020/D65 coordinates through the selected RGB ICC
 /// profile, including its transfer encoding.
 ///
-/// Tone mapping beforehand is optional. u16 saturates out-of-range values.
+/// Requires a known color interpretation, not original-scene proportionality.
+/// Profile transfer encoding is storage encoding. Tone mapping beforehand is optional. u16 saturates out-of-range values.
 /// RAW metadata, if connected, is also copied.
 #[crate::node(kind = TIFF, id = "export.tiff", category = "export", name = "Export", outputs = [], actions = [("export", export)])]
 fn tiff(
-    _: Export,
-    (image, metadata): (&Rec2020Mat, Option<&RawMetadata>),
-    _: &EvalContext<'_>,
+    #[params] p: Export,
+    image: &ColorImage,
+    metadata: Option<&RawMetadata>,
 ) -> Result<(), KernelError>;
 
 fn export(
     p: Export,
-    (input, metadata): (&Rec2020Mat, Option<&RawMetadata>),
+    (input, metadata): (&ColorImage, Option<&RawMetadata>),
     ctx: &EvalContext,
 ) -> Result<(), KernelError> {
+    if input.interpretation().coordinates != ColorCoordinates::LinearRec2020 {
+        return Err(KernelError::Failed(
+            "TIFF export requires additive Rec.2020/D65 coordinates".into(),
+        ));
+    }
     let path = p.path.as_deref().ok_or(KernelError::Incomplete("no output file chosen"))?;
     let in_file = |e: &dyn std::fmt::Display, path: &Path| format!("{}: {e}", path.display());
     let output = profile::Output::load(&p.output, ctx.resources())?;

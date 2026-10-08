@@ -78,8 +78,8 @@ fn ev_position(ev: f32, min: f32, max: f32) -> f32 {
     (ev - min) / (max - min)
 }
 
-/// Each channel's counts per stop, linearly or on a log scale that keeps small
-/// populations visible; the marked line is 1.0 (0 EV).
+/// Each native channel's counts per log2(value) bin; the marked line is value 1.
+/// A separate optional log scale makes small populations visible.
 fn histogram(painter: &Painter, rect: Rect, h: &Histogram, font: &FontId) {
     let plot = Plot::new(painter, rect, font);
     let painter = &plot.painter;
@@ -94,9 +94,9 @@ fn histogram(painter: &Painter, rect: Rect, h: &Histogram, font: &FontId) {
     }
     let zero = plot.at([ev_position(0.0, h.min_stop, h.max_stop), 0.0]).x;
     painter.vline(zero, rect.y_range(), Stroke::new(1.0, theme::LIGHTER));
-    plot.label(rect.left_bottom(), Align2::LEFT_BOTTOM, &format!("{} EV", h.min_stop));
-    plot.label(egui::pos2(zero + 2.0, rect.top()), Align2::LEFT_TOP, "0 EV");
-    plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, &format!("+{} EV", h.max_stop));
+    plot.label(rect.left_bottom(), Align2::LEFT_BOTTOM, &format!("{}", h.min_stop));
+    plot.label(egui::pos2(zero + 2.0, rect.top()), Align2::LEFT_TOP, "0 · log₂ value");
+    plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, &format!("+{}", h.max_stop));
 }
 
 // Build density geometry on the worker. Drawing only transforms the shared
@@ -161,9 +161,9 @@ fn draw_scope(painter: &Painter, rect: Rect, scope: &Scope, mesh: &egui::Mesh, f
         ScopeAxes::Waveform { min_stop, max_stop } => {
             let zero = at([0.0, 1.0 - ev_position(0.0, min_stop, max_stop)]).y;
             painter.hline(rect.x_range(), zero, Stroke::new(1.0, theme::LIGHTER));
-            plot.label(rect.left_top(), Align2::LEFT_TOP, &format!("+{max_stop} EV"));
-            plot.label(egui::pos2(rect.left(), zero), Align2::LEFT_BOTTOM, "0 EV");
-            plot.label(rect.left_bottom(), Align2::LEFT_BOTTOM, &format!("{min_stop} EV"));
+            plot.label(rect.left_top(), Align2::LEFT_TOP, &format!("+{max_stop}"));
+            plot.label(egui::pos2(rect.left(), zero), Align2::LEFT_BOTTOM, "0 · log₂ value");
+            plot.label(rect.left_bottom(), Align2::LEFT_BOTTOM, &format!("{min_stop}"));
             plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, "image x");
         }
         ScopeAxes::Vectorscope { primaries, color_space } => {

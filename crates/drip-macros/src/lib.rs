@@ -7,7 +7,11 @@ use syn::parse_macro_input;
 /// Include a locally defined node in the executable's generated catalogue.
 /// Function Rustdoc supplies inspector help; optional `references = [(label, url), ...]`
 /// supplies links. Keep implementation rationale in ordinary comments inside the function.
-/// Functions return output tuples; a signature ending in `;` declares a consumer without a kernel.
+/// Named immutable arguments declare ports. `#[params] p: Parameters` supplies a
+/// parameter record, or individual `#[param(kind)]` arguments generate one.
+/// `#[context] ctx: &EvalContext<'_>` accesses evaluation resources and scale.
+/// Functions return an `Arc<T>` or output tuple; a signature ending in `;`
+/// declares a consumer without a kernel. Semantic predicates stay in the body.
 /// Input syntax is `&T`, `Either<&A, &B>`, or `Option` of either;
 /// qualified paths are accepted, but aliases for these wrappers are not resolved.
 /// The function `foo_bar` declares `FooBarNode` and the typed handle named by `kind`.
@@ -268,7 +272,7 @@ fn type_arguments<'a>(ty: &'a syn::Type, wrapper: &str) -> syn::Result<Vec<&'a s
 
 fn node_function(
     args: proc_macro2::TokenStream,
-    function: syn::ItemFn,
+    mut function: syn::ItemFn,
     declaration: bool,
 ) -> syn::Result<proc_macro2::TokenStream> {
     use syn::parse::Parser;
@@ -282,7 +286,7 @@ fn node_function(
             .get_ident()
             .ok_or_else(|| syn::Error::new_spanned(&m.path, "expected option name"))?
             .to_string();
-        if !["kind", "id", "category", "name", "outputs", "actions", "checks", "references"]
+        if !["kind", "id", "category", "name", "outputs", "actions", "references"]
             .contains(&key.as_str())
         {
             return Err(syn::Error::new_spanned(m, "unknown node option"));
@@ -301,38 +305,24 @@ fn node_function(
     let category = get("category")?;
     let label = get("name")?;
     let outputs = get("outputs")?;
-    let args: Vec<_> = function.sig.inputs.iter().collect();
-    if args.len() != 3
-        || !function.sig.generics.params.is_empty()
+    if !function.sig.generics.params.is_empty()
         || function.sig.asyncness.is_some()
+        || function.sig.unsafety.is_some()
+        || function.sig.constness.is_some()
+        || function.sig.abi.is_some()
     {
         return Err(syn::Error::new_spanned(
             &function.sig,
-            "node functions take (parameters, input tuple, context), without generics or async",
+            "node functions must be ordinary concrete functions",
         ));
     }
-    let syn::FnArg::Typed(params) = args[0] else {
-        return Err(syn::Error::new_spanned(args[0], "expected parameters"));
-    };
-    let params_type = &params.ty;
-    let syn::FnArg::Typed(inputs) = args[1] else {
-        return Err(syn::Error::new_spanned(args[1], "expected inputs"));
-    };
-    let (syn::Pat::Tuple(names), syn::Type::Tuple(types)) = (&*inputs.pat, &*inputs.ty) else {
-        return Err(syn::Error::new_spanned(
-            inputs,
-            "use a named input tuple, including () for no inputs",
-        ));
-    };
-    let names = names
-        .elems
-        .iter()
-        .map(|p| match p {
-            syn::Pat::Ident(i) => Ok(i.ident.to_string()),
-            _ => Err(syn::Error::new_spanned(p, "input tuple elements must be named")),
-        })
-        .collect::<syn::Result<Vec<_>>>()?;
-    let inputs = types.elems.iter().map(input_type).collect::<syn::Result<Vec<_>>>()?;
+    let signature = node_arguments(&mut function)?;
+    let params_type = &signature.params_type;
+    let names = &signature.names;
+    let inputs = &signature.inputs;
+    let parameter_definition = &signature.parameter_definition;
+    let bindings = &signature.bindings;
+    let calls = &signature.calls;
     let syn::ReturnType::Type(_, return_type) = &function.sig.output else {
         return Err(syn::Error::new_spanned(
             &function.sig,
@@ -360,20 +350,32 @@ fn node_function(
     let actions = callbacks(options.get("actions"))?.into_iter().map(
         |(label, callback)| quote!(::drip::node::TypedAction { name: #label, run: #callback }),
     );
-    let checks = callbacks(options.get("checks"))?.into_iter().map(
-        |(label, callback)| quote!(::drip::node::TypedCheck { name: #label, check: #callback }),
-    );
-    let arg_types = function.sig.inputs.iter().map(|arg| match arg {
-        syn::FnArg::Typed(arg) => &arg.ty,
-        _ => unreachable!("node functions have no receiver"),
-    });
     let implementation = if declaration {
-        quote! { const _: Option<::drip::node::Kernel<#kernel>> = None::<fn(#(#arg_types),*) -> #return_type>; }
+        // Check the signature through the adapter without emitting a callable
+        // panic-only function for a declaration that has no implementation.
+        let arguments = function.sig.inputs.iter().map(|arg| match arg {
+            syn::FnArg::Typed(arg) => &arg.ty,
+            _ => unreachable!(),
+        });
+        let ignored = function.sig.inputs.iter().map(|_| quote!(_));
+        quote! {
+            const _: ::drip::node::Kernel<#kernel> =
+                |__params, (#(#bindings,)*), __context| {
+                    let declaration: fn(#(#arguments),*) -> #return_type =
+                        |#(#ignored),*| unreachable!("signature check only");
+                    declaration(#(#calls),*)
+                };
+        }
     } else {
         quote!(#function)
     };
-    let callback = if declaration { quote!(None) } else { quote!(Some(#name)) };
+    let callback = if declaration {
+        quote!(None)
+    } else {
+        quote!(Some(|__params, (#(#bindings,)*), __context| #name(#(#calls),*)))
+    };
     Ok(quote! {
+        #parameter_definition
         #implementation
         #[allow(non_camel_case_types)]
         pub struct #kernel;
@@ -382,7 +384,6 @@ fn node_function(
             type Inputs = (#(#inputs,)*);
             type Outputs = #output_types;
             const ACTIONS: &'static [::drip::node::TypedAction<Self>] = &[#(#actions),*];
-            const CHECKS: &'static [::drip::node::TypedCheck<Self>] = &[#(#checks),*];
             const KERNEL: Option<::drip::node::Kernel<Self>> = #callback;
         }
         pub static #kind: ::drip::node::TypedNode<#kernel> = ::drip::node::TypedNode::new(#id, #category, #label, &[#(#names),*], &#outputs).documented(#docs).references(&#references);
@@ -390,6 +391,127 @@ fn node_function(
         #[linkme(crate = ::drip::__private::linkme)]
         static #entry: &'static ::drip::node::NodeKind = #kind.kind();
     })
+}
+
+struct NodeArguments {
+    params_type: proc_macro2::TokenStream,
+    parameter_definition: proc_macro2::TokenStream,
+    names: Vec<String>,
+    inputs: Vec<proc_macro2::TokenStream>,
+    bindings: Vec<syn::Ident>,
+    calls: Vec<proc_macro2::TokenStream>,
+}
+
+fn node_arguments(function: &mut syn::ItemFn) -> syn::Result<NodeArguments> {
+    let identity = function
+        .sig
+        .ident
+        .to_string()
+        .split('_')
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let mut c = s.chars();
+            c.next().unwrap().to_uppercase().collect::<String>() + c.as_str()
+        })
+        .collect::<String>();
+    let generated_params = format_ident!("{}Parameters", identity);
+    let mut result = NodeArguments {
+        params_type: quote!(()),
+        parameter_definition: quote!(),
+        names: Vec::new(),
+        inputs: Vec::new(),
+        bindings: Vec::new(),
+        calls: Vec::new(),
+    };
+    let mut fields = Vec::new();
+    let mut has_params = false;
+    let mut has_context = false;
+    for argument in &mut function.sig.inputs {
+        let syn::FnArg::Typed(argument) = argument else {
+            return Err(syn::Error::new_spanned(argument, "node functions have no receiver"));
+        };
+        let syn::Pat::Ident(pattern) = &*argument.pat else {
+            return Err(syn::Error::new_spanned(&argument.pat, "node arguments must be named"));
+        };
+        let name = &pattern.ident;
+        let ty = &argument.ty;
+        let roles: Vec<_> = argument
+            .attrs
+            .iter()
+            .filter(|a| {
+                a.path().is_ident("param")
+                    || a.path().is_ident("params")
+                    || a.path().is_ident("context")
+            })
+            .collect();
+        if roles.len() > 1 {
+            return Err(syn::Error::new_spanned(argument, "an argument has exactly one role"));
+        }
+        match roles.first() {
+            Some(attr) if attr.path().is_ident("params") => {
+                if has_params || !fields.is_empty() {
+                    return Err(syn::Error::new_spanned(
+                        argument,
+                        "use one #[params] record or inline #[param] fields",
+                    ));
+                }
+                has_params = true;
+                result.params_type = quote!(#ty);
+                result.calls.push(quote!(__params));
+            }
+            Some(attr) if attr.path().is_ident("context") => {
+                if has_context {
+                    return Err(syn::Error::new_spanned(
+                        argument,
+                        "only one #[context] argument is allowed",
+                    ));
+                }
+                has_context = true;
+                result.calls.push(quote!(__context));
+            }
+            Some(_) => {
+                if has_params {
+                    return Err(syn::Error::new_spanned(
+                        argument,
+                        "use one #[params] record or inline #[param] fields",
+                    ));
+                }
+                let attrs = &argument.attrs;
+                fields.push(quote!(#(#attrs)* pub #name: #ty));
+                result.calls.push(quote!(__params.#name));
+            }
+            None => {
+                let binding = format_ident!("__input_{}", result.names.len());
+                result.names.push(name.to_string());
+                result.inputs.push(input_type(ty)?);
+                result.calls.push(quote!(#binding));
+                result.bindings.push(binding);
+            }
+        }
+        argument.attrs.retain(|a| {
+            !a.path().is_ident("param")
+                && !a.path().is_ident("params")
+                && !a.path().is_ident("context")
+                && !a.path().is_ident("external")
+                && !a.path().is_ident("doc")
+        });
+    }
+    if !fields.is_empty() {
+        result.params_type = quote!(#generated_params);
+        let item: syn::DeriveInput =
+            syn::parse2(quote!(pub struct #generated_params { #(#fields,)* }))?;
+        let implementation = parameters_impl(item.clone())?;
+        let mut emitted = item;
+        if let syn::Data::Struct(data) = &mut emitted.data {
+            for field in &mut data.fields {
+                field
+                    .attrs
+                    .retain(|a| !a.path().is_ident("param") && !a.path().is_ident("external"));
+            }
+        }
+        result.parameter_definition = quote!(#emitted #implementation);
+    }
+    Ok(result)
 }
 
 fn callbacks(expr: Option<&syn::Expr>) -> syn::Result<Vec<(&syn::Expr, &syn::Expr)>> {
@@ -428,6 +550,61 @@ mod tests {
         for ty in ["ImageInput", "ImageInput<'_>", "Option<ImageInput<'_>>"] {
             let error = input_type(&syn::parse_str(ty).unwrap()).unwrap_err();
             assert!(error.to_string().contains("wrapper aliases are not resolved"), "{error}");
+        }
+    }
+
+    #[test]
+    fn named_arguments_keep_ports_parameters_and_context_distinct() {
+        let mut function = syn::parse_quote! {
+            fn scale(
+                image: &Image<Gpu>,
+                #[param(ParamKind::Float { default: 1.0, min: 0.0, max: 4.0 })]
+                gain: f64,
+                mask: Option<&Mask<Cpu>>,
+                #[context] context: &EvalContext<'_>,
+            ) -> Result<Arc<Image<Gpu>>, KernelError> { todo!() }
+        };
+        let arguments = super::node_arguments(&mut function).unwrap();
+        assert_eq!(arguments.names, ["image", "mask"]);
+        assert_eq!(arguments.params_type.to_string(), "ScaleParameters");
+        assert_eq!(arguments.calls.len(), 4);
+        assert!(
+            function
+                .sig
+                .inputs
+                .iter()
+                .all(|arg| { matches!(arg, syn::FnArg::Typed(arg) if arg.attrs.is_empty()) })
+        );
+    }
+
+    #[test]
+    fn complete_named_node_expands_to_rust_items() {
+        let options = quote::quote!(
+            kind = SCALE,
+            id = "test.scale",
+            category = "test",
+            name = "Scale",
+            outputs = ["image"]
+        );
+        let function = syn::parse_quote! {
+            /// Scale values in their declared additive coordinates.
+            fn scale(image: &Image<Gpu>, #[param(kind)] gain: f32)
+                -> Result<Arc<Image<Gpu>>, KernelError> { todo!() }
+        };
+        let expanded = super::node_function(options, function, false).unwrap();
+        syn::parse2::<syn::File>(expanded).unwrap();
+    }
+
+    #[test]
+    fn roles_cannot_duplicate_or_mix_parameter_record_with_fields() {
+        for definition in [
+            "fn bad(#[params] p: P, #[param(kind)] gain: f32) {}",
+            "fn bad(#[context] a: &C, #[context] b: &C) {}",
+            "fn bad(#[params] #[context] p: P) {}",
+            "fn bad((a, b): (&A, &B)) {}",
+        ] {
+            let mut function = syn::parse_str(definition).unwrap();
+            assert!(super::node_arguments(&mut function).is_err(), "{definition}");
         }
     }
 

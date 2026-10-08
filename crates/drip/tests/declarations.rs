@@ -15,6 +15,7 @@ pub struct Measurement {
     unit: u32,
 }
 impl Interpretation for Measurement {
+    const CHANNELS: usize = 1;
     const NAME: &'static str = "Measurement";
 }
 type Samples = RealMat<1, Measurement>;
@@ -35,11 +36,7 @@ pub struct Source {
 
 /// Provides a measurement with an explicitly declared unit.
 #[node(kind = SOURCE, id = "contract.source", category = "test", name = "Source", outputs = ["samples"], references = [("Units", "https://example.org/units")])]
-fn source(
-    p: Source,
-    (): (),
-    _: &EvalContext<'_>,
-) -> Result<(Arc<RealMat<1, Measurement>>,), KernelError> {
+fn source(#[params] p: Source) -> Result<(Arc<RealMat<1, Measurement>>,), KernelError> {
     let width = p.geometry.width as usize;
     Ok((Arc::new(RealMat::new(
         Arc::new(RawMat { width, height: 1, scale: 1, pixels: vec![[1.0]; width] }),
@@ -47,7 +44,7 @@ fn source(
     )),))
 }
 
-fn compatible(_: (), (a, b): (&Samples, &Samples), _: &EvalContext<'_>) -> Result<(), String> {
+fn compatible(a: &Samples, b: &Samples) -> Result<(), String> {
     if (a.buffer().width, a.buffer().height, a.buffer().scale)
         != (b.buffer().width, b.buffer().height, b.buffer().scale)
     {
@@ -60,21 +57,22 @@ fn compatible(_: (), (a, b): (&Samples, &Samples), _: &EvalContext<'_>) -> Resul
 }
 static EVALUATIONS: AtomicUsize = AtomicUsize::new(0);
 static ACTIONS: AtomicUsize = AtomicUsize::new(0);
-fn action(_: (), _: (&Samples, &Samples), _: &EvalContext<'_>) -> Result<(), KernelError> {
+fn action(_: (), (a, b): (&Samples, &Samples), _: &EvalContext<'_>) -> Result<(), KernelError> {
+    compatible(a, b)?;
     ACTIONS.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
 #[node(kind = SUM, id = "contract.sum", category = "test", name = "Sum", outputs = ["samples"],
-    checks = [("matching geometry and units", compatible)], actions = [("record", action)])]
-fn sum(
-    _: (),
-    (a, b): (&Samples, &Samples),
-    _: &EvalContext<'_>,
-) -> Result<(Arc<Samples>,), KernelError> {
+    actions = [("record", action)])]
+fn sum(a: &Samples, b: &Samples) -> Result<(Arc<Samples>,), KernelError> {
+    compatible(a, b)?;
     EVALUATIONS.fetch_add(1, Ordering::Relaxed);
     let pixels =
         a.buffer().pixels.iter().zip(&b.buffer().pixels).map(|(a, b)| [a[0] + b[0]]).collect();
-    Ok((Arc::new(a.with_buffer(Arc::new(RawMat { pixels, ..**a.buffer() }))),))
+    Ok((Arc::new(Samples::try_new(
+        Arc::new(RawMat { pixels, ..**a.buffer() }),
+        a.interpretation().clone(),
+    )?),))
 }
 
 #[test]
@@ -90,20 +88,19 @@ fn runtime_relationships_gate_both_evaluation_and_actions_and_recheck_edits() {
         graph.output_type(&Port(a, "samples".into())),
         graph.output_type(&Port(b, "samples".into()))
     );
-    assert_eq!(SUM.checks().collect::<Vec<_>>(), ["matching geometry and units"]);
     let mut eval = Evaluator::default();
     eval.evaluate(&graph, 0, &[sum]);
     assert!(
-        matches!(eval.result(sum).unwrap(), Err(NodeError::Constraint(error)) if error.detail == "measurement units differ")
+        matches!(eval.result(sum).unwrap(), Err(NodeError::Failed(error)) if error == "measurement units differ")
     );
-    assert!(matches!(eval.fork().run_action(&graph, sum, "record"), Err(NodeError::Constraint(_))));
+    assert!(matches!(eval.fork().run_action(&graph, sum, "record"), Err(NodeError::Failed(_))));
     assert_eq!(EVALUATIONS.load(Ordering::Relaxed), 0);
     assert_eq!(ACTIONS.load(Ordering::Relaxed), 0);
     graph.set_param(b, "unit", 0.into()).unwrap();
     graph.set_param(b, "width", 3.into()).unwrap();
     eval.evaluate(&graph, 0, &[sum]);
     assert!(
-        matches!(eval.result(sum).unwrap(), Err(NodeError::Constraint(error)) if error.detail == "sample geometries differ")
+        matches!(eval.result(sum).unwrap(), Err(NodeError::Failed(error)) if error == "sample geometries differ")
     );
     graph.set_param(b, "width", 2.into()).unwrap();
     eval.evaluate(&graph, 0, &[sum]);
@@ -128,7 +125,7 @@ fn fields_supply_flat_schema_defaults_and_documentation() {
 }
 
 #[node(kind = OBSERVER, id = "contract.observer", category = "test", name = "Observer", outputs = [])]
-fn observer(_: (), (samples,): (&Samples,), _: &EvalContext<'_>) -> Result<(), KernelError>;
+fn observer(samples: &Samples) -> Result<(), KernelError>;
 
 #[test]
 fn declaration_only_nodes_provide_validated_inputs_without_computation() {
@@ -158,7 +155,7 @@ fn input_consumers_reject_a_different_declaration() {
 }
 
 #[test]
-fn consumer_failures_leave_computational_results_reusable() {
+fn consumer_failure_does_not_poison_the_next_request() {
     let mut graph = Graph::default();
     let source = graph.add_node(&SOURCE);
     let observer = graph.add_node(&OBSERVER);
@@ -168,11 +165,10 @@ fn consumer_failures_leave_computational_results_reusable() {
         Err::<(), _>(KernelError::Failed("consumer failed".into()))
     });
     assert_eq!(result, Err(NodeError::Failed("consumer failed".into())));
-    assert!(evaluator.result(source).unwrap().is_ok());
-    assert!(evaluator.result(observer).is_none());
-    let revision = evaluator.revision(source);
-    evaluator.with_inputs(&graph, observer, 0, &OBSERVER, |_, _, _| Ok(())).unwrap();
-    assert_eq!(evaluator.revision(source), revision);
+    let length = evaluator
+        .with_inputs(&graph, observer, 0, &OBSERVER, |_, (samples,), _| Ok(samples.samples().len()))
+        .unwrap();
+    assert_eq!(length, 2);
 }
 
 #[test]
@@ -188,93 +184,45 @@ fn declarations_cannot_advertise_outputs_without_a_kernel() {
         drip::node::NodeKind::new::<NoKernel>("test.invalid", "test", "Invalid", &[], &["samples"]);
 }
 
-mod observed_kernel {
-    use super::*;
+/// Inline scalar parameters require no separately maintained parameter record.
+#[node(kind = SCALE, id = "contract.scale", category = "test", name = "Scale", outputs = ["samples"])]
+fn scale(
+    samples: &Samples,
+    #[param(ParamKind::Float { min: 0.0, max: 4.0, default: 2.0 })] gain: f32,
+) -> Result<Arc<Samples>, KernelError> {
+    Ok(Arc::new(Samples::try_new(
+        Arc::new(RawMat {
+            pixels: samples.pixels.iter().map(|p| [p[0] * gain]).collect(),
+            ..**samples.buffer()
+        }),
+        samples.interpretation().clone(),
+    )?))
+}
 
-    static CHECKS: AtomicUsize = AtomicUsize::new(0);
-    static KERNEL_CALLS: AtomicUsize = AtomicUsize::new(0);
-
-    #[derive(Parameters)]
-    pub struct Settings {
-        #[param(ParamKind::Bool { default: true })]
-        fail: bool,
-    }
-
-    fn check(
-        _: Settings,
-        inputs: (&Samples, &Samples),
-        ctx: &EvalContext<'_>,
-    ) -> Result<(), String> {
-        CHECKS.fetch_add(1, Ordering::Relaxed);
-        compatible((), inputs, ctx)
-    }
-
-    #[node(kind = PROBE, id = "contract.observed_kernel", category = "test", name = "Observed kernel", outputs = ["samples"], checks = [("matching geometry and units", check)])]
-    fn probe(
-        settings: Settings,
-        (a, b): (&Samples, &Samples),
-        _: &EvalContext<'_>,
-    ) -> Result<(Arc<Samples>,), KernelError> {
-        KERNEL_CALLS.fetch_add(1, Ordering::Relaxed);
-        let _ = b;
-        if settings.fail {
-            return Err("kernel failed".into());
-        }
-        Ok((Arc::new(a.clone()),))
-    }
-
-    #[test]
-    fn input_observation_skips_the_kernel_and_reuses_successful_contract_checks() {
-        let mut graph = Graph::default();
-        let a = graph.add_node(&SOURCE);
-        let b = graph.add_node(&SOURCE);
-        let probe = graph.add_node(&PROBE);
-        graph.connect(Port(a, "samples".into()), Port(probe, "a".into())).unwrap();
-        graph.connect(Port(b, "samples".into()), Port(probe, "b".into())).unwrap();
-        let mut evaluator = Evaluator::default();
-        evaluator
-            .with_inputs(&graph, probe, 0, &PROBE, |_, (a, _), _| {
-                assert_eq!(a.buffer().pixels, vec![[1.0], [1.0]]);
-                Ok(())
-            })
-            .unwrap();
-        assert_eq!(CHECKS.load(Ordering::Relaxed), 1);
-        assert_eq!(KERNEL_CALLS.load(Ordering::Relaxed), 0);
-        assert!(evaluator.result(probe).is_none());
-
-        evaluator.evaluate(&graph, 0, &[probe]);
-        assert!(
-            matches!(evaluator.result(probe), Some(Err(NodeError::Failed(error))) if error == "kernel failed")
-        );
-        evaluator.with_inputs(&graph, probe, 0, &PROBE, |_, _, _| Ok(())).unwrap();
-        assert_eq!(
-            KERNEL_CALLS.load(Ordering::Relaxed),
-            1,
-            "a cached kernel failure neither blocks input observation nor reruns the kernel"
-        );
-        assert!(evaluator.result(probe).unwrap().is_err());
-
-        graph.set_param(probe, "fail", false.into()).unwrap();
-        evaluator.evaluate(&graph, 0, &[probe]);
-        let checks = CHECKS.load(Ordering::Relaxed);
-        assert!(evaluator.result(probe).unwrap().is_ok());
-        evaluator.with_inputs(&graph, probe, 0, &PROBE, |_, _, _| Ok(())).unwrap();
-        assert_eq!(
-            CHECKS.load(Ordering::Relaxed),
-            checks,
-            "the current successful evaluation already checked this input contract"
-        );
-        assert_eq!(KERNEL_CALLS.load(Ordering::Relaxed), 2);
-
-        graph.set_param(b, "unit", 1.into()).unwrap();
-        let result =
-            evaluator.with_inputs(&graph, probe, 0, &PROBE, |_, _, _| -> Result<(), KernelError> {
-                panic!("incompatible inputs must not reach the consumer")
-            });
-        assert!(
-            matches!(result, Err(NodeError::Constraint(error)) if error.detail == "measurement units differ")
-        );
-        assert_eq!(CHECKS.load(Ordering::Relaxed), checks + 1);
-        assert_eq!(KERNEL_CALLS.load(Ordering::Relaxed), 2);
-    }
+#[test]
+fn inline_parameter_and_single_output_have_generated_bindings() {
+    let mut graph = Graph::default();
+    let source = graph.add_node(&SOURCE);
+    let scale = graph.add_node(&SCALE);
+    graph.connect(Port(source, "samples".into()), Port(scale, "samples".into())).unwrap();
+    assert_eq!(ScaleParameters::SPECS.len(), 1);
+    assert_eq!(SCALE.inputs().next().unwrap().name, "samples");
+    let mut evaluator = Evaluator::default();
+    evaluator.evaluate(&graph, 0, &[scale]);
+    assert_eq!(
+        evaluator.result(scale).unwrap().as_ref().unwrap()[0]
+            .downcast_ref::<Samples>()
+            .unwrap()
+            .samples(),
+        &[2.0, 2.0]
+    );
+    graph.set_param(scale, "gain", 3.0.into()).unwrap();
+    evaluator.evaluate(&graph, 0, &[scale]);
+    assert_eq!(
+        evaluator.result(scale).unwrap().as_ref().unwrap()[0]
+            .downcast_ref::<Samples>()
+            .unwrap()
+            .samples(),
+        &[3.0, 3.0]
+    );
 }

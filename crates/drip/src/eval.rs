@@ -1,25 +1,18 @@
-//! Pull-based evaluation and node-result caching. Only requested targets and
-//! their ancestors run, in dependency order.
+//! Request-driven evaluation with transient, shared placement adaptation.
 //!
-//! Follow [`Evaluator::evaluate`] into `Evaluator::run`, then `Cache::stamp` in
-//! the source. The cache holds one result (including failures) per node ID. Its
-//! dependency stamp hashes kind, parameters, preview level, input names, source
-//! ports and upstream stamps. Matching stamps reuse results without inspecting
-//! pixels; changed stamps propagate recomputation through descendants. This
-//! relies on the laws of [`crate::node::NodeDeclaration`] and [`crate::value::EdgeValue`].
-//!
-//! [`crate::resource::Resources`] separately caches decoded files by path and
-//! payload type. [`Evaluator::fork`] shares these files with an empty node cache.
-//! [`Evaluator::run_action`] evaluates inputs at full detail, dropping intermediates
-//! after their last consumer; the action itself is never cached. Neither cache
-//! watches the filesystem: changed files need explicit resource invalidation.
+//! A request executes each needed node once. It retains requested outputs and
+//! consumer inputs, never a cross-request node cache. Each output port owns its
+//! temporary CPU/GPU representations until the last requesting edge consumes it.
+//! GPU completion/lifetime belongs to the compute queue, not to graph topology.
 
-use std::collections::HashMap;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::any::TypeId;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
+use crate::compute::Compute;
 use crate::graph::{Graph, NodeId, Port};
-use crate::node::{EvalContext, KernelError, NodeDeclaration, TypedNode, check_inputs};
-use crate::param::{Parameters, Params};
+use crate::node::{EvalContext, KernelError, NodeDeclaration, NodeKind, TypedNode, check_inputs};
+use crate::param::{ParamMap, Parameters, Params};
 use crate::ports::InputTuple;
 use crate::resource::Resources;
 use crate::value::Value;
@@ -40,69 +33,188 @@ pub enum NodeError {
     Failed(String),
     #[error("input `{input}`: {mismatch}")]
     Contract { input: &'static str, mismatch: crate::ports::TypeMismatch },
-    #[error(transparent)]
-    Constraint(crate::node::ConstraintError),
 }
-
 impl NodeError {
-    fn from_kernel(kind: &crate::node::NodeKind, error: KernelError) -> Self {
+    fn from_kernel(kind: &NodeKind, error: KernelError) -> Self {
         match error {
             KernelError::Incomplete(message) => Self::Incomplete(message),
             KernelError::Failed(message) => Self::Failed(message),
-            KernelError::Contract { index, mismatch } => Self::Contract {
-                input: kind.inputs().nth(index).expect("checked input index").name,
-                mismatch,
-            },
-            KernelError::Constraint(error) => Self::Constraint(error),
+            KernelError::Contract { index, mismatch } => {
+                Self::Contract { input: kind.inputs().nth(index).map_or("?", |p| p.name), mismatch }
+            }
+        }
+    }
+}
+pub type NodeResult = Result<Vec<Value>, NodeError>;
+
+/// Outputs and external consumers are distinct requests. An input request does
+/// not execute the consumer's kernel or action; it supplies its declared inputs.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Request {
+    Output(Port),
+    Inputs(NodeId),
+}
+impl Request {
+    fn node(&self) -> NodeId {
+        match self {
+            Self::Output(port) => port.0,
+            Self::Inputs(id) => *id,
         }
     }
 }
 
-pub type NodeResult = Result<Vec<Value>, NodeError>;
+struct Prepared {
+    kind: &'static NodeKind,
+    params: ParamMap,
+    values: Result<Vec<Option<Value>>, NodeError>,
+}
 
-/// Dependency stamp within one evaluator/resource lifetime.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Revision(u64);
+/// A completed scheduling pass. GPU work may still be queued; reading a CPU
+/// consumer has already performed its necessary synchronization. Keeping this
+/// object retains only requested values, not every intermediate in the graph.
+pub struct Evaluation {
+    resources: Resources,
+    level: u8,
+    outputs: BTreeMap<Port, Value>,
+    consumers: BTreeMap<NodeId, Prepared>,
+    results: BTreeMap<NodeId, NodeResult>,
+    // Request validity is independent of whether a node computes successfully.
+    // A misspelled output must not poison another requested branch through it.
+    request_errors: BTreeMap<Request, NodeError>,
+    pub executed: Vec<NodeId>,
+    /// Placement conversions, excluding small kernel coefficient uploads.
+    pub transfers: usize,
+}
+impl Evaluation {
+    fn new(resources: Resources, level: u8) -> Self {
+        Self {
+            resources,
+            level,
+            outputs: BTreeMap::new(),
+            consumers: BTreeMap::new(),
+            results: BTreeMap::new(),
+            request_errors: BTreeMap::new(),
+            executed: Vec::new(),
+            transfers: 0,
+        }
+    }
+    pub fn output(&self, port: &Port) -> Result<&Value, NodeError> {
+        if let Some(error) = self.request_errors.get(&Request::Output(port.clone())) {
+            return Err(error.clone());
+        }
+        if let Some(Err(error)) = self.results.get(&port.0) {
+            return Err(error.clone());
+        }
+        self.outputs
+            .get(port)
+            .ok_or_else(|| NodeError::Failed(format!("output {port:?} was not requested")))
+    }
+    /// Computational results, independent of invalid requests on other ports.
+    pub fn result(&self, id: NodeId) -> Option<&NodeResult> {
+        self.results.get(&id)
+    }
+    /// Invalid target/port requests, retained separately from kernel failures.
+    pub fn request_errors(&self) -> impl Iterator<Item = (&Request, &NodeError)> {
+        self.request_errors.iter()
+    }
+    pub fn failures(&self) -> impl Iterator<Item = (NodeId, &NodeError)> {
+        self.results
+            .iter()
+            .filter_map(|(&id, result)| {
+                result
+                    .as_ref()
+                    .err()
+                    .filter(|e| !matches!(e, NodeError::Upstream(_)))
+                    .map(|e| (id, e))
+            })
+            .chain(self.request_errors.iter().map(|(request, error)| (request.node(), error)))
+    }
+    /// Borrow exactly the declared inputs from this immutable request snapshot.
+    /// No graph is consulted and no computation is repeated during presentation.
+    pub fn with_inputs<N: NodeDeclaration, R>(
+        &self,
+        id: NodeId,
+        declaration: &TypedNode<N>,
+        consume: impl FnOnce(
+            N::Parameters,
+            <N::Inputs as InputTuple>::Borrowed<'_>,
+            &EvalContext<'_>,
+        ) -> Result<R, KernelError>,
+    ) -> Result<R, NodeError> {
+        if let Some(error) = self.request_errors.get(&Request::Inputs(id)) {
+            return Err(error.clone());
+        }
+        let prepared = self
+            .consumers
+            .get(&id)
+            .ok_or_else(|| NodeError::Failed("consumer inputs were not requested".into()))?;
+        if !std::ptr::eq(prepared.kind, declaration.kind()) {
+            return Err(NodeError::Failed("consumer bound to a different node declaration".into()));
+        }
+        let inputs = prepared.values.as_ref().map_err(Clone::clone)?;
+        let ctx = EvalContext::new(self.level, &self.resources)
+            .map_err(|e| NodeError::from_kernel(prepared.kind, e))?;
+        let params = Params::validated(&prepared.params);
+        check_inputs::<N>(params, inputs, &ctx)
+            .map_err(|e| NodeError::from_kernel(prepared.kind, e))?;
+        consume(N::Parameters::read(params), N::Inputs::read(inputs), &ctx)
+            .map_err(|e| NodeError::from_kernel(prepared.kind, e))
+    }
+}
 
-/// Keeps one result per node, and the files nodes have loaded, between
-/// evaluations.
+/// Reusable resources and the latest requested result. No computed image is
+/// reused by a later evaluation. Forks share decoded sources and the device only.
 #[derive(Default)]
 pub struct Evaluator {
-    cache: Cache,
     resources: Resources,
+    last: Option<Evaluation>,
 }
-
-#[derive(Default)]
-struct Cache(HashMap<NodeId, Entry>);
-
-struct Entry {
-    stamp: u64,
-    result: NodeResult,
-}
-
 impl Evaluator {
-    /// A fresh node cache sharing loaded resources, including future first loads.
+    pub fn with_compute(compute: Arc<Compute>) -> Self {
+        Self { resources: Resources::with_compute(compute), ..Self::default() }
+    }
     pub fn fork(&self) -> Self {
-        Self { cache: Cache::default(), resources: self.resources.clone() }
+        Self { resources: self.resources.clone(), last: None }
     }
-
-    /// Brings `targets` up to date at downscale `level` and returns the nodes
-    /// actually recomputed.
+    pub fn resources(&self) -> &Resources {
+        &self.resources
+    }
+    /// Evaluate an explicit batch. The caller owns the requested values and can
+    /// prepare several frontend consumers without recomputing shared ancestors.
+    pub fn request(&self, graph: &Graph, level: u8, requests: &[Request]) -> Evaluation {
+        execute(graph, level, requests, self.resources.clone())
+    }
+    /// Convenience for requesting every output of a node, or its inputs when it
+    /// is an outputless consumer. Previous requested values are released first.
     pub fn evaluate(&mut self, graph: &Graph, level: u8, targets: &[NodeId]) -> Vec<NodeId> {
-        self.cache.0.retain(|id, _| graph.node(*id).is_some());
-        self.run(graph, level, targets, false)
+        self.last = None;
+        let mut requests = Vec::new();
+        for &id in targets {
+            match graph.node(id) {
+                Some(node) if node.kind.outputs().len() > 0 => {
+                    requests.extend(
+                        node.kind.outputs().map(|p| Request::Output(Port(id, p.name.into()))),
+                    );
+                }
+                _ => requests.push(Request::Inputs(id)),
+            }
+        }
+        let report = self.request(graph, level, &requests);
+        let executed = report.executed.clone();
+        self.last = Some(report);
+        executed
     }
-
     pub fn result(&self, id: NodeId) -> Option<&NodeResult> {
-        self.cache.0.get(&id).map(|entry| &entry.result)
+        self.last.as_ref()?.result(id)
     }
-
-    pub fn revision(&self, id: NodeId) -> Option<Revision> {
-        self.cache.0.get(&id).map(|entry| Revision(entry.stamp))
+    pub fn evaluation(&self) -> Option<&Evaluation> {
+        self.last.as_ref()
     }
-
-    /// Evaluate and borrow the validated inputs of a particular declaration.
-    /// Consumer results and failures are not stored in the computational cache.
+    pub fn failures(&self) -> impl Iterator<Item = (NodeId, &NodeError)> {
+        self.last.iter().flat_map(Evaluation::failures)
+    }
+    /// Standalone typed consumer convenience. Batch consumers should instead use
+    /// `request` followed by `Evaluation::with_inputs` on the same snapshot.
     pub fn with_inputs<N: NodeDeclaration, R>(
         &mut self,
         graph: &Graph,
@@ -115,168 +227,213 @@ impl Evaluator {
             &EvalContext<'_>,
         ) -> Result<R, KernelError>,
     ) -> Result<R, NodeError> {
-        let node = graph.node(id).ok_or_else(|| NodeError::Failed("node does not exist".into()))?;
-        if !std::ptr::eq(node.kind, declaration.kind()) {
-            return Err(NodeError::Failed("consumer bound to a different node declaration".into()));
-        }
-        let sources: Vec<_> = sources(graph, id).collect();
-        self.evaluate(graph, level, &sources);
-        let inputs = self.cache.inputs(graph, id)?;
-        let ctx = EvalContext { level, resources: &self.resources };
-        let params = Params::validated(&node.params);
-        // A successful evaluation at this revision already checked these inputs.
-        let checked = self.cache.0.get(&id).is_some_and(|entry| {
-            entry.stamp == self.cache.stamp(graph, &ctx, id) && entry.result.is_ok()
-        });
-        if !checked {
-            check_inputs::<N>(params, &inputs, &ctx)
-                .map_err(|error| NodeError::from_kernel(node.kind, error))?;
-        }
-        consume(N::Parameters::read(params), N::Inputs::read(&inputs), &ctx)
-            .map_err(|error| NodeError::from_kernel(node.kind, error))
+        self.last = None;
+        let report = self.request(graph, level, &[Request::Inputs(id)]);
+        report.with_inputs(id, declaration, consume)
     }
-
-    /// Root failures among these targets and their dependencies, including cached
-    /// failures. Frontends compare accepted snapshots before reporting changes.
-    pub fn failures<'a>(
-        &'a self,
-        graph: &Graph,
-        targets: &[NodeId],
-    ) -> impl Iterator<Item = (NodeId, &'a NodeError)> {
-        graph.upstream_order(targets).into_iter().filter_map(move |id| {
-            let error = self.result(id)?.as_ref().err()?;
-            (!matches!(error, NodeError::Upstream(_))).then_some((id, error))
-        })
-    }
-
-    /// Consumes this evaluator for a full-resolution action, releasing
-    /// intermediates after their last consumer. Fork first to keep a preview cache.
+    /// External effects are explicit and run at full resolution. All upstream
+    /// kernels remain pure; their transient results retire in the same way as previews.
     pub fn run_action(mut self, graph: &Graph, id: NodeId, name: &str) -> Result<(), NodeError> {
-        let node = graph.node(id).expect("in graph");
+        // An action owns this evaluator; previous preview outputs are not inputs
+        // to the action and must not occupy its full-resolution working budget.
+        self.last = None;
+        let node = graph.node(id).ok_or_else(|| NodeError::Failed("node does not exist".into()))?;
         let action = node.kind.action(name).ok_or_else(|| NodeError::UnknownAction(name.into()))?;
-        self.cache = Cache::default();
-        let targets: Vec<_> = sources(graph, id).collect();
-        self.run(graph, 0, &targets, true);
-        if let Some((id, error)) = self.failures(graph, &targets).next() {
+        let report = self.request(graph, 0, &[Request::Inputs(id)]);
+        if let Some((failed, error)) = report.failures().find(|(failed, _)| *failed != id) {
             return Err(NodeError::AtNode {
-                node: id,
-                kind: graph.node(id).expect("evaluated node").kind.id,
+                node: failed,
+                kind: graph.node(failed).map_or("unknown", |n| n.kind.id),
                 source: Box::new(error.clone()),
             });
         }
-        let inputs = self.cache.inputs(graph, id)?;
-        let ctx = EvalContext { level: 0, resources: &self.resources };
+        let prepared = report
+            .consumers
+            .get(&id)
+            .ok_or_else(|| NodeError::Failed("missing action inputs".into()))?;
+        let inputs = prepared.values.as_ref().map_err(Clone::clone)?;
+        let ctx = EvalContext::new(0, &self.resources)
+            .map_err(|e| NodeError::from_kernel(node.kind, e))?;
         action
-            .run(Params(&node.params), &inputs, &ctx)
-            .map_err(|error| NodeError::from_kernel(node.kind, error))
+            .run(Params::validated(&prepared.params), inputs, &ctx)
+            .map_err(|e| NodeError::from_kernel(node.kind, e))
     }
+}
 
-    /// With `release`, successful results retire after their last consumer
-    /// (unless targeted), bounding image memory for full-resolution actions.
-    fn run(&mut self, graph: &Graph, level: u8, targets: &[NodeId], release: bool) -> Vec<NodeId> {
-        let ctx = EvalContext { level, resources: &self.resources };
-        let order = graph.upstream_order(targets);
-        let mut pending: HashMap<NodeId, usize> = HashMap::new();
-        if release {
-            for &id in &order {
-                for source in sources(graph, id) {
-                    *pending.entry(source).or_default() += 1;
+struct Representations {
+    original: Value,
+    adapted: HashMap<TypeId, Value>,
+}
+
+fn execute(graph: &Graph, level: u8, requests: &[Request], resources: Resources) -> Evaluation {
+    let mut report = Evaluation::new(resources.clone(), level);
+    let mut output_ports = BTreeSet::new();
+    let mut consumers = BTreeSet::new();
+    let mut roots = BTreeSet::new();
+    let mut execution_roots = BTreeSet::new();
+    for request in requests {
+        let id = request.node();
+        let Some(node) = graph.node(id) else {
+            report
+                .request_errors
+                .insert(request.clone(), NodeError::Failed(format!("no node {id:?}")));
+            continue;
+        };
+        match request {
+            Request::Output(port) => {
+                if node.kind.output_index(&port.1).is_none() {
+                    report.request_errors.insert(
+                        request.clone(),
+                        NodeError::Failed(format!("unknown output {port:?}")),
+                    );
+                    continue;
                 }
+                output_ports.insert(port.clone());
+                execution_roots.insert(id);
+            }
+            Request::Inputs(_) => {
+                consumers.insert(id);
+                execution_roots.extend(sources(graph, id).map(|p| p.0));
             }
         }
-        let mut computed = Vec::new();
-        for &id in &order {
-            let stamp = self.cache.stamp(graph, &ctx, id);
-            if self.cache.0.get(&id).is_none_or(|entry| entry.stamp != stamp) {
-                let start = std::time::Instant::now();
-                let result = self.cache.compute(graph, &ctx, id);
-                let kind = graph.node(id).expect("in graph").kind.id;
-                log::debug!(
-                    "node={id:?} kind={kind} level={level} outcome={} elapsed={:.1?}",
-                    match &result {
-                        Ok(_) => "ok",
-                        Err(NodeError::MissingInput(_) | NodeError::Incomplete(_)) => "incomplete",
-                        Err(NodeError::Upstream(_)) => "blocked",
-                        Err(_) => "failed",
-                    },
-                    start.elapsed()
-                );
-                self.cache.0.insert(id, Entry { stamp, result });
-                computed.push(id);
-            } else {
-                log::trace!("node={id:?} level={level} cache=hit");
+        roots.insert(id);
+    }
+    let ctx = match EvalContext::new(level, &resources) {
+        Ok(ctx) => ctx,
+        Err(error) => {
+            for id in roots {
+                report.results.insert(id, Err(NodeError::Failed(error.to_string())));
             }
-            if release {
-                for source in sources(graph, id) {
-                    let left = pending.get_mut(&source).expect("counted above");
-                    *left -= 1;
-                    // Failed entries retain root causes for action diagnostics;
-                    // successful image payloads still retire at their last consumer.
-                    if *left == 0
-                        && !targets.contains(&source)
-                        && self.cache.0[&source].result.is_ok()
-                    {
-                        self.cache.0.remove(&source);
+            return report;
+        }
+    };
+    let order = graph.upstream_order(&roots.into_iter().collect::<Vec<_>>());
+    let execute: BTreeSet<_> = graph
+        .upstream_order(&execution_roots.into_iter().collect::<Vec<_>>())
+        .into_iter()
+        .collect();
+    let mut remaining: HashMap<Port, usize> = HashMap::new();
+    for &id in &order {
+        for source in sources(graph, id) {
+            *remaining.entry(source.clone()).or_default() += 1;
+        }
+    }
+    let mut live: HashMap<Port, Representations> = HashMap::new();
+    for id in order {
+        let node = graph.node(id).expect("validated request ancestors");
+        let inputs =
+            collect_inputs(graph, id, &ctx, &mut live, &report.results, &mut report.transfers);
+        if consumers.contains(&id) {
+            report.consumers.insert(
+                id,
+                Prepared { kind: node.kind, params: node.params.clone(), values: inputs.clone() },
+            );
+        }
+        let result = match &inputs {
+            Err(error) => Err(error.clone()),
+            Ok(inputs) if execute.contains(&id) => {
+                report.executed.push(id);
+                (node.kind.eval)(Params::validated(&node.params), inputs, &ctx)
+                    .map_err(|error| NodeError::from_kernel(node.kind, error))
+            }
+            Ok(_) => Ok(Vec::new()),
+        };
+        // Drop this call's input handles before retiring exhausted source ports.
+        drop(inputs);
+        for source in sources(graph, id) {
+            let count = remaining.get_mut(source).expect("counted input edge");
+            *count -= 1;
+            if *count == 0 {
+                live.remove(source);
+            }
+        }
+        match result {
+            Err(error) => {
+                report.results.insert(id, Err(error));
+            }
+            Ok(values) => {
+                if consumers.contains(&id) {
+                    report.results.entry(id).or_insert_with(|| Ok(Vec::new()));
+                }
+                let mut requested = Vec::new();
+                for (spec, value) in node.kind.outputs().zip(values) {
+                    let port = Port(id, spec.name.into());
+                    if output_ports.contains(&port) {
+                        report.outputs.insert(port.clone(), value.clone());
+                        requested.push(value.clone());
+                    }
+                    if remaining.get(&port).is_some_and(|&n| n > 0) {
+                        live.insert(
+                            port,
+                            Representations { original: value, adapted: HashMap::new() },
+                        );
                     }
                 }
+                if !requested.is_empty() {
+                    report.results.insert(id, Ok(requested));
+                }
             }
         }
-        computed
     }
+    report
 }
 
-impl Cache {
-    fn stamp(&self, graph: &Graph, ctx: &EvalContext, id: NodeId) -> u64 {
-        let node = graph.node(id).expect("in graph");
-        let mut h = DefaultHasher::new();
-        (node.kind.id, ctx.level).hash(&mut h);
-        serde_json::to_string(&node.params).expect("plain data serializes").hash(&mut h);
-        for spec in node.kind.inputs() {
-            spec.name.hash(&mut h);
-            if let Some(source) = graph.source(&Port(id, spec.name.into())) {
-                (source, self.0.get(&source.0).map(|entry| entry.stamp)).hash(&mut h);
+fn collect_inputs(
+    graph: &Graph,
+    id: NodeId,
+    ctx: &EvalContext<'_>,
+    live: &mut HashMap<Port, Representations>,
+    results: &BTreeMap<NodeId, NodeResult>,
+    transfers: &mut usize,
+) -> Result<Vec<Option<Value>>, NodeError> {
+    let node = graph.node(id).expect("planned node");
+    node.kind
+        .inputs()
+        .map(|spec| {
+            let Some(source) = graph.source(&Port(id, spec.name.into())) else {
+                return if spec.requirement.optional {
+                    Ok(None)
+                } else {
+                    Err(NodeError::MissingInput(spec.name))
+                };
+            };
+            if results.get(&source.0).is_some_and(Result::is_err) {
+                return Err(NodeError::Upstream(source.0));
             }
-        }
-        h.finish()
-    }
-
-    fn compute(&self, graph: &Graph, ctx: &EvalContext, id: NodeId) -> NodeResult {
-        let node = graph.node(id).expect("in graph");
-        let inputs = self.inputs(graph, id)?;
-        (node.kind.eval)(Params(&node.params), &inputs, ctx)
-            .map_err(|error| NodeError::from_kernel(node.kind, error))
-    }
-
-    /// The values on node `id`'s inputs, from its sources' cached results;
-    /// `None` for an unconnected optional input.
-    fn inputs(&self, graph: &Graph, id: NodeId) -> Result<Vec<Option<Value>>, NodeError> {
-        let kind = graph.node(id).expect("in graph").kind;
-        kind.inputs()
-            .map(|spec| {
-                let Some(source) = graph.source(&Port(id, spec.name.into())) else {
-                    let optional = spec.requirement.optional;
-                    return if optional {
-                        Ok(None)
-                    } else {
-                        Err(NodeError::MissingInput(spec.name))
-                    };
-                };
-                let Ok(evaluated) = &self.0[&source.0].result else {
-                    return Err(NodeError::Upstream(source.0));
-                };
-                let index = graph.node(source.0).expect("in graph").kind.output_index(&source.1);
-                Ok(Some(evaluated[index.expect("validated edge")].clone()))
-            })
-            .collect()
-    }
+            let replicas = live
+                .get_mut(source)
+                .ok_or_else(|| NodeError::Failed(format!("source {source:?} produced no value")))?;
+            let descriptor =
+                spec.requirement.target(replicas.original.descriptor()).ok_or_else(|| {
+                    NodeError::Contract {
+                        input: spec.name,
+                        mismatch: crate::ports::TypeMismatch {
+                            expected: spec.requirement.name(),
+                            actual: replicas.original.descriptor().name,
+                        },
+                    }
+                })?;
+            if descriptor == *replicas.original.descriptor() {
+                return Ok(Some(replicas.original.clone()));
+            }
+            let key = descriptor.type_id();
+            if let Some(value) = replicas.adapted.get(&key) {
+                return Ok(Some(value.clone()));
+            }
+            let compute =
+                ctx.compute().map_err(|error| NodeError::from_kernel(node.kind, error))?;
+            let value =
+                descriptor.materialize(&replicas.original, compute).map_err(NodeError::Failed)?;
+            *transfers += 1;
+            replicas.adapted.insert(key, value.clone());
+            Ok(Some(value))
+        })
+        .collect()
+}
+fn sources(graph: &Graph, id: NodeId) -> impl Iterator<Item = &Port> {
+    graph.edges().filter(move |(_, input)| input.0 == id).map(|(output, _)| output)
 }
 
-fn sources(graph: &Graph, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
-    graph.edges().filter(move |(_, input)| input.0 == id).map(|(output, _)| output.0)
-}
-
-/// Runs a standalone action with fresh resources. Interactive callers use
-/// `Evaluator::fork().run_action(...)` to reuse their session's loaded files.
 pub fn run_action(graph: &Graph, id: NodeId, name: &str) -> Result<(), NodeError> {
     Evaluator::default().run_action(graph, id, name)
 }

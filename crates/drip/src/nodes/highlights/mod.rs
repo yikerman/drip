@@ -1,6 +1,6 @@
-//! Sensor-space highlight repair before preview reduction and demosaicing.
+//! Reconstruction of clipped sensor responses before spatial reduction.
 
-use crate::image::Mosaic;
+use crate::image::{Gpu, Mosaic};
 use crate::node::{EvalContext, KernelError};
 use crate::param::ParamKind;
 use std::sync::Arc;
@@ -8,22 +8,31 @@ mod opposed;
 
 #[derive(crate::Parameters)]
 pub struct Highlights {
-    /// Fraction of the per-channel saturation threshold used for reconstruction.
+    /// Fraction of the current per-channel saturation threshold.
     #[param(ParamKind::Float { min: 0.5, max: 1.0, default: 0.98 })]
     threshold: f32,
 }
 
-/// Reconstruct clipped Bayer samples with inpaint opposed.
+/// Estimate clipped Mosaic samples using inpaint opposed.
 ///
-/// Assumes white-balanced input. Threshold is a fraction of each channel's saturation
-/// level. Runs before preview reduction.
+/// Requires a Bayer mosaic and saturation levels in its current sample scale.
+/// As-shot-balanced channels are the estimator's intended domain: it uses the
+/// cube-root mean of the other two channels plus chrominance learned nearby.
+/// Unclipped samples remain unchanged; reconstructed values are estimates, not
+/// recovered measurements suitable for chart calibration. Threshold metadata
+/// remains the sensor saturation reference, not a bound on output values.
 #[crate::node(kind = HIGHLIGHTS, id = "raw.highlights", category = "raw", name = "Highlights", outputs = ["mosaic"], references = [("darktable: inpaint opposed", "https://docs.darktable.org/usermanual/5.6/en/module-reference/processing-modules/highlight-reconstruction/")])]
 fn highlights(
-    p: Highlights,
-    (mosaic,): (&Mosaic,),
-    _: &EvalContext<'_>,
-) -> Result<(Arc<Mosaic>,), KernelError> {
-    let data = opposed::process(mosaic, p.threshold);
-    let data = crate::image::RawMat::from_samples(mosaic.width, mosaic.height, mosaic.scale, data);
-    Ok((Arc::new(mosaic.with_buffer(Arc::new(data))),))
+    #[params] p: Highlights,
+    mosaic: &Mosaic<Gpu>,
+    #[context] ctx: &EvalContext<'_>,
+) -> Result<(Arc<Mosaic<Gpu>>,), KernelError> {
+    let output = opposed::process(ctx.compute()?, mosaic, p.threshold)?;
+    Ok((Arc::new(Mosaic::from_gpu(
+        output,
+        mosaic.width(),
+        mosaic.height(),
+        mosaic.scale(),
+        mosaic.interpretation().clone(),
+    )?),))
 }

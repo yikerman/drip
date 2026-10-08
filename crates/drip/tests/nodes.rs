@@ -1,10 +1,12 @@
 //! The built-in nodes on synthetic data with independently known results.
 
-use drip::image::{CameraRgb, Rec2020Mat};
+use drip::compute::Compute;
+use drip::image::{CameraRgb, ColorImage, Gpu};
 use drip::node::NodeDeclaration;
+use drip::value::{EdgeValue, Value};
 
 use drip::ports::Read;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use drip::color::{self, D65, REC2020};
 use drip::eval::Evaluator;
@@ -15,6 +17,30 @@ use drip::nodes;
 use drip::project::Project;
 use drip_raw::{BlackPattern, Raw};
 use serde_json::json;
+
+fn compute() -> &'static Arc<Compute> {
+    static COMPUTE: OnceLock<Arc<Compute>> = OnceLock::new();
+    COMPUTE.get_or_init(|| Compute::new().expect("hardware or software compute adapter required"))
+}
+
+// Numerical assertions deliberately read back at their host boundary. Nodes
+// themselves run their production WGSL kernels through the normal evaluator.
+fn download(value: &Value) -> Value {
+    if value.downcast_ref::<Mosaic<Gpu>>().is_some() {
+        Mosaic::<drip::image::Cpu>::materialize(value, compute()).unwrap()
+    } else if value.downcast_ref::<CameraRgb<Gpu>>().is_some() {
+        CameraRgb::<drip::image::Cpu>::materialize(value, compute()).unwrap()
+    } else if value.downcast_ref::<drip::image::ColorImage<Gpu>>().is_some() {
+        ColorImage::<drip::image::Cpu>::materialize(value, compute()).unwrap()
+    } else {
+        value.clone()
+    }
+}
+
+fn downsample(input: &Mosaic) -> Result<Mosaic, drip::node::KernelError> {
+    let resident = input.upload(compute())?;
+    Ok(nodes::downsample(compute(), &resident)?.download(compute())?)
+}
 
 fn raw(width: usize, height: usize, data: Vec<u16>) -> Raw {
     Raw {
@@ -96,7 +122,7 @@ fn binning_keeps_the_bayer_phase_and_crops_partial_cells() {
     // 9 × 4 sites at scale 2: one whole 4 × 4 binned cell per 4 columns, the
     // ninth column dropped. Each value encodes its site as row * 10 + col.
     let data = (0..4).flat_map(|r| (0..9).map(move |c| 100 + (r * 10 + c) as u16)).collect();
-    let m = nodes::downsample(&nodes::normalize(&raw(9, 4, data)).unwrap());
+    let m = downsample(&nodes::normalize(&raw(9, 4, data)).unwrap()).unwrap();
     assert_eq!((m.width, m.height, m.scale), (4, 2, 2));
     let mean = |sites: [(u16, u16); 4]| {
         sites.iter().map(|&(r, c)| (r * 10 + c) as f32).sum::<f32>() / 4000.0
@@ -116,7 +142,7 @@ fn repeated_downsampling_matches_direct_averages_with_patterned_black_and_all_ba
     for cfa in [[[0, 1], [3, 2]], [[1, 0], [2, 3]], [[3, 2], [0, 1]], [[2, 3], [1, 0]]] {
         r.cfa = cfa;
         let mut m = nodes::normalize(&r).unwrap();
-        for level in 0..5 {
+        for level in 0..4 {
             let scale = 1 << level;
             assert_eq!((m.width, m.height), (19 / (2 * scale) * 2, 17 / (2 * scale) * 2));
             assert_eq!(m.scale, scale as u32);
@@ -138,7 +164,14 @@ fn repeated_downsampling_matches_direct_averages_with_patterned_black_and_all_ba
                     assert!((f64::from(m.samples()[row * m.width + col]) - expected).abs() < 2e-7);
                 }
             }
-            m = nodes::downsample(&m);
+            if level == 3 {
+                assert!(
+                    downsample(&m).is_err(),
+                    "a Bayer cell cannot be reduced to an empty image"
+                );
+            } else {
+                m = downsample(&m).unwrap();
+            }
         }
     }
 }
@@ -155,7 +188,10 @@ fn unusable_raw_metadata_is_an_error() {
     for matrix in [[[0.0; 3]; 3], [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]] {
         let mut r = raw(2, 2, vec![0; 4]);
         r.xyz_to_cam = matrix;
-        assert!(nodes::normalize(&r).is_err(), "{matrix:?}");
+        assert!(
+            nodes::normalize(&r).is_ok(),
+            "decoding does not require invertible colorimetry: {matrix:?}"
+        );
     }
     let mut r = raw(2, 2, vec![0; 4]);
     r.maximum = 100;
@@ -211,18 +247,19 @@ impl NodeDeclaration for MosaicKernel {
     });
 }
 
-/// A source node emitting the scene-referred pixels given as `pixels`.
+/// A source node emitting fixed additive Rec.2020 coordinates, including HDR
+/// and negative samples. Their relationship to a captured scene is unspecified.
 static SCENE: NodeKind =
     NodeKind::new::<SceneKernel>("test.scene", "test", "scene", &[], &["image"]);
 struct SceneKernel;
 impl NodeDeclaration for SceneKernel {
     type Parameters = ();
     type Inputs = ();
-    type Outputs = (Arc<Rec2020Mat>,);
+    type Outputs = (Arc<ColorImage>,);
 
     const KERNEL: Option<drip::node::Kernel<Self>> = Some(|_, (), _| {
         let pixels = vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]];
-        Ok((Arc::new(Rec2020Mat::from(Arc::new(Rgb { width: 2, height: 1, scale: 1, pixels }))),))
+        Ok((Arc::new(ColorImage::from(Arc::new(Rgb { width: 2, height: 1, scale: 1, pixels }))),))
     });
 }
 
@@ -242,9 +279,9 @@ fn chain(source: &'static NodeKind, kinds: &[&'static NodeKind]) -> (Project, No
 }
 
 fn evaluate(p: &Project, id: NodeId) -> Vec<drip::value::Value> {
-    let mut ev = Evaluator::default();
+    let mut ev = Evaluator::with_compute(compute().clone());
     ev.evaluate(&p.graph, 0, &[id]);
-    ev.result(id).unwrap().clone().unwrap()
+    ev.result(id).unwrap().as_ref().unwrap().iter().map(download).collect()
 }
 
 #[test]
@@ -267,18 +304,18 @@ fn binning_debayer_averages_greens_and_halves_resolution() {
 }
 
 #[test]
-fn exposure_scales_linear_rgb_and_sigmoid_reinterprets_its_finite_output() {
+fn exposure_scales_additive_rgb_and_sigmoid_drops_scene_relationship() {
     let (mut p, exposure) = chain(&SCENE, &[&nodes::EXPOSURE]);
     p.graph.set_param(exposure, "ev", json!(1.0)).unwrap();
-    let rgb = evaluate(&p, exposure)[0].borrow::<Read<Rec2020Mat>>().unwrap().rgb().clone();
+    let rgb = evaluate(&p, exposure)[0].borrow::<Read<ColorImage>>().unwrap().rgb().clone();
     assert_eq!(rgb.pixels, [[0.36, 0.0, -2.0], [0.18, 2e6, 0.72]]);
     let sigmoid = p.graph.add_node(&nodes::SIGMOID);
     p.graph.connect(Port(exposure, "image".into()), Port(sigmoid, "image".into())).unwrap();
     let out = evaluate(&p, sigmoid);
-    assert!(out[0].downcast_ref::<Rec2020Mat>().is_some());
+    assert!(out[0].downcast_ref::<ColorImage>().is_some());
     assert!(
         out[0]
-            .borrow::<Read<Rec2020Mat>>()
+            .borrow::<Read<ColorImage>>()
             .unwrap()
             .rgb()
             .pixels
@@ -286,13 +323,18 @@ fn exposure_scales_linear_rgb_and_sigmoid_reinterprets_its_finite_output() {
             .flatten()
             .all(|v| v.is_finite())
     );
-    // Creative output still denotes linear light; later exposure is allowed.
+    assert_eq!(
+        out[0].downcast_ref::<ColorImage>().unwrap().interpretation().scene,
+        drip::image::SceneRelationship::Rendered
+    );
+    // Rendered colors retain additive coordinates; later exposure is allowed,
+    // without reinstating a claim about original captured scene light.
     let later = p.graph.add_node(&nodes::EXPOSURE);
     p.graph.set_param(later, "ev", json!(1.0)).unwrap();
     p.graph.connect(Port(sigmoid, "image".into()), Port(later, "image".into())).unwrap();
     let later_output = evaluate(&p, later);
-    let before = out[0].downcast_ref::<Rec2020Mat>().unwrap();
-    let after = later_output[0].downcast_ref::<Rec2020Mat>().unwrap();
+    let before = out[0].downcast_ref::<ColorImage>().unwrap();
+    let after = later_output[0].downcast_ref::<ColorImage>().unwrap();
     assert_eq!(after.pixels, before.pixels.iter().map(|p| p.map(|v| v * 2.0)).collect::<Vec<_>>());
 }
 
@@ -325,9 +367,13 @@ fn highlights_reconstruct_before_preview_averaging() {
     let bypass = p.graph.add_node(&nodes::RCD);
     p.graph.connect(Port(highlights, "mosaic".into()), Port(repaired, "mosaic".into())).unwrap();
     p.graph.connect(Port(source, "mosaic".into()), Port(bypass, "mosaic".into())).unwrap();
-    let mut ev = Evaluator::default();
-    ev.evaluate(&p.graph, 1, &[repaired, bypass]);
-    let result = |id| &ev.result(id).unwrap().as_ref().unwrap()[0];
+    let mut ev = Evaluator::with_compute(compute().clone());
+    ev.evaluate(&p.graph, 1, &[highlights, repaired, bypass]);
+    let results: std::collections::HashMap<_, _> = [highlights, repaired, bypass]
+        .into_iter()
+        .map(|id| (id, download(&ev.result(id).unwrap().as_ref().unwrap()[0])))
+        .collect();
+    let result = |id| &results[&id];
     assert_eq!(result(highlights).downcast_ref::<Mosaic>().unwrap().scale, 1);
     assert_eq!(result(highlights).downcast_ref::<Mosaic>().unwrap().width, 8);
     assert_eq!(result(repaired).borrow::<Read<CameraRgb>>().unwrap().rgb().scale, 2);
@@ -360,4 +406,13 @@ fn white_balance_scales_saturation_with_each_channel() {
             assert!(m.interpretation().white[c] <= saturation + 1e-6);
         }
     }
+}
+
+#[test]
+fn camera_conversion_rejects_degenerate_characterization_at_its_boundary() {
+    let (project, camera) = chain(&MOSAIC, &[&nodes::BIN_2X2, &nodes::CAMERA_TO_REC2020]);
+    let mut evaluator = Evaluator::with_compute(compute().clone());
+    evaluator.evaluate(&project.graph, 0, &[camera]);
+    let error = evaluator.result(camera).unwrap().as_ref().unwrap_err();
+    assert!(error.to_string().contains("degenerate"), "{error}");
 }

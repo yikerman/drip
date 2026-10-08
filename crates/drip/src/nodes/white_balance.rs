@@ -1,45 +1,39 @@
-//! As-shot white balance in camera space.
+//! Channel gain correction in sensor response coordinates.
 
-use crate::image::Mosaic;
+use crate::image::{Gpu, Mosaic};
 use crate::node::{EvalContext, KernelError};
-use rayon::prelude::*;
 use std::sync::Arc;
 
-/// Multiply Bayer samples by the as-shot gains relative to the first green channel.
+/// Multiply Mosaic samples by the capture's as-shot gains.
 ///
-/// Apply once before highlight reconstruction.
+/// Requires a valid color-filter pattern and finite positive channel gains.
+/// Each channel's saturation threshold scales with its samples. Output remains
+/// sensor response data; the operation does not establish standard colorimetry.
+/// Apply once when using these as-shot gains as the camera conversion convention.
 #[crate::node(kind = WHITE_BALANCE, id = "color.white_balance", category = "color", name = "White balance", outputs = ["mosaic"])]
 fn white_balance(
-    _: (),
-    (mosaic,): (&Mosaic,),
-    _: &EvalContext<'_>,
-) -> Result<(Arc<Mosaic>,), KernelError> {
-    let wb = mosaic.interpretation().camera.white_balance;
-    let gains: Vec<_> =
-        mosaic.interpretation().cfa.colors.iter().map(|&c| wb[c as usize]).collect();
-    let data = process(mosaic.samples(), mosaic.width, mosaic.interpretation().cfa.size, &gains);
-    Ok((Arc::new(Mosaic::new(
-        Arc::new(crate::image::RawMat::from_samples(
-            mosaic.width,
-            mosaic.height,
-            mosaic.scale,
-            data,
-        )),
-        crate::image::SensorMosaic {
-            cfa: mosaic.interpretation().cfa.clone(),
-            white: std::array::from_fn(|c| mosaic.interpretation().white[c] * wb[c]),
-            camera: mosaic.interpretation().camera.clone(),
-        },
-    )),))
-}
-
-pub(super) fn process(input: &[f32], width: usize, cfa_size: usize, gains: &[f32]) -> Vec<f32> {
-    input
-        .par_iter()
-        .enumerate()
-        .map(|(i, &value)| {
-            let phase = (i / width % cfa_size) * cfa_size + i % width % cfa_size;
-            value * gains[phase]
-        })
-        .collect()
+    mosaic: &Mosaic<Gpu>,
+    #[context] ctx: &EvalContext<'_>,
+) -> Result<(Arc<Mosaic<Gpu>>,), KernelError> {
+    let meaning = mosaic.interpretation();
+    let gains = meaning.camera.white_balance;
+    let mut parameters = vec![mosaic.width() as f32, meaning.cfa.size as f32];
+    parameters.extend(meaning.cfa.colors.iter().map(|&c| gains[c as usize]));
+    let output = super::gpu::pointwise(
+        ctx.compute()?,
+        "white_balance",
+        mosaic.gpu_buffer(),
+        mosaic.gpu_buffer().len(),
+        mosaic.gpu_buffer().len(),
+        &parameters,
+    )?;
+    let mut meaning = meaning.clone();
+    meaning.white = std::array::from_fn(|c| meaning.white[c] * gains[c]);
+    Ok((Arc::new(Mosaic::from_gpu(
+        output,
+        mosaic.width(),
+        mosaic.height(),
+        mosaic.scale(),
+        meaning,
+    )?),))
 }

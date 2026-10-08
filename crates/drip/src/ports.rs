@@ -20,7 +20,7 @@ impl InputRequirement {
         self.types.iter().map(|ty| ty.name).collect::<Vec<_>>().join(" or ")
     }
     pub fn accepts(&self, output: &TypeDescriptor) -> bool {
-        self.types.contains(output)
+        self.types.iter().any(|ty| ty.compatible_with(output))
     }
     pub fn check(&self, output: &TypeDescriptor) -> Result<(), TypeMismatch> {
         if self.accepts(output) {
@@ -28,6 +28,24 @@ impl InputRequirement {
         } else {
             Err(TypeMismatch { expected: self.name(), actual: output.name })
         }
+    }
+    /// Concrete binding is stricter than connection compatibility: transfer must
+    /// have produced precisely the representation declared by the function.
+    pub fn check_exact(&self, output: &TypeDescriptor) -> Result<(), TypeMismatch> {
+        if self.types.contains(output) {
+            Ok(())
+        } else {
+            Err(TypeMismatch { expected: self.name(), actual: output.name })
+        }
+    }
+
+    /// Prefer an already compatible representation before introducing a transfer.
+    pub fn target(&self, output: &TypeDescriptor) -> Option<TypeDescriptor> {
+        self.types
+            .iter()
+            .find(|ty| *ty == output)
+            .or_else(|| self.types.iter().find(|ty| ty.compatible_with(output)))
+            .copied()
     }
 }
 
@@ -103,6 +121,13 @@ pub trait OutputTuple {
     const TYPES: &'static [TypeDescriptor];
     fn erase(self) -> Vec<Value>;
 }
+impl<T: EdgeValue> OutputTuple for Arc<T> {
+    const TYPES: &'static [TypeDescriptor] = &[TypeDescriptor::of::<T>()];
+    fn erase(self) -> Vec<Value> {
+        vec![Value::new(self)]
+    }
+}
+
 impl InputTuple for () {
     type Borrowed<'a> = ();
     const REQUIREMENTS: &'static [InputRequirement] = &[];

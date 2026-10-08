@@ -22,7 +22,8 @@ impl GuiNode for SigmoidGui {
         let point = |x: f32, y: f32| {
             egui::pos2(rect.left() + x * rect.width(), rect.bottom() - y * rect.height())
         };
-        // Log scene exposure on x, linear display value on y.
+        // Log input value relative to middle grey on x, rendered value on y.
+        // The plot does not claim the actual input still measures scene exposure.
         let points = (0..=128)
             .map(|i| {
                 let x = i as f32 / 128.0;

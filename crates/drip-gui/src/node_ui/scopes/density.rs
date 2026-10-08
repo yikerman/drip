@@ -10,7 +10,7 @@ use std::sync::Arc;
 use rayon::prelude::*;
 
 use drip::color::{self, D65, REC2020};
-use drip::image::{CameraRgb, Rec2020Mat, Rgb};
+use drip::image::{CameraRgb, ColorCoordinates, ColorImage, Rgb};
 use drip::node::{EvalContext, KernelError};
 use drip::nodes::scopes::ExposureSettings;
 use drip::ports::Either;
@@ -41,9 +41,12 @@ pub enum ScopeAxes {
 const SIZE: usize = 256;
 const RADIUS: f32 = 0.5;
 
+/// Count native channel values by image column in log2(value) bins.
+/// This numerical diagnostic neither converts coordinates nor requires a scene
+/// estimate. RGB plot colors identify channels; they do not characterize them.
 pub fn waveform(
     p: ExposureSettings,
-    (image,): (Either<&Rec2020Mat, &CameraRgb>,),
+    (image,): (Either<&ColorImage, &CameraRgb>,),
     _: &EvalContext<'_>,
 ) -> Result<Arc<Scope>, KernelError> {
     let (min, max) = (p.min_ev as f32, p.max_ev as f32);
@@ -59,11 +62,21 @@ pub fn waveform(
     ))
 }
 
+/// Plot CIE u′v′ of represented Rec.2020/D65 colors.
+/// Requires that runtime color interpretation, but accepts rendered data without
+/// a relationship to the captured scene. Negative channels are clipped only for
+/// this view; source samples and their interpretation remain unchanged.
 pub fn vectorscope(
     _: (),
-    (image,): (&Rec2020Mat,),
+    (image,): (&ColorImage,),
     _: &EvalContext<'_>,
 ) -> Result<Arc<Scope>, KernelError> {
+    image.require_additive_color()?;
+    if image.interpretation().coordinates != ColorCoordinates::LinearRec2020 {
+        return Err(KernelError::Failed(
+            "vectorscope requires additive Rec.2020/D65 coordinates".into(),
+        ));
+    }
     let matrix = &color::rgb_to_xyz(REC2020, D65);
     let counts = vector_counts(&image.rgb().pixels, matrix);
     let primaries = color::transpose(*matrix).map(|primary| position(uv(primary)));

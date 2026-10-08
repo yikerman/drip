@@ -5,35 +5,65 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use drip::image::Rgb;
+use drip::image::{ColorImage, Gpu, Rgb};
+#[cfg(test)]
+use drip::{compute::Compute, image::ImageError};
 use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
+use wgpu::util::DeviceExt;
 
-/// An image packed as `Rgba16Float` texels. Packing is CPU work, done off the
-/// UI thread; the renderer only uploads the bytes.
+/// Presentation storage stays in the producer's placement. Normal previews hold
+/// the resident FP32 RGB buffer; CPU proofing results upload only when displayed.
 pub struct Image {
     pub width: usize,
     pub height: usize,
     /// Sensor pixels per image pixel along each axis.
     pub scale: u32,
-    pub texels: Vec<u8>,
+    source: Source,
+}
+
+enum Source {
+    Host(Arc<Rgb>),
+    Resident(Arc<ColorImage<Gpu>>),
 }
 
 impl Image {
-    pub fn new(rgb: &Rgb) -> Self {
-        let texels = rgb
-            .pixels
-            .iter()
-            .flat_map(|&[r, g, b]| [r, g, b, 1.0])
-            .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
-            .collect();
-        Image { width: rgb.width, height: rgb.height, scale: rgb.scale, texels }
+    pub fn new(rgb: &Arc<Rgb>) -> Self {
+        Self {
+            width: rgb.width,
+            height: rgb.height,
+            scale: rgb.scale,
+            source: Source::Host(rgb.clone()),
+        }
+    }
+    pub fn resident(image: Arc<ColorImage<Gpu>>) -> Self {
+        Self {
+            width: image.width(),
+            height: image.height(),
+            scale: image.scale(),
+            source: Source::Resident(image),
+        }
+    }
+    /// Explicit inspection boundary for tests and CPU consumers. Drawing itself
+    /// never calls this method and never reads resident samples back to the host.
+    #[cfg(test)]
+    pub fn readback(&self, compute: &Compute) -> Result<Arc<Rgb>, ImageError> {
+        match &self.source {
+            Source::Host(image) => Ok(image.clone()),
+            Source::Resident(image) => Ok(image.download(compute)?.rgb().clone()),
+        }
+    }
+    #[cfg(test)]
+    pub fn host_pixels(&self) -> Option<&Arc<Rgb>> {
+        match &self.source {
+            Source::Host(image) => Some(image),
+            Source::Resident(_) => None,
+        }
     }
 }
 
 /// GPU state shared by all previews, kept in egui's callback resources.
 struct Previews {
     pipeline: wgpu::RenderPipeline,
-    samplers: [wgpu::Sampler; 2],
     shown: HashMap<egui::Id, Shown>,
     /// Previews drawn this frame; the others are freed at its end.
     used: HashSet<egui::Id>,
@@ -41,7 +71,7 @@ struct Previews {
     screen: [u32; 2],
 }
 
-/// One preview's texture and placement. Holding the image keeps identity
+/// One preview's storage bindings and placement. Holding the image keeps identity
 /// comparisons by pointer sound.
 struct Shown {
     image: Arc<Image>,
@@ -78,32 +108,23 @@ pub fn install(device: &wgpu::Device, renderer: &mut egui_wgpu::Renderer) {
         multiview_mask: None,
         cache: None,
     });
-    let samplers = [wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear].map(|filter| {
-        device.create_sampler(&wgpu::SamplerDescriptor {
-            mag_filter: filter,
-            min_filter: filter,
-            ..Default::default()
-        })
-    });
-    let previews = Previews {
-        pipeline,
-        samplers,
-        shown: HashMap::new(),
-        used: HashSet::new(),
-        screen: [1, 1],
-    };
+    let previews =
+        Previews { pipeline, shown: HashMap::new(), used: HashSet::new(), screen: [1, 1] };
     renderer.callback_resources.insert(previews);
 }
 
-/// Frees the previews not drawn since the last call; called once per frame.
-pub fn end_frame(renderer: &mut egui_wgpu::Renderer) {
+/// Frees previews not drawn this frame and returns the submitted images.
+/// The caller retains these through queue completion so their compute-memory
+/// reservations cover presentation work as well as numerical kernel work.
+pub fn end_frame(renderer: &mut egui_wgpu::Renderer) -> Vec<Arc<Image>> {
     let previews: &mut Previews = renderer.callback_resources.get_mut().expect("installed");
     let used = std::mem::take(&mut previews.used);
     previews.shown.retain(|id, _| used.contains(id));
+    previews.shown.values().map(|shown| shown.image.clone()).collect()
 }
 
 /// Draws `image` stretched over `rect`, clipped like any other shape; `id`
-/// names the preview so its texture is reused while the image is unchanged.
+/// names the preview so its bindings are reused while the image is unchanged.
 pub fn draw(
     painter: &egui::Painter,
     rect: egui::Rect,
@@ -180,55 +201,44 @@ impl CallbackTrait for Paint {
 
 fn upload(
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    _queue: &wgpu::Queue,
     previews: &Previews,
     image: &Arc<Image>,
 ) -> Shown {
-    let size = wgpu::Extent3d {
-        width: image.width as u32,
-        height: image.height as u32,
-        depth_or_array_layers: 1,
+    let samples = match &image.source {
+        Source::Resident(source) => source.gpu_buffer().raw().clone(),
+        Source::Host(source) => {
+            let bytes: Vec<u8> =
+                source.pixels.as_flattened().iter().flat_map(|v| v.to_ne_bytes()).collect();
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("proof preview samples"),
+                contents: &bytes,
+                usage: wgpu::BufferUsages::STORAGE,
+            })
+        }
     };
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("preview"),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba16Float,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
-    queue.write_texture(
-        texture.as_image_copy(),
-        &image.texels,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(size.width * 8),
-            rows_per_image: None,
-        },
-        size,
-    );
     let rect = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("preview rect"),
         size: 16,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    let view = texture.create_view(&Default::default());
-    let groups = previews.samplers.each_ref().map(|sampler| {
+    let groups = [0u32, 1].map(|interpolate| {
+        let info: Vec<u8> = [image.width as u32, image.height as u32, interpolate, 0]
+            .into_iter()
+            .flat_map(u32::to_ne_bytes)
+            .collect();
+        let info = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("preview dimensions and sampling"),
+            contents: &info,
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("preview"),
             layout: &previews.pipeline.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(sampler),
-                },
+                wgpu::BindGroupEntry { binding: 0, resource: samples.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: info.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: rect.as_entire_binding() },
             ],
         })

@@ -1,6 +1,6 @@
 //! TIFF export, read back and checked against independently computed values.
 
-use drip::image::{RawMetadata, Rec2020Mat};
+use drip::image::{ColorImage, RawMetadata};
 use drip::node::NodeDeclaration;
 
 use std::path::{Path, PathBuf};
@@ -30,11 +30,11 @@ struct DisplayKernel;
 impl NodeDeclaration for DisplayKernel {
     type Parameters = ();
     type Inputs = ();
-    type Outputs = (Arc<Rec2020Mat>,);
+    type Outputs = (Arc<ColorImage>,);
 
     const KERNEL: Option<drip::node::Kernel<Self>> = Some(|_, (), _| {
         let image = Rgb { width: 2, height: 2, scale: 1, pixels: PIXELS.to_vec() };
-        Ok((Arc::new(Rec2020Mat::from(Arc::new(image))),))
+        Ok((Arc::new(ColorImage::from(Arc::new(image))),))
     });
 }
 

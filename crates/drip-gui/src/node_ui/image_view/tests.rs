@@ -49,7 +49,12 @@ fn zoom_keeps_pointer_anchor_and_pan_stops_at_image_edges() {
 
 #[test]
 fn popup_controls_wheel_and_primary_drag_share_navigation_state() {
-    let image = Arc::new(Image { width: 1000, height: 800, scale: 2, texels: vec![] });
+    let image = Arc::new(Image::new(&Arc::new(drip::image::Rgb {
+        width: 1000,
+        height: 800,
+        scale: 2,
+        pixels: vec![[0.0; 3]; 800_000],
+    })));
     let mut h = Harness::builder()
         .with_size(vec2(500.0, 400.0))
         .with_step_dt(1.0 / 60.0)
@@ -128,7 +133,12 @@ fn popup_controls_wheel_and_primary_drag_share_navigation_state() {
 #[test]
 fn pointer_leave_stops_image_scroll_zoom() {
     for same_frame in [false, true] {
-        let image = Arc::new(Image { width: 1000, height: 800, scale: 1, texels: vec![] });
+        let image = Arc::new(Image::new(&Arc::new(drip::image::Rgb {
+            width: 1000,
+            height: 800,
+            scale: 1,
+            pixels: vec![[0.0; 3]; 800_000],
+        })));
         let mut h = Harness::builder()
             .with_size(vec2(500.0, 400.0))
             .with_step_dt(1.0 / 60.0)

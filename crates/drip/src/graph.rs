@@ -1,6 +1,11 @@
-//! The node graph, with editing operations that keep it valid: connections
-//! are type-compatible, every input has at most one source and the graph stays
-//! acyclic. The file format lives in `project`, not here.
+//! Editable topology and structural port contracts.
+//!
+//! The graph knows node declarations, parameters and named edges. An edge is
+//! valid when payload families match, even if CPU/GPU placement differs. It does
+//! not inspect samples, establish physical meaning, select transfers or retain
+//! computed values; those belong to node-local refinements and evaluation.
+//! Missing inputs are valid during editing. Mutations preserve acyclicity and
+//! at most one source per input; failed connections leave the graph unchanged.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -57,6 +62,9 @@ pub struct Graph {
     /// Input port → the output port feeding it.
     edges: BTreeMap<Port, Port>,
     next_id: u64,
+    // Removed identities must not become another node while a frontend still
+    // holds a reference. Imported sparse IDs must not exhaust the low range.
+    issued_ids: BTreeSet<NodeId>,
 }
 
 impl Graph {
@@ -87,7 +95,7 @@ impl Graph {
     }
 
     pub fn add_node(&mut self, kind: &'static NodeKind) -> NodeId {
-        let name = (1..)
+        let name = (1_u64..)
             .map(|n| if n == 1 { kind.name.to_string() } else { format!("{} {n}", kind.name) })
             .find(|name| self.find(name).is_none())
             .expect("unbounded");
@@ -102,16 +110,33 @@ impl Graph {
             external: kind.params.iter().filter(|p| p.external).map(|p| p.name).collect(),
             ui: Json::Null,
         };
-        let id = NodeId(self.next_id);
-        self.insert(id, node);
+        let id = self.allocate_id();
+        self.nodes.insert(id, node);
         id
     }
 
-    /// Adds a node built elsewhere (by the loader), keeping ids unique. The
-    /// loader rejects the largest id, so this cannot overflow.
+    /// Insert an already validated project record. The loader checks duplicate
+    /// IDs and reserves u64::MAX; its presence near that boundary does not prevent
+    /// subsequent editing from allocating unused IDs in the low range.
     pub(crate) fn insert(&mut self, id: NodeId, node: Node) {
-        self.next_id = self.next_id.max(id.0 + 1);
+        self.next_id = self.next_id.max(id.0.saturating_add(1));
+        self.issued_ids.insert(id);
         self.nodes.insert(id, node);
+    }
+
+    fn allocate_id(&mut self) -> NodeId {
+        // A graph with every non-reserved u64 identity cannot fit in memory.
+        assert!((self.issued_ids.len() as u128) < u64::MAX as u128, "node ID space exhausted");
+        loop {
+            if self.next_id == u64::MAX {
+                self.next_id = 0;
+            }
+            let id = NodeId(self.next_id);
+            self.next_id += 1;
+            if self.issued_ids.insert(id) {
+                return id;
+            }
+        }
     }
 
     pub fn remove_node(&mut self, id: NodeId) -> Option<Node> {
@@ -212,21 +237,44 @@ impl Graph {
         false
     }
 
-    /// `targets` and all their ancestors, each after its sources.
+    /// `targets` and all their ancestors, each after its sources. The explicit
+    /// DFS stack supports loaded deep graphs without consuming the Rust stack.
     pub(crate) fn upstream_order(&self, targets: &[NodeId]) -> Vec<NodeId> {
-        fn visit(graph: &Graph, id: NodeId, seen: &mut BTreeSet<NodeId>, order: &mut Vec<NodeId>) {
-            if seen.insert(id) {
-                let inputs = graph.edges.range(Port(id, String::new())..);
-                for (_, output) in inputs.take_while(|(input, _)| input.0 == id) {
-                    visit(graph, output.0, seen, order);
-                }
+        let mut seen = BTreeSet::new();
+        let mut order = Vec::new();
+        let mut stack: Vec<_> = targets.iter().rev().map(|&id| (id, false)).collect();
+        while let Some((id, expanded)) = stack.pop() {
+            if expanded {
                 order.push(id);
+            } else if seen.insert(id) {
+                stack.push((id, true));
+                let sources: Vec<_> = self
+                    .edges
+                    .range(Port(id, String::new())..)
+                    .take_while(|(input, _)| input.0 == id)
+                    .map(|(_, source)| source.0)
+                    .collect();
+                stack.extend(sources.into_iter().rev().map(|source| (source, false)));
             }
         }
-        let (mut seen, mut order) = (BTreeSet::new(), Vec::new());
-        for &id in targets {
-            visit(self, id, &mut seen, &mut order);
-        }
         order
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ordering_handles_deep_chains_and_shared_ancestors_iteratively() {
+        // Topological traversal needs only edges. Bypass interactive insertion
+        // here to isolate stack behavior from name allocation and cycle checks.
+        let mut graph = Graph::default();
+        let depth = 20_000;
+        for id in 1..depth {
+            graph.edges.insert(Port(NodeId(id), "in".into()), Port(NodeId(id - 1), "out".into()));
+        }
+        let order = graph.upstream_order(&[NodeId(depth - 1), NodeId(depth / 2)]);
+        assert_eq!(order, (0..depth).map(NodeId).collect::<Vec<_>>());
     }
 }

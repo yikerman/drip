@@ -1,60 +1,12 @@
 # Design
 
-Decisions not evident from code. Unfinished work is in [TODO](TODO.md), validation
-in [PROGRESS](PROGRESS.md).
-
-## Scope
-
-- **Decided:** The next milestone is a packaged, user-testable proof of concept.
-  Current image quality and editing workflows are accepted. Missing modules,
-  broader reference-based validation and SpyderX measurements are not blockers.
-  Prioritize installation, launch and a complete RAW-to-TIFF smoke test.
-- **Requirement:** Correct display color on Wayland, macOS and Windows. Linux is
-  the primary development platform; X11 is unsupported. A replacement GUI must
-  cover all three color paths.
-- **Decided:** Sub-300 ms latency is acceptable without further optimization.
-  The CubeCL trial lost to Rayon on latency and development effort at host-valued
-  node boundaries. Reconsider GPU execution only with whole-node measurements
-  including transfers and allocations.
-- **Decided:** Prototype project formats have no migration guarantee.
-- **Decided:** Inspector help treats Rustdoc source wraps as spaces and retains
-  paragraph breaks, so prose wraps to the sidebar width. Node metadata retains
-  the source line breaks; reflow belongs to presentation.
-
-## Distribution
-
-- **Requirement:** Minimize dependencies users must install. Native processing
-  libraries should be static; the normal Linux C/C++ runtime may remain external.
-- **Decided:** Vendor unmodified sources at release tags. Builds must not fetch
-  or update sources; source pins and licenses belong in [THIRD_PARTY](../THIRD_PARTY.md).
-- **Decided:** Use LibRaw's shared source manifest through `cc` on Windows too.
-  Its MSVC makefile lists the same sources but hardcodes compiler/runtime and
-  output choices that should remain Cargo's responsibility.
-- **Decided:** Preserve user compiler flags and target selection. Defer CPU
-  variants and OpenMP until measured gains justify their cross-platform build
-  and runtime packaging costs.
-- **Decided:** Build each distribution target natively to avoid cross-compiler,
-  SDK and native-library sysroot setup. Use the newest standard GitHub runner
-  images; this supersedes the older Ubuntu compatibility baseline.
-- **Tentative:** Linux `.tar.xz`/Flatpak, unsigned macOS `.app` bundles in ZIPs,
-  and unsigned Windows ZIPs. CI ZIPs are the initial delivery format.
-
-## Future processing contracts
-
-- **Requirement:** Sensor calibration needs matching sensor sites, CFA phase and
-  sample units. Separate decoding from black subtraction/normalization/crop, or
-  retain enough information to account for them. Spatial gains may require
-  spatial saturation/noise metadata.
-- **Requirement:** Chart calibration produces a reusable transform with a stated
-  basis, normalization, reference illumination and fit residuals. Chart and
-  subject can have different grids and exposures.
-- **Requirement:** Masks, gain fields and scalar samples have distinct contracts
-  despite shared storage. Range, broadcasting, division and geometry rules belong
-  to consumers. Index-wise blending may pair unrelated scenes; sensor calibration
-  requires sensor-site correspondence. Applying a mask after filtering differs
-  from restricting the filter's samples.
-- **Requirement:** Capture provenance and model applicability stay separate.
-  Processing must update or discard metadata whose assumptions it changes.
-- **Decided:** Multiple-frame operations consume decoded-value collections.
-  Alignment may be internal or reusable; no graph-level frame-stack abstraction
-  is needed.
+- **Decided:** wgpu/WGSL is the computational backend. Software GPU adapters are the fallback; no second production CPU kernel implementation. Host decoding, metadata and file output remain supported.
+- **Requirement:** Complete and validate the headless library first; migrate the frontend afterwards, including labels and help.
+- **Decided:** Concrete payload families parameterized by CPU/GPU placement, with domain-specific host-readable meaning. Types describe representation; runtime refinements validate coordinate, scene/model, domain and cross-input requirements. Additive color coordinates do not establish original-scene measurements.
+- **Decided:** Pure nodes declare concrete input/output payloads and placement. Local declarations generate mechanical registration and binding. Kernel docs state mathematical/physical assumptions and output guarantees.
+- **Decided:** DAG owns nodes, connections and structural validation. Eval walks requested dependencies, adapts CPU/GPU placement once per shared value, and releases intermediates after last use. No persistent DAG result cache. Source/resource caching remains explicit.
+- **Requirement:** GPU intermediates remain resident across kernels; synchronize only for actual host consumers/completion. Budget and report allocations; fail clearly when a workload cannot fit.
+- **Requirement:** Preserve working RAW processing, color management, export, project editing and presentation behavior through the rewrite. Validate real workloads, numerical outputs and invalid contracts.
+- **Decided:** RAW source caching includes normalized samples and metadata, shared across preview levels and export. Reload sources replaces that snapshot; downstream numerical outputs remain uncached.
+- **Decided:** Frontend views share one evaluation request and the renderer's device. Normal previews sample the resident FP32 buffer; ICC proofing and CPU scopes are explicit host consumers.
+- **Open:** Whole-image buffer limits, tiling and a bounded host resource cache. The current GPU budget covers compute buffers and readback staging, not all driver or display allocations.

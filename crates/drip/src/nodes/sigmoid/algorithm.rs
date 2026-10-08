@@ -12,6 +12,7 @@
 //! License: GPL-3.0-or-later; see THIRD_PARTY.md for credits and the upstream license.
 
 use crate::color::{self, D65, REC2020};
+#[cfg(test)]
 use rayon::prelude::*;
 
 pub const GREY: f32 = 0.18;
@@ -50,6 +51,15 @@ impl Sigmoid {
         }
     }
 
+    /// Parameters shared by the authoritative WGSL image kernel.
+    pub(super) fn parameters(&self) -> Vec<f32> {
+        let mut values = vec![self.film, self.paper, self.log_exposure, self.hue];
+        values.extend_from_slice(self.inset.as_flattened());
+        values.extend_from_slice(self.outset.as_flattened());
+        values
+    }
+
+    /// Scalar curve sampling for frontend plots; image processing uses WGSL.
     pub fn curve(&self, value: f32) -> f32 {
         if value <= 0.0 {
             return 0.0;
@@ -60,22 +70,26 @@ impl Sigmoid {
         (-self.paper * softplus).exp()
     }
 
+    #[cfg(test)]
     pub fn pixel(&self, input: [f32; 3]) -> [f32; 3] {
         let input = apply(&self.inset, positive(input));
         let mapped = input.map(|v| self.curve(v));
         apply(&self.outset, preserve_hue(input, mapped, self.hue))
     }
 
+    #[cfg(test)]
     pub fn process(&self, input: &[[f32; 3]]) -> Vec<[f32; 3]> {
         input.par_iter().map(|&p| self.pixel(p)).collect()
     }
 }
 
+#[cfg(test)]
 fn apply(matrix: &[[f32; 3]; 3], pixel: [f32; 3]) -> [f32; 3] {
     matrix.map(|r| r[0] * pixel[0] + r[1] * pixel[1] + r[2] * pixel[2])
 }
 
 /// Move negative channels toward the achromatic axis, preserving the average.
+#[cfg(test)]
 fn positive(pixel: [f32; 3]) -> [f32; 3] {
     // Divide before summing so finite HDR inputs do not overflow their average.
     let average = pixel.iter().map(|v| v / 3.0).sum::<f32>().max(0.0);
@@ -88,6 +102,7 @@ fn positive(pixel: [f32; 3]) -> [f32; 3] {
     pixel.map(|v| ((1.0 - saturation) * average + saturation * v).max(0.0))
 }
 
+#[cfg(test)]
 fn preserve_hue(input: [f32; 3], mapped: [f32; 3], hue: f32) -> [f32; 3] {
     let mut order = [0, 1, 2];
     order.sort_by(|&a, &b| input[a].total_cmp(&input[b]));

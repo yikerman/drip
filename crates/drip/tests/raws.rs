@@ -1,16 +1,21 @@
 //! The pipeline on a real raw.
 
-use drip::image::{CameraRgb, Mosaic, Rec2020Mat};
-use drip::ports::Read;
+use drip::compute::Compute;
+use drip::image::{ColorImage, Gpu, Mosaic};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
-use drip::eval::{Evaluator, run_action};
+use drip::eval::{Evaluator, NodeError};
 use drip::graph::{NodeId, Port};
 use drip::nodes;
 use drip::project::Project;
 use lcms2::Profile;
 use serde_json::json;
+
+fn compute() -> Arc<Compute> {
+    static COMPUTE: OnceLock<Arc<Compute>> = OnceLock::new();
+    COMPUTE.get_or_init(|| Compute::new().expect("hardware or software adapter required")).clone()
+}
 
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw/sony-ilce-7rm3.arw")
@@ -43,13 +48,13 @@ fn pipeline(raw: &Path, tail: &[&'static drip::node::NodeKind]) -> (Project, Vec
 fn pipeline_matches_libraw() {
     let path = fixture();
     let (p, ids) = pipeline(&path, &[]);
-    let mut ev = Evaluator::default();
+    let mut ev = Evaluator::with_compute(compute());
     ev.evaluate(&p.graph, 0, &[ids[3]]);
-    let ours = ev.result(ids[3]).unwrap().as_ref().unwrap()[0]
-        .borrow::<Read<Rec2020Mat>>()
-        .unwrap()
-        .rgb()
-        .clone();
+    let resident =
+        ev.result(ids[3]).unwrap().as_ref().unwrap()[0].downcast_ref::<ColorImage<Gpu>>().unwrap();
+    let downloaded = resident.download(&compute()).unwrap();
+    let ours = downloaded.rgb();
+    assert!(ev.result(ids[0]).is_none(), "unrequested intermediates are retired");
     let (width, _, reference) = drip_raw::reference(&path).unwrap();
 
     // LibRaw scales by 65535 and normalizes white balance to its smallest
@@ -94,7 +99,7 @@ fn exports_a_tiff_from_a_raw() {
     p.graph.set_param(export, "path", json!(out)).unwrap();
     p.graph.set_param(export, "profile", json!("file")).unwrap();
     p.graph.set_param(export, "profile_file", json!(profile)).unwrap();
-    run_action(&p.graph, export, "export").unwrap();
+    Evaluator::with_compute(compute()).run_action(&p.graph, export, "export").unwrap();
 
     let raw = drip_raw::decode(&fixture()).unwrap();
     let mut decoder = tiff::decoder::Decoder::new(std::fs::File::open(&out).unwrap()).unwrap();
@@ -125,21 +130,28 @@ fn built_in_template_takes_the_raw_and_output_paths() {
     std::fs::copy(fixture(), &path).unwrap();
     p.graph.set_param(raw, "path", json!(path)).unwrap();
     let preview = p.graph.find("Preview").unwrap();
-    let mut ev = Evaluator::default();
+    let mut ev = Evaluator::with_compute(compute());
     ev.evaluate(&p.graph, 3, &[preview]);
+    assert_eq!(ev.evaluation().unwrap().failures().count(), 0);
+    assert!(ev.result(raw).is_none(), "preview does not retain RAW outputs");
     // Later levels and export forks must work entirely from decoded data.
     std::fs::remove_file(&path).unwrap();
     let scale = ev
-        .with_inputs(&p.graph, preview, 3, &nodes::PREVIEW, |_, (image,), _| Ok(image.rgb().scale))
+        .with_inputs(&p.graph, preview, 3, &nodes::PREVIEW, |_, (image,), _| Ok(image.scale()))
         .unwrap();
     assert_eq!(scale, 8, "RCD preserves the requested scale");
 
+    ev.evaluate(&p.graph, 3, &[raw]);
     let cached = ev.result(raw).unwrap().as_ref().unwrap()[0].downcast::<Mosaic>().unwrap();
     let previous = Arc::downgrade(&cached);
     let expected = cached.samples().to_vec();
     drop(cached);
     ev.evaluate(&p.graph, 2, &[raw]);
-    assert!(previous.upgrade().is_none(), "old normalized levels are not retained");
+    let next = ev.result(raw).unwrap().as_ref().unwrap()[0].downcast::<Mosaic>().unwrap();
+    assert!(
+        Arc::ptr_eq(&previous.upgrade().unwrap(), &next),
+        "RAW normalization is source-cached independently of preview scale"
+    );
     ev.evaluate(&p.graph, 3, &[raw]);
     assert_eq!(
         expected,
@@ -168,13 +180,9 @@ fn built_in_template_takes_the_raw_and_output_paths() {
     );
     let demosaic = p.graph.find("Demosaic").unwrap();
     ev.evaluate(&p.graph, 31, &[demosaic]);
-    let smallest = ev.result(demosaic).unwrap().as_ref().unwrap()[0]
-        .borrow::<Read<CameraRgb>>()
-        .unwrap()
-        .rgb()
-        .clone();
-    assert!(smallest.pixels.is_empty());
-    assert_eq!(smallest.scale, 1 << 31);
+    assert!(matches!(ev.result(demosaic), Some(Err(NodeError::Failed(message)))
+        if message.contains("resolution level")));
+    ev.evaluate(&p.graph, 0, &[raw]);
     let sensor = ev.result(raw).unwrap().as_ref().unwrap()[0].downcast_ref::<Mosaic>().unwrap();
     assert_eq!(sensor.scale, 1, "sensor processing precedes preview reduction");
 }

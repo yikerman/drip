@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use drip::image::{Rec2020Mat, Rgb};
+use drip::image::{ColorImage, Gpu, Rgb};
 use drip::node::{EvalContext, KernelError};
 use drip::nodes::preview::{Mode, Preview};
 use drip::profile;
@@ -21,20 +21,27 @@ mod view;
 
 pub fn prepare(
     p: Preview,
-    (image,): (&Rec2020Mat,),
+    (image,): (&ColorImage<Gpu>,),
     ctx: &EvalContext<'_>,
 ) -> Result<PreviewImage, KernelError> {
-    let input = image.rgb();
-    let output = || profile::Output::load(&p.output, ctx.resources());
-    let pixels = match p.mode {
-        Mode::None => None,
-        Mode::Softproof => Some(softproof(&output()?, &input.pixels)?),
-        Mode::Gamutcheck => Some(gamutcheck(&output()?, &input.pixels)?),
-    };
-    let mut view = match pixels {
-        None => PreviewImage::new(image),
-        Some(pixels) => {
-            let proof = Rec2020Mat::from(Arc::new(Rgb { pixels, ..**input }));
+    image.require_additive_color()?;
+    ctx.compute()?.check_buffer(image.gpu_buffer())?;
+    let mut view = match p.mode {
+        Mode::None => PreviewImage::resident(image),
+        Mode::Softproof | Mode::Gamutcheck => {
+            let output = profile::Output::load(&p.output, ctx.resources())?;
+            // LittleCMS owns the proofing algorithm; this explicit host boundary
+            // is limited to the selected proof mode, never the normal preview.
+            let host = image.download(ctx.compute()?)?;
+            let pixels = match p.mode {
+                Mode::Softproof => softproof(&output, &host.pixels)?,
+                Mode::Gamutcheck => gamutcheck(&output, &host.pixels)?,
+                Mode::None => unreachable!(),
+            };
+            let proof = ColorImage::try_new(
+                Arc::new(Rgb { pixels, ..**host.rgb() }),
+                image.interpretation().after_rendering(),
+            )?;
             PreviewImage::new(&proof)
         }
     };

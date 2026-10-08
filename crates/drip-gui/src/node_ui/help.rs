@@ -1,5 +1,4 @@
-//! Inspector help: the node's documentation, then its port
-//! declared concrete port contracts.
+//! Inspector help: node-local assumptions, followed by payloads and placement.
 
 use super::ports;
 use drip::graph::{Graph, NodeId};
@@ -16,12 +15,7 @@ pub fn show(ui: &mut Ui, graph: &Graph, id: NodeId) {
     egui::Grid::new(("node help", id)).num_columns(2).show(ui, |ui| {
         for port in ports::texts(graph, id) {
             ui.weak(format!("{} {}", port.role.label(), port.port));
-            ui.label(port.label);
-            ui.end_row();
-        }
-        for check in kind.checks() {
-            ui.weak("requires at evaluation");
-            ui.label(check);
+            ui.label(port.contract());
             ui.end_row();
         }
     });

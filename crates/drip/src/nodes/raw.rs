@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use drip_raw::Raw;
 
-use crate::color::{self, D65, REC2020};
 use crate::image::{Camera, Cfa, Mosaic, RawMetadata};
 use crate::node::{EvalContext, KernelError};
 use crate::param::ParamKind;
@@ -18,21 +17,29 @@ pub struct RawSource {
 
 /// Decode a Bayer RAW, subtract its black levels and normalize using sensor saturation.
 ///
-/// Camera characterization and as-shot white balance remain attached to the mosaic.
+/// Output is a CPU Mosaic in black-subtracted sensor response coordinates;
+/// clipping references and as-shot gains remain attached. A missing or singular
+/// color characterization does not prevent sensor-domain processing.
 /// RAW metadata is also available as a separate output.
 #[crate::node(kind = READ, id = "raw.read", category = "raw", name = "RAW", outputs = ["mosaic", "metadata"])]
 fn read(
-    p: RawSource,
-    (): (),
-    ctx: &EvalContext<'_>,
+    #[params] p: RawSource,
+    #[context] ctx: &EvalContext<'_>,
 ) -> Result<(Arc<Mosaic>, Arc<RawMetadata>), KernelError> {
     let path = p.path.as_deref().ok_or(KernelError::Incomplete("no raw file chosen"))?;
-    let raw = ctx.resources().load(path, |path| {
-        drip_raw::decode(path).map_err(|e| format!("{}: {e}", path.display()))
+    let source = ctx.resources().load(path, |path| {
+        let raw = drip_raw::decode(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok(Source { mosaic: Arc::new(normalize(&raw)?), metadata: Arc::new(raw.metadata) })
     })?;
-    let mosaic = normalize(&raw)?;
-    let outputs = (Arc::new(mosaic), Arc::new(raw.metadata.clone()));
-    Ok(outputs)
+    Ok((source.mosaic.clone(), source.metadata.clone()))
+}
+
+// The source snapshot owns normalization too: parameter edits downstream must
+// not rescan the RAW on the CPU. Reloading resources replaces this snapshot;
+// preview scale belongs to demosaic and does not create more source copies.
+struct Source {
+    mosaic: Arc<Mosaic>,
+    metadata: Arc<RawMetadata>,
 }
 
 /// Subtracts black and scales sensor saturation to 1, cropping partial Bayer
@@ -46,6 +53,17 @@ fn read(
 ///
 /// \[1\] LibRaw, `adjust_bl()` and `subtract_black_internal()`, LibRaw 0.22.
 pub fn normalize(raw: &Raw) -> Result<Mosaic, String> {
+    if raw.width < 2 || raw.height < 2 || raw.width.checked_mul(raw.height) != Some(raw.data.len())
+    {
+        return Err("raw dimensions do not describe complete Bayer data".into());
+    }
+    let colors: Vec<_> = raw.cfa.iter().flatten().map(|&c| if c == 3 { 1 } else { c }).collect();
+    if !matches!(colors.as_slice(), [0, 1, 1, 2] | [1, 0, 2, 1] | [1, 2, 0, 1] | [2, 1, 1, 0]) {
+        return Err("a 2 × 2 Bayer pattern is required".into());
+    }
+    if raw.pattern.height.checked_mul(raw.pattern.width) != Some(raw.pattern.values.len()) {
+        return Err("black pattern dimensions do not match its values".into());
+    }
     // Like LibRaw, use the first green's multiplier when the second has none.
     let g2 = if raw.as_shot[3] > 0.0 { raw.as_shot[3] } else { raw.as_shot[1] };
     let white_balance =
@@ -53,14 +71,11 @@ pub fn normalize(raw: &Raw) -> Result<Mosaic, String> {
     if !white_balance.iter().all(|m| m.is_finite() && *m > 0.0) {
         return Err("the raw has no usable as-shot white balance".into());
     }
-    if color::camera_to_rgb(&color::to_f64(&raw.xyz_to_cam), &color::rgb_to_xyz(REC2020, D65))
-        .is_none()
-    {
-        return Err("the camera's color matrix is missing or singular".into());
-    }
 
     let black = |row: usize, col: usize| {
-        raw.black + raw.channel_black[raw.cfa[row % 2][col % 2] as usize] + raw.pattern.at(row, col)
+        u64::from(raw.black)
+            + u64::from(raw.channel_black[raw.cfa[row % 2][col % 2] as usize])
+            + u64::from(raw.pattern.at(row, col))
     };
     let small_pattern =
         (1..=2).contains(&raw.pattern.height) && (1..=2).contains(&raw.pattern.width);
@@ -69,14 +84,14 @@ pub fn normalize(raw: &Raw) -> Result<Mosaic, String> {
         // first, so the common part is the smallest black of one Bayer cell.
         (0..4).map(|i| black(i / 2, i % 2)).min().expect("4 sites")
     } else {
-        raw.black
-            + raw.channel_black.iter().min().expect("4 channels")
-            + raw.pattern.values.iter().min().copied().unwrap_or(0)
+        u64::from(raw.black)
+            + u64::from(*raw.channel_black.iter().min().expect("4 channels"))
+            + u64::from(raw.pattern.values.iter().min().copied().unwrap_or(0))
     };
-    if raw.maximum <= common {
+    if u64::from(raw.maximum) <= common {
         return Err(format!("saturation {} is not above black {common}", raw.maximum));
     }
-    let gain = 1.0 / (raw.maximum - common) as f32;
+    let gain = 1.0 / (u64::from(raw.maximum) - common) as f32;
 
     let (width, height) = (raw.width / 2 * 2, raw.height / 2 * 2);
     let mut data = Vec::with_capacity(width * height);
@@ -99,8 +114,9 @@ pub fn normalize(raw: &Raw) -> Result<Mosaic, String> {
     }
     let cfa = Cfa { size: 2, colors: raw.cfa.concat() };
     let camera = Arc::new(Camera { xyz_to_cam: raw.xyz_to_cam, white_balance });
-    Ok(Mosaic::new(
+    Mosaic::try_new(
         Arc::new(crate::image::RawMat::from_samples(width, height, 1, data)),
         crate::image::SensorMosaic { cfa, white, camera },
-    ))
+    )
+    .map_err(|error| error.to_string())
 }

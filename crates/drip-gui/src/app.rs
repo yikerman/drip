@@ -49,6 +49,7 @@ struct Status {
 
 impl App {
     pub fn new(
+        compute: std::sync::Arc<drip::compute::Compute>,
         file: Option<PathBuf>,
         wide_gamut: bool,
         wake: impl Fn() + Send + Sync + 'static,
@@ -56,7 +57,7 @@ impl App {
         let mut app = App {
             project: templates::raw_to_tiff(),
             registry: nodes::registry(),
-            worker: Worker::new(wake),
+            worker: Worker::new(compute, wake),
             dirty: true,
             file: None,
             selected: None,
@@ -245,8 +246,8 @@ impl App {
             if ui.button("Save template…").clicked() {
                 self.save_as(true);
             }
-            if ui.button("Invalidate cache").clicked() {
-                self.invalidate_cache();
+            if ui.button("Reload sources").clicked() {
+                self.reload_sources();
             }
             ui.separator();
             let label = |level| {
@@ -352,10 +353,10 @@ impl App {
         saved
     }
 
-    fn invalidate_cache(&mut self) {
+    fn reload_sources(&mut self) {
         self.dirty = true;
         let result = self.worker.invalidate();
-        self.report(result.map(|()| "invalidating cache…".into()));
+        self.report(result.map(|()| "reloading sources…".into()));
     }
 
     /// The evaluator-owning worker snapshots resources in command order.
@@ -375,8 +376,8 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use drip::image::Rec2020Mat;
-    use drip::node::{EvalContext, KernelError, NodeDeclaration};
+    use drip::image::ColorImage;
+    use drip::node::{KernelError, NodeDeclaration};
 
     use crate::node_ui::{preview::PreviewImage, scopes::Histogram};
 
@@ -388,13 +389,22 @@ mod tests {
 
     use super::*;
 
+    fn compute() -> std::sync::Arc<drip::compute::Compute> {
+        static COMPUTE: std::sync::OnceLock<std::sync::Arc<drip::compute::Compute>> =
+            std::sync::OnceLock::new();
+        COMPUTE.get_or_init(|| drip::compute::Compute::new().expect("test adapter")).clone()
+    }
+
     #[test]
     fn detail_dropdown_scroll_updates_the_project_and_stops_at_ends() {
         let mut h = Harness::builder()
             .with_size(egui::vec2(1600.0, 100.0))
             .with_step_dt(1.0 / 60.0)
             .with_max_steps(100)
-            .build_ui_state(|ui, app: &mut App| app.menu(ui), App::new(None, true, || {}));
+            .build_ui_state(
+                |ui, app: &mut App| app.menu(ui),
+                App::new(compute(), None, true, || {}),
+            );
         let pos = h.get_by_label("Preview detail").rect().center();
         for (delta, level) in [(-1.0, 2), (1.0, 1), (10.0, 0), (-20.0, MAX_LEVEL)] {
             h.state_mut().dirty = false;
@@ -463,7 +473,7 @@ mod tests {
 
     #[test]
     fn shared_edits_redraw_windows_without_evaluating_presentation_changes() {
-        let mut h = harness(App::new(None, true, || {}));
+        let mut h = harness(App::new(compute(), None, true, || {}));
         settle(&mut h);
         let app = h.state_mut();
         let id = app.project.graph.find("Sigmoid").unwrap();
@@ -505,7 +515,7 @@ mod tests {
     #[test]
     fn previews_use_the_selected_global_detail() {
         let file = fixture_project("open");
-        let mut h = harness(App::new(Some(file.clone()), true, || {}));
+        let mut h = harness(App::new(compute(), Some(file.clone()), true, || {}));
         settle(&mut h);
         let app = h.state();
         assert!(app.file.as_ref() == Some(&file));
@@ -527,7 +537,7 @@ mod tests {
             .clone();
         assert_eq!(app.level, DEFAULT_LEVEL);
         assert_eq!(image.width, 3984, "1/2 preview with full-size RCD");
-        h.get_by_label("Invalidate cache").click();
+        h.get_by_label("Reload sources").click();
         settle(&mut h);
         let refreshed = &h
             .state()
@@ -542,7 +552,10 @@ mod tests {
             .unwrap()
             .image;
         assert!(!std::sync::Arc::ptr_eq(&image, refreshed));
-        assert_eq!(image.texels, refreshed.texels);
+        assert_eq!(
+            image.readback(&compute()).unwrap().pixels,
+            refreshed.readback(&compute()).unwrap().pixels
+        );
         h.get_by_label("Preview detail").click();
         settle(&mut h);
         h.get_by_label("1/4").click();
@@ -583,7 +596,7 @@ mod tests {
         assert!(image.upgrade().is_some(), "resizing preserves the evaluated image");
         h.get_by_label("Save").click();
         settle(&mut h);
-        let restored = App::new(Some(file.clone()), true, || {});
+        let restored = App::new(compute(), Some(file.clone()), true, || {});
         assert_eq!(restored.level, 2);
         assert!(!restored.status.unwrap().error);
 
@@ -596,14 +609,14 @@ mod tests {
 
     #[test]
     fn evaluation_is_independent_of_node_positions() {
-        use drip::node::NodeKind;
+        use drip::node::TypedNode;
 
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         static CALLS: AtomicUsize = AtomicUsize::new(0);
-        static NODE: NodeKind =
-            NodeKind::new::<OffscreenKernel>("test.offscreen", "test", "offscreen", &[], &[]);
+        static NODE: TypedNode<OffscreenKernel> =
+            TypedNode::new("test.offscreen", "test", "offscreen", &[], &[]);
         #[derive(drip::Parameters)]
         struct OffscreenKernel {
             #[param(ParamKind::Bool { default: false })]
@@ -614,12 +627,22 @@ mod tests {
             type Inputs = ();
             type Outputs = ();
 
-            const KERNEL: Option<drip::node::Kernel<Self>> =
-                Some(|Self { value: _value }: Self::Parameters, (): (), _: &EvalContext<'_>| {
-                    CALLS.fetch_add(1, Ordering::SeqCst);
-                    Ok(())
-                });
+            const KERNEL: Option<drip::node::Kernel<Self>> = None;
         }
+
+        struct OffscreenGui;
+        impl crate::node_ui::GuiNode for OffscreenGui {
+            type Node = OffscreenKernel;
+            type Presentation = ();
+            const NODE: &'static TypedNode<Self::Node> = &NODE;
+            const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|p, (), _| {
+                let _ = p.value;
+                CALLS.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            });
+        }
+        #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
+        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<OffscreenGui>();
 
         let mut project = Project::default();
         let left = project.graph.add_node(&NODE);
@@ -629,7 +652,7 @@ mod tests {
         }
         let completions = Arc::new(AtomicUsize::new(0));
         let wake = completions.clone();
-        let mut app = App::new(None, true, move || {
+        let mut app = App::new(compute(), None, true, move || {
             wake.fetch_add(1, Ordering::SeqCst);
         });
         app.set_project(project, None).unwrap();
@@ -641,7 +664,7 @@ mod tests {
 
         set_param(&mut h, left, "value", json!(true));
         settle(&mut h);
-        assert_eq!(CALLS.load(Ordering::SeqCst), 3, "off-screen edits are evaluated");
+        assert_eq!(CALLS.load(Ordering::SeqCst), 4, "off-screen edits are evaluated");
         let before = completions.load(Ordering::SeqCst);
         h.state_mut().project.graph.set_ui(left, json!({"pos": [0, 0]})).unwrap();
         settle(&mut h);
@@ -679,7 +702,7 @@ mod tests {
                     started.send(()).unwrap();
                     release.recv_timeout(Duration::from_secs(5)).unwrap();
                 }
-                Ok(PreviewImage::new(&Rec2020Mat::from(Arc::new(Rgb {
+                Ok(PreviewImage::new(&ColorImage::from(Arc::new(Rgb {
                     width: 1,
                     height: 1,
                     scale: 1,
@@ -695,7 +718,7 @@ mod tests {
         *GATE.lock().unwrap() = Some((started, resume));
         let mut project = Project::default();
         let id = project.graph.add_node(&SLOW);
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(compute(), None, true, || {});
         app.set_project(project, None).unwrap();
         let mut h = harness(app);
         settle(&mut h);
@@ -743,7 +766,7 @@ mod tests {
 
     #[test]
     fn invalid_detail_does_not_replace_the_open_project() {
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(compute(), None, true, || {});
         let original = app.project.clone();
         for value in [json!(-1), json!(9), json!(256), json!(2.5), json!("2"), json!(null)] {
             let mut project = templates::raw_to_tiff();
@@ -756,24 +779,24 @@ mod tests {
 
     #[test]
     fn reports_unreadable_projects() {
-        let mut h = harness(App::new(Some("/nonexistent.drip".into()), true, || {}));
+        let mut h = harness(App::new(compute(), Some("/nonexistent.drip".into()), true, || {}));
         h.run();
         assert!(h.state().status.as_ref().is_some_and(|s| s.error));
     }
 
     #[test]
     fn warns_when_previews_are_clipped() {
-        let mut h = harness(App::new(None, false, || {}));
+        let mut h = harness(App::new(compute(), None, false, || {}));
         h.run();
         assert!(h.query_by_label("previews clipped to sRGB").is_some());
-        let mut h = harness(App::new(None, true, || {}));
+        let mut h = harness(App::new(compute(), None, true, || {}));
         h.run();
         assert!(h.query_by_label("previews clipped to sRGB").is_none());
     }
 
     #[test]
     fn inspector_shows_the_selected_node_and_the_inputs() {
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(compute(), None, true, || {});
         app.selected = app.project.graph.find("Export");
         let mut h = harness(app);
         h.run();
@@ -786,19 +809,21 @@ mod tests {
 
     #[test]
     fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
-        let documentation = "Creative S-curve on Rec.2020 RGB.\n\n\
-            Assumes middle grey at 0.18 and keeps it fixed. Black is 0 and the curve approaches 1. \
-            The output is interpreted as linear Rec.2020 for further processing; additional \
-            input guarantees are dropped. Preview and export do not require tone mapping.";
-        let mut app = App::new(None, true, || {});
+        let documentation = nodes::SIGMOID
+            .documentation
+            .split("\n\n")
+            .map(|p| p.replace('\n', " "))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let mut app = App::new(compute(), None, true, || {});
         let id = app.project.graph.find("Sigmoid").unwrap();
         app.selected = Some(id);
         let mut h = harness(app);
         h.run();
         let kind = h.get_by_label("tone.sigmoid").rect();
-        let description = h.get_by_label(documentation).rect();
-        let input = h.get_all_by_label("Rec.2020 RGB").next().unwrap().rect();
-        let output = h.get_all_by_label("Rec.2020 RGB").nth(1).unwrap().rect();
+        let description = h.get_by_label(&documentation).rect();
+        let input = h.get_all_by_label("Color image (GPU)").next().unwrap().rect();
+        let output = h.get_all_by_label("Color image (GPU)").nth(1).unwrap().rect();
         let control = h.get_by_label("contrast").rect();
         assert!(h.query_by_label("darktable: sigmoid").is_some());
         assert!(kind.bottom() <= description.top());
@@ -809,25 +834,25 @@ mod tests {
         let popped = Popped { node: id, part: node_ui::Part::Parameters };
         let mut popup = Harness::builder().with_size(egui::vec2(360.0, 320.0)).build_ui_state(
             move |ui, app: &mut App| app.window(ui, popped),
-            App::new(None, true, || {}),
+            App::new(compute(), None, true, || {}),
         );
         popup.run();
         assert!(popup.query_by_label("tone.sigmoid").is_some());
         assert!(popup.query_by_label("contrast").is_some());
-        assert!(popup.query_by_label("Rec.2020 RGB").is_none());
+        assert!(popup.query_by_label("Color image (GPU)").is_none());
         assert!(popup.query_by_label("darktable: sigmoid").is_none());
-        assert!(popup.query_by_label(documentation).is_none());
+        assert!(popup.query_by_label(&documentation).is_none());
     }
 
     #[test]
     fn nodes_without_controls_show_documentation_and_references() {
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(compute(), None, true, || {});
         app.selected = app.project.graph.find("Demosaic");
         let mut h = harness(app);
         h.run();
         let kind = h.get_by_label("demosaic.rcd").rect();
-        let input = h.get_by_label("Sensor mosaic").rect();
-        let output = h.get_by_label("Camera RGB").rect();
+        let input = h.get_by_label("Sensor mosaic (GPU)").rect();
+        let output = h.get_by_label("Camera RGB (GPU)").rect();
         let reference = h.get_by_label("RCD algorithm").rect();
         assert!(kind.bottom() <= input.top());
         assert!(input.bottom() <= output.top());
@@ -836,7 +861,7 @@ mod tests {
 
     #[test]
     fn undocumented_nodes_show_generated_port_help() {
-        use drip::image::Rec2020Mat;
+        use drip::image::ColorImage;
         use drip::node::NodeKind;
         use drip::ports::Read;
         use std::sync::Arc;
@@ -845,22 +870,22 @@ mod tests {
         struct Generic;
         impl NodeDeclaration for Generic {
             type Parameters = ();
-            type Inputs = (Read<Rec2020Mat>,);
-            type Outputs = (Arc<Rec2020Mat>,);
+            type Inputs = (Read<ColorImage>,);
+            type Outputs = (Arc<ColorImage>,);
             const KERNEL: Option<drip::node::Kernel<Self>> =
                 Some(|_, (image,), _| Ok((Arc::new(image.clone()),)));
         }
 
         let mut project = Project::default();
         let id = project.graph.add_node(&GENERIC);
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(compute(), None, true, || {});
         app.set_project(project, None).unwrap();
         app.selected = Some(id);
         let mut h = harness(app);
         h.run();
         let kind = h.get_by_label("test.generic").rect();
-        let input = h.get_all_by_label("Rec.2020 RGB").next().unwrap().rect();
-        let output = h.get_all_by_label("Rec.2020 RGB").nth(1).unwrap().rect();
+        let input = h.get_all_by_label("Color image (CPU)").next().unwrap().rect();
+        let output = h.get_all_by_label("Color image (CPU)").nth(1).unwrap().rect();
         assert!(kind.bottom() <= input.top() && input.bottom() <= output.top());
         assert!(h.query_by_label("pending").is_none());
     }
@@ -868,7 +893,7 @@ mod tests {
     #[test]
     fn nodes_with_parameters_and_views_pop_them_out() {
         use crate::node_ui::Part;
-        let mut h = harness(App::new(None, true, || {}));
+        let mut h = harness(App::new(compute(), None, true, || {}));
         h.run();
         let graph = &h.state().project.graph;
         let histogram = graph.find("Histogram").unwrap();
@@ -912,7 +937,7 @@ mod tests {
         for kind in [nodes::WAVEFORM.kind(), nodes::VECTORSCOPE.kind()] {
             let mut project = Project::default();
             let id = project.graph.add_node(kind);
-            let mut app = App::new(None, true, || {});
+            let mut app = App::new(compute(), None, true, || {});
             app.set_project(project, None).unwrap();
             let mut h = harness(app);
             h.run();
@@ -928,7 +953,7 @@ mod tests {
     #[test]
     fn declared_gui_view_gets_a_popout_before_preparation_succeeds() {
         #[drip::node(kind = VIEW, id = "test.declared_view", category = "test", name = "Declared view", outputs = [])]
-        fn view(_: (), (): (), _: &EvalContext<'_>) -> Result<(), KernelError>;
+        fn view() -> Result<(), KernelError>;
         struct TestGui;
         impl crate::node_ui::GuiNode for TestGui {
             type Node = ViewNode;
@@ -941,7 +966,7 @@ mod tests {
         static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<TestGui>();
         let mut project = Project::default();
         let id = project.graph.add_node(&VIEW);
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(compute(), None, true, || {});
         app.set_project(project, None).unwrap();
         let mut h = harness(app);
         h.run();
@@ -961,7 +986,7 @@ mod tests {
             enabled: bool,
         }
         #[drip::node(kind = VIEW, id = "test.custom_controls_view", category = "test", name = "Custom controls view", outputs = [])]
-        fn view(_: Settings, (): (), _: &EvalContext<'_>) -> Result<(), KernelError>;
+        fn view(#[params] settings: Settings) -> Result<(), KernelError>;
         fn controls(
             ui: &mut egui::Ui,
             cx: &mut crate::node_ui::ControlCx<'_, '_, '_, '_, ViewNode>,
@@ -988,7 +1013,7 @@ mod tests {
         static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<TestGui>();
         let mut project = Project::default();
         let id = project.graph.add_node(&VIEW);
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(compute(), None, true, || {});
         app.set_project(project, None).unwrap();
         app.selected = Some(id);
         let mut h = harness(app);
@@ -1019,7 +1044,7 @@ mod tests {
                 &["contrast", "skew", "preserve_hue", "−8 … +8 EV relative to middle grey"][..],
             ),
         ] {
-            let mut app = App::new(None, true, || {});
+            let mut app = App::new(compute(), None, true, || {});
             let id = app.project.graph.find(name).unwrap();
             let popped = Popped { node: id, part: crate::node_ui::Part::Parameters };
             app.popped.insert(popped);
@@ -1044,7 +1069,7 @@ mod tests {
 
     #[test]
     fn empty_canvas_above_the_nodes_takes_clicks() {
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(compute(), None, true, || {});
         app.selected = app.project.graph.find("Export");
         let mut h = harness(app);
         h.run();

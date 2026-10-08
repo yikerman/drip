@@ -1,10 +1,11 @@
 //! Files loaded once per resource store, shared by preview and export.
 //! Replacing the store invalidates its contents without affecting existing readers.
 
+use crate::compute::Compute;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 type Loaded = HashMap<TypeId, Arc<dyn Any + Send + Sync>>;
 type Files = HashMap<PathBuf, Arc<Mutex<Loaded>>>;
@@ -12,9 +13,26 @@ type Files = HashMap<PathBuf, Arc<Mutex<Loaded>>>;
 #[derive(Clone, Default)]
 pub struct Resources {
     files: Arc<Mutex<Files>>,
+    compute: Arc<OnceLock<Result<Arc<Compute>, String>>>,
 }
 
 impl Resources {
+    /// Share a known device with numerical evaluation and resident presentation.
+    pub fn with_compute(compute: Arc<Compute>) -> Self {
+        let slot = OnceLock::new();
+        let _ = slot.set(Ok(compute));
+        Self { files: Default::default(), compute: Arc::new(slot) }
+    }
+
+    /// CPU-only graphs do not initialize a device. All forks share one queue.
+    pub fn compute(&self) -> Result<&Compute, String> {
+        self.compute
+            .get_or_init(|| Compute::new().map_err(|e| e.to_string()))
+            .as_ref()
+            .map(Arc::as_ref)
+            .map_err(Clone::clone)
+    }
+
     /// Computes a value once per path and type. Failures are retried.
     pub fn load<T: Any + Send + Sync>(
         &self,

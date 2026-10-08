@@ -7,6 +7,9 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+bytemuck = "1"
+pollster = "1.0.1"
+wgpu = "30"
 drip-macros = { path = "../drip-macros" }
 linkme = "0.3.37"
 drip-raw.workspace = true

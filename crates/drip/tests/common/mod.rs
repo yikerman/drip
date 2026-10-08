@@ -1,12 +1,13 @@
 //! Toy node kinds for exercising the graph engine without real image processing.
 #![allow(dead_code)]
 
-use drip::image::{Interpretation, RealMat, Rec2020Mat};
+use drip::image::{ColorImage, Interpretation, RealMat};
 
 #[derive(Debug, Default)]
 pub struct TaggedRec2020;
 impl Interpretation for TaggedRec2020 {
     const NAME: &'static str = "Test tagged RGB";
+    const CHANNELS: usize = 3;
 }
 pub type TaggedMat = RealMat<3, TaggedRec2020>;
 
@@ -23,12 +24,12 @@ use drip::param::ParamKind;
 use drip::project::Project;
 use drip::value::Value;
 
-pub fn scene(pixel: [f32; 3]) -> Arc<Rec2020Mat> {
-    Arc::new(Rec2020Mat::from(Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![pixel] })))
+pub fn scene(pixel: [f32; 3]) -> Arc<ColorImage> {
+    Arc::new(ColorImage::from(Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![pixel] })))
 }
 
 pub fn pixel(value: &Value) -> [f32; 3] {
-    match value.borrow::<ReadEither<Rec2020Mat, TaggedMat>>().unwrap() {
+    match value.borrow::<ReadEither<ColorImage, TaggedMat>>().unwrap() {
         Either::First(image) => image.rgb().pixels[0],
         Either::Second(image) => image.rgb().pixels[0],
     }
@@ -45,7 +46,7 @@ struct ConstKernel {
 impl NodeDeclaration for ConstKernel {
     type Parameters = Self;
     type Inputs = ();
-    type Outputs = (Arc<Rec2020Mat>,);
+    type Outputs = (Arc<ColorImage>,);
 
     const KERNEL: Option<drip::node::Kernel<Self>> =
         Some(|p, (), ctx| Ok((scene([p.value, ctx.scale() as f32, 0.0]),)));
@@ -56,8 +57,8 @@ pub static ADD: NodeKind =
 struct AddKernel;
 impl NodeDeclaration for AddKernel {
     type Parameters = ();
-    type Inputs = (Read<Rec2020Mat>, Read<Rec2020Mat>);
-    type Outputs = (Arc<Rec2020Mat>,);
+    type Inputs = (Read<ColorImage>, Read<ColorImage>);
+    type Outputs = (Arc<ColorImage>,);
 
     const KERNEL: Option<drip::node::Kernel<Self>> = Some(|_, (input0, input1), _| {
         let (a, b) = (input0.rgb().pixels[0], input1.rgb().pixels[0]);
@@ -71,7 +72,7 @@ pub static TONEMAP: NodeKind =
 struct TonemapKernel;
 impl NodeDeclaration for TonemapKernel {
     type Parameters = ();
-    type Inputs = (Read<Rec2020Mat>,);
+    type Inputs = (Read<ColorImage>,);
     type Outputs = (Arc<TaggedMat>,);
 
     const KERNEL: Option<drip::node::Kernel<Self>> =
@@ -83,8 +84,8 @@ pub static FAIL: NodeKind =
 struct FailKernel;
 impl NodeDeclaration for FailKernel {
     type Parameters = ();
-    type Inputs = (Read<Rec2020Mat>,);
-    type Outputs = (Arc<Rec2020Mat>,);
+    type Inputs = (Read<ColorImage>,);
+    type Outputs = (Arc<ColorImage>,);
 
     const KERNEL: Option<drip::node::Kernel<Self>> = Some(|_, _, _| Err("boom".into()));
 }
@@ -95,7 +96,7 @@ pub static VIEW: drip::node::TypedNode<ViewKernel> =
 pub struct ViewKernel;
 impl NodeDeclaration for ViewKernel {
     type Parameters = ();
-    type Inputs = (ReadEither<Rec2020Mat, TaggedMat>,);
+    type Inputs = (ReadEither<ColorImage, TaggedMat>,);
     type Outputs = ();
 }
 
@@ -132,8 +133,8 @@ struct GainKernel {
 }
 impl NodeDeclaration for GainKernel {
     type Parameters = Self;
-    type Inputs = (Read<Rec2020Mat>,);
-    type Outputs = (Arc<Rec2020Mat>,);
+    type Inputs = (Read<ColorImage>,);
+    type Outputs = (Arc<ColorImage>,);
 
     const KERNEL: Option<drip::node::Kernel<Self>> = Some(|p, (input0,), _| {
         let g = p.gain;
@@ -152,7 +153,7 @@ struct FileKernel {
 impl NodeDeclaration for FileKernel {
     type Parameters = Self;
     type Inputs = ();
-    type Outputs = (Arc<Rec2020Mat>,);
+    type Outputs = (Arc<ColorImage>,);
 
     const KERNEL: Option<drip::node::Kernel<Self>> = Some(|p, (), ctx| {
         let len = ctx.resources().load(p.path.as_deref().ok_or("no path set")?, |path| {

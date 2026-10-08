@@ -158,3 +158,21 @@ fn loaded_graphs_continue_ids_after_the_largest() {
             .unwrap();
     assert_eq!(p.graph.add_node(&CONST), NodeId(42));
 }
+
+#[test]
+fn sparse_ids_near_the_reserved_limit_do_not_break_editing() {
+    let mut project = load(file(
+        json!([
+            node(u64::MAX - 1, "high", "test.const", json!({ "value": 1.0 })),
+            node(0, "low", "test.const", json!({ "value": 1.0 }))
+        ]),
+        json!([]),
+    ))
+    .unwrap();
+    let added = project.graph.add_node(&CONST);
+    assert_eq!(added, NodeId(1));
+    project.graph.remove_node(added);
+    assert_eq!(project.graph.add_node(&CONST), NodeId(2));
+    let restored = Project::from_json(&project.to_json(), &registry()).unwrap();
+    assert_eq!(restored.graph.nodes().count(), 3);
+}

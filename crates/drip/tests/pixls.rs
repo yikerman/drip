@@ -86,7 +86,7 @@ fn camera_corpus_resolution_and_export() {
         let mut full = None;
         for level in [3, 0] {
             evaluator.evaluate(&project.graph, level, &[preview]);
-            let failures: Vec<_> = evaluator.failures(&project.graph, &[preview]).collect();
+            let failures: Vec<_> = evaluator.failures().collect();
             assert!(failures.is_empty(), "{}: {failures:?}", file);
             let rgb = evaluator
                 .with_inputs(
@@ -94,7 +94,7 @@ fn camera_corpus_resolution_and_export() {
                     preview,
                     level,
                     &drip::nodes::PREVIEW,
-                    |_, (image,), _| Ok(image.rgb().clone()),
+                    |_, (image,), ctx| Ok(image.download(ctx.compute()?)?.rgb().clone()),
                 )
                 .unwrap();
             let scale = 1 << level;

@@ -1,15 +1,15 @@
 //! Histogram evaluation and its integer reduction.
 
-use drip::image::{CameraRgb, Rec2020Mat};
+use drip::image::{CameraRgb, ColorImage};
 use drip::node::{EvalContext, KernelError};
 use drip::nodes::scopes::ExposureSettings;
 use drip::ports::Either;
 use rayon::prelude::*;
 use std::sync::Arc;
 
-/// Pixel counts per channel over equal steps of log2 value (stops), which
-/// suits linear data. Values at or below `2^min_stop`, zero and negative
-/// included, fall in the first bin; values at or above `2^max_stop` in the last.
+/// Pixel counts per native channel over equal steps of log2(value).
+/// The axis describes numbers, not an assertion of proportional scene exposure.
+/// Values at or below `2^min_stop`, zero and negative included, fall in the first bin; values at or above `2^max_stop` in the last.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Histogram {
     pub min_stop: f32,
@@ -21,9 +21,11 @@ pub struct Histogram {
 
 const BINS: usize = 256;
 
+/// Count native channels without color conversion or a scene-linearity check.
+/// The three plot colors distinguish channel positions for either payload family.
 pub fn histogram(
     p: ExposureSettings,
-    (image,): (Either<&Rec2020Mat, &CameraRgb>,),
+    (image,): (Either<&ColorImage, &CameraRgb>,),
     _: &EvalContext<'_>,
 ) -> Result<Arc<Histogram>, KernelError> {
     let image = match image {

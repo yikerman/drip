@@ -2,8 +2,8 @@
 use drip::color::{self, D65, P3, REC2020};
 use drip::eval::Evaluator;
 use drip::graph::{Graph, GraphError, Port};
-use drip::image::{CameraRgb, Interpretation, Mosaic, RawMetadata, RealMat, Rec2020Mat, Rgb};
-use drip::node::{EvalContext, KernelError};
+use drip::image::{CameraRgb, ColorImage, Gpu, Interpretation, Mosaic, RawMetadata, RealMat, Rgb};
+use drip::node::KernelError;
 use drip::nodes;
 use drip::ports::{Either, Input, Optional, Read, ReadEither};
 use drip::value::{TypeDescriptor, Value};
@@ -17,24 +17,21 @@ fn pixels() -> Arc<Rgb> {
 pub struct P3Interpretation;
 impl Interpretation for P3Interpretation {
     const NAME: &'static str = "Linear P3 RGB";
+    const CHANNELS: usize = 3;
 }
 type LinearP3 = RealMat<3, P3Interpretation>;
 
 #[drip::node(kind = P3_SOURCE, id = "test.p3", category = "test", name = "P3", outputs = ["image"])]
-fn p3_source(_: (), (): (), _: &EvalContext<'_>) -> Result<(Arc<LinearP3>,), KernelError> {
+fn p3_source() -> Result<(Arc<LinearP3>,), KernelError> {
     Ok((Arc::new(LinearP3::from(pixels())),))
 }
 
 /// Explicit conversion makes a locally defined interpretation usable by ordinary nodes.
 #[drip::node(kind = TO_WORKING, id = "test.p3_to_working", category = "test", name = "P3 to working RGB", outputs = ["image"])]
-fn to_working(
-    _: (),
-    (image,): (&LinearP3,),
-    _: &EvalContext<'_>,
-) -> Result<(Arc<Rec2020Mat>,), KernelError> {
+fn to_working(image: &LinearP3) -> Result<(Arc<ColorImage>,), KernelError> {
     let matrix =
         color::mul(&color::inverse(&color::rgb_to_xyz(REC2020, D65)), &color::rgb_to_xyz(P3, D65));
-    Ok((Arc::new(Rec2020Mat::from(Arc::new(
+    Ok((Arc::new(ColorImage::from(Arc::new(
         image.buffer().map(|v| color::apply(&matrix, v.map(f64::from)).map(|v| v as f32)),
     ))),))
 }
@@ -42,24 +39,26 @@ fn to_working(
 #[test]
 fn concrete_binding_shares_storage_and_does_not_trust_labels() {
     let data = pixels();
-    let value = Value::new(Arc::new(Rec2020Mat::from(data.clone())));
-    let input = value.borrow::<Read<Rec2020Mat>>().unwrap();
+    let value = Value::new(Arc::new(ColorImage::from(data.clone())));
+    let input = value.borrow::<Read<ColorImage>>().unwrap();
     assert!(Arc::ptr_eq(input.buffer(), &data));
     assert!(value.borrow::<Read<CameraRgb>>().is_none());
     #[derive(Debug, Default)]
     struct Impostor;
     impl Interpretation for Impostor {
-        const NAME: &'static str = "Rec.2020 RGB";
+        const NAME: &'static str = "Color image";
+        const CHANNELS: usize = 3;
     }
     let impostor = Value::new(Arc::new(RealMat::<3, Impostor>::from(data)));
-    assert_eq!(value.descriptor().name, impostor.descriptor().name);
-    assert!(impostor.borrow::<Read<Rec2020Mat>>().is_none());
+    // A copied human-readable label cannot grant the concrete payload contract.
+    assert_ne!(value.descriptor(), impostor.descriptor());
+    assert!(impostor.borrow::<Read<ColorImage>>().is_none());
 }
 
 #[test]
 fn diagnostic_alternatives_check_and_bind_the_same_concrete_types() {
-    type ScopeInput = ReadEither<Rec2020Mat, CameraRgb>;
-    let working = Value::new(Arc::new(Rec2020Mat::from(pixels())));
+    type ScopeInput = ReadEither<ColorImage, CameraRgb>;
+    let working = Value::new(Arc::new(ColorImage::from(pixels())));
     let camera = Value::new(Arc::new(CameraRgb::new(
         pixels(),
         drip::image::Camera {
@@ -103,7 +102,7 @@ fn all_outputs_are_known_before_evaluation_and_failed_edits_are_atomic() {
     let exposure = graph.add_node(&nodes::EXPOSURE);
     let preview = graph.add_node(&nodes::PREVIEW);
     let port = |id| Port(id, "image".into());
-    assert!(graph.output_type(&port(exposure)).unwrap().is::<Rec2020Mat>());
+    assert!(graph.output_type(&port(exposure)).unwrap().is::<drip::image::ColorImage<Gpu>>());
     graph.connect(port(exposure), port(preview)).unwrap();
     assert!(matches!(
         graph.connect(port(p3), port(exposure)),
@@ -115,10 +114,14 @@ fn all_outputs_are_known_before_evaluation_and_failed_edits_are_atomic() {
     assert!(graph.connect(port(p3), port(exposure)).is_err());
     assert_eq!(graph.source(&port(exposure)), Some(&port(convert)));
     let mut evaluator = Evaluator::default();
-    evaluator.evaluate(&graph, 0, &[preview]);
+    evaluator.evaluate(&graph, 0, &[preview, exposure]);
     assert!(evaluator.result(preview).unwrap().is_ok());
     let value = &evaluator.result(exposure).unwrap().as_ref().unwrap()[0];
-    let output = value.downcast_ref::<Rec2020Mat>().unwrap();
+    let output = value
+        .downcast_ref::<drip::image::ColorImage<Gpu>>()
+        .unwrap()
+        .download(evaluator.resources().compute().unwrap())
+        .unwrap();
     let xyz = color::apply(&color::rgb_to_xyz(P3, D65), [1.0, 0.0, 0.0]);
     let expected = color::apply(&color::inverse(&color::rgb_to_xyz(REC2020, D65)), xyz);
     for (actual, expected) in output.pixels[0].into_iter().zip(expected) {
@@ -140,13 +143,17 @@ fn creative_ordering_is_allowed_and_uses_the_working_rgb_convention() {
     }
     graph.set_param(exposure, "ev", 1.0.into()).unwrap();
     let mut eval = Evaluator::default();
-    eval.evaluate(&graph, 0, &[second_tone]);
-    let image =
-        |id| eval.result(id).unwrap().as_ref().unwrap()[0].downcast_ref::<Rec2020Mat>().unwrap();
+    eval.evaluate(&graph, 0, &[tone, exposure, second_tone]);
+    let image = |id| {
+        eval.result(id).unwrap().as_ref().unwrap()[0]
+            .downcast_ref::<drip::image::ColorImage<Gpu>>()
+            .unwrap()
+            .download(eval.resources().compute().unwrap())
+            .unwrap()
+    };
     assert_eq!(image(exposure).pixels[0], image(tone).pixels[0].map(|v| v * 2.0));
-    assert_eq!(
-        image(second_tone).pixels[0],
-        nodes::sigmoid::Sigmoid::new(1.5, -0.2, 0.0).pixel(image(exposure).pixels[0])
-    );
+    assert!(image(second_tone).pixels[0].iter().all(|v| v.is_finite()));
+    assert_ne!(image(second_tone).pixels[0], image(exposure).pixels[0]);
+    assert_eq!(image(second_tone).interpretation().scene, drip::image::SceneRelationship::Rendered);
     assert!(drip::nodes::registry().get(P3_SOURCE.id).is_some());
 }

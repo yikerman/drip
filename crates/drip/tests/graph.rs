@@ -11,7 +11,7 @@ fn connect_rejects_incompatible_types() {
     let (c, w) = (g.add_node(&CONST), g.add_node(&WRITE));
     let err = g.connect(port(c, "image"), port(w, "image")).unwrap_err();
     assert!(
-        matches!(err, GraphError::TypeMismatch { input, mismatch } if input == port(w, "image") && mismatch.actual == "Rec.2020 RGB")
+        matches!(err, GraphError::TypeMismatch { input, mismatch } if input == port(w, "image") && mismatch.actual == "Color image")
     );
     assert_eq!(g.edges().count(), 0);
 }
@@ -106,4 +106,37 @@ fn every_node_gets_its_own_inputs() {
     g.set_external(w2, "path", false).unwrap();
     assert_eq!(g.inputs().collect::<Vec<_>>(), [(w1, "path"), (c, "value")]);
     assert_eq!(g.set_external(c, "nope", true), Err(GraphError::UnknownParam(c, "nope".into())));
+}
+
+#[drip::node(kind = CPU_COLOR, id = "test.cpu_color", category = "test", name = "CPU color", outputs = [])]
+fn cpu_color(
+    image: &drip::image::ColorImage<drip::image::Cpu>,
+) -> Result<(), drip::node::KernelError>;
+
+#[test]
+fn placement_is_adaptable_but_payload_meaning_is_not() {
+    let mut graph = Graph::default();
+    let source = graph.add_node(&CONST);
+    let gpu = graph.add_node(&drip::nodes::EXPOSURE);
+    let consumer = graph.add_node(&CPU_COLOR);
+    graph.connect(port(source, "image"), port(gpu, "image")).unwrap();
+    graph.connect(port(gpu, "image"), port(consumer, "image")).unwrap();
+    let camera = graph.add_node(&drip::nodes::RCD);
+    assert!(matches!(
+        graph.connect(port(camera, "image"), port(gpu, "image")),
+        Err(GraphError::TypeMismatch { .. })
+    ));
+    assert_eq!(graph.source(&port(gpu, "image")), Some(&port(source, "image")));
+}
+
+#[test]
+fn rejected_cycle_preserves_the_previous_source() {
+    let mut graph = Graph::default();
+    let source = graph.add_node(&CONST);
+    let a = graph.add_node(&ADD);
+    let b = graph.add_node(&ADD);
+    graph.connect(port(source, "image"), port(a, "a")).unwrap();
+    graph.connect(port(a, "sum"), port(b, "a")).unwrap();
+    assert_eq!(graph.connect(port(b, "sum"), port(a, "a")), Err(GraphError::Cycle));
+    assert_eq!(graph.source(&port(a, "a")), Some(&port(source, "image")));
 }
