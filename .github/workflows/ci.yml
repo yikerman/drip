@@ -79,7 +79,7 @@ jobs:
       - if: runner.os == 'Linux'
         run: cargo test --locked --profile dist --target ${{ matrix.target }} --workspace
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: drip-${{ matrix.name }}
           path: ./dist/
