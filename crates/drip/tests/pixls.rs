@@ -44,7 +44,7 @@ fn camera_corpus_resolution_and_export() {
     for (file, make, model) in fixtures {
         eprintln!("TEST {make} {model} ({file})");
         let path = root.join(file);
-        let raw = match drip_libraw::decode(&path) {
+        let raw = match drip_raw::decode(&path) {
             Ok(raw) => raw,
             Err(error) if error.is_unsupported() => {
                 eprintln!("SKIP {}: LibRaw: {error}", file);
@@ -150,7 +150,7 @@ fn camera_corpus_resolution_and_export() {
         }
     }
     eprintln!("camera corpus: {passed} rendered, {skipped} skipped (LibRaw unsupported)");
-    assert!(passed > 0, "no supported fixtures were tested");
+    assert_eq!(skipped, 0, "the pinned RAW stack must support every active fixture");
     if review.is_none() {
         std::fs::remove_file(profile_path).unwrap();
         std::fs::remove_dir(output).unwrap();

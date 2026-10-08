@@ -78,6 +78,6 @@
 - `crates/drip-gui`: interactive frontend (binary `drip-gui`) on winit + wgpu +
   egui. owns GUI code, presentation and all preview preparation.
 
-- `crates/drip-libraw`: minimal LibRaw binding (C shim + safe `decode`).
+- `crates/drip-raw`: bundled RAW stack (LibRaw/codecs, C shim + safe `decode`).
 
 - `fixtures/`: test data; binary data are stored with Git LFS.

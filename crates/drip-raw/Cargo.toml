@@ -1,0 +1,23 @@
+# Rust likes static-linking, and we should take advantage of that foundation
+# and assume minimum system deps on user's PC.
+
+[package]
+name = "drip-raw"
+description = "Bundled RAW decoding stack and safe Bayer decoding API for Drip"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+links = "raw_r"
+
+[features]
+# LibRaw's own half-size processing, for cross-checking Drip's pipeline in tests.
+reference = []
+
+[build-dependencies]
+cc = { version = "1.2.64", features = ["parallel"] }
+cmake = "0.1"
+
+[lints]
+workspace = true

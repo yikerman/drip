@@ -3,8 +3,8 @@
 Drip is AGPL-3.0-or-later. We thank the authors and contributors of the projects
 below.
 
-Dependency versions are recorded in `Cargo.lock`; native library versions
-come from the build environment. This lists direct dependencies and major native
+Rust dependency versions are recorded in `Cargo.lock`; native source pins are
+listed below. This lists direct dependencies and major native
 components, rather than duplicating the full transitive dependency tree.
 
 ## Processing sources
@@ -26,7 +26,9 @@ here when introduced.
 
 | Project and credit | Use | License |
 |--------------------|-----|---------|
-| [LibRaw LLC and contributors](https://www.libraw.org/) | RAW decoding through Drip's C shim | LGPL-2.1 OR CDDL-1.0 |
+| [LibRaw LLC and contributors](https://www.libraw.org/) | Bundled RAW decoding through Drip's C shim | LGPL-2.1 OR CDDL-1.0; [upstream notices](https://github.com/LibRaw/LibRaw/blob/b93f6e45c194f5df9b02a43b1af9a54b4f41f33f/COPYRIGHT), [LGPL](https://github.com/LibRaw/LibRaw/blob/b93f6e45c194f5df9b02a43b1af9a54b4f41f33f/LICENSE.LGPL), [CDDL](https://github.com/LibRaw/LibRaw/blob/b93f6e45c194f5df9b02a43b1af9a54b4f41f33f/LICENSE.CDDL) |
+| [D. R. Commander and libjpeg-turbo contributors](https://libjpeg-turbo.org/), Independent JPEG Group | Static JPEG codec for LibRaw; this software is based in part on the work of the Independent JPEG Group | IJG, BSD-3-Clause and Zlib; [license overview](https://github.com/libjpeg-turbo/libjpeg-turbo/blob/c85e6b905bf237038faa936dab160ebfc5da0344/LICENSE.md), [IJG terms](https://github.com/libjpeg-turbo/libjpeg-turbo/blob/c85e6b905bf237038faa936dab160ebfc5da0344/README.ijg) |
+| [Jean-loup Gailly, Mark Adler and zlib contributors](https://zlib.net/) | Static deflate codec for LibRaw | Zlib; [license](https://github.com/madler/zlib/blob/da607da739fa6047df13e66a2af6b8bec7c2a498/LICENSE) |
 | [Marti Maria and Little CMS contributors](https://github.com/mm2/Little-CMS) | ICC export, preview softproofing and gamut classification | MIT |
 | [Kornel Lesiński and rust-lcms2 contributors](https://github.com/kornelski/rust-lcms2) (`lcms2`, `lcms2-sys`) | Rust Little CMS bindings | MIT |
 | [David Tolnay and linkme contributors](https://github.com/dtolnay/linkme/tree/0.3.37) (`linkme` 0.3.37) | Linked node discovery and local custom GUI bindings | MIT OR Apache-2.0 ([MIT](https://github.com/dtolnay/linkme/blob/0.3.37/LICENSE-MIT), [Apache-2.0](https://github.com/dtolnay/linkme/blob/0.3.37/LICENSE-APACHE)) |
@@ -42,6 +44,27 @@ here when introduced.
 | [Rust log contributors](https://github.com/rust-lang/log), [env_logger contributors](https://github.com/rust-cli/env_logger) | Logging | MIT OR Apache-2.0 |
 | [half-rs contributors](https://github.com/VoidStarKat/half-rs) (`half`) | Half-float texture preparation | MIT OR Apache-2.0 |
 | [Joshua Barretto and pollster contributors](https://github.com/zesterer/pollster) | Blocking GPU initialization | MIT OR Apache-2.0 |
+
+## Bundled native sources
+
+Native sources are unmodified Git submodules at release tags. Gitlinks pin the
+exact commits; updating a tag upstream does not change a Drip checkout.
+
+| Directory | Release tag | Commit |
+|-----------|-------------|--------|
+| `vendor/libraw` | `0.22.2` | `b93f6e45c194f5df9b02a43b1af9a54b4f41f33f` |
+| `vendor/libjpeg-turbo` | `3.2.0` | `c85e6b905bf237038faa936dab160ebfc5da0344` |
+| `vendor/zlib` | `v1.3.2` | `da607da739fa6047df13e66a2af6b8bec7c2a498` |
+
+`drip-raw` uses LibRaw's upstream translation-unit list [18], reentrant settings
+and JPEG/zlib support, with no OpenMP, internal LittleCMS, RawSpeed or DNG SDK.
+The codecs use their upstream CMake builds with static linkage and without tools
+or tests; JPEG SIMD is required and its embedded build identifier is `drip`.
+LittleCMS 2.19 is bundled by the locked `lcms2-sys` 4.0.7 crate and built through
+its `static` feature; it has no separate submodule.
+
+The submodules retain their own copyright/license files. Source distributions
+must include their contents, not just Git links.
 
 ## Patched dependencies
 
@@ -59,9 +82,11 @@ release with passthrough support.
 | Project and credit | Use | License |
 |--------------------|-----|---------|
 | [David Tolnay and Rust macro contributors](https://github.com/dtolnay/syn) (`syn`, `quote`, `proc-macro2`; versions in Cargo.lock) | Local `drip-macros` node/parameter declaration parsing, typed adapters and GUI binding discovery | MIT OR Apache-2.0 ([syn licenses](https://github.com/dtolnay/syn#license), [quote licenses](https://github.com/dtolnay/quote#license), [proc-macro2 licenses](https://github.com/dtolnay/proc-macro2#license)) |
-| [cc-rs contributors](https://github.com/rust-lang/cc-rs) (`cc`) | Compile the LibRaw shim | MIT OR Apache-2.0 |
+| [clap contributors](https://github.com/clap-rs/clap) | Packaging task argument parsing | MIT OR Apache-2.0; [licenses](https://github.com/clap-rs/clap#license) |
+| [cargo_metadata contributors](https://github.com/oli-obk/cargo_metadata) | Cargo executable artifact discovery for packaging | MIT; [license](https://github.com/oli-obk/cargo_metadata/blob/main/LICENSE) |
+| [cc-rs contributors](https://github.com/rust-lang/cc-rs) (`cc`) | Compile LibRaw and the C shim | MIT OR Apache-2.0 |
+| [cmake-rs contributors](https://github.com/rust-lang/cmake-rs) (`cmake`) | Cargo integration for the upstream JPEG/zlib CMake builds | MIT OR Apache-2.0 |
 | [pkg-config-rs contributors](https://github.com/rust-lang/pkg-config-rs) | Find native libraries | MIT OR Apache-2.0 |
-| [vcpkg-rs contributors](https://github.com/mcgoo/vcpkg-rs) | Find LibRaw on Windows | MIT OR Apache-2.0 |
 | [egui contributors](https://github.com/emilk/egui) (`egui_kittest`) | Headless GUI tests | MIT OR Apache-2.0 |
 
 Test images in `fixtures/raw/pixls/` are from [raw.pixls.us](https://raw.pixls.us/),
@@ -142,6 +167,24 @@ https://github.com/darktable-org/darktable/blob/master/src/iop/colorout.c.
 Accessed Oct. 5, 2026. Reference for Lab-input proofing and parallel LittleCMS
 conversion; no implementation copied. Drip retains its bounded RGB round trip
 for softproof instead of modifying the target profile's tone curves.
+
+[16] LibRaw LLC and contributors, “Build configuration,” `configure.ac`,
+LibRaw 0.22.2. [Online]. Available:
+https://github.com/LibRaw/LibRaw/blob/0.22.2/configure.ac.
+Accessed Oct. 7, 2026. Reference for the static build's OpenMP,
+JPEG, zlib, LittleCMS and example-program options.
+
+[17] AppImage contributors, “Best practices,” *AppImage documentation*.
+[Online]. Available: https://docs.appimage.org/reference/best-practices.html.
+Accessed Oct. 7, 2026. Reference for Linux binary build baselines and shared-library
+compatibility; does not imply a decision to distribute AppImages.
+
+[18] LibRaw LLC and contributors, “Automake source manifest,” `Makefile.am`,
+LibRaw 0.22.2, commit `b93f6e45c194f5df9b02a43b1af9a54b4f41f33f`.
+[Online]. Available:
+https://github.com/LibRaw/LibRaw/blob/b93f6e45c194f5df9b02a43b1af9a54b4f41f33f/Makefile.am.
+The Cargo build reads its shared `lib_libraw_a_SOURCES` declaration directly;
+it does not invoke Autotools or maintain a second decoder list.
 
 [15] M. Maria Saguer and Little CMS contributors, “GamutSampler,”
 `src/cmsgmt.c`, Little CMS 2.16. [Online]. Available:

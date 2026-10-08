@@ -51,14 +51,16 @@ Drip is an early **0.1.0-dev** prototype for Bayer RAW photos, developed on Linu
 with Wayland. You'll need to build it from source; Windows and macOS packaging
 hasn't been verified yet.
 
-Install [Rust](https://rustup.rs/) 1.95 or newer, then the dependencies for your
-platform:
+Install [Rust](https://rustup.rs/) 1.95 or newer, then the build tools for your
+platform. Cargo builds pinned LibRaw, JPEG, zlib and LittleCMS sources statically;
+system installations of those libraries are unnecessary. Linux uses the system
+C++ runtime (`libstdc++` with GCC).
 
 <details>
 <summary>Fedora (Tier 0 Support!)</summary>
 
 ```sh
-sudo dnf install gcc-c++ pkgconf-pkg-config LibRaw-devel lcms2-devel wayland-devel libxkbcommon-devel git-lfs
+sudo dnf install gcc-c++ cmake make nasm pkgconf-pkg-config wayland-devel libxkbcommon-devel git-lfs
 ```
 
 </details>
@@ -68,7 +70,7 @@ sudo dnf install gcc-c++ pkgconf-pkg-config LibRaw-devel lcms2-devel wayland-dev
 
 ```sh
 sudo apt update
-sudo apt install build-essential pkg-config libraw-dev liblcms2-dev libwayland-dev libxkbcommon-dev git-lfs
+sudo apt install build-essential cmake nasm pkg-config libwayland-dev libxkbcommon-dev git-lfs
 ```
 
 Use rustup if your distribution's Rust version is too old.
@@ -82,7 +84,7 @@ Install the Xcode Command Line Tools and [Homebrew](https://brew.sh/), then:
 
 ```sh
 xcode-select --install
-brew install libraw little-cms2 pkgconf git-lfs
+brew install cmake nasm git-lfs
 ```
 
 </details>
@@ -91,39 +93,33 @@ brew install libraw little-cms2 pkgconf git-lfs
 <summary>Windows x64 (here be dragons)</summary>
 
 Install Git with Git LFS, Rust's MSVC toolchain, and Visual Studio Build Tools
-with **Desktop development with C++** and a Windows SDK. In Developer PowerShell,
-set up [vcpkg](https://learn.microsoft.com/en-us/vcpkg/get_started/get-started)
-and the native libraries:
-
-```powershell
-$env:VCPKG_ROOT = "$env:USERPROFILE\vcpkg"
-git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
-& "$env:VCPKG_ROOT\bootstrap-vcpkg.bat"
-$env:VCPKGRS_TRIPLET = "x64-windows-static-md"
-& "$env:VCPKG_ROOT\vcpkg.exe" install libraw:x64-windows-static-md lcms:x64-windows-static-md
-$env:LCMS2_LIB_DIR = "$env:VCPKG_ROOT\installed\x64-windows-static-md\lib"
-```
-
-Run the build below from the Drip checkout in that same terminal. These steps
-match the build scripts but haven't been tested on Windows.
+with **Desktop development with C++** and a Windows SDK. Install CMake and NASM
+and put them on `PATH`. Run the build below in Developer PowerShell. Native
+compilation follows Rust's selected CRT linkage. Windows runtime packaging and
+execution remain unverified.
 
 </details>
 
-From the Drip checkout, fetch the fixtures and build the editor:
+From the Drip checkout, initialize the release-pinned submodules, fetch the
+fixtures and build the editor:
 
 ```sh
-git lfs install
+git submodule update --init --recursive
 git lfs pull
-cargo build --release -p drip-gui
+cargo build --release --workspace
 ```
 
-To install `drip-gui` in Cargo's binary directory (`~/.cargo/bin` by default):
+Build both frontends and stage only their executables in `./dist/`:
 
 ```sh
-cargo install --path crates/drip-gui --locked
+cargo xtask dist
+# Or select a target explicitly:
+cargo xtask dist --target x86_64-unknown-linux-gnu
 ```
 
 ## Usage
+
+AI SLOP TO BE CLEANED UP
 
 Launch the installed editor with `drip-gui`, or run it from the checkout:
 
@@ -213,16 +209,6 @@ You can also open a saved project from the command line:
 cargo run --release -p drip-gui -- project.drip
 ```
 
-## What's next
-
-The next steps are testing on more photographs, refining the editing experience,
-checking display color with a SpyderX, and packaging the first release.
-Instrument-based wide-gamut verification is still outstanding.
-
-Batch processing, undo/redo, denoising and lens corrections are still to come.
-Project files may change as the prototype develops. See [TODO](TODO.md) for
-what's planned.
-
 ## Under the hood
 
 Drip is written in Rust, with Rayon for processing and wgpu/egui for the GUI.
@@ -235,8 +221,6 @@ come from darktable; sources and credits are in [THIRD_PARTY.md](THIRD_PARTY.md)
 For development, see the [library design and reading guide](crates/drip/src/lib.rs)
 and [GUI overview](crates/drip-gui/src/main.rs).
 Build its linked API docs with `cargo doc -p drip --no-deps`.
-See [DESIGN](docs/DESIGN.md) for decisions and
-[PROGRESS](docs/PROGRESS.md) for the current handoff. Run the tests with:
 
 ```sh
 cargo test --workspace --all-targets
@@ -250,12 +234,10 @@ cargo run -p drip --example calibration_dag
 cargo run -p drip --example masked_edit_dag
 ```
 
-The first shares synthetic sensor frames and a fitted calibration between branches;
-the second blends a creative processing branch through a mask.
-
 Logs go to stderr: `RUST_LOG=warn,drip=debug` for diagnostics,
 `RUST_LOG=warn,drip_gui::frame=trace` for frame timings.
 
 ## License
 
 AGPL-3.0-or-later; see [LICENSE](LICENSE).
+RUST_LOG=warn,drip_gui::frame=trace

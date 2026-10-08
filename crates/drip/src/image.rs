@@ -2,7 +2,7 @@
 //! Rec.2020/D65 by convention, including after creative nonlinear processing.
 //! This describes the result, not preservation of original scene relationships.
 
-pub use drip_libraw::Metadata as RawMetadata;
+pub use drip_raw::Metadata as RawMetadata;
 use std::sync::Arc;
 
 /// Row-major, interleaved real samples. No encoding or color meaning is implied.

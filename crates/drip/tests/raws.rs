@@ -50,7 +50,7 @@ fn pipeline_matches_libraw() {
         .unwrap()
         .rgb()
         .clone();
-    let (width, _, reference) = drip_libraw::reference(&path).unwrap();
+    let (width, _, reference) = drip_raw::reference(&path).unwrap();
 
     // LibRaw scales by 65535 and normalizes white balance to its smallest
     // multiplier rather than green, so compare up to one global factor,
@@ -65,7 +65,7 @@ fn pipeline_matches_libraw() {
     let mut ratios: Vec<_> = pairs.iter().map(|(o, r)| f64::from(r[1]) / f64::from(o[1])).collect();
     ratios.sort_by(f64::total_cmp);
     let scale = ratios[ratios.len() / 2];
-    let m = drip_libraw::decode(&path).unwrap().as_shot;
+    let m = drip_raw::decode(&path).unwrap().as_shot;
     let expected = 65535.0 * f64::from(m[1] / m[..3].iter().copied().fold(f32::INFINITY, f32::min));
     assert!((scale / expected - 1.0).abs() < 1e-3, "scale {scale}, expected {expected}");
 
@@ -96,7 +96,7 @@ fn exports_a_tiff_from_a_raw() {
     p.graph.set_param(export, "profile_file", json!(profile)).unwrap();
     run_action(&p.graph, export, "export").unwrap();
 
-    let raw = drip_libraw::decode(&fixture()).unwrap();
+    let raw = drip_raw::decode(&fixture()).unwrap();
     let mut decoder = tiff::decoder::Decoder::new(std::fs::File::open(&out).unwrap()).unwrap();
     assert_eq!(
         decoder.dimensions().unwrap(),

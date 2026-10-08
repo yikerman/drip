@@ -9,8 +9,8 @@ license.workspace = true
 [dependencies]
 drip-macros = { path = "../drip-macros" }
 linkme = "0.3.37"
-drip-libraw.workspace = true
-lcms2 = "6.2.0"
+drip-raw.workspace = true
+lcms2.workspace = true
 log = "0.4.34"
 rayon = "1.12"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -22,5 +22,4 @@ tiff = { version = "0.11.3", default-features = false, features = ["deflate"] }
 workspace = true
 
 [dev-dependencies]
-drip-libraw = { workspace = true, features = ["reference"] }
-lcms2 = "6.2"
+drip-raw = { workspace = true, features = ["reference"] }

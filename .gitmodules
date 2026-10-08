@@ -1,0 +1,12 @@
+[submodule "vendor/libraw"]
+	# Release tag 0.22.2; the gitlink pins its exact commit.
+	path = vendor/libraw
+	url = https://github.com/LibRaw/LibRaw.git
+[submodule "vendor/zlib"]
+	# Release tag v1.3.2; the gitlink pins its exact commit.
+	path = vendor/zlib
+	url = https://github.com/madler/zlib.git
+[submodule "vendor/libjpeg-turbo"]
+	# Release tag 3.2.0; the gitlink pins its exact commit.
+	path = vendor/libjpeg-turbo
+	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git

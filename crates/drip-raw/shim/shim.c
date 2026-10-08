@@ -102,6 +102,7 @@ int drip_raw_unsupported(int err) {
   return err == LIBRAW_FILE_UNSUPPORTED || err == LIBRAW_NOT_IMPLEMENTED;
 }
 
+#ifdef DRIP_REFERENCE
 /* LibRaw's own pipeline in half-size mode (2x2 binning, greens averaged), as-shot
  * white balance, no highlight recovery, linear Rec.2020, 16 bit, unrotated.
  * On success *rgb is a malloc'd width * height * 3 buffer the caller frees. */
@@ -144,3 +145,4 @@ int drip_raw_reference(const char *path, int *width, int *height, unsigned short
 }
 
 void drip_free(void *p) { free(p); }
+#endif

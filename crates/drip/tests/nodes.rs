@@ -13,7 +13,7 @@ use drip::image::{Camera, Cfa, Mosaic, Rgb};
 use drip::node::NodeKind;
 use drip::nodes;
 use drip::project::Project;
-use drip_libraw::{BlackPattern, Raw};
+use drip_raw::{BlackPattern, Raw};
 use serde_json::json;
 
 fn raw(width: usize, height: usize, data: Vec<u16>) -> Raw {

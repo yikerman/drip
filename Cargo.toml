@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/drip", "crates/drip-cli", "crates/drip-gui", "crates/drip-libraw", "crates/drip-macros"]
+members = ["crates/drip", "crates/drip-cli", "crates/drip-gui", "crates/drip-raw", "crates/drip-macros", "xtask"]
 
 [workspace.package]
 version = "0.1.0-dev"
@@ -10,7 +10,8 @@ license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 drip = { path = "crates/drip" }
-drip-libraw = { path = "crates/drip-libraw" }
+drip-raw = { path = "crates/drip-raw" }
+lcms2 = { version = "6.2.0", features = ["static"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
@@ -21,6 +22,11 @@ undocumented_unsafe_blocks = "warn"
 # Image processing at opt-level 0 is too slow to test or use on real raws.
 [profile.dev]
 opt-level = 1
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
+strip = "debuginfo"
 
 # wgpu 30.0.1 with `SurfaceColorSpace::PassThrough` (gfx-rs/wgpu#10545). See
 # "Patched dependencies" in THIRD_PARTY.md before changing or removing it.

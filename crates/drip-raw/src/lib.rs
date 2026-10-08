@@ -1,4 +1,5 @@
-//! Minimal binding to LibRaw. The one entry point, [`decode`], opens a file,
+//! Bundled RAW decoding through LibRaw, libjpeg-turbo and zlib.
+//! The entry point, [`decode`], opens a file,
 //! copies everything Drip needs into owned values and closes LibRaw before
 //! returning, so no LibRaw state outlives a call or is shared between threads.
 //! Linking the reentrant `libraw_r` makes concurrent calls safe.

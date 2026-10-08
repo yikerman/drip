@@ -1,0 +1,24 @@
+name: Native build dependencies
+description: Install tools and desktop headers for the runner's native architecture.
+runs:
+  using: composite
+  steps:
+    - if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        packages=(cmake pkg-config libwayland-dev libxkbcommon-dev)
+        if [[ "$RUNNER_ARCH" == X64 ]]; then packages+=(nasm); fi
+        sudo apt-get update
+        sudo apt-get install -y "${packages[@]}"
+    - if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        packages=(cmake)
+        if [[ "$RUNNER_ARCH" == X64 ]]; then packages+=(nasm); fi
+        brew install "${packages[@]}"
+    - if: runner.os == 'Windows' && runner.arch == 'X64'
+      shell: pwsh
+      run: |
+        choco install nasm --no-progress -y
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        "C:\Program Files\NASM" >> $env:GITHUB_PATH

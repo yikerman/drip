@@ -3,6 +3,61 @@
 Validation evidence as of 2026-10-07. Decisions are in [DESIGN](DESIGN.md), open
 work in [TODO](../TODO.md), implementation history in Git.
 
+## 2026-10-07: Bundled RAW stack and packaging
+
+- Build renamed `drip-raw` from release-pinned LibRaw, JPEG and zlib submodules;
+  LittleCMS uses its binding's bundled static feature. JPEG SIMD is enabled;
+  LibRaw OpenMP, internal color management and optional decoders are disabled.
+  Keep toolchain CPU defaults and normal platform runtimes. CPU-specific builds,
+  OpenMP and RawSpeed evaluation remain deferred.
+- Linux workspace tests passed (165 passed, one GPU-only test ignored), as did
+  strict workspace Clippy. Distribution tests passed (170 including doctests,
+  one ignored); all 15 RAW fixtures rendered/exported without skips. These runs
+  preceded integration of the remote dependency refresh and Rust 1.95 requirement.
+- Rebased packaging onto the remote Windows dependency fix, CLI rename and
+  compacted docs. Retained the shared Windows crate resolution and Rust minimum.
+
+## 2026-10-07: Latest hosted runner images
+
+- Select current images from `actions/runner-images`: Ubuntu 26.04 on AMD64/ARM64,
+  macOS latest/26 Intel, Windows latest/11 ARM64 with Visual Studio 2026.
+  Keep native builds, test failure policy and independent distribution jobs.
+- Replace the Ubuntu 22.04 baseline decision; minimum supported Linux systems
+  remain a packaging verification task. Hosted jobs have not been executed here.
+- Actionlint passed with only its outdated label checks suppressed for Ubuntu
+  26.04 and Windows 11 VS2026 ARM64, verified against the upstream image catalog.
+
+## 2026-10-07: Windows native build review fixes
+
+- Normalize CRLF before parsing LibRaw's source manifest so Windows Git checkouts
+  retain the same source list and continuation handling as LF checkouts.
+- Enable `/EHsc` for MSVC-family compilers, including clang-cl, matching upstream
+  `Makefile.msvc` and preserving C++ stack unwinding on decoder failures.
+- Linux RAW decoding/error tests passed with the normal checkout and with a
+  temporary source copy whose `Makefile.am` uses CRLF. Both upstream makefiles
+  enumerate the same 79 source files. Strict RAW-crate Clippy, formatting and
+  whitespace checks passed. Windows execution remains for hosted CI.
+
+## 2026-10-07: Cargo artifact staging
+
+- Replaced the provisional justfile and CI tool installation with a workspace
+  `xtask` binary and Cargo alias. `cargo xtask dist [--target <triple>]` builds
+  both frontends, then recreates ignored `./dist/` with only their executables.
+  Clap handles arguments; Cargo artifact messages supply paths without guessing
+  output directories or executable suffixes. User compiler settings are preserved.
+- CI uploads the staged directory as a ZIP and treats missing output as an error.
+  Both GUI and scaffold CLI are included. Documented GitHub's executable-permission
+  loss on extraction; platform bundles and runtime packaging remain deferred.
+- Removed the Python GUI binding harness, its five probe files, Python cache
+  ignore entries and the associated CI step at the user's request. Reference
+  vector generation scripts remain separate from the removed checks.
+- Validated the real Linux build/staging command with an explicit target and
+  Cargo's configured default target. Staged bytes match both build outputs and
+  preserve local executable modes; stale files are removed, while a failed build
+  leaves the previous output intact. Both staged files are ignored by Git.
+  Strict xtask Clippy, formatting, Actionlint and whitespace checks passed.
+  Windows/macOS staging and hosted ZIP uploads have not been executed here.
+
 ## Current validation
 
 - The concrete-port rewrite passed 164 runtime/example tests, including the RAW
