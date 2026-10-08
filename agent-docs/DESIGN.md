@@ -17,6 +17,9 @@ in [PROGRESS](PROGRESS.md).
   node boundaries. Reconsider GPU execution only with whole-node measurements
   including transfers and allocations.
 - **Decided:** Prototype project formats have no migration guarantee.
+- **Decided:** Inspector help treats Rustdoc source wraps as spaces and retains
+  paragraph breaks, so prose wraps to the sidebar width. Node metadata retains
+  the source line breaks; reflow belongs to presentation.
 
 ## Distribution
 

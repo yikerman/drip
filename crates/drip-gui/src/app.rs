@@ -786,13 +786,17 @@ mod tests {
 
     #[test]
     fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
+        let documentation = "Creative S-curve on Rec.2020 RGB.\n\n\
+            Assumes middle grey at 0.18 and keeps it fixed. Black is 0 and the curve approaches 1. \
+            The output is interpreted as linear Rec.2020 for further processing; additional \
+            input guarantees are dropped. Preview and export do not require tone mapping.";
         let mut app = App::new(None, true, || {});
         let id = app.project.graph.find("Sigmoid").unwrap();
         app.selected = Some(id);
         let mut h = harness(app);
         h.run();
         let kind = h.get_by_label("tone.sigmoid").rect();
-        let description = h.get_by_label(drip::nodes::SIGMOID.documentation).rect();
+        let description = h.get_by_label(documentation).rect();
         let input = h.get_all_by_label("Rec.2020 RGB").next().unwrap().rect();
         let output = h.get_all_by_label("Rec.2020 RGB").nth(1).unwrap().rect();
         let control = h.get_by_label("contrast").rect();
@@ -812,7 +816,7 @@ mod tests {
         assert!(popup.query_by_label("contrast").is_some());
         assert!(popup.query_by_label("Rec.2020 RGB").is_none());
         assert!(popup.query_by_label("darktable: sigmoid").is_none());
-        assert!(popup.query_by_label(drip::nodes::SIGMOID.documentation).is_none());
+        assert!(popup.query_by_label(documentation).is_none());
     }
 
     #[test]

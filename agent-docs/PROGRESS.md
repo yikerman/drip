@@ -4,6 +4,9 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-07
 
+- Inspector node help now reflows source-wrapped sentences while preserving
+  paragraphs. The updated inspector help test and workspace formatting check
+  passed.
 - Compacted agent documentation to retain rationale, validation evidence and
   unfinished work; removed implementation summaries and redundant history.
 - After the dependency-refresh rebase, Linux workspace tests passed (165 passed,
