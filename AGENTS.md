@@ -57,9 +57,9 @@
 
 ## Workflow
 
-- record decisions and rationale in `docs/DESIGN.md` with status: requirement,
-  decided, tentative, or open. update `docs/PROGRESS.md` each session. track
-  unimplemented ideas in the `TODO.md` table.
+- record decisions and rationale in `agent-docs/DESIGN.md` with status: requirement,
+  decided, tentative, or open. update `agent-docs/PROGRESS.md` each session. track
+  unimplemented ideas in the `agent-docs/TODO.md` table.
 
 - commits are self-contained and do one thing right. format:
   `{submodule} or chore: {summary}` followed by an explanation using the same

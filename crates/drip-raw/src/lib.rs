@@ -144,7 +144,7 @@ fn error(code: c_int) -> Error {
 }
 
 fn c_path(path: &Path) -> Result<CString, Error> {
-    // LibRaw takes narrow paths; on Windows that limits paths to ANSI (TODO.md).
+    // LibRaw takes narrow paths; on Windows that limits paths to ANSI (agent-docs/TODO.md).
     let path = path.to_str().ok_or_else(|| Error {
         message: format!("{} is not valid UTF-8", path.display()),
         unsupported: false,
