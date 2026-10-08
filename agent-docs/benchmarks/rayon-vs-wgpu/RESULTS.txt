@@ -1,0 +1,118 @@
+Rayon versus the wgpu rewrite — 2026-10-08
+
+Conclusion
+
+The rewrite is faster at full recomputation, but is not uniformly faster for
+editing. On the 42.4 MP RAW, completed GPU-resident processing is 6.8x faster
+than Rayon (170 versus 1,164 ms). Downloading the result reduces that advantage
+to 1.2x (956 ms). The old upstream cache still wins some late-stage edits.
+
+The actual preview worker, including all three scopes:
+- Default half-size preview: highlight edits 641 -> 390 ms; exposure edits
+  379 -> 396 ms; sigmoid edits 359 -> 402 ms.
+- Quarter-size preview: highlight edits 282 -> 138 ms; exposure edits
+  91 -> 137 ms; sigmoid edits 87 -> 149 ms.
+
+The right comparison for the current GUI is worker-latency.png. latency.png
+separately shows the processing pipeline and the cost of requesting CPU output.
+Numbers are medians of nine runs, after two warmups per scenario. No benchmark
+ran concurrently with another benchmark or a build.
+
+Why
+
+The old evaluator reuses every unchanged upstream result. Changing sigmoid
+executes one node; exposure executes two. The rewrite executes all seven nodes
+for every request and uploads the full-resolution sensor mosaic each time.
+The GPU gains on substantial recomputation but cannot match the old cache's
+ability to avoid computation altogether.
+
+The frontend's histogram, waveform and vectorscope consume CPU images. Their
+shared transfer still downloads the entire processed image. GPU-resident preview
+drawing alone does not eliminate that transfer when scopes are requested.
+
+A separate timing of the current download implementation found, for 42.4 MP RGB:
+- Compute::read_f32: 535 ms (staging allocation, GPU copy/wait, mapping and one
+  copy to an owned Vec<f32>, measured together).
+- Converting that Vec<f32> into Vec<[f32; 3]>: another 252 ms for a second copy.
+These timings identify API-level costs, not pure PCIe bandwidth. At 2.65 MP,
+the corresponding costs are 18.8 and 15.7 ms. See transfers.csv.
+
+Next changes supported by these measurements
+
+1. Eliminate the second host copy when changing the RGB allocation's element
+   type. Both layouts have the same alignment and packed scalar representation.
+2. Compute scope reductions on the GPU and download their small count arrays.
+   Keep normal previews on the GPU. Reuse bounded transfer allocations where
+   possible; measure again before introducing a broader allocation framework.
+3. Keep a bounded GPU source/checkpoint before the frequently edited suffix.
+   This avoids repeated RAW uploads and unchanged prefix computation. These
+   results support limited cache reuse, not caching every node indefinitely.
+
+No performance fixes were applied during this comparison.
+
+Method and limits
+
+Baseline: b9b1045da65376fd5812b7b00362806cde37eaf0 (Rayon).
+Rewrite:  9d43d0e0b84bfa72f8e28bab4768a259536caddf (wgpu/WGSL).
+Hardware: Ryzen 5 5600G, 6 cores / 12 threads; RTX 3080 10 GiB.
+Driver: NVIDIA 615.71.09, Vulkan. Rust 1.99.0, ordinary Cargo --release settings.
+Both versions use the same pinned native dependencies. Six and twelve Rayon
+threads were tested; twelve was faster on these fixtures and is plotted.
+
+Fixtures and actual decoded extents:
+- fixtures/raw/pixls/sony-ilce-7s.arw: 2784 x 1872 (5.2 MP).
+- fixtures/raw/sony-ilce-7rm3.arw: 7968 x 5320 (42.4 MP).
+Levels 0, 1 and 2 mean full, half and quarter width/height. The white-balance and
+highlight nodes process the full sensor plane before demosaic preview reduction.
+
+Pipeline: preloaded normalized mosaic -> white balance -> opposed highlights ->
+RCD -> camera color -> exposure -> sigmoid. Replacing the source with a shared
+preloaded value removes disk/RAW decoding from warm timings equally on both
+versions. Fresh recomputation clears the old DAG cache while retaining this
+source; edit scenarios keep the old cache. GPU scenarios use the new evaluator
+unchanged. Timings include allocations, CPU->GPU upload and GPU completion;
+CPU-output mode additionally includes the complete download/layout conversion.
+They exclude checksum work, scopes, ICC conversion, export and window drawing.
+
+Worker runs instead use the original RAW node, actual worker evaluate function,
+normal preview, histogram, waveform and vectorscope. Source loading is warmed.
+They include view preparation and old CPU preview packing. They exclude UI event
+scheduling, window drawing/presentation and the old renderer's texture upload.
+The previous presentation remains alive while the next is evaluated, as in the UI.
+
+Startup is separate in the raw CSVs: decode/normalize, runtime creation, then
+first evaluation. That first evaluation includes this process's shader pipeline
+creation. Warm timings reuse compiled pipelines. OS and driver disk caches were
+not cleared: these are not controlled cold-boot/JIT benchmarks. The initial
+5.2 MP GPU pilot took 508 ms for runtime setup and 218 ms for its first resident
+evaluation, versus about 18 ms warm. Later processes benefited from warmed
+system/driver state. Do not apply the steady-state speedups to first launch.
+
+Both outputs were finite. Across deterministic spatial samples at all tested
+resolutions, maximum absolute CPU/GPU difference was 5.50e-6. This is a sampled
+comparison, not a whole-image error bound; numerical kernels also have reference
+tests. The rewrite intentionally uses FP32 GPU reductions and is not bit-identical.
+
+This is one desktop workstation, without pinned CPU affinity or locked GPU clocks.
+Old temporary study files were removed before timings, freeing 9.5 GiB from tmpfs.
+Main-process major faults were zero except one GPU run with one fault; resource
+counts include startup and untimed numerical checks. RSS is not a VRAM measurement
+and was not used to claim a memory improvement. No external application was stopped.
+
+Reproduction
+
+run.py installs temporary examples in the two checkouts; --workers additionally
+installs a test inside each worker module. --clean removes only those additions.
+Use an isolated checkout at the baseline commit and matching vendor submodules.
+Build compare_rayon in the baseline and compare_wgpu / compare_transfer in the
+rewrite with Cargo --release. Use separate Cargo target directories to avoid
+cross-checkout proc-macro/native build-cache collisions. Put the resulting
+binaries under the current target/release/examples paths used by measure.py.
+
+measure.py --repetitions 9 runs the pipeline cases sequentially. Build each GUI
+with cargo test --release -p drip-gui --no-run after installing the worker test;
+copy the executables to target/release/compare_worker_rayon and
+compare_worker_wgpu. measure_worker.py runs those cases sequentially. Run
+compare_transfer for transfer diagnostics. analyze.py regenerates summaries and
+plots from the raw CSVs. Summary JSON/CSV files retain every scenario, including
+no-change requests (a diagnostic; ordinary UI navigation does not request work).

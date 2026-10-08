@@ -1,0 +1,146 @@
+[
+  {
+    "backend": "rayon-worker",
+    "level": 1,
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 641.301064,
+    "p10_ms": 635.780784,
+    "p90_ms": 661.2944022
+  },
+  {
+    "backend": "rayon-worker",
+    "level": 1,
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 379.096908,
+    "p10_ms": 369.49031659999997,
+    "p90_ms": 386.03658720000004
+  },
+  {
+    "backend": "rayon-worker",
+    "level": 1,
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 359.466607,
+    "p10_ms": 347.7050394,
+    "p90_ms": 362.2534148
+  },
+  {
+    "backend": "rayon-worker",
+    "level": 1,
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.0044,
+    "p10_ms": 0.004252,
+    "p90_ms": 0.0055000000000000005
+  },
+  {
+    "backend": "wgpu-worker",
+    "level": 1,
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 389.821183,
+    "p10_ms": 384.8381902,
+    "p90_ms": 395.7742308
+  },
+  {
+    "backend": "wgpu-worker",
+    "level": 1,
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 396.084484,
+    "p10_ms": 389.357232,
+    "p90_ms": 427.3676204
+  },
+  {
+    "backend": "wgpu-worker",
+    "level": 1,
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 401.956966,
+    "p10_ms": 396.332308,
+    "p90_ms": 432.94985260000004
+  },
+  {
+    "backend": "wgpu-worker",
+    "level": 1,
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 394.500847,
+    "p10_ms": 388.01378020000004,
+    "p90_ms": 399.0072124
+  },
+  {
+    "backend": "rayon-worker",
+    "level": 2,
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 281.597398,
+    "p10_ms": 276.5984932,
+    "p90_ms": 317.3511992
+  },
+  {
+    "backend": "rayon-worker",
+    "level": 2,
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 91.43884,
+    "p10_ms": 89.5141342,
+    "p90_ms": 94.2211072
+  },
+  {
+    "backend": "rayon-worker",
+    "level": 2,
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 86.588197,
+    "p10_ms": 86.218565,
+    "p90_ms": 86.90228
+  },
+  {
+    "backend": "rayon-worker",
+    "level": 2,
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.0044,
+    "p10_ms": 0.00425,
+    "p90_ms": 0.005428
+  },
+  {
+    "backend": "wgpu-worker",
+    "level": 2,
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 138.101153,
+    "p10_ms": 135.77206800000002,
+    "p90_ms": 144.3877394
+  },
+  {
+    "backend": "wgpu-worker",
+    "level": 2,
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 137.163764,
+    "p10_ms": 136.4008172,
+    "p90_ms": 144.033906
+  },
+  {
+    "backend": "wgpu-worker",
+    "level": 2,
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 148.951317,
+    "p10_ms": 146.58306199999998,
+    "p90_ms": 153.5515708
+  },
+  {
+    "backend": "wgpu-worker",
+    "level": 2,
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 148.360838,
+    "p10_ms": 146.7238624,
+    "p90_ms": 156.3234588
+  }
+]

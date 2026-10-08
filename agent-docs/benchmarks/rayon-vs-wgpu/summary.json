@@ -1,0 +1,3266 @@
+[
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 420.313869,
+    "p10_ms": 420.313869,
+    "p90_ms": 420.313869,
+    "min_ms": 420.313869,
+    "max_ms": 420.313869,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 0.598149,
+    "p10_ms": 0.598149,
+    "p90_ms": 0.598149,
+    "min_ms": 0.598149,
+    "max_ms": 0.598149,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 1112.575972,
+    "p10_ms": 1112.575972,
+    "p90_ms": 1112.575972,
+    "min_ms": 1112.575972,
+    "max_ms": 1112.575972,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 1164.174492,
+    "p10_ms": 1154.4612252000002,
+    "p90_ms": 1173.6205803999999,
+    "min_ms": 1149.638766,
+    "max_ms": 1192.556834,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 1117.054447,
+    "p10_ms": 1110.8254054000001,
+    "p90_ms": 1154.4044572,
+    "min_ms": 1110.053135,
+    "max_ms": 1157.815558,
+    "executed_nodes": [
+      5
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 581.648372,
+    "p10_ms": 576.8510516,
+    "p90_ms": 596.3011909999999,
+    "min_ms": 574.986838,
+    "max_ms": 604.986239,
+    "executed_nodes": [
+      2
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 501.956129,
+    "p10_ms": 497.1811376,
+    "p90_ms": 540.5677552,
+    "min_ms": 495.198956,
+    "max_ms": 569.527344,
+    "executed_nodes": [
+      1
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.00139,
+    "p10_ms": 0.001328,
+    "p90_ms": 0.002058,
+    "min_ms": 0.00132,
+    "max_ms": 0.00241,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 408.141671,
+    "p10_ms": 408.141671,
+    "p90_ms": 408.141671,
+    "min_ms": 408.141671,
+    "max_ms": 408.141671,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 0.34682,
+    "p10_ms": 0.34682,
+    "p90_ms": 0.34682,
+    "min_ms": 0.34682,
+    "max_ms": 0.34682,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 1262.209626,
+    "p10_ms": 1262.209626,
+    "p90_ms": 1262.209626,
+    "min_ms": 1262.209626,
+    "max_ms": 1262.209626,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 1424.788807,
+    "p10_ms": 1403.1061714,
+    "p90_ms": 1469.2018882,
+    "min_ms": 1402.739869,
+    "max_ms": 1508.962785,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 1372.483508,
+    "p10_ms": 1359.9860318,
+    "p90_ms": 1395.685847,
+    "min_ms": 1357.222883,
+    "max_ms": 1399.885971,
+    "executed_nodes": [
+      5
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 766.78094,
+    "p10_ms": 763.9899104000001,
+    "p90_ms": 779.4173502,
+    "min_ms": 763.243584,
+    "max_ms": 790.971827,
+    "executed_nodes": [
+      2
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 679.500706,
+    "p10_ms": 668.7646142,
+    "p90_ms": 723.5791038,
+    "min_ms": 667.582727,
+    "max_ms": 732.796223,
+    "executed_nodes": [
+      1
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.00137,
+    "p10_ms": 0.00129,
+    "p90_ms": 0.0021620000000000003,
+    "min_ms": 0.00129,
+    "max_ms": 0.00257,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 411.035858,
+    "p10_ms": 411.035858,
+    "p90_ms": 411.035858,
+    "min_ms": 411.035858,
+    "max_ms": 411.035858,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 152.786631,
+    "p10_ms": 152.786631,
+    "p90_ms": 152.786631,
+    "min_ms": 152.786631,
+    "max_ms": 152.786631,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 939.566941,
+    "p10_ms": 939.566941,
+    "p90_ms": 939.566941,
+    "min_ms": 939.566941,
+    "max_ms": 939.566941,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 956.426694,
+    "p10_ms": 951.4206378,
+    "p90_ms": 974.9101796,
+    "min_ms": 945.032437,
+    "max_ms": 987.669134,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 953.128658,
+    "p10_ms": 936.5062882,
+    "p90_ms": 973.83251,
+    "min_ms": 927.340513,
+    "max_ms": 981.97859,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 951.816919,
+    "p10_ms": 939.5627532,
+    "p90_ms": 959.6269216000001,
+    "min_ms": 939.163882,
+    "max_ms": 961.82644,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 967.732213,
+    "p10_ms": 946.9625618,
+    "p90_ms": 975.3212402,
+    "min_ms": 946.892337,
+    "max_ms": 984.258485,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 947.649007,
+    "p10_ms": 931.9535234,
+    "p90_ms": 990.8297718,
+    "min_ms": 919.531957,
+    "max_ms": 996.524067,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 427.125893,
+    "p10_ms": 427.125893,
+    "p90_ms": 427.125893,
+    "min_ms": 427.125893,
+    "max_ms": 427.125893,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 221.505433,
+    "p10_ms": 221.505433,
+    "p90_ms": 221.505433,
+    "min_ms": 221.505433,
+    "max_ms": 221.505433,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 175.542428,
+    "p10_ms": 175.542428,
+    "p90_ms": 175.542428,
+    "min_ms": 175.542428,
+    "max_ms": 175.542428,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 170.316153,
+    "p10_ms": 169.684594,
+    "p90_ms": 171.50540600000002,
+    "min_ms": 169.556754,
+    "max_ms": 171.635342,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 171.688512,
+    "p10_ms": 170.8474852,
+    "p90_ms": 173.015987,
+    "min_ms": 170.331934,
+    "max_ms": 173.074571,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 171.781533,
+    "p10_ms": 170.668608,
+    "p90_ms": 173.0019208,
+    "min_ms": 170.562344,
+    "max_ms": 173.99852,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 170.195873,
+    "p10_ms": 169.6170582,
+    "p90_ms": 171.14277479999998,
+    "min_ms": 169.508315,
+    "max_ms": 172.302742,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 171.027713,
+    "p10_ms": 170.351282,
+    "p90_ms": 172.335959,
+    "min_ms": 169.654874,
+    "max_ms": 172.338231,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 414.391265,
+    "p10_ms": 414.391265,
+    "p90_ms": 414.391265,
+    "min_ms": 414.391265,
+    "max_ms": 414.391265,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 0.598269,
+    "p10_ms": 0.598269,
+    "p90_ms": 0.598269,
+    "min_ms": 0.598269,
+    "max_ms": 0.598269,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 407.866942,
+    "p10_ms": 407.866942,
+    "p90_ms": 407.866942,
+    "min_ms": 407.866942,
+    "max_ms": 407.866942,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 464.567046,
+    "p10_ms": 457.4008292,
+    "p90_ms": 489.95762279999997,
+    "min_ms": 456.542694,
+    "max_ms": 495.391306,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 411.247738,
+    "p10_ms": 408.6604082,
+    "p90_ms": 414.1919348,
+    "min_ms": 407.682881,
+    "max_ms": 414.789494,
+    "executed_nodes": [
+      5
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 144.637189,
+    "p10_ms": 143.65699120000002,
+    "p90_ms": 146.2775752,
+    "min_ms": 143.00764,
+    "max_ms": 149.152084,
+    "executed_nodes": [
+      2
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 124.107818,
+    "p10_ms": 123.31392720000001,
+    "p90_ms": 128.0993586,
+    "min_ms": 123.10792,
+    "max_ms": 129.707373,
+    "executed_nodes": [
+      1
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.00133,
+    "p10_ms": 0.001298,
+    "p90_ms": 0.001928,
+    "min_ms": 0.00129,
+    "max_ms": 0.00232,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 413.786024,
+    "p10_ms": 413.786024,
+    "p90_ms": 413.786024,
+    "min_ms": 413.786024,
+    "max_ms": 413.786024,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 0.42096,
+    "p10_ms": 0.42096,
+    "p90_ms": 0.42096,
+    "min_ms": 0.42096,
+    "max_ms": 0.42096,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 478.895702,
+    "p10_ms": 478.895702,
+    "p90_ms": 478.895702,
+    "min_ms": 478.895702,
+    "max_ms": 478.895702,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 549.127424,
+    "p10_ms": 538.6468434000001,
+    "p90_ms": 566.188074,
+    "min_ms": 536.479405,
+    "max_ms": 573.887098,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 497.409073,
+    "p10_ms": 482.0059306,
+    "p90_ms": 509.68792940000003,
+    "min_ms": 476.445065,
+    "max_ms": 520.044311,
+    "executed_nodes": [
+      5
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 196.317218,
+    "p10_ms": 191.431119,
+    "p90_ms": 205.0378532,
+    "min_ms": 190.241303,
+    "max_ms": 205.24107,
+    "executed_nodes": [
+      2
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 170.237034,
+    "p10_ms": 167.67477399999999,
+    "p90_ms": 184.5525436,
+    "min_ms": 167.474406,
+    "max_ms": 194.13187,
+    "executed_nodes": [
+      1
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.00136,
+    "p10_ms": 0.00132,
+    "p90_ms": 0.002062,
+    "min_ms": 0.00132,
+    "max_ms": 0.00239,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 421.127729,
+    "p10_ms": 421.127729,
+    "p90_ms": 421.127729,
+    "min_ms": 421.127729,
+    "max_ms": 421.127729,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 152.627271,
+    "p10_ms": 152.627271,
+    "p90_ms": 152.627271,
+    "min_ms": 152.627271,
+    "max_ms": 152.627271,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 285.63073,
+    "p10_ms": 285.63073,
+    "p90_ms": 285.63073,
+    "min_ms": 285.63073,
+    "max_ms": 285.63073,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 277.072629,
+    "p10_ms": 273.66953060000003,
+    "p90_ms": 279.8590338,
+    "min_ms": 271.563725,
+    "max_ms": 281.066905,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 277.629188,
+    "p10_ms": 273.4596864,
+    "p90_ms": 282.3999938,
+    "min_ms": 272.618984,
+    "max_ms": 282.447713,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 278.344628,
+    "p10_ms": 275.7657066,
+    "p90_ms": 288.392338,
+    "min_ms": 273.825813,
+    "max_ms": 292.714974,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 278.327658,
+    "p10_ms": 273.78406820000004,
+    "p90_ms": 282.0875304,
+    "min_ms": 272.743933,
+    "max_ms": 284.479072,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 278.933628,
+    "p10_ms": 276.49186599999996,
+    "p90_ms": 282.89374519999996,
+    "min_ms": 276.34493,
+    "max_ms": 286.17735,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 415.074174,
+    "p10_ms": 415.074174,
+    "p90_ms": 415.074174,
+    "min_ms": 415.074174,
+    "max_ms": 415.074174,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 189.676874,
+    "p10_ms": 189.676874,
+    "p90_ms": 189.676874,
+    "min_ms": 189.676874,
+    "max_ms": 189.676874,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 82.04724,
+    "p10_ms": 82.04724,
+    "p90_ms": 82.04724,
+    "min_ms": 82.04724,
+    "max_ms": 82.04724,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 82.28362,
+    "p10_ms": 81.9626872,
+    "p90_ms": 82.807761,
+    "min_ms": 81.78424,
+    "max_ms": 82.834369,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 83.098578,
+    "p10_ms": 81.6054722,
+    "p90_ms": 83.7979744,
+    "min_ms": 81.383921,
+    "max_ms": 85.823516,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 82.53367,
+    "p10_ms": 82.2170952,
+    "p90_ms": 82.640655,
+    "min_ms": 82.08568,
+    "max_ms": 82.762639,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 83.242198,
+    "p10_ms": 82.763806,
+    "p90_ms": 84.5140148,
+    "min_ms": 82.70231,
+    "max_ms": 86.268486,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 82.928348,
+    "p10_ms": 82.606504,
+    "p90_ms": 83.2806242,
+    "min_ms": 82.41676,
+    "max_ms": 83.292689,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 406.599872,
+    "p10_ms": 406.599872,
+    "p90_ms": 406.599872,
+    "min_ms": 406.599872,
+    "max_ms": 406.599872,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 0.596659,
+    "p10_ms": 0.596659,
+    "p90_ms": 0.596659,
+    "min_ms": 0.596659,
+    "max_ms": 0.596659,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 246.714569,
+    "p10_ms": 246.714569,
+    "p90_ms": 246.714569,
+    "min_ms": 246.714569,
+    "max_ms": 246.714569,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 280.415626,
+    "p10_ms": 260.2723132,
+    "p90_ms": 284.54700579999997,
+    "min_ms": 259.937386,
+    "max_ms": 284.785341,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 216.424979,
+    "p10_ms": 199.7085824,
+    "p90_ms": 220.291649,
+    "min_ms": 198.489656,
+    "max_ms": 224.311541,
+    "executed_nodes": [
+      5
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 29.725921,
+    "p10_ms": 29.6191724,
+    "p90_ms": 30.89045,
+    "min_ms": 29.509622,
+    "max_ms": 34.830046,
+    "executed_nodes": [
+      2
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 27.197043,
+    "p10_ms": 26.9009798,
+    "p90_ms": 28.2190746,
+    "min_ms": 26.883323,
+    "max_ms": 29.929841,
+    "executed_nodes": [
+      1
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.00146,
+    "p10_ms": 0.001398,
+    "p90_ms": 0.004128000000000001,
+    "min_ms": 0.00139,
+    "max_ms": 0.00664,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 417.703332,
+    "p10_ms": 417.703332,
+    "p90_ms": 417.703332,
+    "min_ms": 417.703332,
+    "max_ms": 417.703332,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 0.34026,
+    "p10_ms": 0.34026,
+    "p90_ms": 0.34026,
+    "min_ms": 0.34026,
+    "max_ms": 0.34026,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 320.243507,
+    "p10_ms": 320.243507,
+    "p90_ms": 320.243507,
+    "min_ms": 320.243507,
+    "max_ms": 320.243507,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 317.12074,
+    "p10_ms": 309.66491940000003,
+    "p90_ms": 318.73893680000003,
+    "min_ms": 291.413345,
+    "max_ms": 319.304048,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 242.158924,
+    "p10_ms": 228.29406840000001,
+    "p90_ms": 250.42587880000002,
+    "min_ms": 226.209958,
+    "max_ms": 256.46857,
+    "executed_nodes": [
+      5
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 42.920538,
+    "p10_ms": 40.9510694,
+    "p90_ms": 47.2250378,
+    "min_ms": 40.737031,
+    "max_ms": 52.288009,
+    "executed_nodes": [
+      2
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 37.344964,
+    "p10_ms": 37.2048778,
+    "p90_ms": 38.9857462,
+    "min_ms": 37.106773,
+    "max_ms": 41.890079,
+    "executed_nodes": [
+      1
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.00139,
+    "p10_ms": 0.0013540000000000002,
+    "p90_ms": 0.002502,
+    "min_ms": 0.00133,
+    "max_ms": 0.00339,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 412.738717,
+    "p10_ms": 412.738717,
+    "p90_ms": 412.738717,
+    "min_ms": 412.738717,
+    "max_ms": 412.738717,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 148.092995,
+    "p10_ms": 148.092995,
+    "p90_ms": 148.092995,
+    "min_ms": 148.092995,
+    "max_ms": 148.092995,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 125.367927,
+    "p10_ms": 125.367927,
+    "p90_ms": 125.367927,
+    "min_ms": 125.367927,
+    "max_ms": 125.367927,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 110.929472,
+    "p10_ms": 110.367968,
+    "p90_ms": 117.6415248,
+    "min_ms": 110.078672,
+    "max_ms": 118.316284,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 111.386161,
+    "p10_ms": 110.3649022,
+    "p90_ms": 111.81336019999999,
+    "min_ms": 109.844143,
+    "max_ms": 111.909081,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 117.635385,
+    "p10_ms": 110.7775774,
+    "p90_ms": 118.43643180000001,
+    "min_ms": 109.902363,
+    "max_ms": 119.125703,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 112.33136,
+    "p10_ms": 110.0724822,
+    "p90_ms": 115.4709708,
+    "min_ms": 109.584643,
+    "max_ms": 116.899586,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 110.345073,
+    "p10_ms": 110.207466,
+    "p90_ms": 111.020763,
+    "min_ms": 110.201442,
+    "max_ms": 111.370851,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 410.925768,
+    "p10_ms": 410.925768,
+    "p90_ms": 410.925768,
+    "min_ms": 410.925768,
+    "max_ms": 410.925768,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 221.549373,
+    "p10_ms": 221.549373,
+    "p90_ms": 221.549373,
+    "min_ms": 221.549373,
+    "max_ms": 221.549373,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 75.242367,
+    "p10_ms": 75.242367,
+    "p90_ms": 75.242367,
+    "min_ms": 75.242367,
+    "max_ms": 75.242367,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 72.699249,
+    "p10_ms": 71.704046,
+    "p90_ms": 73.604166,
+    "min_ms": 71.59003,
+    "max_ms": 73.786998,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 72.24866,
+    "p10_ms": 72.03747519999999,
+    "p90_ms": 72.799347,
+    "min_ms": 71.87446,
+    "max_ms": 73.437459,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 72.182009,
+    "p10_ms": 71.8347392,
+    "p90_ms": 72.49965379999999,
+    "min_ms": 71.77726,
+    "max_ms": 72.605269,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 72.1187,
+    "p10_ms": 72.045681,
+    "p90_ms": 72.5917228,
+    "min_ms": 72.034129,
+    "max_ms": 73.138178,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "42mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 72.414469,
+    "p10_ms": 71.974192,
+    "p90_ms": 73.2749488,
+    "min_ms": 71.85632,
+    "max_ms": 73.730028,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 51.68211,
+    "p10_ms": 51.68211,
+    "p90_ms": 51.68211,
+    "min_ms": 51.68211,
+    "max_ms": 51.68211,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 0.547599,
+    "p10_ms": 0.547599,
+    "p90_ms": 0.547599,
+    "min_ms": 0.547599,
+    "max_ms": 0.547599,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 126.958346,
+    "p10_ms": 126.958346,
+    "p90_ms": 126.958346,
+    "min_ms": 126.958346,
+    "max_ms": 126.958346,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 146.062337,
+    "p10_ms": 144.72916700000002,
+    "p90_ms": 149.12343479999998,
+    "min_ms": 143.989279,
+    "max_ms": 149.353874,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 134.328649,
+    "p10_ms": 130.6755716,
+    "p90_ms": 140.8061606,
+    "min_ms": 129.176534,
+    "max_ms": 149.873943,
+    "executed_nodes": [
+      5
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 72.786639,
+    "p10_ms": 72.0831158,
+    "p90_ms": 73.2910746,
+    "min_ms": 72.030259,
+    "max_ms": 74.109177,
+    "executed_nodes": [
+      2
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 61.41823,
+    "p10_ms": 60.514772799999996,
+    "p90_ms": 61.8691918,
+    "min_ms": 60.48754,
+    "max_ms": 62.871559,
+    "executed_nodes": [
+      1
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.00143,
+    "p10_ms": 0.00135,
+    "p90_ms": 0.0022040000000000002,
+    "min_ms": 0.00135,
+    "max_ms": 0.00226,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 52.128259,
+    "p10_ms": 52.128259,
+    "p90_ms": 52.128259,
+    "min_ms": 52.128259,
+    "max_ms": 52.128259,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 0.34098,
+    "p10_ms": 0.34098,
+    "p90_ms": 0.34098,
+    "min_ms": 0.34098,
+    "max_ms": 0.34098,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 154.899418,
+    "p10_ms": 154.899418,
+    "p90_ms": 154.899418,
+    "min_ms": 154.899418,
+    "max_ms": 154.899418,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 184.13832,
+    "p10_ms": 177.9568582,
+    "p90_ms": 186.030684,
+    "min_ms": 176.373067,
+    "max_ms": 189.565024,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 163.85105,
+    "p10_ms": 160.7421362,
+    "p90_ms": 171.15159839999998,
+    "min_ms": 160.526513,
+    "max_ms": 178.083576,
+    "executed_nodes": [
+      5
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 94.365858,
+    "p10_ms": 93.1451872,
+    "p90_ms": 95.60299459999999,
+    "min_ms": 92.61034,
+    "max_ms": 96.660585,
+    "executed_nodes": [
+      2
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 84.097858,
+    "p10_ms": 83.65285800000001,
+    "p90_ms": 86.20180420000001,
+    "min_ms": 83.560698,
+    "max_ms": 89.319033,
+    "executed_nodes": [
+      1
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.00137,
+    "p10_ms": 0.001338,
+    "p90_ms": 0.002038,
+    "min_ms": 0.00133,
+    "max_ms": 0.00239,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 51.932439,
+    "p10_ms": 51.932439,
+    "p90_ms": 51.932439,
+    "min_ms": 51.932439,
+    "max_ms": 51.932439,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 145.779277,
+    "p10_ms": 145.779277,
+    "p90_ms": 145.779277,
+    "min_ms": 145.779277,
+    "max_ms": 145.779277,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 114.060709,
+    "p10_ms": 114.060709,
+    "p90_ms": 114.060709,
+    "min_ms": 114.060709,
+    "max_ms": 114.060709,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 107.301276,
+    "p10_ms": 106.6902652,
+    "p90_ms": 108.5006978,
+    "min_ms": 106.236546,
+    "max_ms": 109.715793,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 106.010296,
+    "p10_ms": 105.1439518,
+    "p90_ms": 107.681506,
+    "min_ms": 105.049207,
+    "max_ms": 108.374234,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 104.243678,
+    "p10_ms": 103.8935528,
+    "p90_ms": 106.1180726,
+    "min_ms": 103.794968,
+    "max_ms": 107.129495,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 109.202763,
+    "p10_ms": 107.6393106,
+    "p90_ms": 111.38599880000001,
+    "min_ms": 106.054937,
+    "max_ms": 112.04987,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 107.877124,
+    "p10_ms": 104.5914494,
+    "p90_ms": 112.0230842,
+    "min_ms": 103.369819,
+    "max_ms": 112.213421,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 51.982489,
+    "p10_ms": 51.982489,
+    "p90_ms": 51.982489,
+    "min_ms": 51.982489,
+    "max_ms": 51.982489,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 190.325884,
+    "p10_ms": 190.325884,
+    "p90_ms": 190.325884,
+    "min_ms": 190.325884,
+    "max_ms": 190.325884,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 22.511638,
+    "p10_ms": 22.511638,
+    "p90_ms": 22.511638,
+    "min_ms": 22.511638,
+    "max_ms": 22.511638,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 17.893563,
+    "p10_ms": 17.677073,
+    "p90_ms": 17.9961302,
+    "min_ms": 17.610393,
+    "max_ms": 18.092923,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 17.515532,
+    "p10_ms": 17.4412382,
+    "p90_ms": 17.588729,
+    "min_ms": 17.420703,
+    "max_ms": 17.606393,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 17.529882,
+    "p10_ms": 17.4526948,
+    "p90_ms": 17.664861,
+    "min_ms": 17.400942,
+    "max_ms": 17.683533,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 17.811213,
+    "p10_ms": 16.452108,
+    "p90_ms": 18.0375262,
+    "min_ms": 12.698288,
+    "max_ms": 18.101343,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 0,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 17.716272,
+    "p10_ms": 17.658175,
+    "p90_ms": 17.8208328,
+    "min_ms": 17.611903,
+    "max_ms": 17.909112,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 51.54456,
+    "p10_ms": 51.54456,
+    "p90_ms": 51.54456,
+    "min_ms": 51.54456,
+    "max_ms": 51.54456,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 0.542859,
+    "p10_ms": 0.542859,
+    "p90_ms": 0.542859,
+    "min_ms": 0.542859,
+    "max_ms": 0.542859,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 51.18533,
+    "p10_ms": 51.18533,
+    "p90_ms": 51.18533,
+    "min_ms": 51.18533,
+    "max_ms": 51.18533,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 58.145773,
+    "p10_ms": 57.2188682,
+    "p90_ms": 59.354624799999996,
+    "min_ms": 56.326285,
+    "max_ms": 59.481512,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 35.365605,
+    "p10_ms": 34.5645482,
+    "p90_ms": 39.753203,
+    "min_ms": 33.491597,
+    "max_ms": 43.866447,
+    "executed_nodes": [
+      5
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 14.744505,
+    "p10_ms": 14.6290242,
+    "p90_ms": 14.9909552,
+    "min_ms": 14.517217,
+    "max_ms": 15.029956,
+    "executed_nodes": [
+      2
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 13.626117,
+    "p10_ms": 13.433229,
+    "p90_ms": 13.890670799999999,
+    "min_ms": 13.334917,
+    "max_ms": 14.679206,
+    "executed_nodes": [
+      1
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.00235,
+    "p10_ms": 0.001358,
+    "p90_ms": 0.0036940000000000002,
+    "min_ms": 0.00135,
+    "max_ms": 0.00387,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 51.612509,
+    "p10_ms": 51.612509,
+    "p90_ms": 51.612509,
+    "min_ms": 51.612509,
+    "max_ms": 51.612509,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 0.37502,
+    "p10_ms": 0.37502,
+    "p90_ms": 0.37502,
+    "min_ms": 0.37502,
+    "max_ms": 0.37502,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 61.49373,
+    "p10_ms": 61.49373,
+    "p90_ms": 61.49373,
+    "min_ms": 61.49373,
+    "max_ms": 61.49373,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 68.580823,
+    "p10_ms": 67.08774820000001,
+    "p90_ms": 70.4505906,
+    "min_ms": 66.044965,
+    "max_ms": 71.970109,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 41.949189,
+    "p10_ms": 40.995866,
+    "p90_ms": 48.5029766,
+    "min_ms": 40.97497,
+    "max_ms": 49.796151,
+    "executed_nodes": [
+      5
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 20.771399,
+    "p10_ms": 20.0367448,
+    "p90_ms": 21.9271448,
+    "min_ms": 19.68476,
+    "max_ms": 22.407568,
+    "executed_nodes": [
+      2
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 21.391529,
+    "p10_ms": 18.736309199999997,
+    "p90_ms": 22.0687502,
+    "min_ms": 18.619702,
+    "max_ms": 22.296039,
+    "executed_nodes": [
+      1
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.00137,
+    "p10_ms": 0.00134,
+    "p90_ms": 0.002628,
+    "min_ms": 0.00134,
+    "max_ms": 0.0031,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 51.3539,
+    "p10_ms": 51.3539,
+    "p90_ms": 51.3539,
+    "min_ms": 51.3539,
+    "max_ms": 51.3539,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 144.709949,
+    "p10_ms": 144.709949,
+    "p90_ms": 144.709949,
+    "min_ms": 144.709949,
+    "max_ms": 144.709949,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 45.490505,
+    "p10_ms": 45.490505,
+    "p90_ms": 45.490505,
+    "min_ms": 45.490505,
+    "max_ms": 45.490505,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 29.419901,
+    "p10_ms": 29.1693012,
+    "p90_ms": 30.5784804,
+    "min_ms": 29.144942,
+    "max_ms": 32.049318,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 30.5041,
+    "p10_ms": 30.313482,
+    "p90_ms": 31.1355118,
+    "min_ms": 30.26417,
+    "max_ms": 32.189679,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 30.23598,
+    "p10_ms": 30.033983,
+    "p90_ms": 33.1613396,
+    "min_ms": 30.022471,
+    "max_ms": 34.434666,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 31.502469,
+    "p10_ms": 31.3475738,
+    "p90_ms": 34.3934428,
+    "min_ms": 31.119149,
+    "max_ms": 34.489626,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 30.27864,
+    "p10_ms": 30.0385302,
+    "p90_ms": 31.533881,
+    "min_ms": 30.014851,
+    "max_ms": 31.874649,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 50.864631,
+    "p10_ms": 50.864631,
+    "p90_ms": 50.864631,
+    "min_ms": 50.864631,
+    "max_ms": 50.864631,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 194.57317,
+    "p10_ms": 194.57317,
+    "p90_ms": 194.57317,
+    "min_ms": 194.57317,
+    "max_ms": 194.57317,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 18.681502,
+    "p10_ms": 18.681502,
+    "p90_ms": 18.681502,
+    "min_ms": 18.681502,
+    "max_ms": 18.681502,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 10.50378,
+    "p10_ms": 10.478765000000001,
+    "p90_ms": 10.579824,
+    "min_ms": 10.417269,
+    "max_ms": 10.64628,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 10.22406,
+    "p10_ms": 10.152892,
+    "p90_ms": 10.325334,
+    "min_ms": 10.12786,
+    "max_ms": 10.47199,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 10.0071,
+    "p10_ms": 9.967179999999999,
+    "p90_ms": 10.1014,
+    "min_ms": 9.96126,
+    "max_ms": 10.20884,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 10.03487,
+    "p10_ms": 9.965599,
+    "p90_ms": 10.370824,
+    "min_ms": 9.956751,
+    "max_ms": 11.414,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 1,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 10.15471,
+    "p10_ms": 9.955968200000001,
+    "p90_ms": 10.341511800000001,
+    "min_ms": 9.935121,
+    "max_ms": 10.421559,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 51.787419,
+    "p10_ms": 51.787419,
+    "p90_ms": 51.787419,
+    "min_ms": 51.787419,
+    "max_ms": 51.787419,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 0.633489,
+    "p10_ms": 0.633489,
+    "p90_ms": 0.633489,
+    "min_ms": 0.633489,
+    "max_ms": 0.633489,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 30.453691,
+    "p10_ms": 30.453691,
+    "p90_ms": 30.453691,
+    "min_ms": 30.453691,
+    "max_ms": 30.453691,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 35.011716,
+    "p10_ms": 34.0862608,
+    "p90_ms": 35.603620799999995,
+    "min_ms": 33.992956,
+    "max_ms": 36.685764,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 16.579074,
+    "p10_ms": 14.339628,
+    "p90_ms": 19.0520472,
+    "min_ms": 14.202836,
+    "max_ms": 26.720304,
+    "executed_nodes": [
+      5
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 3.719246,
+    "p10_ms": 3.6098882,
+    "p90_ms": 3.856712,
+    "min_ms": 3.507897,
+    "max_ms": 3.873696,
+    "executed_nodes": [
+      2
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 3.342606,
+    "p10_ms": 3.299169,
+    "p90_ms": 3.420681,
+    "min_ms": 3.293657,
+    "max_ms": 3.528577,
+    "executed_nodes": [
+      1
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 12,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.00233,
+    "p10_ms": 0.0020859999999999997,
+    "p90_ms": 0.00255,
+    "min_ms": 0.00139,
+    "max_ms": 0.00271,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 53.316869,
+    "p10_ms": 53.316869,
+    "p90_ms": 53.316869,
+    "min_ms": 53.316869,
+    "max_ms": 53.316869,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 0.452449,
+    "p10_ms": 0.452449,
+    "p90_ms": 0.452449,
+    "min_ms": 0.452449,
+    "max_ms": 0.452449,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 36.239915,
+    "p10_ms": 36.239915,
+    "p90_ms": 36.239915,
+    "min_ms": 36.239915,
+    "max_ms": 36.239915,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 36.857894,
+    "p10_ms": 35.756933000000004,
+    "p90_ms": 37.8031874,
+    "min_ms": 35.710325,
+    "max_ms": 39.736961,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 16.282444,
+    "p10_ms": 15.961103,
+    "p90_ms": 19.120153600000002,
+    "min_ms": 15.943215,
+    "max_ms": 24.694636,
+    "executed_nodes": [
+      5
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 4.794585,
+    "p10_ms": 4.7725212,
+    "p90_ms": 4.8996218,
+    "min_ms": 4.762546,
+    "max_ms": 5.127765,
+    "executed_nodes": [
+      2
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 4.673745,
+    "p10_ms": 4.608599,
+    "p90_ms": 4.974135,
+    "min_ms": 4.602495,
+    "max_ms": 5.162095,
+    "executed_nodes": [
+      1
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "rayon",
+    "threads": 6,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 0.00141,
+    "p10_ms": 0.00139,
+    "p90_ms": 0.003052,
+    "min_ms": 0.00139,
+    "max_ms": 0.00306,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 52.310929,
+    "p10_ms": 52.310929,
+    "p90_ms": 52.310929,
+    "min_ms": 52.310929,
+    "max_ms": 52.310929,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 149.704443,
+    "p10_ms": 149.704443,
+    "p90_ms": 149.704443,
+    "min_ms": 149.704443,
+    "max_ms": 149.704443,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 29.465731,
+    "p10_ms": 29.465731,
+    "p90_ms": 29.465731,
+    "min_ms": 29.465731,
+    "max_ms": 29.465731,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 7.630382,
+    "p10_ms": 7.5987002,
+    "p90_ms": 7.7640002,
+    "min_ms": 7.573573,
+    "max_ms": 7.880553,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 7.704293,
+    "p10_ms": 7.6448342,
+    "p90_ms": 7.7437982000000005,
+    "min_ms": 7.598803,
+    "max_ms": 7.830103,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 7.646453,
+    "p10_ms": 7.5918730000000005,
+    "p90_ms": 7.771896,
+    "min_ms": 7.579073,
+    "max_ms": 7.856912,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 7.634392,
+    "p10_ms": 7.5990982,
+    "p90_ms": 7.6755848,
+    "min_ms": 7.583923,
+    "max_ms": 7.693472,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "host",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 7.596582,
+    "p10_ms": 7.5745202,
+    "p90_ms": 7.7481127999999995,
+    "min_ms": 7.568153,
+    "max_ms": 7.901312,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "decode_normalize",
+    "n": 1,
+    "median_ms": 51.761829,
+    "p10_ms": 51.761829,
+    "p90_ms": 51.761829,
+    "min_ms": 51.761829,
+    "max_ms": 51.761829,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "runtime_init",
+    "n": 1,
+    "median_ms": 212.796932,
+    "p10_ms": 212.796932,
+    "p90_ms": 212.796932,
+    "min_ms": 212.796932,
+    "max_ms": 212.796932,
+    "executed_nodes": [
+      0
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "first_evaluation",
+    "n": 1,
+    "median_ms": 31.608109,
+    "p10_ms": 31.608109,
+    "p90_ms": 31.608109,
+    "min_ms": 31.608109,
+    "max_ms": 31.608109,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "fresh",
+    "n": 9,
+    "median_ms": 6.782123,
+    "p10_ms": 6.7681098,
+    "p90_ms": 6.829651,
+    "min_ms": 6.760613,
+    "max_ms": 6.943163,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "highlight",
+    "n": 9,
+    "median_ms": 6.763744,
+    "p10_ms": 6.7496098,
+    "p90_ms": 6.8449729999999995,
+    "min_ms": 6.738473,
+    "max_ms": 6.846413,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "exposure",
+    "n": 9,
+    "median_ms": 6.777683,
+    "p10_ms": 6.7437952,
+    "p90_ms": 6.878969199999999,
+    "min_ms": 6.737284,
+    "max_ms": 6.878994,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "sigmoid",
+    "n": 9,
+    "median_ms": 6.772743,
+    "p10_ms": 6.7607238,
+    "p90_ms": 6.864999,
+    "min_ms": 6.745683,
+    "max_ms": 6.878023,
+    "executed_nodes": [
+      7
+    ]
+  },
+  {
+    "fixture": "5mp",
+    "level": 2,
+    "backend": "wgpu",
+    "threads": 0,
+    "boundary": "resident",
+    "scenario": "noop",
+    "n": 9,
+    "median_ms": 6.781903,
+    "p10_ms": 6.733217799999999,
+    "p90_ms": 6.8234492,
+    "min_ms": 6.732233,
+    "max_ms": 6.846474,
+    "executed_nodes": [
+      7
+    ]
+  }
+]

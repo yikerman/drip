@@ -10,3 +10,4 @@
 - **Decided:** RAW source caching includes normalized samples and metadata, shared across preview levels and export. Reload sources replaces that snapshot; downstream numerical outputs remain uncached.
 - **Decided:** Frontend views share one evaluation request and the renderer's device. Normal previews sample the resident FP32 buffer; ICC proofing and CPU scopes are explicit host consumers.
 - **Open:** Whole-image buffer limits, tiling and a bounded host resource cache. The current GPU budget covers compute buffers and readback staging, not all driver or display allocations.
+- **Tentative:** Benchmark evidence now supports GPU scope reductions, removal of the extra host layout copy, then bounded source/prefix reuse. Full recomputation is faster on the GPU, but removing upstream cache reuse regresses some late edits; no new cache policy has been implemented.

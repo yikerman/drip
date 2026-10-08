@@ -1,0 +1,200 @@
+{
+  "pilot/5mp-level0-rayon-6-host": {
+    "resources": "max_rss_kib=417364 major_faults=0 wall_seconds=2.55",
+    "notes": [
+      "rayon_threads=6",
+      "image=2784x1872 scale=1 mean=0.1720688053 host=true"
+    ]
+  },
+  "pilot/5mp-level0-rayon-12-host": {
+    "resources": "max_rss_kib=422776 major_faults=0 wall_seconds=2.01",
+    "notes": [
+      "rayon_threads=12",
+      "image=2784x1872 scale=1 mean=0.1720688053 host=true"
+    ]
+  },
+  "pilot/5mp-level0-wgpu-0-resident": {
+    "resources": "max_rss_kib=456232 major_faults=178 wall_seconds=1.38",
+    "notes": [
+      "image=2784x1872 scale=1 mean=0.1720688130 host=false"
+    ]
+  },
+  "pilot/5mp-level0-wgpu-0-host": {
+    "resources": "max_rss_kib=415616 major_faults=0 wall_seconds=2.94",
+    "notes": [
+      "image=2784x1872 scale=1 mean=0.1720688130 host=true"
+    ]
+  },
+  "measurements/5mp-level2-rayon-6-host": {
+    "resources": "max_rss_kib=113948 major_faults=0 wall_seconds=0.77",
+    "notes": [
+      "rayon_threads=6",
+      "image=696x468 scale=4 mean=0.1718905699 host=true"
+    ]
+  },
+  "measurements/5mp-level2-rayon-12-host": {
+    "resources": "max_rss_kib=114788 major_faults=0 wall_seconds=0.71",
+    "notes": [
+      "rayon_threads=12",
+      "image=696x468 scale=4 mean=0.1718905699 host=true"
+    ]
+  },
+  "measurements/5mp-level2-wgpu-0-resident": {
+    "resources": "max_rss_kib=337028 major_faults=0 wall_seconds=0.73",
+    "notes": [
+      "image=696x468 scale=4 mean=0.1718905778 host=false"
+    ]
+  },
+  "measurements/5mp-level2-wgpu-0-host": {
+    "resources": "max_rss_kib=313224 major_faults=0 wall_seconds=0.71",
+    "notes": [
+      "image=696x468 scale=4 mean=0.1718905778 host=true"
+    ]
+  },
+  "measurements/5mp-level1-rayon-6-host": {
+    "resources": "max_rss_kib=188188 major_faults=0 wall_seconds=1.74",
+    "notes": [
+      "rayon_threads=6",
+      "image=1392x936 scale=2 mean=0.1719905236 host=true"
+    ]
+  },
+  "measurements/5mp-level1-rayon-12-host": {
+    "resources": "max_rss_kib=193200 major_faults=0 wall_seconds=1.41",
+    "notes": [
+      "rayon_threads=12",
+      "image=1392x936 scale=2 mean=0.1719905236 host=true"
+    ]
+  },
+  "measurements/5mp-level1-wgpu-0-resident": {
+    "resources": "max_rss_kib=318620 major_faults=0 wall_seconds=0.91",
+    "notes": [
+      "image=1392x936 scale=2 mean=0.1719905314 host=false"
+    ]
+  },
+  "measurements/5mp-level1-wgpu-0-host": {
+    "resources": "max_rss_kib=332156 major_faults=0 wall_seconds=2.00",
+    "notes": [
+      "image=1392x936 scale=2 mean=0.1719905314 host=true"
+    ]
+  },
+  "measurements/5mp-level0-rayon-6-host": {
+    "resources": "max_rss_kib=417796 major_faults=0 wall_seconds=5.68",
+    "notes": [
+      "rayon_threads=6",
+      "image=2784x1872 scale=1 mean=0.1720688053 host=true"
+    ]
+  },
+  "measurements/5mp-level0-rayon-12-host": {
+    "resources": "max_rss_kib=422744 major_faults=0 wall_seconds=4.52",
+    "notes": [
+      "rayon_threads=12",
+      "image=2784x1872 scale=1 mean=0.1720688053 host=true"
+    ]
+  },
+  "measurements/5mp-level0-wgpu-0-resident": {
+    "resources": "max_rss_kib=410388 major_faults=0 wall_seconds=1.39",
+    "notes": [
+      "image=2784x1872 scale=1 mean=0.1720688130 host=false"
+    ]
+  },
+  "measurements/5mp-level0-wgpu-0-host": {
+    "resources": "max_rss_kib=468652 major_faults=0 wall_seconds=6.30",
+    "notes": [
+      "image=2784x1872 scale=1 mean=0.1720688130 host=true"
+    ]
+  },
+  "measurements/42mp-level2-rayon-6-host": {
+    "resources": "max_rss_kib=869308 major_faults=0 wall_seconds=7.53",
+    "notes": [
+      "rayon_threads=6",
+      "image=1992x1330 scale=4 mean=0.0759288089 host=true"
+    ]
+  },
+  "measurements/42mp-level2-rayon-12-host": {
+    "resources": "max_rss_kib=874336 major_faults=0 wall_seconds=6.44",
+    "notes": [
+      "rayon_threads=12",
+      "image=1992x1330 scale=4 mean=0.0759288089 host=true"
+    ]
+  },
+  "measurements/42mp-level2-wgpu-0-resident": {
+    "resources": "max_rss_kib=500728 major_faults=0 wall_seconds=4.81",
+    "notes": [
+      "image=1992x1330 scale=4 mean=0.0759288169 host=false"
+    ]
+  },
+  "measurements/42mp-level2-wgpu-0-host": {
+    "resources": "max_rss_kib=516924 major_faults=1 wall_seconds=6.93",
+    "notes": [
+      "image=1992x1330 scale=4 mean=0.0759288169 host=true"
+    ]
+  },
+  "measurements/42mp-level1-rayon-6-host": {
+    "resources": "max_rss_kib=1197504 major_faults=0 wall_seconds=15.70",
+    "notes": [
+      "rayon_threads=6",
+      "image=3984x2660 scale=2 mean=0.0760516372 host=true"
+    ]
+  },
+  "measurements/42mp-level1-rayon-12-host": {
+    "resources": "max_rss_kib=1202392 major_faults=0 wall_seconds=12.91",
+    "notes": [
+      "rayon_threads=12",
+      "image=3984x2660 scale=2 mean=0.0760516372 host=true"
+    ]
+  },
+  "measurements/42mp-level1-wgpu-0-resident": {
+    "resources": "max_rss_kib=675328 major_faults=0 wall_seconds=5.54",
+    "notes": [
+      "image=3984x2660 scale=2 mean=0.0760516451 host=false"
+    ]
+  },
+  "measurements/42mp-level1-wgpu-0-host": {
+    "resources": "max_rss_kib=722200 major_faults=0 wall_seconds=16.29",
+    "notes": [
+      "image=3984x2660 scale=2 mean=0.0760516451 host=true"
+    ]
+  },
+  "measurements/42mp-level0-rayon-6-host": {
+    "resources": "max_rss_kib=3018976 major_faults=0 wall_seconds=46.10",
+    "notes": [
+      "rayon_threads=6",
+      "image=7968x5320 scale=1 mean=0.0761492413 host=true"
+    ]
+  },
+  "measurements/42mp-level0-rayon-12-host": {
+    "resources": "max_rss_kib=3023940 major_faults=0 wall_seconds=36.86",
+    "notes": [
+      "rayon_threads=12",
+      "image=7968x5320 scale=1 mean=0.0761492413 host=true"
+    ]
+  },
+  "measurements/42mp-level0-wgpu-0-resident": {
+    "resources": "max_rss_kib=1792440 major_faults=0 wall_seconds=11.26",
+    "notes": [
+      "image=7968x5320 scale=1 mean=0.0761492491 host=false"
+    ]
+  },
+  "measurements/42mp-level0-wgpu-0-host": {
+    "resources": "max_rss_kib=1797096 major_faults=0 wall_seconds=54.39",
+    "notes": [
+      "image=7968x5320 scale=1 mean=0.0761492491 host=true"
+    ]
+  },
+  "workers/42mp-level2-rayon": {
+    "resources": "max_rss_kib=1075228 major_faults=8 wall_seconds=5.51",
+    "notes": []
+  },
+  "workers/42mp-level2-wgpu": {
+    "resources": "max_rss_kib=688128 major_faults=15 wall_seconds=7.34",
+    "notes": []
+  },
+  "workers/42mp-level1-rayon": {
+    "resources": "max_rss_kib=1508672 major_faults=0 wall_seconds=15.40",
+    "notes": []
+  },
+  "workers/42mp-level1-wgpu": {
+    "resources": "max_rss_kib=880824 major_faults=0 wall_seconds=18.54",
+    "notes": []
+  }
+}
