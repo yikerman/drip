@@ -2,6 +2,8 @@
 use crate::{Result, runtime::RuntimeContext};
 use cubecl::{prelude::BufferArg, server::Handle};
 use std::{fmt::Debug, marker::PhantomData};
+mod host;
+pub use host::HostBuffer;
 
 pub trait Payload: Send + Sync + 'static {
     type Desc: Clone + Debug + Send + Sync + 'static;

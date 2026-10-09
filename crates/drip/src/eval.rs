@@ -196,6 +196,14 @@ impl Evaluator {
 }
 
 type DescribedValue = (Description, Data);
+
+/// One logical output and its at-most-one transferred representation.
+struct Value {
+    desc: Option<Description>,
+    placement: Placement,
+    native: Data,
+    transferred: Option<Data>,
+}
 fn output_id(node: NodeId, index: usize) -> PortId {
     PortId { node, index, direction: Direction::Output }
 }
@@ -224,8 +232,7 @@ struct Run<'a, 't> {
     dag: &'a Dag,
     runtime: &'a RuntimeContext,
     global: &'a GlobalContext,
-    descriptions: HashMap<usize, Vec<Option<Description>>>,
-    values: HashMap<(PortId, Placement), Data>,
+    values: HashMap<PortId, Value>,
     uses: HashMap<PortId, usize>,
     statistics: Statistics,
     timings: Option<&'t mut Vec<NodeTiming>>,
@@ -241,7 +248,6 @@ impl<'a, 't> Run<'a, 't> {
             dag,
             runtime,
             global,
-            descriptions: HashMap::new(),
             values: HashMap::new(),
             uses: HashMap::new(),
             statistics: Statistics::default(),
@@ -313,22 +319,26 @@ impl<'a, 't> Run<'a, 't> {
     }
 
     fn materialize(&mut self, from: PortId, spec: &PortSpec) -> Result<DescribedValue> {
-        let source = self.dag.output(from)?;
-        let desc = self.descriptions[&from.node.index][from.index]
+        let value = self
+            .values
+            .get_mut(&from)
+            .ok_or_else(|| Error::Contract("requested source description is unavailable".into()))?;
+        let desc = value
+            .desc
             .as_ref()
             .ok_or_else(|| Error::Contract("requested source description is unavailable".into()))?;
-        let key = (from, spec.placement);
-        if !self.values.contains_key(&key) {
-            // Keep the native placement until the last consumer uses the value.
-            let native = source.node.outputs()[from.index].placement;
-            let data = (spec.transport)(&self.values[&(from, native)], native, desc, self.runtime)?;
+        if spec.placement == value.placement {
+            return Ok((desc.clone(), value.native.clone()));
+        }
+        if value.transferred.is_none() {
+            let data = (spec.transport)(&value.native, value.placement, desc, self.runtime)?;
             match spec.placement {
                 Placement::Cpu => self.statistics.downloads += 1,
                 Placement::Device => self.statistics.uploads += 1,
             }
-            self.values.insert(key, data);
+            value.transferred = Some(data);
         }
-        Ok((desc.clone(), self.values[&key].clone()))
+        Ok((desc.clone(), value.transferred.as_ref().unwrap().clone()))
     }
     fn execute(&mut self, e: &crate::graph::Entry) -> Result<()> {
         let start = self.timings.as_ref().map(|_| Instant::now());
@@ -377,14 +387,21 @@ impl<'a, 't> Run<'a, 't> {
             if self.uses.contains_key(&id) {
                 match data {
                     Some(data) => {
-                        self.values.insert((id, spec.placement), data);
+                        self.values.insert(
+                            id,
+                            Value {
+                                desc: output_descs[port].clone(),
+                                placement: spec.placement,
+                                native: data,
+                                transferred: None,
+                            },
+                        );
                     }
                     None if output_descs[port].is_none() => {}
                     None => return Err(Error::Runtime("node omitted a described output".into())),
                 }
             }
         }
-        self.descriptions.insert(e.id.index, output_descs);
         Ok(())
     }
 
@@ -398,8 +415,7 @@ impl<'a, 't> Run<'a, 't> {
         let remaining = self.uses.get_mut(&port).unwrap();
         *remaining -= 1;
         if *remaining == 0 {
-            self.values.remove(&(port, Placement::Cpu));
-            self.values.remove(&(port, Placement::Device));
+            self.values.remove(&port);
         }
     }
 }

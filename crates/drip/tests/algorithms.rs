@@ -7,13 +7,14 @@ fn algorithms(runtime: RuntimeContext) {
     };
     let bits = [[0x80000000, 0x7fc01234, 0x7f800000], [1, 0xff800000, 0x3f800000]];
     let pixels: Vec<[f32; 3]> = bits.map(|p| p.map(f32::from_bits)).to_vec();
-    let device = ColorRgb::upload(&descriptor, &pixels, &runtime).unwrap();
+    let device = ColorRgb::upload(&descriptor, &pixels.into(), &runtime).unwrap();
     let restored = ColorRgb::download(&descriptor, &device, &runtime).unwrap();
     assert_eq!(restored.iter().map(|p| p.map(f32::to_bits)).collect::<Vec<_>>(), bits);
 
     let evaluator = Evaluator::new(runtime);
     bayer_reduction(&evaluator);
     resident_highlights(&evaluator);
+    bayer_host_island(&evaluator);
     context_driven_demosaic(&evaluator);
     let phases = [BayerPhase::Rggb, BayerPhase::Grbg, BayerPhase::Gbrg, BayerPhase::Bggr];
     let camera = Camera { coordinates: "reference-camera".into(), scale: "relative".into() };
@@ -27,7 +28,9 @@ fn algorithms(runtime: RuntimeContext) {
                 phase,
                 interpretation: camera.clone(),
             },
-            (0..w * h).map(|i| ((i * 137 + i / w * 29) % 2048) as f32 / 1024. - 0.03).collect(),
+            (0..w * h)
+                .map(|i| ((i * 137 + i / w * 29) % 2048) as f32 / 1024. - 0.03)
+                .collect::<Vec<_>>(),
         )
         .unwrap();
         let rcd = node::rcd::add(&mut dag, ()).unwrap();
@@ -136,7 +139,7 @@ fn bayer_reduction(evaluator: &Evaluator) {
                 assert_eq!(value, ((i / w) % 2 * 2 + (i % w) % 2) as f32 + 1.);
             }
             if factor == 1 {
-                assert_eq!(*result.data, pixels);
+                assert_eq!(&**result.data, pixels.as_slice());
             }
         }
     }
@@ -182,7 +185,7 @@ fn context_driven_demosaic(evaluator: &Evaluator) {
             phase: BayerPhase::Grbg,
             interpretation: camera.clone(),
         },
-        (0..64 * 48).map(|i| ((i * 31 + i / 64) % 101) as f32 / 100.).collect(),
+        (0..64 * 48).map(|i| ((i * 31 + i / 64) % 101) as f32 / 100.).collect::<Vec<_>>(),
     )
     .unwrap();
     let demosaic = node::rcd::add(&mut dag, ()).unwrap();
@@ -275,4 +278,69 @@ fn resident_highlights(evaluator: &Evaluator) {
     // Highlights must keep the image on the device between its two neighbors.
     assert_eq!(output.statistics.uploads, 1);
     assert_eq!(output.statistics.downloads, 1);
+}
+
+fn bayer_copy_contract(
+    _: &drip::runtime::GlobalContext,
+    _: &(),
+    image: Option<&BayerDesc>,
+) -> drip::Result<(Option<BayerDesc>,)> {
+    Ok((image.cloned(),))
+}
+
+#[drip::node(id="test-bayer-cpu-copy", contract=bayer_copy_contract)]
+fn bayer_cpu_copy(
+    _: &drip::runtime::KernelContext<'_>,
+    _: &(),
+    image: Read<'_, Cpu<Bayer>>,
+    output: Write<'_, Cpu<Bayer>>,
+) -> drip::Result<()> {
+    output.data.copy_from_slice(image.data);
+    Ok(())
+}
+
+fn bayer_host_island(evaluator: &Evaluator) {
+    let mut dag = Dag::new();
+    let source = node::source::<Bayer>(
+        &mut dag,
+        BayerDesc {
+            extent: Extent { width: 5, height: 3 },
+            phase: BayerPhase::Rggb,
+            interpretation: Camera { coordinates: "host-island".into(), scale: "white-1".into() },
+        },
+        (0..15).map(|i| i as f32).collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let before = node::reduce::bayer::add(&mut dag, node::reduce::Settings { factor: 1 }).unwrap();
+    let island = bayer_cpu_copy::add(&mut dag, ()).unwrap();
+    let sibling = bayer_cpu_copy::add(&mut dag, ()).unwrap();
+    let after = node::reduce::bayer::add(&mut dag, node::reduce::Settings { factor: 1 }).unwrap();
+    dag.connect(source, before.image).unwrap();
+    dag.connect(before.output, island.image).unwrap();
+    dag.connect(before.output, sibling.image).unwrap();
+    dag.connect(island.output, after.image).unwrap();
+    let result = evaluator.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), after.output).unwrap();
+    assert_eq!(result.statistics.uploads, 2);
+    assert_eq!(result.statistics.downloads, 2);
+    assert!(result.data.iter().enumerate().all(|(i, &v)| v == i as f32));
+
+    let inputs = evaluator.evaluate_inputs(&dag, &Default::default(), &[island.node, sibling.node]);
+    let a = inputs[&island.node]
+        .as_ref()
+        .unwrap()
+        .get("image")
+        .unwrap()
+        .shared::<Cpu<Bayer>>()
+        .unwrap();
+    let b = inputs[&sibling.node]
+        .as_ref()
+        .unwrap()
+        .get("image")
+        .unwrap()
+        .shared::<Cpu<Bayer>>()
+        .unwrap();
+    assert!(std::sync::Arc::ptr_eq(&a, &b));
+    drop(inputs);
+    drop(dag);
+    assert!(b.iter().enumerate().all(|(i, &v)| v == i as f32));
 }

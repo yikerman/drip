@@ -23,7 +23,7 @@ fn evaluate(
     };
     let levels_desc = BayerLevelDesc { phase, interpretation: desc.interpretation.clone() };
     let levels = std::array::from_fn(|i| clips[reference::color(phase, i / 2, i % 2)]);
-    let input = Bayer::upload(&desc, &samples.to_vec(), runtime).unwrap();
+    let input = Bayer::upload(&desc, &samples.to_vec().into(), runtime).unwrap();
     let mut output = Bayer::allocate_device(&desc, runtime).unwrap();
     let ctx = KernelContext { global: &GlobalContext::default(), runtime };
     reconstruct(
@@ -34,7 +34,7 @@ fn evaluate(
         Write { desc: &desc, data: &mut output },
     )
     .unwrap();
-    Bayer::download(&desc, &output, runtime).unwrap()
+    Bayer::download(&desc, &output, runtime).unwrap().to_vec()
 }
 fn fixture(width: usize, height: usize, phase: BayerPhase, clips: [f32; 4]) -> Vec<f32> {
     (0..width * height)

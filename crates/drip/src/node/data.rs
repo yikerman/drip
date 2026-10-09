@@ -1,5 +1,5 @@
 //! Concrete image and calibration payloads shared by processing nodes.
-pub use crate::payload::{F32Buffer, Interpretation, Payload};
+pub use crate::payload::{F32Buffer, HostBuffer, Interpretation, Payload};
 use crate::{Error, Result, runtime::RuntimeContext};
 use cubecl::bytes::Bytes;
 use std::marker::PhantomData;
@@ -154,7 +154,7 @@ pub struct BayerDesc {
 pub struct Bayer;
 impl Payload for Bayer {
     type Desc = BayerDesc;
-    type Cpu = Vec<f32>;
+    type Cpu = HostBuffer<f32>;
     type Device = F32Buffer<Self>;
     fn validate_desc(d: &Self::Desc) -> Result<()> {
         d.extent.validate()?;
@@ -168,18 +168,18 @@ impl Payload for Bayer {
         Ok(())
     }
     fn allocate_cpu(d: &Self::Desc) -> Self::Cpu {
-        vec![0.0; d.extent.pixels()]
+        vec![0.0; d.extent.pixels()].into()
     }
     fn allocate_device(d: &Self::Desc, r: &RuntimeContext) -> Result<Self::Device> {
         Ok(F32Buffer::new(r.client()?.empty(d.extent.pixels() * 4)))
     }
     fn upload(_: &Self::Desc, data: &Self::Cpu, r: &RuntimeContext) -> Result<Self::Device> {
-        Ok(F32Buffer::new(r.client()?.create(Bytes::from_elems(data.clone()))))
+        Ok(F32Buffer::new(r.client()?.create(data.shared_bytes())))
     }
     fn download(_: &Self::Desc, data: &Self::Device, r: &RuntimeContext) -> Result<Self::Cpu> {
         let bytes =
             r.client()?.read_one(data.handle.clone()).map_err(|e| Error::Runtime(e.to_string()))?;
-        Ok(bytemuck::cast_slice(&bytes).to_vec())
+        HostBuffer::from_bytes(bytes)
     }
 }
 

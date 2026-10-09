@@ -9,7 +9,12 @@ use crate::{
 };
 use std::sync::Arc;
 /// Bind immutable, already loaded data. Loading and decode remain outside pure nodes.
-pub fn source<P: Payload>(dag: &mut Dag, desc: P::Desc, data: P::Cpu) -> Result<Output<P>> {
+pub fn source<P: Payload>(
+    dag: &mut Dag,
+    desc: P::Desc,
+    data: impl Into<P::Cpu>,
+) -> Result<Output<P>> {
+    let data = data.into();
     P::validate_cpu(&desc, &data)?;
     let id = dag.add(Arc::new(Source::<P> { desc, data: Arc::new(data) }))?;
     Ok(Output::new(id, 0))

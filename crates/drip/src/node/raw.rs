@@ -33,7 +33,7 @@ struct Bound {
     levels: Arc<[f32; 4]>,
     metadata: Arc<drip_raw::Metadata>,
     desc: BayerDesc,
-    mosaic: Arc<Vec<f32>>,
+    mosaic: Arc<HostBuffer<f32>>,
     gains: Option<Arc<[f32; 4]>>,
     gain_desc: Option<BayerGainDesc>,
     matrix: Option<Arc<[[f32; 3]; 3]>>,
@@ -158,7 +158,7 @@ fn normalize(raw: &drip_raw::Raw) -> Result<Bound> {
         [[2, 1], [1, 0]] => BayerPhase::Bggr,
         _ => return Err(Error::Contract("source is not a supported Bayer pattern".into())),
     };
-    let mosaic = normalized_samples(raw)?;
+    let mosaic = normalized_samples(raw)?.into();
     let gains = site_gains(raw);
     let matrix = color::camera_to_rgb(
         &color::to_f64(&raw.xyz_to_cam),
