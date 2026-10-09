@@ -205,3 +205,15 @@ fn small_trackpad_deltas_accumulate_into_integer_steps() {
     assert_eq!(h.state().value, json!(-9));
     assert_eq!(h.state().offset, 0.0);
 }
+
+#[test]
+fn redraw_preserves_values_outside_slider_guidance() {
+    for (kind, value) in [
+        (ParamKind::Float { min: -10.0, max: 10.0, default: 0.0 }, json!(15.0)),
+        (ParamKind::Int { min: -24, max: -1, default: -12 }, json!(-30)),
+    ] {
+        let mut h = harness(kind, value.clone());
+        h.run();
+        assert_eq!(h.state().value, value);
+    }
+}

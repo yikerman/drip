@@ -1,49 +1,19 @@
 # Drip
 
-**Done Right Image Processing**
+A Rust RAW processor with a checked node graph and CubeCL image kernels.
+This branch rewrites the processing model directly in the existing crates.
 
-Drip is an open-source RAW photo editor that puts the processing pipeline in
-your hands. Develop a photo, follow it through each adjustment, and build a
-workflow you can use again.
+Nodes declare concrete payloads, CPU/device placement, and interpretation
+contracts. Graph edits validate contracts before committing. Evaluation runs
+the requested dependency subgraph and owns transfers between host and device.
+Intermediate image results are not cached across evaluations.
 
-![Drip showing a photo preview, histogram, waveform and vectorscope alongside separate sigmoid and exposure controls](fixtures/demos/pipeline-and-scopes.png)
-
-## See what goes into your image
-
-From white balance to the final export, every step is there on the canvas.
-Connect processing nodes, branch the pipeline, and place a preview wherever you
-want a closer look. Keep a histogram, waveform or vectorscope alongside your
-photo to see how your adjustments affect it.
-
-Start with the included RAW-to-TIFF workflow and make it your own:
-
-```text
-RAW → white balance → highlight reconstruction → demosaic
-    → camera color → exposure → sigmoid → TIFF
-```
-
-![The complete RAW-to-TIFF node graph with preview, histogram, waveform and vectorscope](fixtures/demos/pipeline-overview.png)
-
-## Make room for the way you edit
-
-Give your photo more space. Keep exposure and contrast controls close by. Move
-a scope into its own window, or keep everything together on the canvas.
-Previews, scopes and parameter panels can be arranged independently, so you
-choose what stays in view.
-
-![Drip with separate photo preview, histogram and vectorscope windows above the processing graph](fixtures/demos/pop-out-workspace.png)
-
-Adjustments update in the background. Lower the preview detail while exploring,
-then turn it up for a closer look. Exports always use full resolution.
-
-When you've built a pipeline you like, save it as a template for the next photo.
-Choose which settings to expose as inputs, and keep the rest ready to go.
-
-## Keep color in the picture
-
-Drip supports wide-gamut previews and ICC-managed TIFF export, with
-floating-point processing in linear Rec.2020. Color handling is part of the
-workflow from camera conversion through display and export.
+The current RAW path is Bayer normalization, independent as-shot gains and
+camera matrix outputs, opposed highlight reconstruction, RCD demosaic, matrix
+conversion, exposure, and sigmoid.
+The GUI retains color-managed wgpu presentation, ICC proofing, diagnostic scopes,
+and TIFF export. See [rewrite status](agent-docs/CUBECL_REWRITE.md) for migration
+limits and verification.
 
 ## Build & install
 
@@ -118,8 +88,6 @@ cargo xtask dist --target x86_64-unknown-linux-gnu
 ```
 
 ## Usage
-
-AI SLOP TO BE CLEANED UP
 
 Launch the installed editor with `drip-gui`, or run it from the checkout:
 
@@ -209,35 +177,89 @@ You can also open a saved project from the command line:
 cargo run --release -p drip-gui -- project.drip
 ```
 
-## Under the hood
+Saved projects use format version 2 and repeat connection checks when opened.
+Legacy project files are rejected without modification. RAW files are bound as
+immutable decoded snapshots; reopening or invalidating reloads them.
+Preview detail is passed in the global evaluation context. Demosaic reduces its
+Bayer phase planes internally before interpolation, after upstream sensor
+corrections. Every contract and node receives the same context; no hidden nodes
+or temporary graph rewrites are involved. Export requests full detail.
 
-Drip is written in Rust, with Rayon for processing and wgpu/egui for the GUI.
-The processing library is independent of the interface. Local macros derive DAG
-contracts and help from typed node functions. Concrete ports distinguish sensor
-data, camera RGB and working Rec.2020 RGB; creative processing does not impose
-an ordering restriction. Several algorithms
-come from darktable; sources and credits are in [THIRD_PARTY.md](THIRD_PARTY.md).
 
-For development, see the [library design and reading guide](crates/drip/src/lib.rs)
-and [GUI overview](crates/drip-gui/src/main.rs).
-Build its linked API docs with `cargo doc -p drip --no-deps`.
+For headless TIFF export:
 
 ```sh
-cargo test --workspace --all-targets
-cargo test --workspace --doc
+cargo run --release -p drip-cli -- photo.nef output.tiff
+cargo run --release -p drip-cli -- project.drip output.tiff
 ```
 
-Runnable declaration/DAG examples:
+The CLI uses default output-profile settings and 16-bit TIFF. A GUI project
+needs one connected export image to supply an unambiguous batch target;
+frontend view nodes outside that target's dependencies are not loaded.
+
+`DRIP_BACKEND` selects computation for both frontends, including GUI previews
+and exports. It defaults to `wgpu`. To run the same kernels on CPU:
 
 ```sh
-cargo run -p drip --example calibration_dag
-cargo run -p drip --example masked_edit_dag
+DRIP_BACKEND=cpu cargo run --release -p drip-gui --features drip/cpu -- project.drip
+DRIP_BACKEND=cpu cargo run --release -p drip-cli --features drip/cpu -- photo.nef output.tiff
 ```
 
-Logs go to stderr: `RUST_LOG=warn,drip=debug` for diagnostics,
-`RUST_LOG=warn,drip_gui::frame=trace` for frame timings.
+`DRIP_BACKEND=cuda` requires `--features drip/cuda`. Unknown values or backends
+not enabled in the build report an error. Enabling a feature alone does not
+select that backend; there is no automatic fallback. GUI drawing still uses wgpu.
+
+`RUST_LOG=warn,drip_gui::worker=trace` prints per-node host timings for evaluation
+and GUI preparation, followed by the total preview time. Tracing adds no device
+waits; asynchronous GPU execution is not measured separately. Evaluation timings
+include input transfers, contracts and dispatch; existing blocking readbacks are
+charged to their consumer. The final runtime wait appears only in the preview
+total. Timing records are printed after processing; clock reads and record storage
+still add a small cost. Use `drip_gui::worker=debug` for preview totals alone.
+
+## Development
+
+```sh
+cargo test --workspace
+cargo test -p drip --features cpu
+cargo test -p drip --test algorithms -- --ignored
+cargo test -p drip --test model cubecl_wgpu_hybrid -- --ignored
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+The ignored tests require a compute-capable GPU. `drip/cpu` uses CubeCL's CPU
+runtime; `drip/cuda` enables CUDA. All use the same image kernel sources.
+Presentation shaders remain WGSL in `drip-gui`. The first GUI integration uses
+a host preview endpoint; GPU resource sharing and scheduling optimization are
+separate follow-up work.
+
+The macro crate separates parsing/validation from binding generation.
+Node functions own Rustdoc help and contracts; the macro generates port handles,
+discovery, parameter persistence and invocation adapters.
+Parameter schemas come from the function's parameter type via `Parameters`;
+derive it on settings structs and use `&()` for nodes without parameters.
+
+Display labels can be set alongside the node declaration:
+
+```rust
+#[node(
+    id = "my-operation",
+    contract = my_contract,
+    port_labels(image = "RGB", output = "RGB"),
+)]
+```
+
+The keys are port argument names. Labels override the displayed payload names;
+they do not rename connection endpoints or change compatibility checks. Omitted
+labels retain the declared payload names. Unknown ports and duplicate labels
+are compile errors.
+
+Borrowed algorithms and dependency licenses are in [THIRD_PARTY.md](THIRD_PARTY.md).
+Benchmark outputs and retired experiment sources live outside this repository;
+the archive location is recorded in the rewrite status.
 
 ## License
 
 AGPL-3.0-or-later; see [LICENSE](LICENSE).
-RUST_LOG=warn,drip_gui::frame=trace
+
+Source ownership rules are in [crates/drip/README.md](crates/drip/README.md).

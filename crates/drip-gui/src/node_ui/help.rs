@@ -2,7 +2,7 @@
 //! declared concrete port contracts.
 
 use super::ports;
-use drip::graph::{Graph, NodeId};
+use crate::model::{Graph, NodeId};
 use egui::Ui;
 
 pub fn show(ui: &mut Ui, graph: &Graph, id: NodeId) {
@@ -17,11 +17,6 @@ pub fn show(ui: &mut Ui, graph: &Graph, id: NodeId) {
         for port in ports::texts(graph, id) {
             ui.weak(format!("{} {}", port.role.label(), port.port));
             ui.label(port.label);
-            ui.end_row();
-        }
-        for check in kind.checks() {
-            ui.weak("requires at evaluation");
-            ui.label(check);
             ui.end_row();
         }
     });

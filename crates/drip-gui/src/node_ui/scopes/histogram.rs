@@ -1,9 +1,10 @@
 //! Histogram evaluation and its integer reduction.
 
-use drip::image::{CameraRgb, Rec2020Mat};
-use drip::node::{EvalContext, KernelError};
-use drip::nodes::scopes::ExposureSettings;
-use drip::ports::Either;
+use super::ExposureSettings;
+use crate::node_ui::data::PrepareContext;
+use crate::node_ui::data::Rgb;
+use drip::Error as KernelError;
+
 use rayon::prelude::*;
 use std::sync::Arc;
 
@@ -23,13 +24,9 @@ const BINS: usize = 256;
 
 pub fn histogram(
     p: ExposureSettings,
-    (image,): (Either<&Rec2020Mat, &CameraRgb>,),
-    _: &EvalContext<'_>,
+    (image,): (&Rgb,),
+    _: &PrepareContext,
 ) -> Result<Arc<Histogram>, KernelError> {
-    let image = match image {
-        Either::First(rgb) => rgb.rgb(),
-        Either::Second(camera) => camera.rgb(),
-    };
     let (min, max) = (p.min_ev as f32, p.max_ev as f32);
     let thresholds = std::array::from_fn(|i| 2f32.powf(min + i as f32 * (max - min) / BINS as f32));
     let counts = count(&image.pixels, &thresholds);
@@ -99,13 +96,4 @@ mod tests {
     fn empty_image() {
         assert_eq!(count(&[], &[0.0; BINS]), vec![[0; 3]; BINS]);
     }
-}
-
-struct HistogramGui;
-#[drip_macros::gui_node]
-impl crate::node_ui::GuiNode for HistogramGui {
-    type Node = drip::nodes::scopes::HistogramNode;
-    type Presentation = Arc<Histogram>;
-    const NODE: &'static drip::node::TypedNode<Self::Node> = &drip::nodes::HISTOGRAM;
-    const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(histogram);
 }

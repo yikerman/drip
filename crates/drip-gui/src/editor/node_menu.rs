@@ -1,6 +1,6 @@
 //! Node selection, independent of graph edits and canvas coordinates.
 
-use drip::node::{NodeKind, Registry};
+use crate::model::{NodeKind, Registry};
 use egui::Ui;
 
 pub(super) fn show(ui: &mut Ui, registry: &Registry) -> Option<&'static NodeKind> {

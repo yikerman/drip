@@ -1,160 +1,126 @@
-mod common;
-
-use common::*;
-use drip::graph::{GraphError, NodeId};
-use drip::project::{LoadError, Project};
-use serde_json::{Value as Json, json};
-
-const MAJOR: &str = env!("CARGO_PKG_VERSION_MAJOR");
-
-fn load(file: Json) -> Result<Project, LoadError> {
-    Project::from_json(&file.to_string(), &registry())
-}
-
-fn file(nodes: Json, edges: Json) -> Json {
-    json!({ "format": "drip", "version": MAJOR.parse::<u32>().unwrap(), "nodes": nodes, "edges": edges })
-}
-
-fn node(id: u64, label: &str, kind: &str, params: Json) -> Json {
-    json!({ "id": id, "label": label, "kind": kind, "params": params, "external": [] })
-}
-
-fn edge(from: u64, output: &str, to: u64, input: &str) -> Json {
-    json!({ "from": [from, output], "to": [to, input] })
-}
-
-/// const → tonemap → write, with the write path filled in.
-fn project() -> (Project, [NodeId; 3]) {
+use drip::{
+    eval::Evaluator, node, node::data::*, ports::*, project::Project, runtime::RuntimeContext,
+};
+use serde_json::json;
+#[test]
+fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     let mut p = Project::default();
-    let g = &mut p.graph;
-    let ids = [g.add_node(&CONST), g.add_node(&TONEMAP), g.add_node(&WRITE)];
-    g.connect(port(ids[0], "image"), port(ids[1], "scene")).unwrap();
-    g.connect(port(ids[1], "display"), port(ids[2], "image")).unwrap();
-    g.set_param(ids[0], "value", json!(2.5)).unwrap();
-    g.set_param(ids[2], "path", json!("a.tif")).unwrap();
-    g.set_ui(ids[0], json!({ "pos": [10, 20] })).unwrap();
-    p.ui = json!({ "zoom": 2 });
-    (p, ids)
+    let first = node::sigmoid::apply::add(&mut p.dag, Default::default()).unwrap();
+    let apply = node::sigmoid::apply::add(&mut p.dag, Default::default()).unwrap();
+    p.dag.connect(first.output, apply.image).unwrap();
+    p.target = Some(first.output.id());
+    p.ui = json!({"retained":true});
+    p.node_ui.insert(apply.node, json!({"pos":[12,34]}));
+    let serialized = p.to_json().unwrap();
+    let restored = Project::from_json(&serialized).unwrap();
+    assert_eq!(restored.dag.edges().count(), 1);
+    assert_eq!(restored.ui, p.ui);
+    assert_eq!(restored.to_json().unwrap(), serialized);
+    let output = restored.dag.typed_output::<ColorRgb>(restored.target.unwrap()).unwrap();
+    // An incomplete image pipeline remains editable after loading.
+    assert!(restored.dag.description(output).unwrap().is_none());
+    let mut data: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+    data["nodes"][0]["parameters"]["contrast"] = json!(-1.);
+    assert!(Project::from_json(&data.to_string()).is_err());
+    data = serde_json::from_str(&serialized).unwrap();
+    data["edges"][0][0]["port"] = json!("missing");
+    assert!(Project::from_json(&data.to_string()).is_err());
+    assert!(Project::from_json("{\"version\":1}").is_err());
 }
-
 #[test]
-fn round_trips() {
-    let (mut p, [c, ..]) = project();
-    p.graph.set_external(c, "value", true).unwrap();
-    p.graph.set_name(c, "My source").unwrap();
-    let saved: Json = serde_json::from_str(&p.to_json()).unwrap();
-    assert_eq!(saved["version"], json!(MAJOR.parse::<u32>().unwrap()), "the crate's major version");
-    assert_eq!(saved["nodes"][0]["label"], "My source");
-    assert_eq!(saved["nodes"][0]["kind"], "test.const");
-    assert_eq!(Project::from_json(&p.to_json(), &registry()).unwrap(), p);
-}
-
-#[test]
-fn templates_clear_external_params_only() {
-    let (mut p, [c, _, w]) = project();
-    p.graph.set_external(c, "value", true).unwrap();
-    let template = p.template();
-    assert_eq!(template.graph.node(c).unwrap().params["value"], json!(1.0), "back to its default");
-    assert_eq!(template.graph.node(w).unwrap().params["path"], json!(null));
-    assert_eq!(template.graph.inputs().collect::<Vec<_>>(), p.graph.inputs().collect::<Vec<_>>());
-    let (_, [_, t, _]) = project();
-    assert_eq!(template.graph.node(t), p.graph.node(t), "internal params untouched");
-}
-
-#[test]
-fn other_major_versions_are_rejected() {
-    let mut f = file(json!([]), json!([]));
-    f["version"] = json!(MAJOR.parse::<u32>().unwrap() + 1);
-    assert!(matches!(load(f), Err(LoadError::Version(_))));
-}
-
-#[test]
-fn files_must_match_this_build_exactly() {
-    let missing = load(file(json!([node(0, "c", "test.const", json!({}))]), json!([])));
-    assert!(matches!(missing, Err(LoadError::MissingParam(NodeId(0), "value"))));
-    let mut extra = file(json!([]), json!([]));
-    extra["arguments"] = json!({ "raw": "a.arw" });
-    assert!(matches!(load(extra), Err(LoadError::Json(_))), "fields of older formats are refused");
-    let mut bindings = node(0, "c", "test.const", json!({ "value": 1.0 }));
-    bindings["bindings"] = json!({ "value": "x" });
-    assert!(matches!(load(file(json!([bindings]), json!([]))), Err(LoadError::Json(_))));
-}
-
-#[test]
-fn external_sets_load_as_saved() {
-    let mut w = node(0, "w", "test.write", json!({ "path": "a.tif" }));
-    w["external"] = json!([]);
-    let mut c = node(1, "c", "test.const", json!({ "value": 2.0 }));
-    c["external"] = json!(["value"]);
-    let p = load(file(json!([w, c]), json!([]))).unwrap();
-    assert_eq!(p.graph.inputs().collect::<Vec<_>>(), [(NodeId(1), "value")]);
-}
-
-#[test]
-fn templates_are_idempotent() {
-    let (p, _) = project();
-    assert_eq!(p.template().template(), p.template());
-}
-
-#[test]
-fn malformed_files_are_rejected() {
-    let c = node(0, "c", "test.const", json!({ "value": 1.0 }));
-    let a = node(1, "a", "test.add", json!({}));
-    let fails = |f: Json| load(f).unwrap_err();
-    let graph = |e: LoadError| match e {
-        LoadError::Graph(e) => e,
-        e => panic!("{e}"),
+fn tiff_profile_extent_and_pixels_survive_encoding() {
+    let desc = ImageDesc {
+        extent: Extent { width: 2, height: 1 },
+        interpretation: node::raw::working_color(),
     };
-
-    assert!(matches!(Project::from_json("{", &registry()), Err(LoadError::Json(_))));
-    assert!(matches!(
-        fails(json!({ "format": "png", "version": 0, "nodes": [], "edges": [] })),
-        LoadError::NotDrip
-    ));
-    let unknown = fails(file(json!([node(0, "x", "test.future", json!({}))]), json!([])));
-    assert!(matches!(unknown, LoadError::UnknownKind(k) if k == "test.future"));
-    let param =
-        graph(fails(file(json!([node(0, "c", "test.const", json!({ "old": 1 }))]), json!([]))));
-    assert_eq!(param, GraphError::UnknownParam(NodeId(0), "old".into()));
-    let mut external = c.clone();
-    external["external"] = json!(["old"]);
-    let external = graph(fails(file(json!([external]), json!([]))));
-    assert_eq!(external, GraphError::UnknownParam(NodeId(0), "old".into()));
-    let dangling = graph(fails(file(json!([c]), json!([edge(0, "image", 5, "a")]))));
-    assert_eq!(dangling, GraphError::UnknownNode(NodeId(5)));
-    let port = graph(fails(file(json!([c, a]), json!([edge(0, "image", 1, "nope")]))));
-    assert_eq!(port, GraphError::UnknownPort(NodeId(1), "input", "nope".into()));
-    let cycle = graph(fails(file(
-        json!([a, node(2, "b", "test.add", json!({}))]),
-        json!([edge(1, "sum", 2, "a"), edge(2, "sum", 1, "a")]),
-    )));
-    assert_eq!(cycle, GraphError::Cycle);
-    let twice =
-        fails(file(json!([c, a]), json!([edge(0, "image", 1, "a"), edge(0, "image", 1, "a")])));
-    assert!(matches!(twice, LoadError::DuplicateInput(_)));
-    let mistyped = fails(file(
-        json!([c, node(1, "w", "test.write", json!({ "path": null }))]),
-        json!([edge(0, "image", 1, "image")]),
-    ));
-    assert!(matches!(graph(mistyped), GraphError::TypeMismatch { .. }));
-    let bad_value =
-        fails(file(json!([node(0, "c", "test.const", json!({ "value": 99 }))]), json!([])));
-    assert!(matches!(graph(bad_value), GraphError::InvalidParam { .. }));
-    let same_label =
-        fails(file(json!([c, node(1, "c", "test.const", json!({ "value": 1.0 }))]), json!([])));
-    assert!(matches!(graph(same_label), GraphError::InvalidName(_)));
-    let same_id =
-        fails(file(json!([c, node(0, "d", "test.const", json!({ "value": 1.0 }))]), json!([])));
-    assert!(matches!(same_id, LoadError::InvalidId(0)));
-    let max_id =
-        fails(file(json!([node(u64::MAX, "c", "test.const", json!({ "value": 1.0 }))]), json!([])));
-    assert!(matches!(max_id, LoadError::InvalidId(u64::MAX)));
+    let profile =
+        drip::node::profile::Output::load(&Default::default(), &Default::default()).unwrap();
+    let bytes =
+        drip::node::export::tiff(&desc, &[[0.; 3], [1.; 3]], &profile, false, None).unwrap();
+    let mut decoder = tiff::decoder::Decoder::new(std::io::Cursor::new(bytes)).unwrap();
+    assert_eq!(decoder.dimensions().unwrap(), (2, 1));
+    assert!(!decoder.get_tag_u8_vec(tiff::tags::Tag::IccProfile).unwrap().is_empty());
+    let tiff::decoder::DecodingResult::U16(pixels) = decoder.read_image().unwrap() else {
+        panic!("expected u16")
+    };
+    assert_eq!(&pixels[..3], &[0, 0, 0]);
+    assert!(pixels[3..].iter().all(|&v| v > 65530));
+    let mut bad = desc.clone();
+    bad.interpretation.encoding = Encoding::Srgb;
+    assert!(drip::node::export::tiff(&bad, &[[0.; 3], [1.; 3]], &profile, false, None).is_err());
 }
 
 #[test]
-fn loaded_graphs_continue_ids_after_the_largest() {
-    let mut p =
-        load(file(json!([node(41, "c", "test.const", json!({ "value": 1.0 }))]), json!([])))
-            .unwrap();
-    assert_eq!(p.graph.add_node(&CONST), NodeId(42));
+fn headless_target_load_ignores_frontend_nodes_but_validates_demanded_graph() {
+    let mut p = Project::default();
+    let first = node::sigmoid::apply::add(&mut p.dag, Default::default()).unwrap();
+    p.target = Some(first.output.id());
+    let mut document: serde_json::Value = serde_json::from_str(&p.to_json().unwrap()).unwrap();
+    document["nodes"].as_array_mut().unwrap().push(json!({
+        "kind": "unregistered.frontend", "parameters": null, "ui": null
+    }));
+    document["edges"] = json!([[{"node":0,"port":"output"}, {"node":1,"port":"input"}]]);
+    assert!(Project::from_json(&document.to_string()).is_err());
+    let loaded = Project::target_from_json(&document.to_string()).unwrap();
+    assert_eq!(loaded.dag.nodes().count(), 1);
+    assert!(loaded.dag.edges().next().is_none());
+    let mut invalid = document.clone();
+    invalid["target"]["node"] = json!(1);
+    assert!(Project::target_from_json(&invalid.to_string()).is_err());
+    invalid = document.clone();
+    invalid["nodes"][0]["parameters"]["contrast"] = json!(-1.);
+    assert!(Project::target_from_json(&invalid.to_string()).is_err());
+    invalid = document.clone();
+    invalid["target"]["node"] = json!(99);
+    assert!(Project::target_from_json(&invalid.to_string()).is_err());
+    invalid = document;
+    invalid["edges"] = json!([[{"node":0,"port":"output"}, {"node":0,"port":"invalid"}]]);
+    assert!(Project::target_from_json(&invalid.to_string()).is_err());
+}
+
+#[test]
+fn missing_raw_preserves_editable_parameters_and_reports_load_error() {
+    let path = std::path::Path::new("/tmp/drip-deliberately-missing-raw-source.nef");
+    assert!(!path.exists());
+    let project = drip::node::templates::raw_to_rgb(path).unwrap();
+    let text = project.to_json().unwrap();
+    let mut restored = Project::from_json(&text).unwrap();
+    assert_eq!(restored.to_json().unwrap(), text);
+    let target = restored.dag.typed_output::<ColorRgb>(restored.target.unwrap()).unwrap();
+    let error = Evaluator::new(RuntimeContext::host())
+        .evaluate::<Cpu<ColorRgb>>(&restored.dag, &Default::default(), target)
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("drip-deliberately-missing-raw-source.nef"));
+    let raw = restored.dag.nodes().find(|(_, n)| n.metadata().id == "raw-bayer").unwrap().0;
+    let values = Evaluator::new(RuntimeContext::host()).evaluate_inputs(
+        &restored.dag,
+        &Default::default(),
+        &[target.node()],
+    );
+    assert!(matches!(&values[&target.node()], Err(drip::Error::Node { node, source, .. })
+        if *node == raw && source.to_string().contains("drip-deliberately-missing-raw-source.nef")));
+    restored.dag.set_parameters(raw, json!({"path":null})).unwrap();
+    assert!(restored.dag.node(raw).unwrap().parameters().unwrap()["path"].is_null());
+}
+
+#[test]
+fn bound_raw_snapshot_survives_file_removal_until_explicit_rebind() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/raw/pixls/nikon-d70s.nef");
+    let temporary =
+        std::env::temp_dir().join(format!("drip-raw-snapshot-{}.nef", std::process::id()));
+    std::fs::copy(&fixture, &temporary).unwrap();
+    let mut dag = drip::graph::Dag::new();
+    let source = dag
+        .add(node::raw::RawSource::bind(node::raw::Settings { path: Some(temporary.clone()) }))
+        .unwrap();
+    std::fs::remove_file(&temporary).unwrap();
+    let output = dag.typed_output::<Bayer>(dag.output_port(source, "mosaic").unwrap()).unwrap();
+    let evaluator = Evaluator::new(RuntimeContext::host());
+    assert!(evaluator.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), output).is_ok());
+    dag.set_parameters(source, json!({"path":temporary})).unwrap();
+    assert!(evaluator.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), output).is_err());
+    dag.set_parameters(source, json!({"path":fixture})).unwrap();
+    assert!(evaluator.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), output).is_ok());
 }

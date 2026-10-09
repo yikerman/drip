@@ -1,66 +1,69 @@
-//! Typed node implementations are erased only after binding to their declaration.
-
+//! Optional typed controls, preparation and actions over declared node inputs.
 use super::ControlCx;
-use crate::render::node_views::{Drawable, ImageCache, IntoDrawable};
-use drip::eval::{Evaluator, NodeError};
-use drip::graph::{Graph, NodeId};
-use drip::node::{EvalContext, KernelError, NodeDeclaration, NodeKind, TypedNode};
-use drip::ports::InputTuple;
+use crate::{
+    model::NodeKind,
+    node_ui::data::PrepareContext,
+    render::node_views::{Drawable, ImageCache, IntoDrawable},
+};
+use drip::{Result, eval::InputValues};
 use egui::Ui;
+use serde::de::DeserializeOwned;
+use serde_json::Value;
 use std::sync::Arc;
 
-pub type Prepare<G> = for<'i, 'c, 'r> fn(
-    <<G as GuiNode>::Node as NodeDeclaration>::Parameters,
-    <<<G as GuiNode>::Node as NodeDeclaration>::Inputs as InputTuple>::Borrowed<'i>,
-    &'c EvalContext<'r>,
-) -> Result<<G as GuiNode>::Presentation, KernelError>;
-
-/// Preparation has the declaration's exact signature. Controls can run without
-/// inputs; preparation runs on the worker only for bindings that provide it.
+pub type Prepare<G> = fn(
+    <G as GuiNode>::Parameters,
+    &InputValues,
+    &PrepareContext,
+) -> Result<<G as GuiNode>::Presentation>;
+pub type Action<G> = fn(<G as GuiNode>::Parameters, &InputValues, &PrepareContext) -> Result<()>;
 pub trait GuiNode: Sized + 'static {
-    type Node: NodeDeclaration;
+    type Parameters: DeserializeOwned;
     type Presentation: IntoDrawable;
-    const NODE: &'static TypedNode<Self::Node>;
+    const ID: &'static str;
     const PREPARE: Option<Prepare<Self>> = None;
-
-    fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Node>) {
+    const ACTION: Option<Action<Self>> = None;
+    const ACTION_NAME: &'static str = "export";
+    fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Parameters>) {
         node.schema(ui);
     }
 }
-
 type PrepareErased =
-    fn(&mut Evaluator, &Graph, NodeId, u8, &mut ImageCache) -> Result<Arc<dyn Drawable>, NodeError>;
-
+    fn(Value, &InputValues, &PrepareContext, &mut ImageCache) -> Result<Arc<dyn Drawable>>;
+type ActionErased = fn(Value, &InputValues, &PrepareContext) -> Result<()>;
 pub struct Binding {
-    kind: &'static NodeKind,
+    id: &'static str,
     controls: fn(&mut Ui, &mut crate::editing::NodeCx),
     prepare: Option<PrepareErased>,
+    action: Option<ActionErased>,
+    action_name: &'static str,
 }
-
 impl Binding {
     pub const fn new<G: GuiNode>() -> Self {
         Self {
-            kind: G::NODE.kind(),
+            id: G::ID,
             controls: |ui, node| G::controls(ui, &mut ControlCx::new(node)),
             prepare: if G::PREPARE.is_some() {
-                Some(|evaluator, graph, id, level, cache| {
-                    let value = evaluator.with_inputs(
-                        graph,
-                        id,
-                        level,
-                        G::NODE,
-                        G::PREPARE.expect("declared preparation"),
-                    )?;
-                    Ok(value.into_drawable(cache))
+                Some(|params, inputs, ctx, cache| {
+                    let params = decode(params)?;
+                    Ok(G::PREPARE.expect("declared preparation")(params, inputs, ctx)?
+                        .into_drawable(cache))
                 })
             } else {
                 None
             },
+            action: if G::ACTION.is_some() {
+                Some(|params, inputs, ctx| {
+                    G::ACTION.expect("declared action")(decode(params)?, inputs, ctx)
+                })
+            } else {
+                None
+            },
+            action_name: G::ACTION_NAME,
         }
     }
-
     pub fn kind(&self) -> &'static NodeKind {
-        self.kind
+        crate::model::Registry.get(self.id).expect("GUI binds a registered node")
     }
     pub fn has_preparation(&self) -> bool {
         self.prepare.is_some()
@@ -70,12 +73,30 @@ impl Binding {
     }
     pub fn prepare(
         &self,
-        evaluator: &mut Evaluator,
-        graph: &Graph,
-        id: NodeId,
-        level: u8,
+        params: Value,
+        inputs: &InputValues,
+        ctx: &PrepareContext,
         cache: &mut ImageCache,
-    ) -> Result<Option<Arc<dyn Drawable>>, NodeError> {
-        self.prepare.map(|prepare| prepare(evaluator, graph, id, level, cache)).transpose()
+    ) -> Result<Option<Arc<dyn Drawable>>> {
+        self.prepare.map(|prepare| prepare(params, inputs, ctx, cache)).transpose()
     }
+    pub fn action_name(&self) -> Option<&'static str> {
+        self.action.map(|_| self.action_name)
+    }
+    pub fn run_action(
+        &self,
+        name: &str,
+        params: Value,
+        inputs: &InputValues,
+        ctx: &PrepareContext,
+    ) -> Result<()> {
+        let action = self
+            .action
+            .filter(|_| name == self.action_name)
+            .ok_or_else(|| drip::Error::Graph("unknown node action".into()))?;
+        action(params, inputs, ctx)
+    }
+}
+fn decode<P: DeserializeOwned>(params: Value) -> Result<P> {
+    serde_json::from_value(params).map_err(|e| drip::Error::Contract(e.to_string()))
 }

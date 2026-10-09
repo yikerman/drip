@@ -2,9 +2,12 @@
 
 mod binding;
 mod controls;
+mod export;
 pub mod help;
 pub mod preview;
 pub mod scopes;
+#[cfg(test)]
+pub use binding::Action;
 pub use binding::{Binding, GuiNode, Prepare};
 pub use controls::ControlCx;
 mod image_view;
@@ -13,8 +16,8 @@ pub mod ports;
 mod sigmoid;
 mod viewer;
 use crate::editing::NodeCx;
-use drip::graph::{Node, NodeId};
-use drip::node::NodeKind;
+use crate::model::NodeKind;
+use crate::model::{Node, NodeId};
 use egui::{Rect, Ui, Vec2, vec2};
 
 /// Width of a node whose body does not set one, in graph units.
@@ -138,3 +141,12 @@ const FITTED: &str = "fitted window size";
 pub fn fitted(ctx: &egui::Context) -> Option<Vec2> {
     ctx.data(|d| d.get_temp(egui::Id::new(FITTED)))
 }
+
+pub mod camera_histogram;
+mod camera_waveform;
+mod contracts;
+pub mod data;
+pub mod histogram;
+pub mod templates;
+mod vectorscope;
+mod waveform;

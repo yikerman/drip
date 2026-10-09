@@ -94,8 +94,8 @@ impl Description {
         // cd/m², min scaled by 10⁴. With a linear transfer, 1.0 is the maximum.
         params.set_luminances(0, 80, 80);
         let xy = |p: [f64; 2]| p.map(|v| (v * 1_000_000.0).round() as i32);
-        let [[rx, ry], [gx, gy], [bx, by]] = drip::color::REC2020.map(xy);
-        let [wx, wy] = xy(drip::color::D65);
+        let [[rx, ry], [gx, gy], [bx, by]] = drip::node::color::REC2020.map(xy);
+        let [wx, wy] = xy(drip::node::color::D65);
         params.set_mastering_display_primaries(rx, ry, gx, gy, bx, by, wx, wy);
         let description = params.create(&qh, ());
         while state.ready.is_none() {

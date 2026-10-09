@@ -1,29 +1,19 @@
-//! Node parameter schemas. Parameter values are stored as JSON so that
-//! persistence, graph-input arguments and unknown parameters all share one
-//! representation; the schema validates them where they enter (editing,
-//! loading, binding arguments) and evaluation reads them unchecked.
+//! UI parameter schemas generated beside typed, serde-validated settings.
+//! Ranges guide controls; computational contracts decide logical validity.
 
-use serde_json::{Map, Value as Json};
-
-pub type ParamMap = Map<String, Json>;
+use serde_json::Value as Json;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParamSpec {
     pub documentation: &'static str,
     pub name: &'static str,
     pub kind: ParamKind,
-    /// Whether new nodes expose the parameter as an input of their template,
-    /// i.e. expect a value per image. Users can change it per node.
     pub external: bool,
 }
 
 impl ParamSpec {
     pub const fn new(name: &'static str, kind: ParamKind) -> Self {
-        ParamSpec { name, kind, external: false, documentation: "" }
-    }
-
-    pub const fn external(self) -> Self {
-        ParamSpec { external: true, ..self }
+        ParamSpec { name, kind, documentation: "", external: false }
     }
 }
 
@@ -80,23 +70,7 @@ impl ParamKind {
     }
 }
 
-/// Read access to a node's validated, effective parameters during evaluation.
-#[derive(Debug, Clone, Copy)]
-pub struct Params<'a>(pub(crate) &'a ParamMap);
-
-impl<'a> Params<'a> {
-    /// Borrow parameters already validated by a graph or project loader.
-    pub fn validated(values: &'a ParamMap) -> Self {
-        Self(values)
-    }
-
-    pub fn get<T: serde::de::DeserializeOwned>(&self, name: &str) -> T {
-        T::deserialize(&self.0[name]).expect("validated parameter and generated field type")
-    }
-}
-
-/// Implemented by the Parameters derive; node metadata and typed reads use the
-/// same fields and flattened shared configurations.
+/// Implemented by the Parameters derive; schemas follow the typed fields.
 /// A schema incompatible with its field is a declaration error:
 ///
 /// ```compile_fail,E0080
@@ -120,11 +94,9 @@ impl<'a> Params<'a> {
 /// ```
 pub trait Parameters: Sized {
     const SPECS: &'static [ParamSpec];
-    fn read(params: Params<'_>) -> Self;
 }
 impl Parameters for () {
     const SPECS: &'static [ParamSpec] = &[];
-    fn read(_: Params<'_>) {}
 }
 #[doc(hidden)]
 pub const fn concat_specs<const N: usize>(groups: &[&[ParamSpec]]) -> [ParamSpec; N] {

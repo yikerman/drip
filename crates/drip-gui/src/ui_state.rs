@@ -1,7 +1,7 @@
 //! Frontend-owned access to opaque persisted UI data. Invalid layout falls back
 //! locally; invalid processing detail rejects the project before replacing it.
 
-use drip::graph::NodeId;
+use crate::model::NodeId;
 use egui::{Vec2, vec2};
 use serde_json::{Value as Json, json};
 
@@ -38,9 +38,9 @@ impl LayoutField {
 }
 
 pub fn position(ui: &Json, id: NodeId) -> Vec2 {
-    LayoutField::Position
-        .read(ui)
-        .unwrap_or_else(|| vec2(40.0 + 200.0 * (id.0 % 5) as f32, 40.0 + 140.0 * (id.0 / 5) as f32))
+    LayoutField::Position.read(ui).unwrap_or_else(|| {
+        vec2(40.0 + 200.0 * (id.index() % 5) as f32, 40.0 + 140.0 * (id.index() / 5) as f32)
+    })
 }
 
 pub fn view_size(ui: &Json) -> Vec2 {
@@ -81,16 +81,20 @@ mod tests {
 
     #[test]
     fn layout_handles_invalid_saved_coordinates_without_losing_other_state() {
+        let mut graph = crate::model::Graph::default();
+        let ids: Vec<_> = (0..7)
+            .map(|_| graph.add_node(crate::model::Registry.get("rgb-exposure").unwrap()).unwrap())
+            .collect();
         let mut ui = json!({"pos": [1e300, 2], "size": [-1, 200], "other": {"keep": true}});
-        assert_eq!(position(&ui, NodeId(6)), vec2(240.0, 180.0));
+        assert_eq!(position(&ui, ids[6]), vec2(240.0, 180.0));
         assert_eq!(view_size(&ui), DEFAULT_VIEW_SIZE);
         LayoutField::Position.write(&mut ui, vec2(-20.0, 50.0));
         LayoutField::ViewSize.write(&mut ui, vec2(100.0, 200.0));
-        assert_eq!(position(&ui, NodeId(6)), vec2(-20.0, 50.0));
+        assert_eq!(position(&ui, ids[6]), vec2(-20.0, 50.0));
         assert_eq!(view_size(&ui), vec2(100.0, 200.0));
         assert_eq!(ui["other"], json!({"keep": true}));
         for value in [Json::Null, json!([]), json!({"pos": [1, 2, 3], "size": ["a", 2]})] {
-            assert_eq!(position(&value, NodeId(0)), vec2(40.0, 40.0));
+            assert_eq!(position(&value, ids[0]), vec2(40.0, 40.0));
             assert_eq!(view_size(&value), DEFAULT_VIEW_SIZE);
         }
     }

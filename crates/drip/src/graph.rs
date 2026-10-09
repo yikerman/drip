@@ -1,232 +1,281 @@
-//! The node graph, with editing operations that keep it valid: connections
-//! are type-compatible, every input has at most one source and the graph stays
-//! acyclic. The file format lives in `project`, not here.
+//! Transactional connection checks over small CPU descriptions, never pixels.
+use crate::{Error, Result, definition::Node, payload::Payload, ports::*};
+use std::{
+    any::TypeId,
+    collections::VecDeque,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
-use std::collections::{BTreeMap, BTreeSet};
+#[derive(Clone)]
+pub(crate) struct Entry {
+    pub id: NodeId,
+    pub node: Arc<dyn Node>,
+    pub inputs: Vec<Option<PortId>>,
+    pub descs: Vec<Option<Description>>,
+}
+#[derive(Clone)]
+pub struct Dag {
+    pub(crate) id: u64,
+    pub(crate) entries: Vec<Option<Entry>>,
+    pub(crate) order: Vec<usize>,
+}
+impl Default for Dag {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl Dag {
+    pub fn new() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        #[allow(deprecated)] // Keep compatibility with Rust 1.95.
+        let id = NEXT
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
+            .expect("graph identity exhausted");
+        Self { id, entries: Vec::new(), order: Vec::new() }
+    }
 
-use serde_json::Value as Json;
-
-use crate::node::NodeKind;
-use crate::param::ParamMap;
-use crate::ports::TypeMismatch;
-use crate::value::TypeDescriptor;
-
-/// Stable within a project; never reused while the graph is alive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NodeId(pub u64);
-
-/// A named port of a node, input or output depending on context.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Port(pub NodeId, pub String);
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Node {
-    /// Unique and renamable; how users and the CLI refer to the node.
-    pub name: String,
-    pub kind: &'static NodeKind,
-    /// A valid value for every parameter of the kind.
-    pub params: ParamMap,
-    /// Parameters exposed as inputs of the template: they take a value per
-    /// image and are cleared when saving as a template.
-    pub external: BTreeSet<&'static str>,
-    /// Opaque frontend state such as the node's position.
-    pub ui: Json,
+    pub fn nodes(&self) -> impl Iterator<Item = (NodeId, &dyn Node)> {
+        self.entries.iter().flatten().map(|e| (e.id, e.node.as_ref()))
+    }
+    pub fn node(&self, id: NodeId) -> Result<&dyn Node> {
+        Ok(self.entry(id)?.node.as_ref())
+    }
+    pub fn edges(&self) -> impl Iterator<Item = (PortId, PortId)> + '_ {
+        self.entries.iter().flatten().flat_map(|e| {
+            e.inputs.iter().enumerate().filter_map(move |(index, from)| {
+                from.map(|from| (from, PortId { node: e.id, index, direction: Direction::Input }))
+            })
+        })
+    }
+    pub fn input_port(&self, node: NodeId, name: &str) -> Result<PortId> {
+        let index = self
+            .entry(node)?
+            .node
+            .inputs()
+            .iter()
+            .position(|p| p.name == name)
+            .ok_or_else(wrong_handle)?;
+        Ok(PortId { node, index, direction: Direction::Input })
+    }
+    pub fn output_port(&self, node: NodeId, name: &str) -> Result<PortId> {
+        let index = self
+            .entry(node)?
+            .node
+            .outputs()
+            .iter()
+            .position(|p| p.name == name)
+            .ok_or_else(wrong_handle)?;
+        Ok(PortId { node, index, direction: Direction::Output })
+    }
+    pub fn set_parameters(&mut self, id: NodeId, parameters: serde_json::Value) -> Result<()> {
+        let kind = self.entry(id)?.node.metadata().id;
+        self.replace(id, crate::definition::registered(kind, parameters)?)
+    }
+    /// All descriptor-affecting edits either pass together or leave the graph intact.
+    pub fn edit<T>(&mut self, f: impl FnOnce(&mut Edit<'_>) -> Result<T>) -> Result<T> {
+        let mut draft =
+            Self { id: self.id, entries: self.entries.clone(), order: self.order.clone() };
+        let result = f(&mut Edit { dag: &mut draft })?;
+        draft.validate()?;
+        *self = draft;
+        Ok(result)
+    }
+    pub fn add(&mut self, node: Arc<dyn Node>) -> Result<NodeId> {
+        self.edit(|e| Ok(e.add(node)))
+    }
+    pub fn connect<P: Payload>(&mut self, from: Output<P>, to: Input<P>) -> Result<()> {
+        self.connect_ids(from.id, to.id)
+    }
+    pub fn connect_ids(&mut self, from: PortId, to: PortId) -> Result<()> {
+        self.edit(|e| e.connect_ids(from, to))
+    }
+    pub fn disconnect<P>(&mut self, to: Input<P>) -> Result<()> {
+        self.edit(|e| e.disconnect(to.id))
+    }
+    pub fn replace(&mut self, id: NodeId, node: Arc<dyn Node>) -> Result<()> {
+        self.edit(|e| e.replace(id, node))
+    }
+    pub fn remove(&mut self, id: NodeId) -> Result<()> {
+        self.edit(|e| e.remove(id))
+    }
+    pub fn typed_output<P: Payload>(&self, port: PortId) -> Result<Output<P>> {
+        let e = self.output(port)?;
+        if !e.node.outputs()[port.index].is::<P>() {
+            return Err(wrong_handle());
+        }
+        Ok(Output::new(port.node, port.index))
+    }
+    /// Full-detail description checked during graph edits. Evaluation reports
+    /// its request-specific description in the returned value.
+    pub fn description<P: Payload>(&self, output: Output<P>) -> Result<Option<&P::Desc>> {
+        let e = self.output(output.id)?;
+        if e.node.outputs()[output.id.index].payload != TypeId::of::<P>() {
+            return Err(wrong_handle());
+        }
+        Ok(e.descs[output.id.index].as_ref().map(downcast))
+    }
+    pub(crate) fn entry(&self, id: NodeId) -> Result<&Entry> {
+        if id.graph != self.id {
+            return Err(wrong_handle());
+        }
+        self.entries
+            .get(id.index)
+            .and_then(Option::as_ref)
+            .filter(|e| e.id == id)
+            .ok_or_else(wrong_handle)
+    }
+    pub(crate) fn output(&self, id: PortId) -> Result<&Entry> {
+        let e = self.entry(id.node)?;
+        if id.direction != Direction::Output || id.index >= e.node.outputs().len() {
+            return Err(wrong_handle());
+        }
+        Ok(e)
+    }
+    fn input(&self, id: PortId) -> Result<&Entry> {
+        let e = self.entry(id.node)?;
+        if id.direction != Direction::Input || id.index >= e.inputs.len() {
+            return Err(wrong_handle());
+        }
+        Ok(e)
+    }
+    fn validate(&mut self) -> Result<()> {
+        let order = self.topological_order()?;
+        for &index in &order {
+            self.check_contract(index)?;
+        }
+        self.order = order;
+        Ok(())
+    }
+    fn topological_order(&self) -> Result<Vec<usize>> {
+        let mut degrees = vec![0usize; self.entries.len()];
+        let mut children = vec![Vec::new(); self.entries.len()];
+        for (index, entry) in self.entries.iter().enumerate() {
+            let Some(e) = entry else { continue };
+            for (port, from) in e.inputs.iter().enumerate() {
+                let Some(from) = from else { continue };
+                let source = self.output(*from)?;
+                if source.node.outputs()[from.index].payload != e.node.inputs()[port].payload {
+                    return Err(Error::Contract(format!(
+                        "payload mismatch at {}.{}",
+                        e.node.metadata().id,
+                        e.node.inputs()[port].name
+                    )));
+                }
+                degrees[index] += 1;
+                children[from.node.index].push(index);
+            }
+        }
+        let mut ready: VecDeque<_> = degrees
+            .iter()
+            .enumerate()
+            .filter(|(i, n)| **n == 0 && self.entries[*i].is_some())
+            .map(|(i, _)| i)
+            .collect();
+        let mut order = Vec::new();
+        while let Some(index) = ready.pop_front() {
+            order.push(index);
+            for &child in &children[index] {
+                degrees[child] -= 1;
+                if degrees[child] == 0 {
+                    ready.push_back(child);
+                }
+            }
+        }
+        if order.len() != self.entries.iter().flatten().count() {
+            return Err(Error::Graph("connection creates a cycle".into()));
+        }
+        Ok(order)
+    }
+    fn check_contract(&mut self, index: usize) -> Result<()> {
+        let e = self.entries[index].as_ref().unwrap();
+        // Templates can be wired before their source assets are supplied.
+        // Every edit rechecks known relationships at full detail. Evaluation
+        // repeats contracts for its global context before running each node.
+        let descs = e
+            .inputs
+            .iter()
+            .map(|from| match from {
+                None => Ok(None),
+                Some(from) => Ok(self.output(*from)?.descs[from.index].clone()),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let outputs = e.node.contract(&Default::default(), &descs)?;
+        if outputs.len() != e.node.outputs().len() {
+            return Err(Error::Graph("node contract output arity mismatch".into()));
+        }
+        self.entries[index].as_mut().unwrap().descs = outputs;
+        Ok(())
+    }
 }
 
-#[derive(Debug, thiserror::Error, PartialEq)]
-pub enum GraphError {
-    #[error("no node {0:?}")]
-    UnknownNode(NodeId),
-    #[error("node {0:?} has no {1} port `{2}`")]
-    UnknownPort(NodeId, &'static str, String),
-    #[error("input {input:?}: {mismatch}")]
-    TypeMismatch { input: Port, mismatch: TypeMismatch },
-    #[error("connection would create a cycle")]
-    Cycle,
-    #[error("node {0:?} has no parameter `{1}`")]
-    UnknownParam(NodeId, String),
-    #[error("invalid value {value} for parameter `{param}`")]
-    InvalidParam { param: String, value: Json },
-    #[error("name `{0}` is empty or already used")]
-    InvalidName(String),
+pub struct Edit<'a> {
+    dag: &'a mut Dag,
 }
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Graph {
-    nodes: BTreeMap<NodeId, Node>,
-    /// Input port → the output port feeding it.
-    edges: BTreeMap<Port, Port>,
-    next_id: u64,
-}
-
-impl Graph {
-    pub fn nodes(&self) -> impl Iterator<Item = (NodeId, &Node)> {
-        self.nodes.iter().map(|(id, node)| (*id, node))
-    }
-
-    pub fn node(&self, id: NodeId) -> Option<&Node> {
-        self.nodes.get(&id)
-    }
-
-    pub fn find(&self, name: &str) -> Option<NodeId> {
-        self.nodes().find(|(_, node)| node.name == name).map(|(id, _)| id)
-    }
-
-    /// Edges as (output, input) pairs.
-    pub fn edges(&self) -> impl Iterator<Item = (&Port, &Port)> {
-        self.edges.iter().map(|(input, output)| (output, input))
-    }
-
-    pub fn source(&self, input: &Port) -> Option<&Port> {
-        self.edges.get(input)
-    }
-
-    /// The template's inputs: every external parameter of every node.
-    pub fn inputs(&self) -> impl Iterator<Item = (NodeId, &'static str)> + '_ {
-        self.nodes().flat_map(|(id, node)| node.external.iter().map(move |param| (id, *param)))
-    }
-
-    pub fn add_node(&mut self, kind: &'static NodeKind) -> NodeId {
-        let name = (1..)
-            .map(|n| if n == 1 { kind.name.to_string() } else { format!("{} {n}", kind.name) })
-            .find(|name| self.find(name).is_none())
-            .expect("unbounded");
-        let node = Node {
-            name,
-            kind,
-            params: kind
-                .params
-                .iter()
-                .map(|p| (p.name.to_string(), p.kind.default_value()))
-                .collect(),
-            external: kind.params.iter().filter(|p| p.external).map(|p| p.name).collect(),
-            ui: Json::Null,
-        };
-        let id = NodeId(self.next_id);
-        self.insert(id, node);
+impl Edit<'_> {
+    pub fn add(&mut self, node: Arc<dyn Node>) -> NodeId {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        #[allow(deprecated)] // Keep compatibility with Rust 1.95.
+        let generation = NEXT
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
+            .expect("node identity exhausted");
+        let id = NodeId { graph: self.dag.id, index: self.dag.entries.len(), generation };
+        self.dag.entries.push(Some(Entry {
+            id,
+            inputs: vec![None; node.inputs().len()],
+            descs: vec![None; node.outputs().len()],
+            node,
+        }));
         id
     }
-
-    /// Adds a node built elsewhere (by the loader), keeping ids unique. The
-    /// loader rejects the largest id, so this cannot overflow.
-    pub(crate) fn insert(&mut self, id: NodeId, node: Node) {
-        self.next_id = self.next_id.max(id.0 + 1);
-        self.nodes.insert(id, node);
+    pub fn connect<P: Payload>(&mut self, from: Output<P>, to: Input<P>) -> Result<()> {
+        self.connect_ids(from.id, to.id)
     }
-
-    pub fn remove_node(&mut self, id: NodeId) -> Option<Node> {
-        self.edges.retain(|input, output| input.0 != id && output.0 != id);
-        self.nodes.remove(&id)
-    }
-
-    /// Connects `output` to `input`, replacing the input's previous source.
-    pub fn connect(&mut self, output: Port, input: Port) -> Result<(), GraphError> {
-        let source = self.node(output.0).ok_or(GraphError::UnknownNode(output.0))?.kind;
-        if source.output_index(&output.1).is_none() {
-            return Err(GraphError::UnknownPort(output.0, "output", output.1.clone()));
+    pub fn connect_ids(&mut self, from: PortId, to: PortId) -> Result<()> {
+        self.dag.output(from)?;
+        if self.dag.input(to)?.inputs[to.index].is_some() {
+            return Err(Error::Graph("input is already connected".into()));
         }
-        let sink = self.node(input.0).ok_or(GraphError::UnknownNode(input.0))?.kind;
-        let spec = sink
-            .input(&input.1)
-            .ok_or_else(|| GraphError::UnknownPort(input.0, "input", input.1.clone()))?;
-        if self.reaches(input.0, output.0) {
-            return Err(GraphError::Cycle);
-        }
-        let ty = self.output_type(&output).expect("checked output port");
-        spec.requirement
-            .check(&ty)
-            .map_err(|mismatch| GraphError::TypeMismatch { input: input.clone(), mismatch })?;
-        self.edges.insert(input, output);
+        self.dag.entries[to.node.index].as_mut().unwrap().inputs[to.index] = Some(from);
         Ok(())
     }
-
-    /// Output types are declared even while inputs are unconnected. None means
-    /// the node or output port does not exist, not that its type is unresolved.
-    pub fn output_type(&self, port: &Port) -> Option<TypeDescriptor> {
-        self.node(port.0)?.kind.outputs().find(|p| p.name == port.1).map(|p| p.ty)
-    }
-
-    pub fn disconnect(&mut self, input: &Port) -> Option<Port> {
-        self.edges.remove(input)
-    }
-
-    pub fn set_param(&mut self, id: NodeId, name: &str, value: Json) -> Result<(), GraphError> {
-        let node = self.node_mut(id)?;
-        let spec =
-            node.kind.param(name).ok_or_else(|| GraphError::UnknownParam(id, name.into()))?;
-        if !spec.kind.accepts(&value) {
-            return Err(GraphError::InvalidParam { param: name.into(), value });
-        }
-        node.params.insert(name.into(), value);
+    pub fn disconnect(&mut self, to: PortId) -> Result<()> {
+        self.dag.input(to)?;
+        self.dag.entries[to.node.index].as_mut().unwrap().inputs[to.index] = None;
         Ok(())
     }
-
-    /// Exposes parameter `name` as a template input, or stops doing so.
-    pub fn set_external(
-        &mut self,
-        id: NodeId,
-        name: &str,
-        external: bool,
-    ) -> Result<(), GraphError> {
-        let node = self.node_mut(id)?;
-        let spec =
-            node.kind.param(name).ok_or_else(|| GraphError::UnknownParam(id, name.into()))?;
-        if external {
-            node.external.insert(spec.name);
-        } else {
-            node.external.remove(spec.name);
+    pub fn replace(&mut self, id: NodeId, node: Arc<dyn Node>) -> Result<()> {
+        let old = self.dag.entry(id)?;
+        let same_ports = |a: Vec<PortSpec>, b: Vec<PortSpec>| {
+            a.len() == b.len()
+                && a.iter().zip(&b).all(|(a, b)| {
+                    a.name == b.name
+                        && a.payload == b.payload
+                        && a.placement == b.placement
+                        && a.optional == b.optional
+                })
+        };
+        if old.node.metadata().id != node.metadata().id
+            || !same_ports(old.node.inputs(), node.inputs())
+            || !same_ports(old.node.outputs(), node.outputs())
+        {
+            return Err(Error::Graph("replacement must preserve node kind and port schema".into()));
         }
+        self.dag.entries[id.index].as_mut().unwrap().node = node;
         Ok(())
     }
-
-    pub fn set_name(&mut self, id: NodeId, name: &str) -> Result<(), GraphError> {
-        if name.is_empty() || self.find(name).is_some_and(|other| other != id) {
-            return Err(GraphError::InvalidName(name.into()));
-        }
-        self.node_mut(id)?.name = name.into();
-        Ok(())
-    }
-
-    pub fn set_ui(&mut self, id: NodeId, ui: Json) -> Result<(), GraphError> {
-        self.node_mut(id)?.ui = ui;
-        Ok(())
-    }
-
-    fn node_mut(&mut self, id: NodeId) -> Result<&mut Node, GraphError> {
-        self.nodes.get_mut(&id).ok_or(GraphError::UnknownNode(id))
-    }
-
-    /// Whether `to` is reachable from `from` along edges (or is `from`).
-    fn reaches(&self, from: NodeId, to: NodeId) -> bool {
-        let mut stack = vec![from];
-        let mut seen = BTreeSet::new();
-        while let Some(id) = stack.pop() {
-            if id == to {
-                return true;
-            }
-            if seen.insert(id) {
-                let consumers = self.edges.iter().filter(|(_, output)| output.0 == id);
-                stack.extend(consumers.map(|(input, _)| input.0));
-            }
-        }
-        false
-    }
-
-    /// `targets` and all their ancestors, each after its sources.
-    pub(crate) fn upstream_order(&self, targets: &[NodeId]) -> Vec<NodeId> {
-        fn visit(graph: &Graph, id: NodeId, seen: &mut BTreeSet<NodeId>, order: &mut Vec<NodeId>) {
-            if seen.insert(id) {
-                let inputs = graph.edges.range(Port(id, String::new())..);
-                for (_, output) in inputs.take_while(|(input, _)| input.0 == id) {
-                    visit(graph, output.0, seen, order);
+    pub fn remove(&mut self, id: NodeId) -> Result<()> {
+        self.dag.entry(id)?;
+        self.dag.entries[id.index] = None;
+        for e in self.dag.entries.iter_mut().flatten() {
+            for from in &mut e.inputs {
+                if from.is_some_and(|p| p.node == id) {
+                    *from = None;
                 }
-                order.push(id);
             }
         }
-        let (mut seen, mut order) = (BTreeSet::new(), Vec::new());
-        for &id in targets {
-            visit(self, id, &mut seen, &mut order);
-        }
-        order
+        Ok(())
     }
 }

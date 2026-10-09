@@ -1,0 +1,20 @@
+//! Processing nodes and their shared image-domain support.
+pub mod bayer_gains;
+pub mod bayer_preview;
+pub mod camera_to_rgb;
+pub mod color;
+pub mod data;
+pub mod export;
+pub mod exposure;
+pub mod gain_levels;
+pub mod highlights;
+pub mod profile;
+pub mod raw;
+pub mod rcd;
+pub mod reduce;
+mod shared_kernel;
+pub mod sigmoid;
+pub mod source;
+pub mod templates;
+pub use exposure::Exposure;
+pub use source::source;

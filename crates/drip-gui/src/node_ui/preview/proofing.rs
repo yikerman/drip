@@ -1,6 +1,6 @@
 //! ICC proofing for the preview working-space image.
 
-use drip::profile;
+use drip::node::profile;
 use lcms2::{Flags, Intent, PixelFormat, Profile, ThreadContext, Transform};
 
 pub(super) fn softproof(

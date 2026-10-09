@@ -28,7 +28,7 @@ impl Scene {
     }
 
     fn port_point(&self, id: NodeId, direction: Direction) -> Pos2 {
-        let layout = layout(id, self.graph.node(id).unwrap(), None);
+        let layout = layout(id, &self.graph.node(id).unwrap(), None);
         let ports = match direction {
             Direction::Input => layout.inputs,
             Direction::Output => layout.outputs,
@@ -39,7 +39,7 @@ impl Scene {
 
 fn harness(zoom: f32) -> Harness<'static, Scene> {
     let mut graph = Graph::default();
-    let node = graph.add_node(&drip::nodes::EXPOSURE);
+    let node = graph.add_node(crate::model::Registry.get("rgb-exposure").unwrap()).unwrap();
     graph.set_ui(node, json!({"pos": [100.0, 100.0]})).unwrap();
     let scene = Scene {
         editor: Editor { offset: Some(vec2(20.0, 20.0)), zoom, wire: None },
@@ -72,7 +72,7 @@ fn harness(zoom: f32) -> Harness<'static, Scene> {
                     s.editor.show(
                         ui,
                         &mut s.graph,
-                        &drip::nodes::registry(),
+                        &crate::model::Registry,
                         &mut s.selected,
                         &mut frame,
                     );
@@ -112,9 +112,13 @@ fn click_port(h: &mut Harness<'_, Scene>, id: NodeId, direction: Direction, butt
     click(h, pos, button);
 }
 
-fn add_node(h: &mut Harness<'_, Scene>, kind: &'static drip::node::NodeKind, pos: Vec2) -> NodeId {
+fn add_node(
+    h: &mut Harness<'_, Scene>,
+    kind: &'static crate::model::NodeKind,
+    pos: Vec2,
+) -> NodeId {
     let graph = &mut h.state_mut().graph;
-    let id = graph.add_node(kind);
+    let id = graph.add_node(kind).unwrap();
     graph.set_ui(id, json!({"pos": [pos.x, pos.y]})).unwrap();
     h.run();
     id
@@ -130,9 +134,17 @@ fn ports_connect_in_either_direction_and_preserve_sources_until_commit() {
         for start_at_input in [false, true] {
             let mut h = harness(zoom);
             let source = h.state().node;
-            let target = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(240.0, 180.0));
-            let previous = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(100.0, 240.0));
-            h.state_mut().graph.connect(image_port(previous), image_port(target)).unwrap();
+            let target = add_node(
+                &mut h,
+                crate::model::Registry.get("rgb-exposure").unwrap(),
+                vec2(240.0, 180.0),
+            );
+            let previous = add_node(
+                &mut h,
+                crate::model::Registry.get("rgb-exposure").unwrap(),
+                vec2(100.0, 240.0),
+            );
+            h.state_mut().graph.connect(output_port(previous), image_port(target)).unwrap();
             let before = h.state().graph.clone();
             let (start, end) = if start_at_input {
                 ((target, Direction::Input), (source, Direction::Output))
@@ -141,18 +153,18 @@ fn ports_connect_in_either_direction_and_preserve_sources_until_commit() {
             };
             click_port(&mut h, start.0, start.1, Secondary);
             assert!(h.state().editor.wire.is_some());
-            assert_eq!(h.state().graph, before);
+            assert_eq!(snapshot(&h.state().graph), snapshot(&before));
             assert!(!h.state().edited);
             click_port(&mut h, end.0, end.1, Secondary);
             assert!(h.state().editor.wire.is_none());
-            assert_eq!(h.state().graph.source(&image_port(target)), Some(&image_port(source)));
+            assert_eq!(h.state().graph.source(&image_port(target)), Some(output_port(source)));
             assert!(h.state().edited);
             assert_eq!(h.state().selected, None);
             assert!(h.query_by_label("Rename").is_none());
 
             click_port(&mut h, source, Direction::Output, Secondary);
             click_port(&mut h, previous, Direction::Input, Secondary);
-            assert_eq!(h.state().graph.source(&image_port(previous)), Some(&image_port(source)));
+            assert_eq!(h.state().graph.source(&image_port(previous)), Some(output_port(source)));
             assert_eq!(h.state().graph.edges().count(), 2);
         }
     }
@@ -162,21 +174,23 @@ fn ports_connect_in_either_direction_and_preserve_sources_until_commit() {
 fn invalid_port_targets_keep_the_pending_connection_and_existing_source() {
     let mut h = harness(1.0);
     let source = h.state().node;
-    let target = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(400.0, 100.0));
-    let camera = add_node(&mut h, &drip::nodes::RCD, vec2(100.0, 300.0));
-    h.state_mut().graph.connect(image_port(source), image_port(target)).unwrap();
+    let target =
+        add_node(&mut h, crate::model::Registry.get("rgb-exposure").unwrap(), vec2(400.0, 100.0));
+    let camera =
+        add_node(&mut h, crate::model::Registry.get("bayer-rcd").unwrap(), vec2(100.0, 300.0));
+    h.state_mut().graph.connect(output_port(source), image_port(target)).unwrap();
     let before = h.state().graph.clone();
     click_port(&mut h, target, Direction::Input, Secondary);
     let pending = h.state().editor.wire.clone();
     for (id, direction, error) in [
         (source, Direction::Input, "Choose an output port"),
-        (camera, Direction::Output, "Exposure 2 · image requires Rec.2020 RGB, got Camera RGB"),
+        (camera, Direction::Output, "payload mismatch at rgb-exposure.image"),
         (target, Direction::Output, "cycle"),
     ] {
         click_port(&mut h, id, direction, Secondary);
         assert!(h.state().refused.as_ref().unwrap().contains(error));
         assert_eq!(h.state().editor.wire, pending);
-        assert_eq!(h.state().graph, before);
+        assert_eq!(snapshot(&h.state().graph), snapshot(&before));
         assert!(!h.state().edited);
     }
     click_port(&mut h, source, Direction::Output, Secondary);
@@ -188,8 +202,12 @@ fn pending_connections_cancel_without_opening_the_canvas_menu() {
     for direction in [Direction::Input, Direction::Output] {
         let mut h = harness(1.0);
         let source = h.state().node;
-        let target = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(400.0, 100.0));
-        h.state_mut().graph.connect(image_port(source), image_port(target)).unwrap();
+        let target = add_node(
+            &mut h,
+            crate::model::Registry.get("rgb-exposure").unwrap(),
+            vec2(400.0, 100.0),
+        );
+        h.state_mut().graph.connect(output_port(source), image_port(target)).unwrap();
         let before = h.state().graph.clone();
         let start = if direction == Direction::Input { target } else { source };
         click_port(&mut h, start, direction, Secondary);
@@ -200,7 +218,7 @@ fn pending_connections_cancel_without_opening_the_canvas_menu() {
         h.key_press(egui::Key::Escape);
         h.run();
         assert!(h.state().editor.wire.is_none());
-        assert_eq!(h.state().graph, before);
+        assert_eq!(snapshot(&h.state().graph), snapshot(&before));
         assert!(!h.state().edited);
     }
 }
@@ -220,7 +238,7 @@ fn port_drags_pan_only_with_the_left_button() {
             let pos = h.state().port_point(id, direction);
             drag(&mut h, pos, Secondary, delta);
             assert_eq!(h.state().editor.offset.unwrap(), offset + delta);
-            assert_eq!(h.state().graph, before);
+            assert_eq!(snapshot(&h.state().graph), snapshot(&before));
             assert_eq!(h.state().selected, None);
             assert!(h.state().editor.wire.is_none());
             assert!(h.query_by_label("No source").is_none());
@@ -233,10 +251,12 @@ fn port_drags_pan_only_with_the_left_button() {
 fn port_menus_navigate_to_connected_nodes_without_editing() {
     let mut h = harness(1.0);
     let source = h.state().node;
-    let near = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(400.0, 100.0));
-    let far = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(3000.0, 1000.0));
+    let near =
+        add_node(&mut h, crate::model::Registry.get("rgb-exposure").unwrap(), vec2(400.0, 100.0));
+    let far =
+        add_node(&mut h, crate::model::Registry.get("rgb-exposure").unwrap(), vec2(3000.0, 1000.0));
     for id in [near, far] {
-        h.state_mut().graph.connect(image_port(source), image_port(id)).unwrap();
+        h.state_mut().graph.connect(output_port(source), image_port(id)).unwrap();
     }
     let before = h.state().graph.clone();
     let offset = h.state().editor.offset;
@@ -259,11 +279,11 @@ fn port_menus_navigate_to_connected_nodes_without_editing() {
 
     click_port(&mut h, far, Direction::Input, Primary);
     assert_eq!(h.state().selected, Some(far));
-    h.get_by_label("Exposure · image").click();
+    h.get_by_label("Exposure · output").click();
     h.run();
     assert_eq!(h.state().selected, Some(source));
     assert!(visible.contains(h.state().node_point()));
-    assert_eq!(h.state().graph, before);
+    assert_eq!(snapshot(&h.state().graph), snapshot(&before));
     assert!(!h.state().edited);
 }
 
@@ -287,10 +307,18 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
         for distance in [0.0, 4.0, 8.0] {
             let mut h = harness(zoom);
             let source = h.state().node;
-            let target = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(340.0, 118.0));
-            let branch = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(340.0, 230.0));
+            let target = add_node(
+                &mut h,
+                crate::model::Registry.get("rgb-exposure").unwrap(),
+                vec2(340.0, 118.0),
+            );
+            let branch = add_node(
+                &mut h,
+                crate::model::Registry.get("rgb-exposure").unwrap(),
+                vec2(340.0, 230.0),
+            );
             for id in [target, branch] {
-                h.state_mut().graph.connect(image_port(source), image_port(id)).unwrap();
+                h.state_mut().graph.connect(output_port(source), image_port(id)).unwrap();
             }
             let start = h.state().port_point(source, Direction::Output);
             let end = h.state().port_point(target, Direction::Input);
@@ -304,7 +332,7 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
             click(&mut h, pointer, Secondary);
             let removed = distance <= WIRE_HIT;
             assert_eq!(h.state().graph.source(&image_port(target)).is_none(), removed);
-            assert_eq!(h.state().graph.source(&image_port(branch)), Some(&image_port(source)));
+            assert_eq!(h.state().graph.source(&image_port(branch)), Some(output_port(source)));
             assert_eq!(h.state().edited, removed);
             assert_eq!(h.query_by_label("color ⏵").is_some(), !removed);
         }
@@ -315,11 +343,14 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
 fn crossing_wires_choose_the_nearest_curve() {
     let mut h = harness(1.0);
     let upper = h.state().node;
-    let lower = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(100.0, 202.0));
-    let upper_target = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(440.0, 118.0));
-    let lower_target = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(440.0, 220.0));
-    h.state_mut().graph.connect(image_port(upper), image_port(lower_target)).unwrap();
-    h.state_mut().graph.connect(image_port(lower), image_port(upper_target)).unwrap();
+    let lower =
+        add_node(&mut h, crate::model::Registry.get("rgb-exposure").unwrap(), vec2(100.0, 202.0));
+    let upper_target =
+        add_node(&mut h, crate::model::Registry.get("rgb-exposure").unwrap(), vec2(440.0, 118.0));
+    let lower_target =
+        add_node(&mut h, crate::model::Registry.get("rgb-exposure").unwrap(), vec2(440.0, 220.0));
+    h.state_mut().graph.connect(output_port(upper), image_port(lower_target)).unwrap();
+    h.state_mut().graph.connect(output_port(lower), image_port(upper_target)).unwrap();
     let curve = bezier(
         h.state().port_point(upper, Direction::Output),
         h.state().port_point(lower_target, Direction::Input),
@@ -328,7 +359,7 @@ fn crossing_wires_choose_the_nearest_curve() {
     let pointer = curve.sample(0.48);
     click(&mut h, pointer, Secondary);
     assert!(h.state().graph.source(&image_port(lower_target)).is_none());
-    assert_eq!(h.state().graph.source(&image_port(upper_target)), Some(&image_port(lower)));
+    assert_eq!(h.state().graph.source(&image_port(upper_target)), Some(output_port(lower)));
 }
 
 #[test]
@@ -336,8 +367,12 @@ fn wires_leave_panning_and_overlapping_nodes_and_ports_interactive() {
     for over_port in [false, true] {
         let mut h = harness(1.0);
         let source = h.state().node;
-        let target = add_node(&mut h, &drip::nodes::EXPOSURE, vec2(440.0, 118.0));
-        h.state_mut().graph.connect(image_port(source), image_port(target)).unwrap();
+        let target = add_node(
+            &mut h,
+            crate::model::Registry.get("rgb-exposure").unwrap(),
+            vec2(440.0, 118.0),
+        );
+        h.state_mut().graph.connect(output_port(source), image_port(target)).unwrap();
         let start = h.state().port_point(source, Direction::Output);
         let end = h.state().port_point(target, Direction::Input);
         let midpoint = start.lerp(end, 0.5);
@@ -345,11 +380,12 @@ fn wires_leave_panning_and_overlapping_nodes_and_ports_interactive() {
         let delta = vec2(30.0, 20.0);
         drag(&mut h, midpoint, Primary, delta);
         assert_eq!(h.state().editor.offset.unwrap(), offset + delta);
-        assert_eq!(h.state().graph.source(&image_port(target)), Some(&image_port(source)));
+        assert_eq!(h.state().graph.source(&image_port(target)), Some(output_port(source)));
         let position = if over_port { vec2(350.0, 118.0) } else { vec2(330.0, 139.0) };
-        let overlay = add_node(&mut h, &drip::nodes::EXPOSURE, position);
+        let overlay =
+            add_node(&mut h, crate::model::Registry.get("rgb-exposure").unwrap(), position);
         click(&mut h, midpoint + delta, Secondary);
-        assert_eq!(h.state().graph.source(&image_port(target)), Some(&image_port(source)));
+        assert_eq!(h.state().graph.source(&image_port(target)), Some(output_port(source)));
         assert!(!h.state().edited);
         if over_port {
             assert_eq!(
@@ -389,7 +425,7 @@ fn left_drag_pans_over_background_and_nodes_without_editing() {
             let delta = vec2(50.0, 30.0);
             drag(&mut h, pos, Primary, delta);
             assert_eq!(h.state().editor.offset.unwrap(), offset + delta);
-            assert_eq!(h.state().graph, graph);
+            assert_eq!(snapshot(&h.state().graph), snapshot(&graph));
             assert_eq!(h.state().selected, None);
             assert!(!h.state().edited);
         }
@@ -415,7 +451,7 @@ fn right_drag_moves_only_nodes_without_opening_menus() {
         assert!(h.query_by_label("Rename").is_none());
         let graph = s.graph.clone();
         drag(&mut h, pos2(40.0, 40.0), Secondary, delta);
-        assert_eq!(h.state().graph, graph);
+        assert_eq!(snapshot(&h.state().graph), snapshot(&graph));
         assert_eq!(h.state().editor.offset, offset);
         assert!(h.query_by_label("color ⏵").is_none());
     }
@@ -463,14 +499,21 @@ fn click_selection_and_node_menu_actions() {
     assert!(rows.windows(2).all(|rows| rows[0] < rows[1]));
     h.get_by_label("color ⏵").click();
     h.run();
-    let names = ["Camera to Rec.2020", "Exposure", "White balance"];
+    let names = ["Camera to RGB", "Exposure", "White balance"];
     let rows: Vec<_> = names.iter().map(|name| h.get_by_label(name).rect().top()).collect();
     assert!(rows.windows(2).all(|rows| rows[0] < rows[1]));
-    h.get_by_label(drip::nodes::EXPOSURE.name).click();
+    h.get_by_label(crate::model::Registry.get("rgb-exposure").unwrap().name).click();
     h.run();
     assert_eq!(h.state().graph.nodes().count(), 1);
     let added = h.state().graph.node(h.state().selected.unwrap()).unwrap();
-    assert_eq!(added.kind.id, "color.exposure");
+    assert_eq!(added.kind.id, "rgb-exposure");
     assert_eq!(added.name, "Exposure");
     assert!(!egui::Popup::is_any_open(&h.ctx));
+}
+
+fn output_port(id: NodeId) -> Port {
+    Port(id, "output".into())
+}
+fn snapshot(graph: &Graph) -> String {
+    crate::model::Project { graph: graph.clone(), ui: serde_json::Value::Null }.to_json().unwrap()
 }

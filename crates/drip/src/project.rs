@@ -1,175 +1,159 @@
-//! Projects and their file format. A template is a
-//! graph whose external parameters are its inputs; a project is the same
-//! graph with those parameters filled in. Both are saved in the same format,
-//! defined here by private types so the in-memory model can change freely.
-
-use std::collections::BTreeSet;
-
-use serde::{Deserialize, Serialize};
-use serde_json::Value as Json;
-
-use crate::graph::{Graph, GraphError, Node, NodeId, Port};
-use crate::node::Registry;
-use crate::param::ParamMap;
-
-const FORMAT: &str = "drip";
-
-/// Files carry the major version of the crate that wrote them, and only that
-/// major version reads them. The prototype keeps no compatibility otherwise:
-/// a file must match exactly what this build writes.
-const VERSION: u32 = match u32::from_str_radix(env!("CARGO_PKG_VERSION_MAJOR"), 10) {
-    Ok(major) => major,
-    Err(_) => panic!("the crate's major version is a number"),
+//! Persist node kinds, parameters and named edges; loading repeats connection checks.
+use crate::{
+    Error, Result, definition,
+    graph::Dag,
+    ports::{NodeId, PortId},
 };
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Clone, Default)]
 pub struct Project {
-    pub graph: Graph,
-    /// Opaque frontend state such as the editor's viewport.
-    pub ui: Json,
+    pub dag: Dag,
+    pub target: Option<PortId>,
+    /// Opaque frontend state. The headless library never interprets it.
+    pub ui: Value,
+    pub node_ui: BTreeMap<NodeId, Value>,
 }
-
-#[derive(Debug, thiserror::Error)]
-pub enum LoadError {
-    #[error("malformed project file: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("not a drip project file")]
-    NotDrip,
-    #[error("written by Drip {0}.x; this is Drip {VERSION}.x")]
-    Version(u32),
-    #[error("unknown node kind `{0}`")]
-    UnknownKind(String),
-    #[error("node {0:?} has no value for parameter `{1}`")]
-    MissingParam(NodeId, &'static str),
-    #[error("input {0:?} has more than one connection")]
-    DuplicateInput(Port),
-    #[error("node id {0} is duplicated or out of range")]
-    InvalidId(u64),
-    #[error(transparent)]
-    Graph(#[from] GraphError),
-}
-
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct File {
-    format: String,
+struct Document {
     version: u32,
-    /// A list rather than a map keyed by id, so duplicate ids are detected
-    /// instead of silently collapsed by the JSON parser.
-    nodes: Vec<FileNode>,
-    edges: Vec<FileEdge>,
-    #[serde(default, skip_serializing_if = "Json::is_null")]
-    ui: Json,
+    nodes: Vec<Record>,
+    edges: Vec<(Endpoint, Endpoint)>,
+    target: Option<Endpoint>,
+    ui: Value,
 }
-
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FileNode {
-    id: u64,
-    label: String,
+struct Record {
     kind: String,
-    params: ParamMap,
-    external: BTreeSet<String>,
-    #[serde(default, skip_serializing_if = "Json::is_null")]
-    ui: Json,
+    parameters: Value,
+    ui: Value,
 }
-
 #[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FileEdge {
-    from: (u64, String),
-    to: (u64, String),
+struct Endpoint {
+    node: usize,
+    port: String,
 }
-
 impl Project {
-    /// The same graph with every external parameter back at its default:
-    /// a function of its inputs.
-    pub fn template(&self) -> Project {
-        let mut template = self.clone();
-        for (id, param) in self.graph.inputs() {
-            let spec = self.graph.node(id).expect("listed").kind.param(param).expect("listed");
-            template
-                .graph
-                .set_param(id, param, spec.kind.default_value())
-                .expect("defaults are valid");
-        }
-        template
-    }
-
-    pub fn to_json(&self) -> String {
-        let nodes = self.graph.nodes().map(|(id, node)| FileNode {
-            id: id.0,
-            label: node.name.clone(),
-            kind: node.kind.id.into(),
-            params: node.params.clone(),
-            external: node.external.iter().map(|p| p.to_string()).collect(),
-            ui: node.ui.clone(),
-        });
-        let edges = self.graph.edges().map(|(from, to)| FileEdge {
-            from: (from.0.0, from.1.clone()),
-            to: (to.0.0, to.1.clone()),
-        });
-        let file = File {
-            format: FORMAT.into(),
-            version: VERSION,
-            nodes: nodes.collect(),
-            edges: edges.collect(),
+    pub fn to_json(&self) -> Result<String> {
+        let nodes: Vec<_> = self.dag.nodes().collect();
+        let ids: BTreeMap<_, _> = nodes.iter().enumerate().map(|(i, (id, _))| (*id, i)).collect();
+        let endpoint = |p: PortId, input: bool| -> Result<Endpoint> {
+            if !input {
+                self.dag.output(p)?;
+            }
+            let n = self.dag.node(p.node())?;
+            let specs = if input { n.inputs() } else { n.outputs() };
+            let spec = specs
+                .get(p.index())
+                .ok_or_else(|| Error::Graph("invalid saved endpoint".into()))?;
+            Ok(Endpoint { node: ids[&p.node()], port: spec.name.into() })
+        };
+        let document = Document {
+            version: 2,
+            nodes: nodes
+                .iter()
+                .map(|(id, n)| {
+                    Ok(Record {
+                        kind: n.metadata().id.into(),
+                        parameters: n.parameters()?,
+                        ui: self.node_ui.get(id).cloned().unwrap_or(Value::Null),
+                    })
+                })
+                .collect::<Result<_>>()?,
+            edges: self
+                .dag
+                .edges()
+                .map(|(a, b)| Ok((endpoint(a, false)?, endpoint(b, true)?)))
+                .collect::<Result<_>>()?,
+            target: self.target.map(|p| endpoint(p, false)).transpose()?,
             ui: self.ui.clone(),
         };
-        serde_json::to_string_pretty(&file).expect("plain data serializes")
+        serde_json::to_string_pretty(&document).map_err(|e| Error::Graph(e.to_string()))
+    }
+    pub fn from_json(text: &str) -> Result<Self> {
+        Self::load(serde_json::from_str(text).map_err(|e| Error::Graph(e.to_string()))?)
     }
 
-    /// Loads a project, validating everything as editing would.
-    pub fn from_json(text: &str, registry: &Registry) -> Result<Project, LoadError> {
-        let file: File = serde_json::from_str(text)?;
-        if file.format != FORMAT {
-            return Err(LoadError::NotDrip);
+    /// Instantiate only the saved target's dependency subgraph. Frontend node
+    /// kinds outside that subgraph need not be registered by a batch frontend.
+    pub fn target_from_json(text: &str) -> Result<Self> {
+        let mut document: Document =
+            serde_json::from_str(text).map_err(|e| Error::Graph(e.to_string()))?;
+        let target = document
+            .target
+            .as_ref()
+            .ok_or_else(|| Error::Graph("project has no unambiguous export target".into()))?;
+        let mut needed = BTreeSet::new();
+        let target_node = target.node;
+        let mut pending = vec![target_node];
+        while let Some(node) = pending.pop() {
+            if node >= document.nodes.len() {
+                return Err(Error::Graph("unknown project node".into()));
+            }
+            if needed.insert(node) {
+                pending.extend(
+                    document
+                        .edges
+                        .iter()
+                        .filter(|(_, to)| to.node == node)
+                        .map(|(from, _)| from.node),
+                );
+            }
         }
-        if file.version != VERSION {
-            return Err(LoadError::Version(file.version));
+        let indices: BTreeMap<_, _> =
+            needed.iter().enumerate().map(|(new, &old)| (old, new)).collect();
+        document.nodes = document
+            .nodes
+            .into_iter()
+            .enumerate()
+            .filter_map(|(id, node)| needed.contains(&id).then_some(node))
+            .collect();
+        document.edges.retain(|(_, to)| needed.contains(&to.node));
+        for (from, to) in &mut document.edges {
+            from.node = indices[&from.node];
+            to.node = indices[&to.node];
         }
-        let mut graph = Graph::default();
-        for n in file.nodes {
-            let id = NodeId(n.id);
-            if n.id == u64::MAX || graph.node(id).is_some() {
-                return Err(LoadError::InvalidId(n.id));
-            }
-            let kind =
-                registry.get(&n.kind).ok_or_else(|| LoadError::UnknownKind(n.kind.clone()))?;
-            let unknown =
-                n.params.keys().chain(&n.external).find(|name| kind.param(name).is_none());
-            if let Some(name) = unknown {
-                return Err(GraphError::UnknownParam(id, name.clone()).into());
-            }
-            for spec in kind.params {
-                let value =
-                    n.params.get(spec.name).ok_or(LoadError::MissingParam(id, spec.name))?;
-                if !spec.kind.accepts(value) {
-                    return Err(GraphError::InvalidParam {
-                        param: spec.name.into(),
-                        value: value.clone(),
-                    }
-                    .into());
-                }
-            }
-            let external = kind
-                .params
-                .iter()
-                .filter(|p| n.external.contains(p.name))
-                .map(|p| p.name)
-                .collect();
-            if n.label.is_empty() || graph.find(&n.label).is_some() {
-                return Err(GraphError::InvalidName(n.label).into());
-            }
-            graph.insert(id, Node { name: n.label, kind, params: n.params, external, ui: n.ui });
+        document.target.as_mut().unwrap().node = indices[&target_node];
+        Self::load(document)
+    }
+
+    fn load(document: Document) -> Result<Self> {
+        if document.version != 2 {
+            return Err(Error::Graph(
+                "unsupported project version; legacy projects require migration".into(),
+            ));
         }
-        for FileEdge { from, to } in file.edges {
-            let (from, to) = (Port(NodeId(from.0), from.1), Port(NodeId(to.0), to.1));
-            if graph.source(&to).is_some() {
-                return Err(LoadError::DuplicateInput(to));
-            }
-            graph.connect(from, to)?;
+        let mut project = Self { ui: document.ui, ..Self::default() };
+        let mut ids = Vec::new();
+        for record in document.nodes {
+            let id = project.dag.add(definition::registered(&record.kind, record.parameters)?)?;
+            ids.push(id);
+            project.node_ui.insert(id, record.ui);
         }
-        Ok(Project { graph, ui: file.ui })
+        let endpoint = |e: Endpoint, input: bool| -> Result<PortId> {
+            let id = *ids.get(e.node).ok_or_else(|| Error::Graph("unknown project node".into()))?;
+            if input {
+                project.dag.input_port(id, &e.port)
+            } else {
+                project.dag.output_port(id, &e.port)
+            }
+        };
+        let edges = document
+            .edges
+            .into_iter()
+            .map(|(a, b)| Ok((endpoint(a, false)?, endpoint(b, true)?)))
+            .collect::<Result<Vec<_>>>()?;
+        project.target = document.target.map(|e| endpoint(e, false)).transpose()?;
+        project.dag.edit(|edit| {
+            for (a, b) in edges {
+                edit.connect_ids(a, b)?;
+            }
+            Ok(())
+        })?;
+        Ok(project)
     }
 }

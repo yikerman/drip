@@ -6,7 +6,14 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+cpu = ["cubecl/cpu"]
+cuda = ["cubecl/cuda"]
+
 [dependencies]
+cubecl = { version = "=0.11.0", default-features = false, features = ["std", "wgpu"] }
+bytemuck = "1"
+pollster = "1.0.1"
 drip-macros = { path = "../drip-macros" }
 linkme = "0.3.37"
 drip-raw.workspace = true

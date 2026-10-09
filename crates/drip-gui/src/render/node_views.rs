@@ -2,7 +2,7 @@
 
 use std::{any::Any, sync::Arc};
 
-use drip::image::Rgb;
+use crate::node_ui::data::Rgb;
 use egui::{FontId, Painter, Rect, Ui};
 
 use crate::render::image::Image;
@@ -68,12 +68,16 @@ impl IntoDrawable for () {
 mod tests {
     use super::*;
     use crate::node_ui::preview::{ImageView, PreviewImage};
-    use drip::image::Rec2020Mat;
+    type Rec2020Mat = Arc<Rgb>;
 
     #[test]
     fn preparation_reuses_images_and_keeps_destruction_on_its_owner() {
-        let source =
-            Arc::new(Rgb { width: 1, height: 1, scale: 1, pixels: vec![[-1.0, 0.5, 2.0]] });
+        let source = Arc::new(Rgb {
+            width: 1,
+            height: 1,
+            requested_scale: 1,
+            pixels: vec![[-1.0, 0.5, 2.0]].into(),
+        });
         let raw = Arc::downgrade(&source);
         let mut value = PreviewImage::new(&Rec2020Mat::from(source));
         let mut images = ImageCache::default();

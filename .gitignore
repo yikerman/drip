@@ -1,2 +1,6 @@
 /target
 /dist
+
+# Retired runtime PoCs and generated measurements live outside the repository.
+/experiments/
+/cubecl-experiment/

@@ -1,69 +1,83 @@
-use super::{
-    density::{vectorscope, waveform},
-    histogram::histogram,
-};
+use super::{histogram::histogram, waveform::waveform};
+use crate::node_ui::vectorscope::vectorscope;
 use std::sync::Arc;
 
-use drip::graph::Graph;
-use drip::image::{Camera, CameraRgb, Rec2020Mat, Rgb};
-use drip::node::EvalContext;
-use drip::nodes::scopes::{ExposureSettings, HISTOGRAM, Scale};
-use drip::param::{Parameters, Params};
-use drip::ports::{Read, ReadEither};
-use drip::value::Value;
-use serde_json::json;
-
 use super::ScopeAxes;
+use crate::model::{Graph, Registry};
+use crate::node_ui::data::{PrepareContext, Rgb};
+use crate::node_ui::scopes::{ExposureSettings, Scale};
+use drip::{eval::Evaluator, graph::Dag, node::data::*, runtime::RuntimeContext};
+use serde_json::json;
 
 #[test]
 fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
     let pixels = Arc::new(Rgb {
         width: 2,
         height: 2,
-        scale: 1,
-        pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36], [1.0, 0.5, 2.0], [0.25; 3]],
+        requested_scale: 1,
+        pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36], [1.0, 0.5, 2.0], [0.25; 3]].into(),
     });
-    let working = Value::new(Arc::new(Rec2020Mat::from(pixels.clone())));
-    let camera = Value::new(Arc::new(CameraRgb::new(
-        pixels,
-        Camera {
-            xyz_to_cam: [[2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 4.0]],
-            white_balance: [2.0, 1.0, 1.5, 1.0],
+    let mut dag = Dag::new();
+    let working = drip::node::source::<ColorRgb>(
+        &mut dag,
+        ImageDesc {
+            extent: Extent { width: 2, height: 2 },
+            interpretation: drip::node::raw::working_color(),
         },
-    )));
-    let resources = Default::default();
-    let context = EvalContext::new(0, &resources).unwrap();
-    let prepare = |value: &Value| {
-        let image = value.borrow::<ReadEither<Rec2020Mat, CameraRgb>>().unwrap();
+        (*pixels.pixels).clone(),
+    )
+    .unwrap();
+    let camera = drip::node::source::<CameraRgb>(
+        &mut dag,
+        ImageDesc {
+            extent: Extent { width: 2, height: 2 },
+            interpretation: Camera {
+                coordinates: "native camera".into(),
+                scale: "relative".into(),
+            },
+        },
+        (*pixels.pixels).clone(),
+    )
+    .unwrap();
+    let histogram = crate::node_ui::histogram::add(&mut dag, ExposureSettings::default()).unwrap();
+    let camera_histogram =
+        crate::node_ui::camera_histogram::add(&mut dag, ExposureSettings::default()).unwrap();
+    dag.connect(working, histogram.image).unwrap();
+    dag.connect(camera, camera_histogram.image).unwrap();
+    assert!(dag.connect_ids(camera.id(), histogram.image.id()).is_err());
+    let targets = [histogram.image.node(), camera_histogram.image.node()];
+    let values =
+        Evaluator::new(RuntimeContext::host()).evaluate_inputs(&dag, &Default::default(), &targets);
+    let ctx = PrepareContext::default();
+    let a = ctx.image::<Color>(values[&targets[0]].as_ref().unwrap()).unwrap();
+    let b = ctx.image::<Camera>(values[&targets[1]].as_ref().unwrap()).unwrap();
+    let prepare = |image: &crate::node_ui::data::Rgb| {
         let settings = || ExposureSettings { min_ev: -12, max_ev: 4, scale: Scale::Log };
         (
-            histogram(settings(), (image,), &context).unwrap(),
-            waveform(settings(), (image,), &context).unwrap(),
+            super::histogram::histogram(settings(), (image,), &ctx).unwrap(),
+            waveform(settings(), (image,), &ctx).unwrap(),
         )
     };
-    let (histogram, waveform) = prepare(&working);
+    let (histogram, waveform) = prepare(&a);
     assert_eq!(histogram.counts.iter().flatten().sum::<u32>(), 12);
     assert_eq!(waveform.counts.iter().flatten().sum::<u32>(), 12);
-    // Exposure scopes inspect native channels, without applying camera color or WB transforms.
-    assert_eq!((histogram, waveform), prepare(&camera));
+    assert_eq!((histogram, waveform), prepare(&b));
 }
 
 #[test]
 fn histogram_bins_by_stops() {
-    let value = Value::new(Arc::new(Rec2020Mat::from(Arc::new(Rgb {
+    let image = Rgb {
         width: 2,
         height: 1,
-        scale: 1,
-        pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]],
-    }))));
+        requested_scale: 1,
+        pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]].into(),
+    };
     let mut graph = Graph::default();
-    let id = graph.add_node(&HISTOGRAM);
-    let resources = Default::default();
-    let context = EvalContext::new(0, &resources).unwrap();
+    let id = graph.add_node(Registry.get("view.histogram").unwrap()).unwrap();
+    let context = PrepareContext::default();
     let prepare = |graph: &Graph| {
-        let params = ExposureSettings::read(Params::validated(&graph.node(id).unwrap().params));
-        let image = value.borrow::<ReadEither<Rec2020Mat, CameraRgb>>().unwrap();
-        histogram(params, (image,), &context).unwrap()
+        let params = serde_json::from_value(graph.node(id).unwrap().params).unwrap();
+        histogram(params, (&image,), &context).unwrap()
     };
     let h = prepare(&graph);
     let bin = |v: f32| ((v.log2() - h.min_stop) / (h.max_stop - h.min_stop) * 256.0) as usize;
@@ -85,17 +99,10 @@ fn histogram_bins_by_stops() {
 
 #[test]
 fn vectorscope_uses_working_rec2020_coordinates() {
-    let source = Rec2020Mat::from(Arc::new(Rgb {
-        width: 1,
-        height: 1,
-        scale: 1,
-        pixels: vec![[1.0, 0.0, 0.0]],
-    }));
-    let value = Value::new(Arc::new(source));
-    let image = value.borrow::<Read<Rec2020Mat>>().unwrap();
-    let resources = Default::default();
-    let context = EvalContext::new(0, &resources).unwrap();
-    let scope = vectorscope((), (image,), &context).unwrap();
+    let image =
+        Rgb { width: 1, height: 1, requested_scale: 1, pixels: vec![[1.0, 0.0, 0.0]].into() };
+    let context = PrepareContext::default();
+    let scope = vectorscope((), (&image,), &context).unwrap();
     let ScopeAxes::Vectorscope { primaries, color_space } = scope.axes else {
         panic!("chromaticity")
     };

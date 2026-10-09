@@ -49,7 +49,7 @@ fn zoom_keeps_pointer_anchor_and_pan_stops_at_image_edges() {
 
 #[test]
 fn popup_controls_wheel_and_primary_drag_share_navigation_state() {
-    let image = Arc::new(Image { width: 1000, height: 800, scale: 2, texels: vec![] });
+    let image = Arc::new(Image { width: 1000, height: 800, requested_scale: 2, texels: vec![] });
     let mut h = Harness::builder()
         .with_size(vec2(500.0, 400.0))
         .with_step_dt(1.0 / 60.0)
@@ -66,7 +66,7 @@ fn popup_controls_wheel_and_primary_drag_share_navigation_state() {
     h.get_by_label("100%").click();
     h.run();
     assert_eq!(h.state().zoom, Some(1.0));
-    h.get_by_label("1000 × 800 · 1/2 detail");
+    h.get_by_label("1000 × 800 · 1/2 detail requested");
     let pointer = pos2(220.0, 180.0);
     h.event(Event::PointerMoved(pointer));
     h.event(Event::MouseWheel {
@@ -128,7 +128,8 @@ fn popup_controls_wheel_and_primary_drag_share_navigation_state() {
 #[test]
 fn pointer_leave_stops_image_scroll_zoom() {
     for same_frame in [false, true] {
-        let image = Arc::new(Image { width: 1000, height: 800, scale: 1, texels: vec![] });
+        let image =
+            Arc::new(Image { width: 1000, height: 800, requested_scale: 1, texels: vec![] });
         let mut h = Harness::builder()
             .with_size(vec2(500.0, 400.0))
             .with_step_dt(1.0 / 60.0)

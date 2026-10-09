@@ -74,10 +74,10 @@ pub(super) fn show(ui: &mut Ui, image: &Arc<Image>, interpolation: bool) {
         if state.zoom.is_none() {
             state.center = pos2(0.5, 0.5);
         }
-        let detail = if image.scale == 1 {
-            "Full detail".into()
+        let detail = if image.requested_scale == 1 {
+            "Full detail requested".into()
         } else {
-            format!("1/{} detail", image.scale)
+            format!("1/{} detail requested", image.requested_scale)
         };
         ui.weak(format!("{} × {} · {detail}", image.width, image.height));
     });

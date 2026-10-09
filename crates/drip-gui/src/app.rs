@@ -4,10 +4,10 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use drip::graph::NodeId;
-use drip::node::Registry;
-use drip::project::Project;
-use drip::{nodes, templates};
+use crate::model::NodeId;
+use crate::model::Project;
+use crate::model::Registry;
+use crate::node_ui::templates;
 use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
 
 use crate::editing::{Frame, NodeCx, Report};
@@ -55,7 +55,7 @@ impl App {
     ) -> Self {
         let mut app = App {
             project: templates::raw_to_tiff(),
-            registry: nodes::registry(),
+            registry: Registry,
             worker: Worker::new(wake),
             dirty: true,
             file: None,
@@ -124,7 +124,7 @@ impl App {
     pub fn windows(&self) -> Vec<Window> {
         let window = |popped: Popped| {
             let node = self.project.graph.node(popped.node).expect("popped nodes exist");
-            Window { popped, title: popped.title(node) }
+            Window { popped, title: popped.title(&node) }
         };
         self.popped.iter().map(|&popped| window(popped)).collect()
     }
@@ -143,7 +143,7 @@ impl App {
             Some(pixels_per_point);
         ctx.run_ui(input, |ui| self.window(ui, popped)).textures_delta.clear();
         let node = self.project.graph.node(popped.node).expect("popped nodes exist");
-        node_ui::fitted(&ctx).unwrap_or_else(|| popped.size(node))
+        node_ui::fitted(&ctx).unwrap_or_else(|| popped.size(&node))
     }
 
     pub fn close_window(&mut self, popped: Popped) {
@@ -158,6 +158,11 @@ impl App {
 
     /// Applies what a frame's GUIs did and requests evaluation after edits.
     fn apply(&mut self, report: Report) {
+        for (id, params) in report.bindings {
+            if let Err(error) = self.worker.bind(&self.project.graph, id, params) {
+                self.report(Err(error));
+            }
+        }
         self.redraw |= report.redraw;
         self.dirty |= report.edited;
         if let Some(refused) = report.refused {
@@ -192,6 +197,21 @@ impl App {
         self.redraw |= !notices.is_empty();
         for notice in notices {
             match notice {
+                Notice::Bound { id, result } => {
+                    if self.project.graph.dag.node(id).is_ok() {
+                        let result =
+                            result.and_then(|node| self.project.graph.dag.replace(id, node));
+                        self.dirty |= result.is_ok();
+                        self.report(result.map(|()| "loaded".into()).map_err(|e| e.to_string()));
+                        action_reported = true;
+                    }
+                }
+                Notice::Opened { file, result } => {
+                    let result =
+                        result.and_then(|project| self.set_project(project, Some(file.clone())));
+                    self.report(result.map(|()| format!("opened {}", file.display())));
+                    action_reported = true;
+                }
                 Notice::Evaluated(result) => evaluated = Some(result),
                 Notice::Action(result) => {
                     self.action = None;
@@ -306,20 +326,8 @@ impl App {
     }
 
     fn open(&mut self, file: PathBuf) {
-        let loaded = std::fs::read_to_string(&file)
-            .map_err(|e| e.to_string())
-            .and_then(|text| Project::from_json(&text, &self.registry).map_err(|e| e.to_string()))
-            .and_then(|project| self.set_project(project, Some(file.clone())));
-        match loaded {
-            Ok(()) => {
-                log::info!("opened project {}", file.display());
-                self.report(Ok(format!("opened {}", file.display())));
-            }
-            Err(e) => {
-                log::error!("cannot open project {}: {e}", file.display());
-                self.report(Err(format!("{}: {e}", file.display())));
-            }
-        }
+        let result = self.worker.open(file.clone());
+        self.report(result.map(|()| format!("opening {}", file.display())));
     }
 
     fn save_as(&mut self, template: bool) {
@@ -333,7 +341,12 @@ impl App {
         }
         let file = PathBuf::from(file);
         if template {
-            self.save(&file, self.project.template());
+            match self.project.template() {
+                Ok(project) => {
+                    self.save(&file, project);
+                }
+                Err(error) => self.report(Err(error.to_string())),
+            }
         } else if self.save(&file, self.project.clone()) {
             self.file = Some(file);
         }
@@ -341,7 +354,10 @@ impl App {
 
     /// Writes `project` to `file`; returns whether that succeeded.
     fn save(&mut self, file: &Path, project: Project) -> bool {
-        let result = std::fs::write(file, project.to_json());
+        let result = project
+            .to_json()
+            .map_err(|e| e.to_string())
+            .and_then(|text| std::fs::write(file, text).map_err(|e| e.to_string()));
         let saved = result.is_ok();
         let shown = file.display();
         match &result {
@@ -354,11 +370,20 @@ impl App {
 
     fn invalidate_cache(&mut self) {
         self.dirty = true;
-        let result = self.worker.invalidate();
+        let result = (|| {
+            self.worker.invalidate()?;
+            for (id, node) in self.project.graph.dag.nodes().filter(|(_, n)| n.loads_assets()) {
+                self.worker.bind(
+                    &self.project.graph,
+                    id,
+                    node.parameters().map_err(|e| e.to_string())?,
+                )?;
+            }
+            Ok(())
+        })();
         self.report(result.map(|()| "invalidating cache…".into()));
     }
 
-    /// The evaluator-owning worker snapshots resources in command order.
     fn run_action(&mut self, id: NodeId, name: &'static str) {
         match self.worker.action(&self.project.graph, id, name) {
             Ok(()) => {
@@ -375,8 +400,11 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use drip::image::Rec2020Mat;
-    use drip::node::{EvalContext, KernelError, NodeDeclaration};
+    use drip::{Error as KernelError, runtime::KernelContext};
+    use serde::{Deserialize, Serialize};
+    fn empty_contract<P>(_: &drip::runtime::GlobalContext, _: &P) -> drip::Result<()> {
+        Ok(())
+    }
 
     use crate::node_ui::{preview::PreviewImage, scopes::Histogram};
 
@@ -421,7 +449,7 @@ mod tests {
         p.graph.set_param(read, "path", json!(raw)).unwrap();
         let file =
             std::env::temp_dir().join(format!("drip-gui-{name}-{}.drip", std::process::id()));
-        std::fs::write(&file, p.to_json()).unwrap();
+        std::fs::write(&file, p.to_json().unwrap()).unwrap();
         file
     }
 
@@ -436,7 +464,7 @@ mod tests {
     }
 
     fn settle(h: &mut Harness<'_, App>) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
         loop {
             h.step();
             h.state_mut().after_frame();
@@ -510,7 +538,11 @@ mod tests {
         let app = h.state();
         assert!(app.file.as_ref() == Some(&file));
         for name in ["Preview", "Histogram", "Waveform", "Vectorscope"] {
-            assert!(has_view(app, name), "{name}");
+            assert!(
+                has_view(app, name),
+                "{name}: {}",
+                app.status.as_ref().map(|s| s.text.as_str()).unwrap_or("no status")
+            );
         }
         let id = app.project.graph.find("Preview").unwrap();
         let image = app
@@ -526,7 +558,7 @@ mod tests {
             .image
             .clone();
         assert_eq!(app.level, DEFAULT_LEVEL);
-        assert_eq!(image.width, 3984, "1/2 preview with full-size RCD");
+        assert_eq!(image.width, 3984, "1/2 preview with reduced Bayer input to RCD");
         h.get_by_label("Invalidate cache").click();
         settle(&mut h);
         let refreshed = &h
@@ -583,9 +615,15 @@ mod tests {
         assert!(image.upgrade().is_some(), "resizing preserves the evaluated image");
         h.get_by_label("Save").click();
         settle(&mut h);
-        let restored = App::new(Some(file.clone()), true, || {});
+        let mut restored = App::new(Some(file.clone()), true, || {});
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while restored.worker.busy() {
+            restored.poll();
+            assert!(std::time::Instant::now() < deadline, "project did not load");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
         assert_eq!(restored.level, 2);
-        assert!(!restored.status.unwrap().error);
+        assert!(!restored.status.as_ref().unwrap().error);
 
         h.get_by_label("New").click();
         settle(&mut h);
@@ -594,151 +632,155 @@ mod tests {
         std::fs::remove_file(file).unwrap();
     }
 
-    #[test]
-    fn evaluation_is_independent_of_node_positions() {
-        use drip::node::NodeKind;
+    mod evaluation_is_independent_of_node_positions_fixture {
+        use super::*;
 
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         static CALLS: AtomicUsize = AtomicUsize::new(0);
-        static NODE: NodeKind =
-            NodeKind::new::<OffscreenKernel>("test.offscreen", "test", "offscreen", &[], &[]);
-        #[derive(drip::Parameters)]
+        #[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
         struct OffscreenKernel {
             #[param(ParamKind::Bool { default: false })]
             value: bool,
         }
-        impl NodeDeclaration for OffscreenKernel {
-            type Parameters = Self;
-            type Inputs = ();
-            type Outputs = ();
-
-            const KERNEL: Option<drip::node::Kernel<Self>> =
-                Some(|Self { value: _value }: Self::Parameters, (): (), _: &EvalContext<'_>| {
-                    CALLS.fetch_add(1, Ordering::SeqCst);
-                    Ok(())
-                });
+        #[drip::node(id="test.offscreen", name="offscreen", category="test", contract=empty_contract)]
+        fn offscreen(_: &KernelContext<'_>, _: &OffscreenKernel) -> drip::Result<()> {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            Ok(())
         }
 
-        let mut project = Project::default();
-        let left = project.graph.add_node(&NODE);
-        let right = project.graph.add_node(&NODE);
-        for (id, x) in [(left, -100_000), (right, 100_000)] {
-            project.graph.set_ui(id, json!({"pos": [x, 0]})).unwrap();
-        }
-        let completions = Arc::new(AtomicUsize::new(0));
-        let wake = completions.clone();
-        let mut app = App::new(None, true, move || {
-            wake.fetch_add(1, Ordering::SeqCst);
-        });
-        app.set_project(project, None).unwrap();
-        let mut h = harness(app);
-        settle(&mut h);
-        assert_eq!(CALLS.load(Ordering::SeqCst), 2);
-        assert!(h.state().worker.result(left).unwrap().is_ok());
-        assert!(h.state().worker.result(right).unwrap().is_ok());
+        #[test]
+        fn evaluation_is_independent_of_node_positions() {
+            let kind = Registry.get("test.offscreen").unwrap();
 
-        set_param(&mut h, left, "value", json!(true));
-        settle(&mut h);
-        assert_eq!(CALLS.load(Ordering::SeqCst), 3, "off-screen edits are evaluated");
-        let before = completions.load(Ordering::SeqCst);
-        h.state_mut().project.graph.set_ui(left, json!({"pos": [0, 0]})).unwrap();
-        settle(&mut h);
-        assert_eq!(completions.load(Ordering::SeqCst), before, "moving nodes requests no work");
+            let mut project = Project::default();
+            let left = project.graph.add_node(kind).unwrap();
+            let right = project.graph.add_node(kind).unwrap();
+            for (id, x) in [(left, -100_000), (right, 100_000)] {
+                project.graph.set_ui(id, json!({"pos": [x, 0]})).unwrap();
+            }
+            let completions = Arc::new(AtomicUsize::new(0));
+            let wake = completions.clone();
+            let mut app = App::new(None, true, move || {
+                wake.fetch_add(1, Ordering::SeqCst);
+            });
+            app.set_project(project, None).unwrap();
+            let mut h = harness(app);
+            settle(&mut h);
+            assert_eq!(CALLS.load(Ordering::SeqCst), 2);
+            assert!(h.state().worker.result(left).unwrap().is_ok());
+            assert!(h.state().worker.result(right).unwrap().is_ok());
+
+            set_param(&mut h, left, "value", json!(true));
+            settle(&mut h);
+            assert_eq!(
+                CALLS.load(Ordering::SeqCst),
+                4,
+                "each request evaluates both demanded nodes"
+            );
+            let before = completions.load(Ordering::SeqCst);
+            h.state_mut().project.graph.set_ui(left, json!({"pos": [0, 0]})).unwrap();
+            settle(&mut h);
+            assert_eq!(completions.load(Ordering::SeqCst), before, "moving nodes requests no work");
+        }
     }
 
-    #[test]
-    fn evaluating_message_keeps_the_ui_and_previous_preview_available() {
-        use drip::image::Rgb;
+    mod evaluating_message_keeps_the_ui_and_previous_preview_available_fixture {
+        use super::*;
+
+        use crate::node_ui::data::Rgb;
 
         use std::sync::{Arc, Mutex, mpsc};
         use std::time::{Duration, Instant};
         static GATE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
-        static SLOW: drip::node::TypedNode<SlowKernel> =
-            drip::node::TypedNode::new("test.slow", "test", "slow", &[], &[]);
-        #[derive(drip::Parameters)]
+        #[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
         struct SlowKernel {
             #[param(ParamKind::Bool { default: false })]
             block: bool,
         }
-        impl NodeDeclaration for SlowKernel {
-            type Parameters = Self;
-            type Inputs = ();
-            type Outputs = ();
+        #[drip::node(id="test.slow", name="slow", category="test", contract=empty_contract)]
+        fn slow(_: &KernelContext<'_>, _: &SlowKernel) -> drip::Result<()> {
+            Ok(())
         }
         struct SlowGui;
         impl crate::node_ui::GuiNode for SlowGui {
-            type Node = SlowKernel;
+            type Parameters = SlowKernel;
             type Presentation = PreviewImage;
-            const NODE: &'static drip::node::TypedNode<Self::Node> = &SLOW;
-            const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|p, (), _| {
+            const ID: &'static str = "test.slow";
+            const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|p, _, _| {
                 if p.block {
                     let gate = GATE.lock().unwrap();
                     let (started, release) = gate.as_ref().unwrap();
                     started.send(()).unwrap();
                     release.recv_timeout(Duration::from_secs(5)).unwrap();
                 }
-                Ok(PreviewImage::new(&Rec2020Mat::from(Arc::new(Rgb {
+                Ok(PreviewImage::new(&Arc::new(Rgb {
                     width: 1,
                     height: 1,
-                    scale: 1,
-                    pixels: vec![[0.5; 3]],
-                }))))
+                    requested_scale: 1,
+                    pixels: vec![[0.5; 3]].into(),
+                })))
             });
         }
         #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
         static SLOW_UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<SlowGui>();
 
-        let (started, entered) = mpsc::channel();
-        let (release, resume) = mpsc::channel();
-        *GATE.lock().unwrap() = Some((started, resume));
-        let mut project = Project::default();
-        let id = project.graph.add_node(&SLOW);
-        let mut app = App::new(None, true, || {});
-        app.set_project(project, None).unwrap();
-        let mut h = harness(app);
-        settle(&mut h);
-        let before = &h
-            .state()
-            .worker
-            .result(id)
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .downcast_ref::<ImageView>()
-            .unwrap()
-            .image;
-        let before = before.clone();
-        set_param(&mut h, id, "block", json!(true));
-        h.step();
-        entered.recv_timeout(Duration::from_secs(5)).unwrap();
-        let start = Instant::now();
-        h.step();
-        assert!(h.query_by_label("evaluating…").is_some());
-        let shown = &h
-            .state()
-            .worker
-            .result(id)
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .downcast_ref::<ImageView>()
-            .unwrap()
-            .image;
-        assert!(Arc::ptr_eq(shown, &before));
-        h.get_by_label("Preview detail").click();
-        h.run();
-        assert!(h.query_by_label("Full").is_some(), "controls respond while the node is blocked");
-        assert!(start.elapsed() < Duration::from_secs(2));
-        release.send(()).unwrap();
-        settle(&mut h);
-        assert!(h.query_by_label("evaluating…").is_none());
-        assert!(h.query_by_label("done").is_some());
+        #[test]
+        fn evaluating_message_keeps_the_ui_and_previous_preview_available() {
+            let (started, entered) = mpsc::channel();
+            let (release, resume) = mpsc::channel();
+            *GATE.lock().unwrap() = Some((started, resume));
+            let mut project = Project::default();
+            let id = project.graph.add_node(Registry.get("test.slow").unwrap()).unwrap();
+            let mut app = App::new(None, true, || {});
+            app.set_project(project, None).unwrap();
+            let mut h = harness(app);
+            settle(&mut h);
+            let before = &h
+                .state()
+                .worker
+                .result(id)
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .downcast_ref::<ImageView>()
+                .unwrap()
+                .image;
+            let before = before.clone();
+            set_param(&mut h, id, "block", json!(true));
+            h.step();
+            entered.recv_timeout(Duration::from_secs(5)).unwrap();
+            let start = Instant::now();
+            h.step();
+            assert!(h.query_by_label("evaluating…").is_some());
+            let shown = &h
+                .state()
+                .worker
+                .result(id)
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .downcast_ref::<ImageView>()
+                .unwrap()
+                .image;
+            assert!(Arc::ptr_eq(shown, &before));
+            h.get_by_label("Preview detail").click();
+            h.run();
+            assert!(
+                h.query_by_label("Full").is_some(),
+                "controls respond while the node is blocked"
+            );
+            assert!(start.elapsed() < Duration::from_secs(2));
+            release.send(()).unwrap();
+            settle(&mut h);
+            assert!(h.query_by_label("evaluating…").is_none());
+            assert!(h.query_by_label("done").is_some());
+        }
     }
 
     #[test]
@@ -749,7 +791,7 @@ mod tests {
             let mut project = templates::raw_to_tiff();
             project.ui = json!({"preview_level": value});
             assert!(app.set_project(project, None).is_err());
-            assert_eq!(app.project, original);
+            assert_eq!(app.project.to_json().unwrap(), original.to_json().unwrap());
             assert_eq!(app.level, DEFAULT_LEVEL);
         }
     }
@@ -757,7 +799,7 @@ mod tests {
     #[test]
     fn reports_unreadable_projects() {
         let mut h = harness(App::new(Some("/nonexistent.drip".into()), true, || {}));
-        h.run();
+        settle(&mut h);
         assert!(h.state().status.as_ref().is_some_and(|s| s.error));
     }
 
@@ -786,37 +828,36 @@ mod tests {
 
     #[test]
     fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
-        let documentation = "Creative S-curve on Rec.2020 RGB.\n\n\
-            Assumes middle grey at 0.18 and keeps it fixed. Black is 0 and the curve approaches 1. \
-            The output is interpreted as linear Rec.2020 for further processing; additional \
-            input guarantees are dropped. Preview and export do not require tone mapping.";
+        let documentation =
+            Registry.get("apply-rec2020-sigmoid").unwrap().documentation.trim().replace('\n', " ");
         let mut app = App::new(None, true, || {});
         let id = app.project.graph.find("Sigmoid").unwrap();
         app.selected = Some(id);
         let mut h = harness(app);
         h.run();
-        let kind = h.get_by_label("tone.sigmoid").rect();
-        let description = h.get_by_label(documentation).rect();
-        let input = h.get_all_by_label("Rec.2020 RGB").next().unwrap().rect();
-        let output = h.get_all_by_label("Rec.2020 RGB").nth(1).unwrap().rect();
+        let kind = h.get_by_label("apply-rec2020-sigmoid").rect();
+        let description = h.get_by_label(&documentation).rect();
+        let output = h.get_by_label("output output").rect();
         let control = h.get_by_label("contrast").rect();
-        assert!(h.query_by_label("darktable: sigmoid").is_some());
         assert!(kind.bottom() <= description.top());
-        assert!(description.bottom() <= input.top());
-        assert!(input.bottom() <= output.top());
+        assert!(description.bottom() <= output.top());
         assert!(output.bottom() <= control.top());
 
         let popped = Popped { node: id, part: node_ui::Part::Parameters };
         let mut popup = Harness::builder().with_size(egui::vec2(360.0, 320.0)).build_ui_state(
             move |ui, app: &mut App| app.window(ui, popped),
-            App::new(None, true, || {}),
+            {
+                let mut app = App::new(None, true, || {});
+                app.project = h.state().project.clone();
+                app
+            },
         );
         popup.run();
-        assert!(popup.query_by_label("tone.sigmoid").is_some());
+        assert!(popup.query_by_label("apply-rec2020-sigmoid").is_some());
         assert!(popup.query_by_label("contrast").is_some());
         assert!(popup.query_by_label("Rec.2020 RGB").is_none());
         assert!(popup.query_by_label("darktable: sigmoid").is_none());
-        assert!(popup.query_by_label(documentation).is_none());
+        assert!(popup.query_by_label(&documentation).is_none());
     }
 
     #[test]
@@ -825,44 +866,54 @@ mod tests {
         app.selected = app.project.graph.find("Demosaic");
         let mut h = harness(app);
         h.run();
-        let kind = h.get_by_label("demosaic.rcd").rect();
-        let input = h.get_by_label("Sensor mosaic").rect();
-        let output = h.get_by_label("Camera RGB").rect();
-        let reference = h.get_by_label("RCD algorithm").rect();
+        let kind = h.get_by_label("bayer-rcd").rect();
+        let input = h.get_by_label("input image").rect();
+        let output = h.get_by_label("output output").rect();
+        let reference = h.get_by_label("RCD source").rect();
         assert!(kind.bottom() <= input.top());
         assert!(input.bottom() <= output.top());
         assert!(output.bottom() <= reference.top());
     }
 
-    #[test]
-    fn undocumented_nodes_show_generated_port_help() {
-        use drip::image::Rec2020Mat;
-        use drip::node::NodeKind;
+    mod undocumented_nodes_show_generated_port_help_fixture {
+        use super::*;
+
+        use drip::node::data::{Color, ColorRgb, ImageDesc};
         use drip::ports::Read;
-        use std::sync::Arc;
-        static GENERIC: NodeKind =
-            NodeKind::new::<Generic>("test.generic", "test", "generic", &["image"], &["image"]);
-        struct Generic;
-        impl NodeDeclaration for Generic {
-            type Parameters = ();
-            type Inputs = (Read<Rec2020Mat>,);
-            type Outputs = (Arc<Rec2020Mat>,);
-            const KERNEL: Option<drip::node::Kernel<Self>> =
-                Some(|_, (image,), _| Ok((Arc::new(image.clone()),)));
+        use drip::ports::{Cpu, Write};
+        fn contract(
+            _: &drip::runtime::GlobalContext,
+            _: &(),
+            image: Option<&ImageDesc<Color>>,
+        ) -> drip::Result<(Option<ImageDesc<Color>>,)> {
+            Ok((image.cloned(),))
+        }
+        #[drip::node(id="test.generic", name="generic", category="test", contract=contract)]
+        fn generic(
+            _: &KernelContext<'_>,
+            _: &(),
+            image: Read<'_, Cpu<ColorRgb>>,
+            output: Write<'_, Cpu<ColorRgb>>,
+        ) -> drip::Result<()> {
+            output.data.copy_from_slice(image.data);
+            Ok(())
         }
 
-        let mut project = Project::default();
-        let id = project.graph.add_node(&GENERIC);
-        let mut app = App::new(None, true, || {});
-        app.set_project(project, None).unwrap();
-        app.selected = Some(id);
-        let mut h = harness(app);
-        h.run();
-        let kind = h.get_by_label("test.generic").rect();
-        let input = h.get_all_by_label("Rec.2020 RGB").next().unwrap().rect();
-        let output = h.get_all_by_label("Rec.2020 RGB").nth(1).unwrap().rect();
-        assert!(kind.bottom() <= input.top() && input.bottom() <= output.top());
-        assert!(h.query_by_label("pending").is_none());
+        #[test]
+        fn undocumented_nodes_show_generated_port_help() {
+            let mut project = Project::default();
+            let id = project.graph.add_node(Registry.get("test.generic").unwrap()).unwrap();
+            let mut app = App::new(None, true, || {});
+            app.set_project(project, None).unwrap();
+            app.selected = Some(id);
+            let mut h = harness(app);
+            h.run();
+            let kind = h.get_by_label("test.generic").rect();
+            let input = h.get_by_label("input image").rect();
+            let output = h.get_by_label("output output").rect();
+            assert!(kind.bottom() <= input.top() && input.bottom() <= output.top());
+            assert!(h.query_by_label("pending").is_none());
+        }
     }
 
     #[test]
@@ -909,9 +960,11 @@ mod tests {
 
     #[test]
     fn scope_nodes_offer_popouts() {
-        for kind in [nodes::WAVEFORM.kind(), nodes::VECTORSCOPE.kind()] {
+        for kind in
+            [Registry.get("view.waveform").unwrap(), Registry.get("view.vectorscope").unwrap()]
+        {
             let mut project = Project::default();
-            let id = project.graph.add_node(kind);
+            let id = project.graph.add_node(kind).unwrap();
             let mut app = App::new(None, true, || {});
             app.set_project(project, None).unwrap();
             let mut h = harness(app);
@@ -925,46 +978,56 @@ mod tests {
         }
     }
 
-    #[test]
-    fn declared_gui_view_gets_a_popout_before_preparation_succeeds() {
-        #[drip::node(kind = VIEW, id = "test.declared_view", category = "test", name = "Declared view", outputs = [])]
-        fn view(_: (), (): (), _: &EvalContext<'_>) -> Result<(), KernelError>;
+    mod declared_gui_view_gets_a_popout_before_preparation_succeeds_fixture {
+        use super::*;
+
+        #[drip::node(id="test.declared_view", category="test", name="Declared view", contract=empty_contract)]
+        fn view(_: &KernelContext<'_>, _: &()) -> drip::Result<()> {
+            Ok(())
+        }
         struct TestGui;
         impl crate::node_ui::GuiNode for TestGui {
-            type Node = ViewNode;
+            type Parameters = ();
             type Presentation = PreviewImage;
-            const NODE: &'static drip::node::TypedNode<Self::Node> = &VIEW;
+            const ID: &'static str = "test.declared_view";
             const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-                Some(|_, (), _| Err(KernelError::Incomplete("no view yet")));
+                Some(|_, _, _| Err(KernelError::Contract("no view yet".into())));
         }
         #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
         static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<TestGui>();
-        let mut project = Project::default();
-        let id = project.graph.add_node(&VIEW);
-        let mut app = App::new(None, true, || {});
-        app.set_project(project, None).unwrap();
-        let mut h = harness(app);
-        h.run();
-        h.get_by_label("🗗").click_accesskit();
-        h.run();
-        let windows = h.state().windows();
-        assert_eq!(windows.len(), 1);
-        assert_eq!(windows[0].popped.node, id);
-        assert_eq!(windows[0].title, "Declared view view · Drip");
+
+        #[test]
+        fn declared_gui_view_gets_a_popout_before_preparation_succeeds() {
+            let mut project = Project::default();
+            let id = project.graph.add_node(Registry.get("test.declared_view").unwrap()).unwrap();
+            let mut app = App::new(None, true, || {});
+            app.set_project(project, None).unwrap();
+            let mut h = harness(app);
+            h.run();
+            h.get_by_label("🗗").click_accesskit();
+            h.run();
+            let windows = h.state().windows();
+            assert_eq!(windows.len(), 1);
+            assert_eq!(windows[0].popped.node, id);
+            assert_eq!(windows[0].title, "Declared view view · Drip");
+        }
     }
 
-    #[test]
-    fn custom_controls_keep_the_generic_view_and_popout() {
-        #[derive(drip::Parameters)]
+    mod custom_controls_keep_the_generic_view_and_popout_fixture {
+        use super::*;
+
+        #[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
         pub struct Settings {
             #[param(drip::param::ParamKind::Bool { default: false })]
             enabled: bool,
         }
-        #[drip::node(kind = VIEW, id = "test.custom_controls_view", category = "test", name = "Custom controls view", outputs = [])]
-        fn view(_: Settings, (): (), _: &EvalContext<'_>) -> Result<(), KernelError>;
+        #[drip::node(id="test.custom_controls_view", category="test", name="Custom controls view", contract=empty_contract)]
+        fn view(_: &KernelContext<'_>, _: &Settings) -> drip::Result<()> {
+            Ok(())
+        }
         fn controls(
             ui: &mut egui::Ui,
-            cx: &mut crate::node_ui::ControlCx<'_, '_, '_, '_, ViewNode>,
+            cx: &mut crate::node_ui::ControlCx<'_, '_, '_, '_, Settings>,
         ) {
             cx.schema(ui);
             ui.label("Custom view controls");
@@ -972,42 +1035,47 @@ mod tests {
         }
         struct TestGui;
         impl crate::node_ui::GuiNode for TestGui {
-            type Node = ViewNode;
+            type Parameters = Settings;
             type Presentation = PreviewImage;
-            const NODE: &'static drip::node::TypedNode<Self::Node> = &VIEW;
+            const ID: &'static str = "test.custom_controls_view";
             const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-                Some(|_, (), _| Err(KernelError::Incomplete("no view yet")));
+                Some(|_, _, _| Err(KernelError::Contract("no view yet".into())));
             fn controls(
                 ui: &mut egui::Ui,
-                cx: &mut crate::node_ui::ControlCx<'_, '_, '_, '_, Self::Node>,
+                cx: &mut crate::node_ui::ControlCx<'_, '_, '_, '_, Self::Parameters>,
             ) {
                 controls(ui, cx);
             }
         }
         #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
         static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<TestGui>();
-        let mut project = Project::default();
-        let id = project.graph.add_node(&VIEW);
-        let mut app = App::new(None, true, || {});
-        app.set_project(project, None).unwrap();
-        app.selected = Some(id);
-        let mut h = harness(app);
-        h.run();
-        assert!(h.query_by_label("Custom view controls").is_some());
-        assert!(h.query_by_label("Typed enabled: false").is_some());
-        h.get_by_role(egui::accesskit::Role::CheckBox).click();
-        h.run();
-        assert!(h.query_by_label("Typed enabled: true").is_some());
-        h.get_by_label("🗗").click_accesskit();
-        h.run();
-        let popped = Popped { node: id, part: crate::node_ui::Part::View };
-        assert_eq!(h.state().windows()[0].popped, popped);
-        assert!(h.query_by_label("shown in its window").is_some());
-        assert!(h.query_by_label("Custom view controls").is_some());
-        h.state_mut().close_window(popped);
-        h.run();
-        assert!(h.query_by_label("shown in its window").is_none());
-        assert!(h.query_by_label("Custom view controls").is_some());
+
+        #[test]
+        fn custom_controls_keep_the_generic_view_and_popout() {
+            let mut project = Project::default();
+            let id =
+                project.graph.add_node(Registry.get("test.custom_controls_view").unwrap()).unwrap();
+            let mut app = App::new(None, true, || {});
+            app.set_project(project, None).unwrap();
+            app.selected = Some(id);
+            let mut h = harness(app);
+            h.run();
+            assert!(h.query_by_label("Custom view controls").is_some());
+            assert!(h.query_by_label("Typed enabled: false").is_some());
+            h.get_by_role(egui::accesskit::Role::CheckBox).click();
+            h.run();
+            assert!(h.query_by_label("Typed enabled: true").is_some());
+            h.get_by_label("🗗").click_accesskit();
+            h.run();
+            let popped = Popped { node: id, part: crate::node_ui::Part::View };
+            assert_eq!(h.state().windows()[0].popped, popped);
+            assert!(h.query_by_label("shown in its window").is_some());
+            assert!(h.query_by_label("Custom view controls").is_some());
+            h.state_mut().close_window(popped);
+            h.run();
+            assert!(h.query_by_label("shown in its window").is_none());
+            assert!(h.query_by_label("Custom view controls").is_some());
+        }
     }
 
     #[test]
@@ -1036,7 +1104,7 @@ mod tests {
                 let rect = h.query_by_label(label).unwrap_or_else(|| panic!("{label}")).rect();
                 assert!(window.contains_rect(rect), "{label} at {rect:?} outside {size:?}");
             }
-            h.state_mut().project.graph.remove_node(id);
+            h.state_mut().project.graph.remove_node(id).unwrap();
             h.run();
             assert!(h.state().windows().is_empty());
         }

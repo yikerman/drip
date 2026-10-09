@@ -1,282 +1,449 @@
-//! Pull-based evaluation and node-result caching. Only requested targets and
-//! their ancestors run, in dependency order.
-//!
-//! Follow [`Evaluator::evaluate`] into `Evaluator::run`, then `Cache::stamp` in
-//! the source. The cache holds one result (including failures) per node ID. Its
-//! dependency stamp hashes kind, parameters, preview level, input names, source
-//! ports and upstream stamps. Matching stamps reuse results without inspecting
-//! pixels; changed stamps propagate recomputation through descendants. This
-//! relies on the laws of [`crate::node::NodeDeclaration`] and [`crate::value::EdgeValue`].
-//!
-//! [`crate::resource::Resources`] separately caches decoded files by path and
-//! payload type. [`Evaluator::fork`] shares these files with an empty node cache.
-//! [`Evaluator::run_action`] evaluates inputs at full detail, dropping intermediates
-//! after their last consumer; the action itself is never cached. Neither cache
-//! watches the filesystem: changed files need explicit resource invalidation.
+//! Evaluate the requested dependency subgraph. Materializations live for one run.
+use crate::{
+    Error, Result,
+    graph::Dag,
+    payload::Payload,
+    ports::*,
+    runtime::{GlobalContext, KernelContext, RuntimeContext},
+};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
-use std::collections::HashMap;
-use std::hash::{DefaultHasher, Hash, Hasher};
-
-use crate::graph::{Graph, NodeId, Port};
-use crate::node::{EvalContext, KernelError, NodeDeclaration, TypedNode, check_inputs};
-use crate::param::{Parameters, Params};
-use crate::ports::InputTuple;
-use crate::resource::Resources;
-use crate::value::Value;
-
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum NodeError {
-    #[error("input `{0}` is not connected")]
-    MissingInput(&'static str),
-    #[error("upstream node {0:?} failed")]
-    Upstream(NodeId),
-    #[error("{0}")]
-    Incomplete(&'static str),
-    #[error("node {node:?} ({kind}): {source}")]
-    AtNode { node: NodeId, kind: &'static str, source: Box<NodeError> },
-    #[error("no action `{0}`")]
-    UnknownAction(String),
-    #[error("{0}")]
-    Failed(String),
-    #[error("input `{input}`: {mismatch}")]
-    Contract { input: &'static str, mismatch: crate::ports::TypeMismatch },
-    #[error(transparent)]
-    Constraint(crate::node::ConstraintError),
+/// Host wall time around one attempted node, including input transfers, contracts
+/// and allocation. Device dispatch is asynchronous; this is not GPU kernel time.
+#[derive(Debug)]
+pub struct NodeTiming {
+    pub node: NodeId,
+    pub kind: &'static str,
+    pub host_elapsed: Duration,
+    pub success: bool,
 }
 
-impl NodeError {
-    fn from_kernel(kind: &crate::node::NodeKind, error: KernelError) -> Self {
-        match error {
-            KernelError::Incomplete(message) => Self::Incomplete(message),
-            KernelError::Failed(message) => Self::Failed(message),
-            KernelError::Contract { index, mismatch } => Self::Contract {
-                input: kind.inputs().nth(index).expect("checked input index").name,
-                mismatch,
-            },
-            KernelError::Constraint(error) => Self::Constraint(error),
-        }
-    }
+#[derive(Default, Debug)]
+pub struct Statistics {
+    pub nodes: usize,
+    /// Port materializations from CPU to device; excludes algorithm-local constants.
+    pub uploads: usize,
+    /// Port materializations from device to CPU.
+    pub downloads: usize,
 }
-
-pub type NodeResult = Result<Vec<Value>, NodeError>;
-
-/// Dependency stamp within one evaluator/resource lifetime.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Revision(u64);
-
-/// Keeps one result per node, and the files nodes have loaded, between
-/// evaluations.
-#[derive(Default)]
+pub struct Evaluation<P: Port> {
+    pub desc: <P::Payload as Payload>::Desc,
+    pub data: Arc<P::Storage>,
+    pub statistics: Statistics,
+}
 pub struct Evaluator {
-    cache: Cache,
-    resources: Resources,
+    runtime: RuntimeContext,
 }
-
-#[derive(Default)]
-struct Cache(HashMap<NodeId, Entry>);
-
-struct Entry {
-    stamp: u64,
-    result: NodeResult,
-}
-
 impl Evaluator {
-    /// A fresh node cache sharing loaded resources, including future first loads.
-    pub fn fork(&self) -> Self {
-        Self { cache: Cache::default(), resources: self.resources.clone() }
+    pub fn new(runtime: RuntimeContext) -> Self {
+        Self { runtime }
     }
 
-    /// Brings `targets` up to date at downscale `level` and returns the nodes
-    /// actually recomputed.
-    pub fn evaluate(&mut self, graph: &Graph, level: u8, targets: &[NodeId]) -> Vec<NodeId> {
-        self.cache.0.retain(|id, _| graph.node(*id).is_some());
-        self.run(graph, level, targets, false)
-    }
-
-    pub fn result(&self, id: NodeId) -> Option<&NodeResult> {
-        self.cache.0.get(&id).map(|entry| &entry.result)
-    }
-
-    pub fn revision(&self, id: NodeId) -> Option<Revision> {
-        self.cache.0.get(&id).map(|entry| Revision(entry.stamp))
-    }
-
-    /// Evaluate and borrow the validated inputs of a particular declaration.
-    /// Consumer results and failures are not stored in the computational cache.
-    pub fn with_inputs<N: NodeDeclaration, R>(
-        &mut self,
-        graph: &Graph,
-        id: NodeId,
-        level: u8,
-        declaration: &TypedNode<N>,
-        consume: impl FnOnce(
-            N::Parameters,
-            <N::Inputs as InputTuple>::Borrowed<'_>,
-            &EvalContext<'_>,
-        ) -> Result<R, KernelError>,
-    ) -> Result<R, NodeError> {
-        let node = graph.node(id).ok_or_else(|| NodeError::Failed("node does not exist".into()))?;
-        if !std::ptr::eq(node.kind, declaration.kind()) {
-            return Err(NodeError::Failed("consumer bound to a different node declaration".into()));
-        }
-        let sources: Vec<_> = sources(graph, id).collect();
-        self.evaluate(graph, level, &sources);
-        let inputs = self.cache.inputs(graph, id)?;
-        let ctx = EvalContext { level, resources: &self.resources };
-        let params = Params::validated(&node.params);
-        // A successful evaluation at this revision already checked these inputs.
-        let checked = self.cache.0.get(&id).is_some_and(|entry| {
-            entry.stamp == self.cache.stamp(graph, &ctx, id) && entry.result.is_ok()
-        });
-        if !checked {
-            check_inputs::<N>(params, &inputs, &ctx)
-                .map_err(|error| NodeError::from_kernel(node.kind, error))?;
-        }
-        consume(N::Parameters::read(params), N::Inputs::read(&inputs), &ctx)
-            .map_err(|error| NodeError::from_kernel(node.kind, error))
-    }
-
-    /// Root failures among these targets and their dependencies, including cached
-    /// failures. Frontends compare accepted snapshots before reporting changes.
-    pub fn failures<'a>(
-        &'a self,
-        graph: &Graph,
+    /// Prepare declared inputs for several external consumers in one run.
+    /// Shared ancestors execute once; an incomplete branch does not prevent
+    /// unrelated consumers from receiving their inputs. No values survive here.
+    pub fn evaluate_inputs(
+        &self,
+        dag: &Dag,
+        global: &GlobalContext,
         targets: &[NodeId],
-    ) -> impl Iterator<Item = (NodeId, &'a NodeError)> {
-        graph.upstream_order(targets).into_iter().filter_map(move |id| {
-            let error = self.result(id)?.as_ref().err()?;
-            (!matches!(error, NodeError::Upstream(_))).then_some((id, error))
+    ) -> BTreeMap<NodeId, Result<InputValues>> {
+        self.evaluate_batch(dag, global, targets, targets)
+    }
+
+    /// Evaluate node status, retaining inputs only for the named observers.
+    /// Status-only targets do not keep their intermediate buffers alive.
+    pub fn evaluate_batch(
+        &self,
+        dag: &Dag,
+        global: &GlobalContext,
+        targets: &[NodeId],
+        observers: &[NodeId],
+    ) -> BTreeMap<NodeId, Result<InputValues>> {
+        self.evaluate_batch_with_timings(dag, global, targets, observers, None)
+    }
+
+    /// Optionally append host timings for attempted nodes in execution order.
+    /// Shared ancestors appear once; nodes skipped after upstream failure do not.
+    /// Recording adds no device waits. Existing readback waits are charged to the
+    /// consuming node; the terminal device wait is outside these measurements.
+    pub fn evaluate_batch_with_timings(
+        &self,
+        dag: &Dag,
+        global: &GlobalContext,
+        targets: &[NodeId],
+        observers: &[NodeId],
+        timings: Option<&mut Vec<NodeTiming>>,
+    ) -> BTreeMap<NodeId, Result<InputValues>> {
+        if let Err(error) = global.validate() {
+            return targets.iter().chain(observers).map(|&id| (id, Err(error.clone()))).collect();
+        }
+        let requests: BTreeMap<_, _> = targets
+            .iter()
+            .chain(observers)
+            .map(|&id| {
+                (
+                    id,
+                    input_request(dag, id).map(|mut request| {
+                        if !observers.contains(&id) {
+                            request.inputs.clear();
+                        }
+                        request
+                    }),
+                )
+            })
+            .collect();
+        let needed: HashSet<_> = requests
+            .values()
+            .filter_map(|r| r.as_ref().ok())
+            .flat_map(|r| r.needed.iter().copied())
+            .collect();
+        let mut run = Run::new(dag, &self.runtime, global, &needed);
+        run.timings = timings;
+        for request in requests.values().filter_map(|r| r.as_ref().ok()) {
+            for (from, _) in &request.inputs {
+                if let Some(from) = from {
+                    run.retain(*from);
+                }
+            }
+        }
+        let failures = run.execute_batch(&needed);
+        let mut results: BTreeMap<_, _> = requests
+            .into_iter()
+            .map(|(id, request)| {
+                let values = request.and_then(|request| run.collect_inputs(id, request, &failures));
+                (id, values)
+            })
+            .collect();
+        if let Err(error) = self.runtime.finish() {
+            for value in results.values_mut().filter(|v| v.is_ok()) {
+                *value = Err(error.clone());
+            }
+        }
+        results
+    }
+
+    /// P selects the endpoint representation; node placements come from signatures.
+    pub fn evaluate<P: Port>(
+        &self,
+        dag: &Dag,
+        global: &GlobalContext,
+        target: Output<P::Payload>,
+    ) -> Result<Evaluation<P>> {
+        let entry = dag.output(target.id)?;
+        if entry.node.outputs()[target.id.index].payload != std::any::TypeId::of::<P::Payload>() {
+            return Err(wrong_handle());
+        }
+        let spec = PortSpec::of::<P>("result");
+        let (mut values, statistics) =
+            self.run(dag, global, target.node(), &[(target.id.index, spec)])?;
+        let (desc, data) = values.pop().unwrap();
+        Ok(Evaluation {
+            desc: downcast::<<P::Payload as Payload>::Desc>(&desc).clone(),
+            data: data
+                .downcast()
+                .map_err(|_| Error::Runtime("result representation mismatch".into()))?,
+            statistics,
         })
     }
 
-    /// Consumes this evaluator for a full-resolution action, releasing
-    /// intermediates after their last consumer. Fork first to keep a preview cache.
-    pub fn run_action(mut self, graph: &Graph, id: NodeId, name: &str) -> Result<(), NodeError> {
-        let node = graph.node(id).expect("in graph");
-        let action = node.kind.action(name).ok_or_else(|| NodeError::UnknownAction(name.into()))?;
-        self.cache = Cache::default();
-        let targets: Vec<_> = sources(graph, id).collect();
-        self.run(graph, 0, &targets, true);
-        if let Some((id, error)) = self.failures(graph, &targets).next() {
-            return Err(NodeError::AtNode {
-                node: id,
-                kind: graph.node(id).expect("evaluated node").kind.id,
-                source: Box::new(error.clone()),
+    /// Demand all native outputs of a node, including an input-only node's checks.
+    pub fn evaluate_node(
+        &self,
+        dag: &Dag,
+        global: &GlobalContext,
+        target: NodeId,
+    ) -> Result<NodeEvaluation> {
+        let specs = dag.entry(target)?.node.outputs();
+        let endpoints: Vec<_> = specs.iter().cloned().enumerate().collect();
+        let (values, statistics) = self.run(dag, global, target, &endpoints)?;
+        let outputs = values
+            .into_iter()
+            .zip(specs)
+            .map(|((desc, data), spec)| OutputValue { desc, data, spec })
+            .collect();
+        Ok(NodeEvaluation { outputs, statistics })
+    }
+
+    fn run(
+        &self,
+        dag: &Dag,
+        global: &GlobalContext,
+        target: NodeId,
+        endpoints: &[(usize, PortSpec)],
+    ) -> Result<(Vec<DescribedValue>, Statistics)> {
+        global.validate()?;
+        let needed = required_nodes(dag, target)?;
+        let mut run = Run::new(dag, &self.runtime, global, &needed);
+        for (index, _) in endpoints {
+            run.retain(output_id(target, *index));
+        }
+        for &index in dag.order.iter().filter(|i| needed.contains(i)) {
+            run.execute(dag.entries[index].as_ref().unwrap())?;
+        }
+        let result = endpoints
+            .iter()
+            .map(|(index, spec)| run.materialize(output_id(target, *index), spec))
+            .collect::<Result<_>>()?;
+        // One terminal wait; host consumers have already waited at read boundaries.
+        self.runtime.finish()?;
+        Ok((result, run.statistics))
+    }
+}
+
+type DescribedValue = (Description, Data);
+fn output_id(node: NodeId, index: usize) -> PortId {
+    PortId { node, index, direction: Direction::Output }
+}
+fn required_nodes(dag: &Dag, target: NodeId) -> Result<HashSet<usize>> {
+    let mut needed = HashSet::new();
+    let mut stack = vec![target];
+    while let Some(id) = stack.pop() {
+        if !needed.insert(id.index) {
+            continue;
+        }
+        let e = dag.entry(id)?;
+        for (from, port) in e.inputs.iter().zip(e.node.inputs()) {
+            if from.is_none() && port.optional {
+                continue;
+            }
+            let from =
+                from.ok_or(Error::MissingInput { node: e.node.metadata().id, port: port.name })?;
+            stack.push(from.node);
+        }
+    }
+    Ok(needed)
+}
+
+/// Per-evaluation ownership; never retained in Evaluator or Dag.
+struct Run<'a, 't> {
+    dag: &'a Dag,
+    runtime: &'a RuntimeContext,
+    global: &'a GlobalContext,
+    descriptions: HashMap<usize, Vec<Option<Description>>>,
+    values: HashMap<(PortId, Placement), Data>,
+    uses: HashMap<PortId, usize>,
+    statistics: Statistics,
+    timings: Option<&'t mut Vec<NodeTiming>>,
+}
+impl<'a, 't> Run<'a, 't> {
+    fn new(
+        dag: &'a Dag,
+        runtime: &'a RuntimeContext,
+        global: &'a GlobalContext,
+        needed: &HashSet<usize>,
+    ) -> Self {
+        let mut run = Self {
+            dag,
+            runtime,
+            global,
+            descriptions: HashMap::new(),
+            values: HashMap::new(),
+            uses: HashMap::new(),
+            statistics: Statistics::default(),
+            timings: None,
+        };
+        for &index in needed {
+            for from in dag.entries[index].as_ref().unwrap().inputs.iter().flatten() {
+                run.retain(*from);
+            }
+        }
+        run
+    }
+
+    fn retain(&mut self, port: PortId) {
+        *self.uses.entry(port).or_default() += 1;
+    }
+
+    fn execute_batch(&mut self, needed: &HashSet<usize>) -> HashMap<NodeId, Error> {
+        let mut failures = HashMap::new();
+        for &index in self.dag.order.iter().filter(|i| needed.contains(i)) {
+            let entry = self.dag.entries[index].as_ref().unwrap();
+            let upstream =
+                entry.inputs.iter().flatten().find_map(|p| failures.get(&p.node).cloned());
+            let result = if let Some(error) = upstream {
+                self.release_inputs(entry);
+                Err(error)
+            } else {
+                self.execute(entry).map_err(|source| Error::Node {
+                    node: entry.id,
+                    kind: entry.node.metadata().id,
+                    source: Box::new(source),
+                })
+            };
+            if let Err(error) = result {
+                failures.insert(entry.id, error);
+            }
+        }
+        failures
+    }
+
+    fn collect_inputs(
+        &mut self,
+        id: NodeId,
+        request: InputRequest,
+        failures: &HashMap<NodeId, Error>,
+    ) -> Result<InputValues> {
+        let result = if let Some(error) = failures.get(&id) {
+            Err(error.clone())
+        } else {
+            request
+                .inputs
+                .iter()
+                .map(|(from, spec)| {
+                    from.map(|from| {
+                        let (desc, data) = self.materialize(from, spec)?;
+                        Ok(OutputValue { desc, data, spec: spec.clone() })
+                    })
+                    .transpose()
+                })
+                .collect::<Result<Vec<_>>>()
+                .map(InputValues)
+        };
+        for (from, _) in request.inputs {
+            if let Some(from) = from {
+                self.release(from);
+            }
+        }
+        result
+    }
+
+    fn materialize(&mut self, from: PortId, spec: &PortSpec) -> Result<DescribedValue> {
+        let source = self.dag.output(from)?;
+        let desc = self.descriptions[&from.node.index][from.index]
+            .as_ref()
+            .ok_or_else(|| Error::Contract("requested source description is unavailable".into()))?;
+        let key = (from, spec.placement);
+        if !self.values.contains_key(&key) {
+            // Keep the native placement until the last consumer uses the value.
+            let native = source.node.outputs()[from.index].placement;
+            let data = (spec.transport)(&self.values[&(from, native)], native, desc, self.runtime)?;
+            match spec.placement {
+                Placement::Cpu => self.statistics.downloads += 1,
+                Placement::Device => self.statistics.uploads += 1,
+            }
+            self.values.insert(key, data);
+        }
+        Ok((desc.clone(), self.values[&key].clone()))
+    }
+    fn execute(&mut self, e: &crate::graph::Entry) -> Result<()> {
+        let start = self.timings.as_ref().map(|_| Instant::now());
+        let result = self.compute(e);
+        self.release_inputs(e);
+        if let (Some(start), Some(timings)) = (start, self.timings.as_mut()) {
+            timings.push(NodeTiming {
+                node: e.id,
+                kind: e.node.metadata().id,
+                host_elapsed: start.elapsed(),
+                success: result.is_ok(),
             });
         }
-        let inputs = self.cache.inputs(graph, id)?;
-        let ctx = EvalContext { level: 0, resources: &self.resources };
-        action
-            .run(Params(&node.params), &inputs, &ctx)
-            .map_err(|error| NodeError::from_kernel(node.kind, error))
+        result
     }
 
-    /// With `release`, successful results retire after their last consumer
-    /// (unless targeted), bounding image memory for full-resolution actions.
-    fn run(&mut self, graph: &Graph, level: u8, targets: &[NodeId], release: bool) -> Vec<NodeId> {
-        let ctx = EvalContext { level, resources: &self.resources };
-        let order = graph.upstream_order(targets);
-        let mut pending: HashMap<NodeId, usize> = HashMap::new();
-        if release {
-            for &id in &order {
-                for source in sources(graph, id) {
-                    *pending.entry(source).or_default() += 1;
+    fn compute(&mut self, e: &crate::graph::Entry) -> Result<()> {
+        let mut inputs = Vec::new();
+        let mut descs = Vec::new();
+        for (from, spec) in e.inputs.iter().zip(e.node.inputs()) {
+            match from {
+                Some(from) => {
+                    let (desc, data) = self.materialize(*from, &spec)?;
+                    descs.push(Some(desc));
+                    inputs.push(Some(data));
+                }
+                None => {
+                    descs.push(None);
+                    inputs.push(None);
                 }
             }
         }
-        let mut computed = Vec::new();
-        for &id in &order {
-            let stamp = self.cache.stamp(graph, &ctx, id);
-            if self.cache.0.get(&id).is_none_or(|entry| entry.stamp != stamp) {
-                let start = std::time::Instant::now();
-                let result = self.cache.compute(graph, &ctx, id);
-                let kind = graph.node(id).expect("in graph").kind.id;
-                log::debug!(
-                    "node={id:?} kind={kind} level={level} outcome={} elapsed={:.1?}",
-                    match &result {
-                        Ok(_) => "ok",
-                        Err(NodeError::MissingInput(_) | NodeError::Incomplete(_)) => "incomplete",
-                        Err(NodeError::Upstream(_)) => "blocked",
-                        Err(_) => "failed",
-                    },
-                    start.elapsed()
-                );
-                self.cache.0.insert(id, Entry { stamp, result });
-                computed.push(id);
-            } else {
-                log::trace!("node={id:?} level={level} cache=hit");
-            }
-            if release {
-                for source in sources(graph, id) {
-                    let left = pending.get_mut(&source).expect("counted above");
-                    *left -= 1;
-                    // Failed entries retain root causes for action diagnostics;
-                    // successful image payloads still retire at their last consumer.
-                    if *left == 0
-                        && !targets.contains(&source)
-                        && self.cache.0[&source].result.is_ok()
-                    {
-                        self.cache.0.remove(&source);
+        let output_descs = e.node.contract(self.global, &descs)?;
+        let specs = e.node.outputs();
+        if output_descs.len() != specs.len() {
+            return Err(Error::Runtime("node contract output arity mismatch".into()));
+        }
+        let context = KernelContext { runtime: self.runtime, global: self.global };
+        let result = e.node.run(&context, &descs, &inputs, &output_descs)?;
+        if result.len() != specs.len() {
+            return Err(Error::Runtime("node result arity mismatch".into()));
+        }
+        self.statistics.nodes += 1;
+        for (port, (data, spec)) in result.into_iter().zip(specs).enumerate() {
+            let id = output_id(e.id, port);
+            if self.uses.contains_key(&id) {
+                match data {
+                    Some(data) => {
+                        self.values.insert((id, spec.placement), data);
                     }
+                    None if output_descs[port].is_none() => {}
+                    None => return Err(Error::Runtime("node omitted a described output".into())),
                 }
             }
         }
-        computed
+        self.descriptions.insert(e.id.index, output_descs);
+        Ok(())
     }
-}
 
-impl Cache {
-    fn stamp(&self, graph: &Graph, ctx: &EvalContext, id: NodeId) -> u64 {
-        let node = graph.node(id).expect("in graph");
-        let mut h = DefaultHasher::new();
-        (node.kind.id, ctx.level).hash(&mut h);
-        serde_json::to_string(&node.params).expect("plain data serializes").hash(&mut h);
-        for spec in node.kind.inputs() {
-            spec.name.hash(&mut h);
-            if let Some(source) = graph.source(&Port(id, spec.name.into())) {
-                (source, self.0.get(&source.0).map(|entry| entry.stamp)).hash(&mut h);
-            }
+    fn release_inputs(&mut self, e: &crate::graph::Entry) {
+        for from in e.inputs.iter().flatten() {
+            self.release(*from);
         }
-        h.finish()
     }
 
-    fn compute(&self, graph: &Graph, ctx: &EvalContext, id: NodeId) -> NodeResult {
-        let node = graph.node(id).expect("in graph");
-        let inputs = self.inputs(graph, id)?;
-        (node.kind.eval)(Params(&node.params), &inputs, ctx)
-            .map_err(|error| NodeError::from_kernel(node.kind, error))
-    }
-
-    /// The values on node `id`'s inputs, from its sources' cached results;
-    /// `None` for an unconnected optional input.
-    fn inputs(&self, graph: &Graph, id: NodeId) -> Result<Vec<Option<Value>>, NodeError> {
-        let kind = graph.node(id).expect("in graph").kind;
-        kind.inputs()
-            .map(|spec| {
-                let Some(source) = graph.source(&Port(id, spec.name.into())) else {
-                    let optional = spec.requirement.optional;
-                    return if optional {
-                        Ok(None)
-                    } else {
-                        Err(NodeError::MissingInput(spec.name))
-                    };
-                };
-                let Ok(evaluated) = &self.0[&source.0].result else {
-                    return Err(NodeError::Upstream(source.0));
-                };
-                let index = graph.node(source.0).expect("in graph").kind.output_index(&source.1);
-                Ok(Some(evaluated[index.expect("validated edge")].clone()))
-            })
-            .collect()
+    fn release(&mut self, port: PortId) {
+        let remaining = self.uses.get_mut(&port).unwrap();
+        *remaining -= 1;
+        if *remaining == 0 {
+            self.values.remove(&(port, Placement::Cpu));
+            self.values.remove(&(port, Placement::Device));
+        }
     }
 }
 
-fn sources(graph: &Graph, id: NodeId) -> impl Iterator<Item = NodeId> + '_ {
-    graph.edges().filter(move |(_, input)| input.0 == id).map(|(output, _)| output.0)
+pub struct NodeEvaluation {
+    pub outputs: Vec<OutputValue>,
+    pub statistics: Statistics,
+}
+pub struct OutputValue {
+    desc: Description,
+    data: Data,
+    spec: PortSpec,
+}
+impl OutputValue {
+    pub fn shared<P: Port>(&self) -> Result<Arc<P::Storage>> {
+        self.get::<P>()?;
+        self.data.clone().downcast().map_err(|_| Error::Runtime("representation mismatch".into()))
+    }
+    pub fn spec(&self) -> &PortSpec {
+        &self.spec
+    }
+    pub fn get<P: Port>(&self) -> Result<(&<P::Payload as Payload>::Desc, &P::Storage)> {
+        if self.spec.payload != std::any::TypeId::of::<P::Payload>()
+            || self.spec.placement != P::PLACEMENT
+        {
+            return Err(Error::Contract("output payload or placement mismatch".into()));
+        }
+        Ok((downcast(&self.desc), downcast(&self.data)))
+    }
 }
 
-/// Runs a standalone action with fresh resources. Interactive callers use
-/// `Evaluator::fork().run_action(...)` to reuse their session's loaded files.
-pub fn run_action(graph: &Graph, id: NodeId, name: &str) -> Result<(), NodeError> {
-    Evaluator::default().run_action(graph, id, name)
+pub struct InputValues(Vec<Option<OutputValue>>);
+impl InputValues {
+    pub fn get(&self, name: &str) -> Option<&OutputValue> {
+        self.0.iter().flatten().find(|v| v.spec.name == name)
+    }
+}
+struct InputRequest {
+    inputs: Vec<(Option<PortId>, PortSpec)>,
+    needed: HashSet<usize>,
+}
+fn input_request(dag: &Dag, id: NodeId) -> Result<InputRequest> {
+    let entry = dag.entry(id)?;
+    let inputs: Vec<_> = entry.inputs.iter().copied().zip(entry.node.inputs()).collect();
+    let needed = required_nodes(dag, id)?;
+    Ok(InputRequest { inputs, needed })
 }

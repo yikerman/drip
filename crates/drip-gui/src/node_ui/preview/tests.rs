@@ -1,31 +1,22 @@
 use super::*;
-use drip::color::{self, D65, REC709, REC2020};
-use drip::graph::Graph;
-use drip::image::Rec2020Mat;
-use drip::nodes::preview::PREVIEW;
-use drip::ports::Read;
-use drip::project::Project;
+use drip::node::color::{self, D65, REC709, REC2020};
+type Rec2020Mat = Arc<Rgb>;
+
+use crate::model::Project;
 use lcms2::{Intent, PixelFormat, Profile, Transform};
 use serde_json::json;
 
 fn preview(image: &Rec2020Mat, params: serde_json::Value) -> Result<PreviewImage, KernelError> {
-    let mut graph = Graph::default();
-    let id = graph.add_node(&PREVIEW);
+    let mut values = serde_json::to_value(Preview::default()).unwrap();
     for (name, value) in params.as_object().unwrap() {
-        graph.set_param(id, name, value.clone()).unwrap();
+        values[name] = value.clone();
     }
-    let resources = Default::default();
-    let context = EvalContext::new(0, &resources).unwrap();
-    let value = drip::value::Value::new(Arc::new(image.clone()));
-    let image = value.borrow::<Read<Rec2020Mat>>().unwrap();
-    let params = <Preview as drip::param::Parameters>::read(drip::param::Params::validated(
-        &graph.node(id).unwrap().params,
-    ));
-    super::prepare(params, (image,), &context)
+    let params: Preview = serde_json::from_value(values).unwrap();
+    super::prepare(params, image, &PrepareContext::default())
 }
 
 fn image(pixels: Vec<[f32; 3]>) -> Arc<Rgb> {
-    Arc::new(Rgb { width: pixels.len(), height: 1, scale: 4, pixels })
+    Arc::new(Rgb { width: pixels.len(), height: 1, requested_scale: 4, pixels: pixels.into() })
 }
 
 fn close(actual: [f32; 3], expected: [f32; 3]) {
@@ -54,13 +45,16 @@ fn softproof_bounds_the_target_gamut_and_keeps_image_geometry() {
     let rgb = image(vec![[0.0; 3], [0.18; 3], [1.0; 3], [0.0, 1.0, 0.0], [-0.1; 3], [2.0; 3]]);
     let shown = preview(&Rec2020Mat::from(rgb.clone()), json!({ "mode": "softproof" })).unwrap();
     let shown = shown.rgb();
-    assert_eq!((shown.width, shown.height, shown.scale), (rgb.width, rgb.height, rgb.scale));
+    assert_eq!(
+        (shown.width, shown.height, shown.requested_scale),
+        (rgb.width, rgb.height, rgb.requested_scale)
+    );
     let rec_to_srgb = color::mul(
         &color::inverse(&color::rgb_to_xyz(REC709, D65)),
         &color::rgb_to_xyz(REC2020, D65),
     );
     let srgb_to_rec = color::inverse(&rec_to_srgb);
-    for (&input, &got) in rgb.pixels.iter().zip(&shown.pixels) {
+    for (&input, &got) in rgb.pixels.iter().zip(shown.pixels.iter()) {
         let bounded = color::apply(&rec_to_srgb, input.map(f64::from)).map(|v| v.clamp(0.0, 1.0));
         close(got, color::apply(&srgb_to_rec, bounded).map(|v| v as f32));
     }
@@ -87,7 +81,7 @@ fn gamutcheck_preserves_dark_neutrals_and_interior_colors() {
     pixels.extend([[0.002, 0.003, 0.002], [0.02, 0.03, 0.02], [0.2, 0.3, 0.2]]);
     let rgb = image(pixels);
     let shown = preview(&Rec2020Mat::from(rgb.clone()), json!({"mode":"gamutcheck"})).unwrap();
-    for (&got, &want) in shown.rgb().pixels.iter().zip(&rgb.pixels) {
+    for (&got, &want) in shown.rgb().pixels.iter().zip(rgb.pixels.iter()) {
         close(got, want);
     }
 }
@@ -195,14 +189,14 @@ fn active_modes_report_missing_profiles() {
     let input = Rec2020Mat::from(image(vec![[0.18; 3]]));
     for mode in ["softproof", "gamutcheck"] {
         let error = preview(&input, json!({ "mode": mode, "profile": "file" })).unwrap_err();
-        assert_eq!(error, KernelError::Incomplete("no output profile file chosen"));
+        assert_eq!(error, KernelError::Contract("no output profile file chosen".into()));
     }
 }
 
 #[test]
 fn proof_settings_round_trip_as_ordinary_node_parameters() {
     let mut project = Project::default();
-    let id = project.graph.add_node(&PREVIEW);
+    let id = project.graph.add_node(crate::model::Registry.get("view.preview").unwrap()).unwrap();
     for (name, value) in [
         ("interpolation", json!(true)),
         ("mode", json!("softproof")),
@@ -213,6 +207,6 @@ fn proof_settings_round_trip_as_ordinary_node_parameters() {
     ] {
         project.graph.set_param(id, name, value).unwrap();
     }
-    let loaded = Project::from_json(&project.to_json(), &drip::nodes::registry()).unwrap();
-    assert_eq!(loaded, project);
+    let loaded = Project::from_json(&project.to_json().unwrap(), &crate::model::Registry).unwrap();
+    assert_eq!(loaded.to_json().unwrap(), project.to_json().unwrap());
 }

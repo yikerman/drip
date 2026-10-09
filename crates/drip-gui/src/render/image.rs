@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use drip::image::Rgb;
+use crate::node_ui::data::Rgb;
 use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
 
 /// An image packed as `Rgba16Float` texels. Packing is CPU work, done off the
@@ -13,8 +13,8 @@ use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
 pub struct Image {
     pub width: usize,
     pub height: usize,
-    /// Sensor pixels per image pixel along each axis.
-    pub scale: u32,
+    /// Requested processing detail; actual dimensions come from the evaluated image.
+    pub requested_scale: u32,
     pub texels: Vec<u8>,
 }
 
@@ -26,7 +26,7 @@ impl Image {
             .flat_map(|&[r, g, b]| [r, g, b, 1.0])
             .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
             .collect();
-        Image { width: rgb.width, height: rgb.height, scale: rgb.scale, texels }
+        Image { width: rgb.width, height: rgb.height, requested_scale: rgb.requested_scale, texels }
     }
 }
 

@@ -14,7 +14,7 @@ beside each algorithm identify the source and explain changes made for Drip.
 
 | Source and credit | Use | License |
 |-------------------|-----|---------|
-| [darktable developers](https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3), including sigmoid and custom-primaries contributors | Sigmoid curve, hue/energy correction and primaries handling, adapted to Rust/Rayon | GPL-3.0-or-later; [license text](https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/LICENSE) |
+| [darktable developers](https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3), including sigmoid and custom-primaries contributors | Sigmoid curve, hue/energy correction and primaries handling, adapted to Rust/CubeCL | GPL-3.0-or-later; [license text](https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/LICENSE) |
 | [Luis Sanz Rodríguez](https://github.com/LuisSR/RCD-Demosaicing), Ingo Weyrich, Hanno Schwalm and darktable contributors | RCD demosaicing, adapted from the pinned darktable revision above; bilinear border in Drip | Original RCD: GPL-3.0; darktable integration: GPL-3.0-or-later |
 | garagecoder and Iain (G’MIC), Hanno Schwalm and [darktable contributors](https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/hlreconstruct) | Inpaint-opposed highlight reconstruction; Bayer adaptation with complete edge neighborhoods | GPL-3.0-or-later |
 | [Dave Coffin, dcraw](https://www.dechifro.org/dcraw/) | Reference for camera matrix normalization and RAW black-level conventions, through LibRaw | dcraw's source contains multiple licensing options; credited here as an algorithm reference, not a vendored dependency |
@@ -191,3 +191,54 @@ it does not invoke Autotools or maintain a second decoder list.
 https://github.com/mm2/Little-CMS/blob/lcms2.16/src/cmsgmt.c.
 Round-trip criterion used to validate gamut warnings; MIT
 [license](https://github.com/mm2/Little-CMS/blob/lcms2.16/COPYING).
+
+## CubeCL processing rewrite
+
+CubeCL 0.11.0 is used under MIT OR Apache-2.0; exact dependencies are pinned in
+Cargo.lock. [Online]. Available: <https://github.com/tracel-ai/cubecl/tree/v0.11.0>.
+
+The CubeCL Bayer 2x2 and exposure kernels live with their nodes under
+`crates/drip/src/node/`; the reusable matrix kernel is in
+`crates/drip/src/node/shared_kernel.rs`. They derive from Drip revision
+`b9b1045da65376fd5812b7b00362806cde37eaf0` through the validated runtime PoC.
+RGB device storage adds a zero padding lane; host storage retains three f32
+channels. Bayer binning drops incomplete edge cells and averages the two greens.
+The same CubeCL source is used by each enabled computation runtime. The original
+PoC source and its complete notices are preserved in the external benchmark
+archive documented in `agent-docs/CUBECL_REWRITE.md`.
+
+RCD in `crates/drip/src/node/rcd/kernel.rs` and sigmoid's kernel and coefficient
+preparation in `crates/drip/src/node/sigmoid.rs` retain the darktable
+GPL-3.0-or-later notices. The port is pinned to darktable commit
+`61dea294bedb3ab6c7cca1a45530b1ab5c0461f3`, using `src/iop/demosaicing/rcd.c`,
+`src/iop/sigmoid.c`, and `src/common/custom_primaries.c` [19].
+[Upstream license](https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/LICENSE).
+RCD uses full-image intermediate buffers and five dispatches instead of tiled
+CPU processing, and a bilinear ten-pixel border. Sigmoid keeps Drip's analytic
+0.18-grey coefficients, smooth-preset primary rotations, zero black, and
+log-domain curve evaluation. An exponent shift protects finite extreme inputs
+in f32. Kernel arithmetic is shared across CubeCL backends; hardware rounding
+can change direction ties. Independent upstream C RCD vectors remain in
+`crates/drip/tests/reference/`.
+
+[19] darktable developers, “RCD demosaicing, sigmoid and custom primaries,”
+source revision `61dea294bedb3ab6c7cca1a45530b1ab5c0461f3`, 2026. [Online].
+Available: <https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src>.
+
+Opposed reconstruction in `crates/drip/src/node/highlights/opposed.rs` retains the existing
+pinned darktable adaptation and reference vectors. Private CubeCL passes build
+three-channel masks, dilate them, reduce chrominance and reconstruct device Bayer
+samples; independently supplied clipping levels retain their four site values.
+Partial mask cells and clipped edge neighborhoods follow Drip's adaptation.
+Cube roots use f32 powers and chrominance uses fixed fan-in-256 f32 reductions
+instead of the former f64 row sums; counts remain exact u32. Hardware rounding
+can produce small differences. WGPU and the optional CPU backend execute the
+same production kernels. The former CPU algorithm remains a test-only reference.
+
+CFA-plane preview reduction in `node/reduce/` restores Drip's same-phase
+averaging from revision `b9b1045da65376fd5812b7b00362806cde37eaf0`. It now accepts
+an explicit integer factor and retains a minimum Bayer cell for small inputs.
+`node/shared_kernel.rs::reduce_bayer` uses f32 accumulation, with exponent scaling to prevent
+overflow for large finite samples, and supplies the same computation to the explicit node and demosaic's context-driven local reduction on every
+CubeCL backend. Unlike darktable's approximate demosaic path, Drip retains the
+selected interpolation algorithm. No preview nodes are injected into the graph.

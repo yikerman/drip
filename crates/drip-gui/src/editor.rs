@@ -10,9 +10,9 @@ use crate::node_ui::{self, Part, ports::PortText};
 use crate::ui_state::{LayoutField, position};
 use crate::widgets::{self, BUTTON};
 use crate::worker::ViewResult;
-use drip::eval::NodeError;
-use drip::graph::{Graph, Node, NodeId, Port};
-use drip::node::Registry;
+
+use crate::model::Registry;
+use crate::model::{Graph, Node, NodeId, Port};
 use egui::emath::TSTransform;
 use egui::epaint::CubicBezierShape;
 use egui::{
@@ -80,7 +80,7 @@ struct CanvasLayout {
 
 impl CanvasLayout {
     fn new<'a>(graph: &Graph, results: &dyn Fn(NodeId) -> Option<&'a ViewResult>) -> Self {
-        Self { nodes: graph.nodes().map(|(id, node)| layout(id, node, results(id))).collect() }
+        Self { nodes: graph.nodes().map(|(id, node)| layout(id, &node, results(id))).collect() }
     }
 
     fn port_position(&self, port: &Port, direction: Direction) -> Option<Pos2> {
@@ -230,7 +230,7 @@ impl Editor {
         let node = graph.node(l.id).expect("laid out from the graph");
         let (kind, kind_params) = (node_ui::of(node.kind), node.kind.params);
         let texts = node_ui::ports::texts(graph, l.id);
-        paint(&painter, l, node, &texts, *selected == Some(l.id));
+        paint(&painter, l, &node, &texts, *selected == Some(l.id));
         let inputs = l.inputs.iter().map(|&(name, pos)| (Direction::Input, name, pos));
         let outputs = l.outputs.iter().map(|&(name, pos)| (Direction::Output, name, pos));
         for ((direction, name, pos), text) in inputs.chain(outputs).zip(&texts) {
@@ -301,7 +301,7 @@ impl Editor {
             Direction::Input => (&target.port, &from.port),
         };
         frame.edit(graph, Edit::Connect(output.clone(), input.clone()));
-        if graph.source(input) == Some(output) {
+        if graph.source(input).as_ref() == Some(output) {
             self.wire = None;
         }
     }
@@ -369,8 +369,8 @@ fn draw_wires(
             Some((
                 input.clone(),
                 bezier(
-                    layout.port_position(output, Direction::Output)?,
-                    layout.port_position(input, Direction::Input)?,
+                    layout.port_position(&output, Direction::Output)?,
+                    layout.port_position(&input, Direction::Input)?,
                     wire,
                 ),
             ))
@@ -399,8 +399,8 @@ fn draw_wires(
 fn peer_menu(ui: &mut Ui, graph: &Graph, endpoint: &Endpoint) -> Option<NodeId> {
     let mut navigate = None;
     let peers = graph.edges().filter_map(|(output, input)| match endpoint.direction {
-        Direction::Input => (input == &endpoint.port).then_some(output),
-        Direction::Output => (output == &endpoint.port).then_some(input),
+        Direction::Input => (input == endpoint.port).then_some(output),
+        Direction::Output => (output == endpoint.port).then_some(input),
     });
     let mut empty = true;
     for peer in peers {
@@ -454,7 +454,7 @@ fn paint(painter: &Painter, l: &NodeLayout, node: &Node, texts: &[PortText], sel
 /// failed, the body its kind's GUI draws.
 fn layout(id: NodeId, node: &Node, result: Option<&ViewResult>) -> NodeLayout {
     let error = match result {
-        Some(Err(NodeError::Upstream(_))) | Some(Ok(_)) | None => None,
+        Some(Ok(_)) | None => None,
         Some(Err(e)) => Some(e.to_string()),
     };
     let size = node_ui::of(node.kind).size(node);
@@ -490,7 +490,7 @@ fn bounds(id: NodeId, node: &Node) -> Rect {
 /// The offset and zoom that center the whole graph in `area`, zooming out as
 /// far as needed to show all of it but never in.
 fn fit(graph: &Graph, area: Rect) -> (Vec2, f32) {
-    let Some(bounds) = graph.nodes().map(|(id, node)| bounds(id, node)).reduce(Rect::union) else {
+    let Some(bounds) = graph.nodes().map(|(id, node)| bounds(id, &node)).reduce(Rect::union) else {
         return (Vec2::ZERO, 1.0);
     };
     let room = area.size() - Vec2::splat(2.0 * MARGIN);

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use drip::color::{self, D65, REC709};
+use drip::node::color::{self, D65, REC709};
 use egui::{Align2, FontId, Painter, Rect, Stroke};
 
 use super::vectorscope_xyz;

@@ -1,6 +1,6 @@
 //! The sidebar: the selected node's help and controls, and the template's inputs.
 
-use drip::graph::Graph;
+use crate::model::Graph;
 use egui::Ui;
 
 use crate::editing::{Edit, Frame, NodeCx};

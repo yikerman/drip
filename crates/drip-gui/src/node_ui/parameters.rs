@@ -25,7 +25,7 @@ pub fn heading(ui: &mut Ui, cx: &mut NodeCx) {
     ui.weak(cx.node().kind.id);
 }
 
-pub fn focus_name(ctx: &egui::Context, id: drip::graph::NodeId) {
+pub fn focus_name(ctx: &egui::Context, id: crate::model::NodeId) {
     // The inspector precedes the canvas; focus once the newly selected field exists.
     ctx.data_mut(|data| data.insert_temp(egui::Id::new(("name", id)).with("focus"), ()));
     ctx.request_repaint();
@@ -34,19 +34,20 @@ pub fn focus_name(ctx: &egui::Context, id: drip::graph::NodeId) {
 pub fn controls(ui: &mut Ui, cx: &mut NodeCx) {
     let kind = cx.node().kind;
     crate::node_ui::of(kind).controls(ui, cx);
-    for action in kind.actions() {
-        if ui.add_enabled(!cx.action_running(), egui::Button::new(action.name)).clicked() {
-            cx.run(action.name);
-        }
+    if let Some(action) = crate::node_ui::binding(kind).and_then(|b| b.action_name())
+        && ui.add_enabled(!cx.action_running(), egui::Button::new(action)).clicked()
+    {
+        cx.run(action);
     }
 }
 
 /// Default schema controls, shared by custom node panels and generic nodes.
 pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
-    let (id, kind) = (cx.id(), cx.node().kind);
+    let node = cx.node();
+    let (id, kind) = (cx.id(), node.kind);
     egui::Grid::new(("params", id)).num_columns(2).show(ui, |ui| {
         for spec in kind.params {
-            let external = cx.node().external.contains(spec.name);
+            let external = node.external.contains(spec.name);
             let text = if external { format!("{} (input)", spec.name) } else { spec.name.into() };
             // Generated from the parameter's doc comment; empty when undocumented.
             let hint = match spec.documentation {
@@ -54,12 +55,9 @@ pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
                 doc => format!("{doc}\n\nright-click to change"),
             };
             let name = ui.label(text).interact(Sense::click()).on_hover_text(hint);
-            if let Some(value) = edit_value(
-                ui,
-                egui::Id::new((id, spec.name)),
-                &spec.kind,
-                &cx.node().params[spec.name],
-            ) {
+            if let Some(value) =
+                edit_value(ui, egui::Id::new((id, spec.name)), &spec.kind, &node.params[spec.name])
+            {
                 cx.set_param(spec.name, value);
             }
             crate::theme::context_menu(&name).show(|ui| {
@@ -84,13 +82,19 @@ pub fn edit_value(ui: &mut Ui, id: egui::Id, kind: &ParamKind, value: &Json) -> 
         ParamKind::Float { min, max, .. } => {
             let mut v = value.as_f64().expect("validated float");
             let response = slider(ui, &mut v, min..=max);
-            v = (v + scroll_steps(ui, &response) * (max - min) / 100.0).clamp(min, max);
+            let steps = scroll_steps(ui, &response);
+            if steps != 0.0 {
+                v = (v + steps * (max - min) / 100.0).clamp(min, max);
+            }
             (response, Some(json!(v)))
         }
         ParamKind::Int { min, max, .. } => {
             let mut v = value.as_i64().expect("validated int");
             let response = slider(ui, &mut v, min..=max);
-            v = v.saturating_add(scroll_steps(ui, &response) as i64).clamp(min, max);
+            let steps = scroll_steps(ui, &response) as i64;
+            if steps != 0 {
+                v = v.saturating_add(steps).clamp(min, max);
+            }
             (response, Some(json!(v)))
         }
         ParamKind::Bool { .. } => {
@@ -168,6 +172,7 @@ fn slider<T: egui::emath::Numeric>(
         }
         value.to_f64()
     });
+    let slider = slider.clamping(egui::SliderClamping::Edits);
     ui.add(if T::INTEGRAL { slider.integer() } else { slider })
 }
 

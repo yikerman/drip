@@ -73,7 +73,7 @@ fn select_supported_format_and_encoding_together() {
 #[test]
 #[ignore = "requires a GPU adapter; run with --ignored"]
 fn gpu_preview_and_output_match_colorimetric_reference() {
-    use drip::{color, profile};
+    use drip::{node::color, node::profile};
     use lcms2::{Intent, PixelFormat, Transform};
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());

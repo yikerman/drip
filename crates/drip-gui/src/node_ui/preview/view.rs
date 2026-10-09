@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use egui::{FontId, Painter, Rect, Ui};
 
+use crate::node_ui::data::Rgb;
 use crate::render::image;
 use crate::render::node_views::{Drawable, ImageCache, IntoDrawable};
-use drip::image::{Rec2020Mat, Rgb};
 
 /// Shared linear Rec.2020 pixels for frontend presentation.
 #[derive(Debug, Clone, PartialEq)]
@@ -17,8 +17,8 @@ pub struct PreviewImage {
 }
 
 impl PreviewImage {
-    pub fn new(image: &Rec2020Mat) -> Self {
-        Self { data: image.rgb().clone(), interpolation: false }
+    pub fn new(image: &Arc<Rgb>) -> Self {
+        Self { data: image.clone(), interpolation: false }
     }
     pub fn rgb(&self) -> &Arc<Rgb> {
         &self.data

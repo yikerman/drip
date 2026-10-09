@@ -1,11 +1,11 @@
 //! Applies frontend graph edits and owns their redraw/evaluation effects.
 
+use crate::model::NodeKind;
+use crate::model::{Graph, GraphError, Node, NodeId, Port};
 use crate::node_ui::{Part, Popped};
 use crate::render::node_views::Drawable;
 use crate::ui_state::LayoutField;
 use crate::worker::ViewResult;
-use drip::graph::{Graph, GraphError, Node, NodeId, Port};
-use drip::node::NodeKind;
 use egui::Vec2;
 use serde_json::Value as Json;
 use std::collections::BTreeSet;
@@ -33,6 +33,9 @@ pub struct Report {
     pub action: Option<(NodeId, &'static str)>,
     /// A window the user opened or closed.
     pub toggled: Option<Popped>,
+    /// Asset-backed parameter edits are admitted on the worker, then checked
+    /// against the current graph before publication to any window.
+    pub bindings: Vec<(NodeId, serde_json::Value)>,
 }
 
 /// All frontend graph mutations pass through `Frame::edit`, which owns their
@@ -63,18 +66,31 @@ impl<'a> Frame<'a> {
         let result: Result<_, GraphError> = (|| {
             match edit {
                 Edit::Add(kind, pos) => {
-                    let id = graph.add_node(kind);
+                    let id = graph.add_node(kind)?;
                     set_ui(graph, id, LayoutField::Position, pos);
                     return Ok(Some(id));
                 }
                 Edit::Remove(id) => {
-                    graph.remove_node(id);
+                    graph.remove_node(id)?;
                 }
                 Edit::Connect(output, input) => graph.connect(output, input)?,
                 Edit::Disconnect(input) => {
-                    graph.disconnect(&input);
+                    graph.disconnect(&input)?;
                 }
-                Edit::Param(id, name, value) => graph.set_param(id, name, value)?,
+                Edit::Param(id, name, value) => {
+                    let node = graph.dag.node(id)?;
+                    if node.loads_assets() {
+                        let mut params = node.parameters()?;
+                        let field = params.get_mut(name).ok_or_else(|| {
+                            GraphError::Graph(format!("unknown parameter {name}"))
+                        })?;
+                        *field = value;
+                        self.report.bindings.push((id, params));
+                        self.report.redraw = true;
+                        return Ok(None);
+                    }
+                    graph.set_param(id, name, value)?;
+                }
                 Edit::Name(id, name) => graph.set_name(id, name)?,
                 Edit::External(id, name, external) => graph.set_external(id, name, external)?,
                 Edit::Ui(id, key, value) => set_ui(graph, id, key, value),
@@ -116,7 +132,7 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
         self.graph
     }
 
-    pub fn node(&self) -> &Node {
+    pub fn node(&self) -> Node {
         self.graph.node(self.id).expect("GUIs are shown for existing nodes")
     }
 
@@ -169,15 +185,6 @@ fn set_ui(graph: &mut Graph, id: NodeId, field: LayoutField, value: Vec2) {
 }
 
 /// Names the refused input using the same concrete contracts as port labels.
-fn refusal(graph: &Graph, error: &GraphError) -> String {
-    match error {
-        GraphError::TypeMismatch { input, mismatch } => format!(
-            "{} · {} requires {}, got {}",
-            graph.node(input.0).expect("checked input").name,
-            input.1,
-            mismatch.expected,
-            mismatch.actual,
-        ),
-        error => error.to_string(),
-    }
+fn refusal(_: &Graph, error: &GraphError) -> String {
+    error.to_string()
 }
