@@ -27,9 +27,11 @@ flatten unrelated ports merely to make their storage uniform.
 # Compute backends
 
 Cargo features include compute runtimes; `DRIP_BACKEND` selects one at startup.
-The default build and unset environment variable both select `wgpu`. CPU/LLVM
-is opt-in for development and is not part of the desktop distribution plan.
-These choices do not change the GUI renderer.
+An unset environment variable selects `metal-native` on macOS if that feature
+is enabled, or `vulkan` on Linux if enabled; otherwise it selects `wgpu`. An
+ordinary default-feature build uses wgpu. `cargo xtask dist` enables the native
+platform choice, using WGSL/D3D12 on Windows. CPU/LLVM is opt-in for development
+and is not shipped by xtask. These choices do not change the GUI renderer.
 
 | `DRIP_BACKEND` | Required `drip` feature | Execution |
 | --- | --- | --- |

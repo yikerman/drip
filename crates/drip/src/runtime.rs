@@ -31,13 +31,13 @@ pub struct RuntimeContext {
 }
 
 impl RuntimeContext {
-    /// Select computation with DRIP_BACKEND (default: wgpu). See the crate
-    /// README for build features and compiler/API choices. Unavailable choices
-    /// are errors; this setting does not change GUI rendering.
+    /// Select computation with DRIP_BACKEND, otherwise the platform's included
+    /// native backend or wgpu. See the crate README for build features and
+    /// compiler/API choices. This setting does not change GUI rendering.
     pub fn from_env() -> Result<Self> {
         let name = match std::env::var("DRIP_BACKEND") {
             Ok(name) => name,
-            Err(std::env::VarError::NotPresent) => "wgpu".into(),
+            Err(std::env::VarError::NotPresent) => backend::default_name().into(),
             Err(_) => return Err(Error::Runtime("DRIP_BACKEND must be valid UTF-8".into())),
         };
         Ok(backend::select(&name)?())

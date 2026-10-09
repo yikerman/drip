@@ -9,6 +9,8 @@
 - **Requirement:** Windows needs D3D12. Compare Linux WGSL versus direct
   SPIR-V, and macOS wgpu/MSL versus native Metal before choosing distribution
   defaults. This work does not target headless distribution.
+- **Requirement (follow-up):** choose the adventurous performance candidates
+  for distribution and have xtask check the platform.
 
 ## Implementation
 
@@ -20,13 +22,24 @@
   Enabling a feature must not silently change an explicit compiler selection.
   `wgpu` uses D3D12 on Windows and automatic graphics API selection elsewhere.
   No automatic CPU or vendor-runtime fallback.
-- **Decided:** keep the existing WGSL default until the comparison is complete.
-  GUI rendering, evaluator transport and kernels are unchanged.
-- **Open:** distribution defaults for Linux/macOS, dependency size, and native
-  platform validation. No performance claim follows from exposing a selector.
+- **Decided:** xtask builds Linux with `drip/vulkan`, macOS with
+  `drip/metal-native`, and Windows with `drip/wgpu`. Startup prefers those native
+  backends when compiled in for their platform. An explicit `DRIP_BACKEND`
+  overrides the default; WGSL remains available. There is no failure fallback.
+- **Decided:** xtask asks rustc for the destination OS and rejects unsupported
+  platforms. Omitted `--target` means the compiler's host, passed explicitly to
+  Cargo so configured Cargo targets cannot change the artifact's backend choice.
+- **Open:** package size and native platform validation. These choices are
+  performance candidates, not measured Drip winners. GUI behavior, evaluator
+  transport and kernels are unchanged.
 
 ## Session validation
 
+- Follow-up xtask change: compiler-host resolution and all six CI target triples
+  pass the platform-selection test; unsupported/invalid targets are rejected.
+  Vulkan-enabled runtime default/override selection tests and all-target Clippy
+  for xtask/drip pass. No distribution binaries were assembled in this session;
+  macOS/Windows runtime validation remains outstanding.
 - Vulkan-enabled `drip`/`drip-gui` build and all-target Clippy passed.
 - Library unit tests passed. Existing algorithm, opposed-highlight reference,
   and hybrid-transfer tests passed on hardware with both `DRIP_BACKEND=vulkan`
@@ -38,6 +51,9 @@
   this session. No backend performance benchmark was run.
 
 ## Documentation comparison after commit 66355bf
+
+The recommendations below record the comparison before the user's follow-up
+decision to ship native Metal and Vulkan. That decision is recorded above.
 
 **Tentative distribution choices:** Linux builds include `vulkan` and therefore
 WGSL; macOS builds include `metal` with `metal-native` available for comparison;

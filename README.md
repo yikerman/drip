@@ -87,6 +87,11 @@ cargo xtask dist
 cargo xtask dist --target x86_64-unknown-linux-gnu
 ```
 
+Without `--target`, this builds for the Rust compiler's host. Distribution builds
+select Vulkan/SPIR-V on Linux, native Metal on macOS, and WGSL/D3D12 on Windows.
+These are also their startup defaults. WGSL remains available through
+`DRIP_BACKEND=wgsl`; CPU/LLVM, CUDA and HIP are not included by `xtask dist`.
+
 ## Usage
 
 Launch the installed editor with `drip-gui`, or run it from the checkout:
@@ -198,7 +203,10 @@ needs one connected export image to supply an unambiguous batch target;
 frontend view nodes outside that target's dependencies are not loaded.
 
 `DRIP_BACKEND` selects computation for both frontends, including GUI previews
-and exports. It defaults to `wgpu`. To run the same kernels on CPU:
+and exports. Without an override it prefers native Metal on macOS when built
+with `drip/metal-native`, or Vulkan on Linux with `drip/vulkan`; otherwise it uses
+`wgpu`. An ordinary default-feature Cargo build still uses wgpu. To run the same
+kernels on CPU:
 
 ```sh
 DRIP_BACKEND=cpu cargo run --release -p drip-gui --features drip/cpu -- project.drip
@@ -206,8 +214,9 @@ DRIP_BACKEND=cpu cargo run --release -p drip-cli --features drip/cpu -- photo.ne
 ```
 
 `DRIP_BACKEND=cuda` requires `--features drip/cuda`. Unknown values or backends
-not enabled in the build report an error. Enabling a feature alone does not
-select that backend; there is no automatic fallback. GUI drawing still uses wgpu.
+not enabled in the build report an error. An explicit selection is never replaced
+by another backend, and failed initialization does not trigger a fallback. GUI
+drawing still uses wgpu. See [compute backend options](crates/drip/README.md#compute-backends).
 
 `RUST_LOG=warn,drip_gui::worker=trace` prints per-node host timings for evaluation
 and GUI preparation, followed by the total preview time. Tracing adds no device

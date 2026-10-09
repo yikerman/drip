@@ -14,6 +14,8 @@ use clap::{Parser, Subcommand};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
+mod target;
+
 #[derive(Parser)]
 #[command(about = "Drip development tasks")]
 struct Cli {
@@ -25,7 +27,7 @@ struct Cli {
 enum Task {
     /// Build both frontends and replace ./dist/ with their executables.
     Dist {
-        /// Rust target triple; omitted to use Cargo's configured default.
+        /// Rust target triple; omitted to build for the compiler's host.
         #[arg(long)]
         target: Option<String>,
     },
@@ -38,6 +40,8 @@ fn main() -> Result<()> {
 }
 
 fn dist(target: Option<&str>) -> Result<()> {
+    let (target, feature) = target::resolve(target)?;
+    eprintln!("building {target} with {feature}");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let mut cargo = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     cargo.current_dir(root).args([
@@ -51,10 +55,11 @@ fn dist(target: Option<&str>) -> Result<()> {
         "--package",
         "drip-cli",
         "--message-format=json-render-diagnostics",
+        "--target",
+        &target,
+        "--features",
+        feature,
     ]);
-    if let Some(target) = target {
-        cargo.args(["--target", target]);
-    }
     let mut build = cargo.stdout(Stdio::piped()).spawn()?;
     let mut executables = Vec::new();
     // Cargo owns target directories and platform suffixes, including user overrides.

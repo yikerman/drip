@@ -62,6 +62,18 @@ fn wgpu_client<C: cubecl::wgpu::WgpuCompiler>(api: cubecl::wgpu::WgpuBackend) ->
     RuntimeContext::from_client(cubecl::wgpu::WgpuRuntime::<C>::client(&device))
 }
 
+/// Prefer the platform's native compute path when the build includes it.
+/// Explicit DRIP_BACKEND choices always bypass this default.
+pub(super) fn default_name() -> &'static str {
+    if cfg!(all(target_os = "macos", feature = "metal-native")) {
+        "metal-native"
+    } else if cfg!(all(target_os = "linux", feature = "vulkan")) {
+        "vulkan"
+    } else {
+        "wgpu"
+    }
+}
+
 pub(super) fn select(name: &str) -> Result<fn() -> RuntimeContext> {
     match name {
         "metal" | "metal-native" if !cfg!(target_os = "macos") => {
@@ -105,6 +117,19 @@ fn missing_feature(name: &str, feature: &str) -> Result<fn() -> RuntimeContext> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn distribution_build_uses_its_native_backend_by_default() {
+        #[cfg(all(target_os = "linux", feature = "vulkan"))]
+        assert_eq!(default_name(), "vulkan");
+        #[cfg(all(target_os = "macos", feature = "metal-native"))]
+        assert_eq!(default_name(), "metal-native");
+        #[cfg(not(any(
+            all(target_os = "linux", feature = "vulkan"),
+            all(target_os = "macos", feature = "metal-native")
+        )))]
+        assert_eq!(default_name(), "wgpu");
+    }
 
     #[test]
     fn selection_checks_build_features_without_initializing_devices() {
