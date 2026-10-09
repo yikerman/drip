@@ -23,10 +23,12 @@ in [PROGRESS](PROGRESS.md).
 
 ## Distribution
 
-- **Decided:** GUI tests requiring compute-device initialization are opt-in with
-  `--ignored`, like existing GPU tests, so ordinary headless CI needs no adapter.
-  Distribution jobs wait for tests but run after failures; cancellation still
-  stops them. Failed tests remain visible in the workflow result.
+- **Decided:** Headless CI builds `drip/cpu` and runs tests with `DRIP_BACKEND=cpu`.
+  GUI evaluation tests run normally; explicit GPU tests remain opt-in. Tests on
+  every platform gate distribution. Distribution jobs only build and upload;
+  they do not run tests or enable the CPU backend for testing.
+  Clippy uses `--workspace --no-deps`; tests and doctests select only workspace
+  packages. Dependencies still compile as required.
 - **Requirement:** Minimize dependencies users must install. Native processing
   libraries should be static; the normal Linux C/C++ runtime may remain external.
 - **Decided:** Vendor unmodified sources at release tags. Builds must not fetch

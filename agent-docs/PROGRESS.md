@@ -5,8 +5,15 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 ## 2026-10-08
 
 - Linux CI run 37893323997 failed in nine GUI tests after CubeCL device-service
-  initialization disconnected. Those tests and the worker panic test now require
-  explicit `--ignored`; distribution jobs proceed after test failures.
+  initialization disconnected. Replaced the temporary GUI test ignores and
+  distribution failure bypass with CPU-backed CI tests. Clippy now explicitly
+  excludes dependency linting; doctests already select workspace packages only.
+  Distribution jobs only build and upload artifacts.
+- CPU-backed workspace tests and four doctests passed, including all ten restored
+  GUI tests (74 passed, one GPU display test ignored). Workspace-only strict
+  Clippy, formatting and workflow lint passed; runner-label warnings were
+  suppressed for the older local actionlint. Hosted cross-platform runs remain
+  unverified.
 
 ## 2026-10-07
 

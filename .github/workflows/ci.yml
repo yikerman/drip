@@ -15,7 +15,8 @@ jobs:
       matrix:
         os: [ubuntu-26.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os != 'ubuntu-26.04' }}    # TODO: remove
+    env:
+      DRIP_BACKEND: cpu
 
     steps:
 
@@ -33,15 +34,14 @@ jobs:
       - if: runner.os == 'Linux'
         run: cargo fmt --all --check
       - if: runner.os == 'Linux'
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --features drip/cpu --no-deps -- -D warnings
 
-      - run: cargo test --locked --workspace --all-targets
-      - run: cargo test --locked --workspace --doc
+      - run: cargo test --locked --workspace --all-targets --features drip/cpu
+      - run: cargo test --locked --workspace --doc --features drip/cpu
 
   dist:
     name: Dist (${{ matrix.name }})
     needs: test
-    if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -77,8 +77,6 @@ jobs:
       - uses: ./.github/actions/native-deps
 
       - run: cargo xtask dist --target ${{ matrix.target }}
-      - if: runner.os == 'Linux'
-        run: cargo test --locked --profile dist --target ${{ matrix.target }} --workspace
 
       - uses: actions/upload-artifact@v7
         with:
