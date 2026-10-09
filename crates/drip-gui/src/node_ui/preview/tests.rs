@@ -16,7 +16,12 @@ fn preview(image: &Rec2020Mat, params: serde_json::Value) -> Result<PreviewImage
 }
 
 fn image(pixels: Vec<[f32; 3]>) -> Arc<Rgb> {
-    Arc::new(Rgb { width: pixels.len(), height: 1, requested_scale: 4, pixels: pixels.into() })
+    Arc::new(Rgb {
+        width: pixels.len(),
+        height: 1,
+        requested_scale: 4,
+        pixels: std::sync::Arc::new(pixels.into()),
+    })
 }
 
 fn close(actual: [f32; 3], expected: [f32; 3]) {

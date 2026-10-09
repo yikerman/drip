@@ -34,7 +34,7 @@ pub fn compute(
     image: Read<'_, Device<ColorRgb>>,
     output: Write<'_, Device<ColorRgb>>,
 ) -> Result<()> {
-    let (count, dim) = dispatch_dims(image.desc.extent.pixels() * 4);
+    let (count, dim) = dispatch_dims(image.desc.extent.pixels() * 3);
     kernel::exposure::launch(
         ctx.client()?,
         count,
@@ -54,7 +54,7 @@ mod kernel {
     pub fn exposure(input: &[f32], output: &mut [f32], gain: f32) {
         let i = ABSOLUTE_POS;
         if i < input.len() {
-            output[i] = if i % 4 == 3 { 0.0f32 } else { input[i] * gain };
+            output[i] = input[i] * gain;
         }
     }
 }

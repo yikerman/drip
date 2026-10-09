@@ -2,7 +2,7 @@
 use drip::{
     Error, Result,
     eval::InputValues,
-    node::data::{Interpretation, Rgb as PayloadRgb},
+    node::data::{HostBuffer, Interpretation, Rgb as PayloadRgb},
     ports::Cpu,
     resource::Resources,
 };
@@ -13,7 +13,7 @@ pub struct Rgb {
     pub width: usize,
     pub height: usize,
     pub requested_scale: u32,
-    pub pixels: Arc<Vec<[f32; 3]>>,
+    pub pixels: Arc<HostBuffer<[f32; 3]>>,
 }
 #[derive(Default)]
 pub struct PrepareContext {

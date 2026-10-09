@@ -15,7 +15,9 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
         width: 2,
         height: 2,
         requested_scale: 1,
-        pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36], [1.0, 0.5, 2.0], [0.25; 3]].into(),
+        pixels: std::sync::Arc::new(
+            vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36], [1.0, 0.5, 2.0], [0.25; 3]].into(),
+        ),
     });
     let mut dag = Dag::new();
     let working = drip::node::source::<ColorRgb>(
@@ -24,7 +26,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
             extent: Extent { width: 2, height: 2 },
             interpretation: drip::node::raw::working_color(),
         },
-        (*pixels.pixels).clone(),
+        pixels.pixels.to_vec(),
     )
     .unwrap();
     let camera = drip::node::source::<CameraRgb>(
@@ -36,7 +38,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
                 scale: "relative".into(),
             },
         },
-        (*pixels.pixels).clone(),
+        pixels.pixels.to_vec(),
     )
     .unwrap();
     let histogram = crate::node_ui::histogram::add(&mut dag, ExposureSettings::default()).unwrap();
@@ -70,7 +72,7 @@ fn histogram_bins_by_stops() {
         width: 2,
         height: 1,
         requested_scale: 1,
-        pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]].into(),
+        pixels: std::sync::Arc::new(vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]].into()),
     };
     let mut graph = Graph::default();
     let id = graph.add_node(Registry.get("view.histogram").unwrap()).unwrap();
@@ -99,8 +101,12 @@ fn histogram_bins_by_stops() {
 
 #[test]
 fn vectorscope_uses_working_rec2020_coordinates() {
-    let image =
-        Rgb { width: 1, height: 1, requested_scale: 1, pixels: vec![[1.0, 0.0, 0.0]].into() };
+    let image = Rgb {
+        width: 1,
+        height: 1,
+        requested_scale: 1,
+        pixels: std::sync::Arc::new(vec![[1.0, 0.0, 0.0]].into()),
+    };
     let context = PrepareContext::default();
     let scope = vectorscope((), (&image,), &context).unwrap();
     let ScopeAxes::Vectorscope { primaries, color_space } = scope.axes else {

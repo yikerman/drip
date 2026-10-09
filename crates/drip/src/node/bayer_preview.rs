@@ -77,10 +77,9 @@ mod kernel {
                     rgb[c] += input[(row + y) * width + col + x];
                 }
             }
-            output[i * 4] = rgb[0];
-            output[i * 4 + 1] = rgb[1] * 0.5f32;
-            output[i * 4 + 2] = rgb[2];
-            output[i * 4 + 3] = 0.0f32;
+            output[i * 3] = rgb[0];
+            output[i * 3 + 1] = rgb[1] * 0.5f32;
+            output[i * 3 + 2] = rgb[2];
         }
     }
 }

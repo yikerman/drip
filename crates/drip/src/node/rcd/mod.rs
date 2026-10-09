@@ -47,7 +47,7 @@ pub fn compute(
         ctx.scratch_f32(n)?,
         ctx.scratch_f32(n)?,
     );
-    let (rgb, other) = (ctx.scratch_f32(n * 4)?, ctx.scratch_f32(n * 4)?);
+    let (rgb, other) = (ctx.scratch_f32(n * 3)?, ctx.scratch_f32(n * 3)?);
     let client = ctx.client()?;
     kernel::rcd_maps::launch(
         client,

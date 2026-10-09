@@ -12,7 +12,7 @@ use std::sync::Arc;
 pub fn source<P: Payload>(
     dag: &mut Dag,
     desc: P::Desc,
-    data: impl Into<P::Cpu>,
+    data: impl Into<P::Data>,
 ) -> Result<Output<P>> {
     let data = data.into();
     P::validate_cpu(&desc, &data)?;
@@ -21,7 +21,7 @@ pub fn source<P: Payload>(
 }
 struct Source<P: Payload> {
     desc: P::Desc,
-    data: Arc<P::Cpu>,
+    data: Arc<P::Data>,
 }
 impl<P: Payload> Node for Source<P> {
     fn metadata(&self) -> Metadata {

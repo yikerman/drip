@@ -1,6 +1,6 @@
 //! Concrete image and calibration payloads shared by processing nodes.
-pub use crate::payload::{F32Buffer, HostBuffer, Interpretation, Payload};
-use crate::{Error, Result, runtime::RuntimeContext};
+pub use crate::payload::{DeviceBuffer, HostBuffer, Interpretation, Payload};
+use crate::{Error, Result};
 use cubecl::bytes::Bytes;
 use std::marker::PhantomData;
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -13,10 +13,10 @@ impl Extent {
         self.width as usize * self.height as usize
     }
     pub fn validate(&self) -> Result<()> {
-        // Kernels use 32-bit indices, including the four-lane RGB layout.
+        // Kernels use 32-bit indices, including the packed RGB layout.
         if self.width == 0
             || self.height == 0
-            || u64::from(self.width) * u64::from(self.height) > u32::MAX as u64 / 4
+            || u64::from(self.width) * u64::from(self.height) > u32::MAX as u64 / 3
         {
             return Err(Error::Contract("nonempty extent must fit 32-bit RGB indexing".into()));
         }
@@ -70,36 +70,29 @@ pub type ColorRgb = Rgb<Color>;
 
 impl<I: Interpretation> Payload for Rgb<I> {
     type Desc = ImageDesc<I>;
-    type Cpu = Vec<[f32; 3]>;
-    type Device = F32Buffer<Self>;
+    type Data = HostBuffer<[f32; 3]>;
     fn validate_desc(d: &Self::Desc) -> Result<()> {
         d.extent.validate()?;
         d.interpretation.validate()
     }
-    fn validate_cpu(d: &Self::Desc, data: &Self::Cpu) -> Result<()> {
+    fn validate_cpu(d: &Self::Desc, data: &Self::Data) -> Result<()> {
         Self::validate_desc(d)?;
         if data.len() != d.extent.pixels() {
             return Err(Error::Contract("RGB extent/storage mismatch".into()));
         }
         Ok(())
     }
-    fn allocate_cpu(d: &Self::Desc) -> Self::Cpu {
-        vec![[0.0; 3]; d.extent.pixels()]
+    fn allocate_cpu(d: &Self::Desc) -> Self::Data {
+        vec![[0.0; 3]; d.extent.pixels()].into()
     }
-    fn allocate_device(d: &Self::Desc, r: &RuntimeContext) -> Result<Self::Device> {
-        Ok(F32Buffer::new(r.client()?.empty(d.extent.pixels() * 16)))
+    fn byte_len(d: &Self::Desc) -> usize {
+        d.extent.pixels() * size_of::<[f32; 3]>()
     }
-    fn upload(_: &Self::Desc, data: &Self::Cpu, r: &RuntimeContext) -> Result<Self::Device> {
-        let padded: Vec<[f32; 4]> = data.iter().map(|p| [p[0], p[1], p[2], 0.0]).collect();
-        Ok(F32Buffer::new(r.client()?.create(Bytes::from_elems(padded))))
+    fn encode(_: &Self::Desc, data: &Self::Data) -> Result<Bytes> {
+        Ok(data.shared_bytes())
     }
-    fn download(_: &Self::Desc, data: &Self::Device, r: &RuntimeContext) -> Result<Self::Cpu> {
-        let bytes =
-            r.client()?.read_one(data.handle.clone()).map_err(|e| Error::Runtime(e.to_string()))?;
-        Ok(bytemuck::cast_slice::<u8, [f32; 4]>(&bytes)
-            .iter()
-            .map(|p| [p[0], p[1], p[2]])
-            .collect())
+    fn decode(_: &Self::Desc, bytes: Bytes) -> Result<Self::Data> {
+        HostBuffer::from_bytes(bytes)
     }
 }
 
@@ -111,30 +104,25 @@ pub struct MatrixDesc<F, T> {
 pub struct Matrix3<F, T>(PhantomData<(F, T)>);
 impl<F: Interpretation, T: Interpretation> Payload for Matrix3<F, T> {
     type Desc = MatrixDesc<F, T>;
-    type Cpu = [[f32; 3]; 3];
-    type Device = F32Buffer<Self>;
+    type Data = [[f32; 3]; 3];
     fn validate_desc(d: &Self::Desc) -> Result<()> {
         d.source.validate()?;
         d.target.validate()
     }
-    fn validate_cpu(d: &Self::Desc, _: &Self::Cpu) -> Result<()> {
+    fn validate_cpu(d: &Self::Desc, _: &Self::Data) -> Result<()> {
         Self::validate_desc(d)
     }
-    fn allocate_cpu(_: &Self::Desc) -> Self::Cpu {
+    fn allocate_cpu(_: &Self::Desc) -> Self::Data {
         [[0.0; 3]; 3]
     }
-    fn allocate_device(_: &Self::Desc, r: &RuntimeContext) -> Result<Self::Device> {
-        Ok(F32Buffer::new(r.client()?.empty(36)))
+    fn byte_len(_: &Self::Desc) -> usize {
+        size_of::<Self::Data>()
     }
-    fn upload(_: &Self::Desc, data: &Self::Cpu, r: &RuntimeContext) -> Result<Self::Device> {
-        Ok(F32Buffer::new(r.client()?.create(Bytes::from_elems(data.to_vec()))))
+    fn encode(_: &Self::Desc, data: &Self::Data) -> Result<Bytes> {
+        Ok(Bytes::from_elems(data.to_vec()))
     }
-    fn download(_: &Self::Desc, data: &Self::Device, r: &RuntimeContext) -> Result<Self::Cpu> {
-        let bytes =
-            r.client()?.read_one(data.handle.clone()).map_err(|e| Error::Runtime(e.to_string()))?;
-        bytemuck::cast_slice::<u8, [f32; 3]>(&bytes)
-            .try_into()
-            .map_err(|_| Error::Runtime("matrix storage mismatch".into()))
+    fn decode(_: &Self::Desc, bytes: Bytes) -> Result<Self::Data> {
+        decode_array(&bytes)
     }
 }
 
@@ -154,31 +142,28 @@ pub struct BayerDesc {
 pub struct Bayer;
 impl Payload for Bayer {
     type Desc = BayerDesc;
-    type Cpu = HostBuffer<f32>;
-    type Device = F32Buffer<Self>;
+    type Data = HostBuffer<f32>;
     fn validate_desc(d: &Self::Desc) -> Result<()> {
         d.extent.validate()?;
         d.interpretation.validate()
     }
-    fn validate_cpu(d: &Self::Desc, data: &Self::Cpu) -> Result<()> {
+    fn validate_cpu(d: &Self::Desc, data: &Self::Data) -> Result<()> {
         Self::validate_desc(d)?;
         if data.len() != d.extent.pixels() {
             return Err(Error::Contract("Bayer extent/storage mismatch".into()));
         }
         Ok(())
     }
-    fn allocate_cpu(d: &Self::Desc) -> Self::Cpu {
+    fn allocate_cpu(d: &Self::Desc) -> Self::Data {
         vec![0.0; d.extent.pixels()].into()
     }
-    fn allocate_device(d: &Self::Desc, r: &RuntimeContext) -> Result<Self::Device> {
-        Ok(F32Buffer::new(r.client()?.empty(d.extent.pixels() * 4)))
+    fn byte_len(d: &Self::Desc) -> usize {
+        d.extent.pixels() * size_of::<f32>()
     }
-    fn upload(_: &Self::Desc, data: &Self::Cpu, r: &RuntimeContext) -> Result<Self::Device> {
-        Ok(F32Buffer::new(r.client()?.create(data.shared_bytes())))
+    fn encode(_: &Self::Desc, data: &Self::Data) -> Result<Bytes> {
+        Ok(data.shared_bytes())
     }
-    fn download(_: &Self::Desc, data: &Self::Device, r: &RuntimeContext) -> Result<Self::Cpu> {
-        let bytes =
-            r.client()?.read_one(data.handle.clone()).map_err(|e| Error::Runtime(e.to_string()))?;
+    fn decode(_: &Self::Desc, bytes: Bytes) -> Result<Self::Data> {
         HostBuffer::from_bytes(bytes)
     }
 }
@@ -187,32 +172,27 @@ impl Payload for Bayer {
 pub struct Coefficients<D, const N: usize>(PhantomData<D>);
 impl<D: Interpretation, const N: usize> Payload for Coefficients<D, N> {
     type Desc = D;
-    type Cpu = [f32; N];
-    type Device = F32Buffer<Self>;
+    type Data = [f32; N];
     fn validate_desc(d: &D) -> Result<()> {
         if N == 0 || N > u32::MAX as usize / 4 {
             return Err(Error::Contract("invalid coefficient layout".into()));
         }
         d.validate()
     }
-    fn validate_cpu(d: &D, _: &Self::Cpu) -> Result<()> {
+    fn validate_cpu(d: &D, _: &Self::Data) -> Result<()> {
         Self::validate_desc(d)
     }
-    fn allocate_cpu(_: &D) -> Self::Cpu {
+    fn allocate_cpu(_: &D) -> Self::Data {
         [0.; N]
     }
-    fn allocate_device(_: &D, r: &RuntimeContext) -> Result<Self::Device> {
-        Ok(F32Buffer::new(r.client()?.empty(N * 4)))
+    fn byte_len(_: &D) -> usize {
+        size_of::<Self::Data>()
     }
-    fn upload(_: &D, data: &Self::Cpu, r: &RuntimeContext) -> Result<Self::Device> {
-        Ok(F32Buffer::new(r.client()?.create(Bytes::from_elems(data.to_vec()))))
+    fn encode(_: &D, data: &Self::Data) -> Result<Bytes> {
+        Ok(Bytes::from_elems(data.to_vec()))
     }
-    fn download(_: &D, data: &Self::Device, r: &RuntimeContext) -> Result<Self::Cpu> {
-        let bytes =
-            r.client()?.read_one(data.handle.clone()).map_err(|e| Error::Runtime(e.to_string()))?;
-        bytemuck::cast_slice::<u8, f32>(&bytes)
-            .try_into()
-            .map_err(|_| Error::Runtime("coefficient storage mismatch".into()))
+    fn decode(_: &D, bytes: Bytes) -> Result<Self::Data> {
+        decode_array(&bytes)
     }
 }
 
@@ -231,7 +211,7 @@ impl Interpretation for BayerGainDesc {
 pub type BayerGains = Coefficients<BayerGainDesc, 4>;
 
 mod metadata;
-pub use metadata::{CaptureMetadata, MetadataDesc};
+pub use metadata::{CaptureData, CaptureMetadata, MetadataDesc};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BayerLevelDesc {
@@ -244,3 +224,10 @@ impl Interpretation for BayerLevelDesc {
     }
 }
 pub type BayerLevels = Coefficients<BayerLevelDesc, 4>;
+
+fn decode_array<T: bytemuck::Pod, const N: usize>(bytes: &[u8]) -> Result<[T; N]> {
+    bytemuck::try_cast_slice::<u8, T>(bytes)
+        .map_err(|e| Error::Runtime(format!("invalid coefficient layout: {e}")))?
+        .try_into()
+        .map_err(|_| Error::Runtime("coefficient storage length mismatch".into()))
+}

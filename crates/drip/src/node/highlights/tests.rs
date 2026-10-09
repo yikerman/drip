@@ -24,7 +24,7 @@ fn evaluate(
     let levels_desc = BayerLevelDesc { phase, interpretation: desc.interpretation.clone() };
     let levels = std::array::from_fn(|i| clips[reference::color(phase, i / 2, i % 2)]);
     let input = Bayer::upload(&desc, &samples.to_vec().into(), runtime).unwrap();
-    let mut output = Bayer::allocate_device(&desc, runtime).unwrap();
+    let mut output = <Device<Bayer> as Port>::allocate(&desc, runtime).unwrap();
     let ctx = KernelContext { global: &GlobalContext::default(), runtime };
     reconstruct(
         &ctx,

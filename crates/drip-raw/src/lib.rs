@@ -92,8 +92,10 @@ impl BlackPattern {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Metadata {
-    pub make: String,
-    pub model: String,
+    /// UTF-8 bytes, normalized at decode.
+    pub make: Vec<u8>,
+    /// UTF-8 bytes, normalized at decode.
+    pub model: Vec<u8>,
     pub iso: f32,
     /// Seconds.
     pub shutter: f32,
@@ -103,7 +105,7 @@ pub struct Metadata {
     /// Unix time.
     pub timestamp: i64,
     /// Capture time as the camera's EXIF `YYYY:MM:DD HH:MM:SS`; empty if unknown.
-    pub datetime: String,
+    pub datetime: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -187,7 +189,7 @@ pub fn decode(path: &Path) -> Result<Raw, Error> {
     let (rows, cols) = (c[4] as usize, c[5] as usize);
     let text = |s: &[c_char]| {
         // SAFETY: the shim NUL-terminates its strings within their arrays.
-        unsafe { CStr::from_ptr(s.as_ptr()) }.to_string_lossy().trim().to_owned()
+        unsafe { CStr::from_ptr(s.as_ptr()) }.to_string_lossy().trim().as_bytes().to_vec()
     };
     Ok(Raw {
         width,

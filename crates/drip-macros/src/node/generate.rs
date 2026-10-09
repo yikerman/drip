@@ -177,24 +177,15 @@ fn contract(options: &Options, signature: &Signature) -> TokenStream {
 fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
     let arguments = signature.ports.iter().map(kernel_argument);
     let mut allocations = Vec::new();
-    let mut validations = Vec::new();
     let mut results = Vec::new();
     for port in signature.outputs() {
         let index = port.index;
         let ty = &port.ty;
         let local = format_ident!("output_{index}");
         allocations.push(quote! {
-            let mut #local = context.allocate::<#ty>(
-                ::drip::ports::downcast(&output_descs[#index])
-            )?;
+            let mut #local = ::drip::ports::OutputSlot::<#ty>::allocate(&output_descs[#index], context)?;
         });
-        validations.push(quote! {
-            <#ty as ::drip::ports::Port>::validate(
-                ::drip::ports::downcast(&output_descs[#index]),
-                &#local,
-            )?;
-        });
-        results.push(quote!(Some(::std::sync::Arc::new(#local) as ::drip::ports::Data)));
+        results.push(quote!(Some(#local.finish()?)));
     }
     quote! {
         fn run(
@@ -204,14 +195,8 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
             inputs: &[Option<::drip::ports::Data>],
             output_descs: &[Option<::drip::ports::Description>],
         ) -> ::drip::Result<Vec<Option<::drip::ports::Data>>> {
-            let output_descs: Vec<_> = output_descs.iter().cloned()
-                .collect::<Option<_>>()
-                .ok_or_else(|| ::drip::Error::Contract(
-                    "node outputs are not fully described".into()
-                ))?;
             #(#allocations)*
             super::#name(context, &self.parameters, #(#arguments),*)?;
-            #(#validations)*
             Ok(vec![#(#results),*])
         }
     }
@@ -219,17 +204,11 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
 
 fn kernel_argument(port: &Port) -> TokenStream {
     let index = port.index;
-    let ty = &port.ty;
     match port.direction {
         Direction::Input => read_argument(port),
         Direction::Output => {
             let local = format_ident!("output_{index}");
-            quote! {
-                ::drip::ports::Write::<#ty> {
-                    data: &mut #local,
-                    desc: ::drip::ports::downcast(&output_descs[#index]),
-                }
-            }
+            quote!(#local.write())
         }
     }
 }
@@ -238,32 +217,11 @@ fn read_argument(port: &Port) -> TokenStream {
     let index = port.index;
     let ty = &port.ty;
     let missing_input = format!("missing required input {}", port.name);
-    let missing_description = format!("input {} is not described", port.name);
-    let data = if port.optional {
-        quote!(data)
-    } else {
-        quote! {
-            inputs[#index].as_ref().ok_or_else(|| ::drip::Error::Contract(#missing_input.into()))?
-        }
-    };
-    let read = quote! {
-        ::drip::ports::Read::<#ty> {
-            data: ::drip::ports::downcast(#data),
-            desc: ::drip::ports::downcast(
-                input_descs[#index].as_ref()
-                    .ok_or_else(|| ::drip::Error::Contract(#missing_description.into()))?
-            ),
-        }
-    };
+    let read = quote!(::drip::ports::Read::<#ty>::bind(&input_descs[#index], &inputs[#index])?);
     if port.optional {
-        quote! {
-            match inputs[#index].as_ref() {
-                Some(data) => Some(#read),
-                None => None,
-            }
-        }
-    } else {
         read
+    } else {
+        quote!(#read.ok_or_else(|| ::drip::Error::Contract(#missing_input.into()))?)
     }
 }
 

@@ -15,7 +15,7 @@
 
 use crate::{
     Result,
-    node::data::{Bayer, F32Buffer},
+    node::data::{Bayer, DeviceBuffer},
     ports::{Device, Read},
     runtime::{KernelContext, dispatch_dims},
 };
@@ -33,7 +33,7 @@ impl U32Buffer {
     }
 }
 struct Partial {
-    sums: F32Buffer<()>,
+    sums: DeviceBuffer<()>,
     counts: U32Buffer,
 }
 impl Partial {
@@ -49,7 +49,7 @@ pub(super) fn process(
     ctx: &KernelContext<'_>,
     image: &Read<'_, Device<Bayer>>,
     clips: [f32; 4],
-    output: &mut F32Buffer<Bayer>,
+    output: &mut DeviceBuffer<Bayer>,
 ) -> Result<()> {
     let (w, h) = (image.desc.extent.width as usize, image.desc.extent.height as usize);
     let phase = image.desc.phase as usize;

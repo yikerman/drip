@@ -176,16 +176,12 @@ fn accepts_qualified_ports_and_indexes_each_direction_independently() {
     let module = generated_module(expanded);
     let run = generated_method(&module, "run");
     let kernel = kernel_call(run, "mix");
-    let wrappers: Vec<_> = kernel
-        .args
-        .iter()
-        .skip(2)
-        .map(|argument| {
-            let syn::Expr::Struct(view) = argument else { panic!("expected a typed port view") };
-            view.path.segments.last().unwrap().ident.to_string()
-        })
-        .collect();
-    assert_eq!(wrappers, ["Write", "Read", "Write", "Read"]);
+    let arguments: Vec<_> =
+        kernel.args.iter().skip(2).map(|arg| quote!(#arg).to_string()).collect();
+    assert_eq!(arguments[0], quote!(output_0.write()).to_string());
+    assert!(arguments[1].contains("Read :: < Cpu < B > > :: bind"));
+    assert_eq!(arguments[2], quote!(output_1.write()).to_string());
+    assert!(arguments[3].contains("Read :: < Device < D > > :: bind"));
 }
 
 #[test]
@@ -339,19 +335,14 @@ fn optional_execution_is_nullable_and_contracts_keep_one_description_per_input()
     let run = generated_method(&module, "run");
     let call = kernel_call(run, "x");
     assert!(matches!(&call.args[0], syn::Expr::Path(context) if context.path.is_ident("context")));
-    let syn::Expr::Struct(required) = &call.args[2] else { panic!("expected a required Read") };
-    let syn::Expr::Call(data) = &required.fields[0].expr else { panic!("expected downcast data") };
-    assert!(matches!(&data.args[0], syn::Expr::Try(_)), "required inputs must reject absent data");
-
-    let syn::Expr::Match(optional) = &call.args[3] else {
-        panic!("expected optional input branches")
-    };
-    let [present, absent] = optional.arms.as_slice() else {
-        panic!("expected present and absent input branches")
-    };
-    let syn::Expr::Call(present) = present.body.as_ref() else { panic!("expected Some(Read)") };
-    assert!(matches!(&present.args[0], syn::Expr::Struct(_)));
-    assert!(matches!(absent.body.as_ref(), syn::Expr::Path(path) if path.path.is_ident("None")));
+    let required = &call.args[2];
+    let optional = &call.args[3];
+    let required = quote!(#required).to_string();
+    let optional = quote!(#optional).to_string();
+    assert!(required.contains(":: bind"));
+    assert!(required.contains("ok_or_else"), "required input must reject absent data");
+    assert!(optional.contains(":: bind"));
+    assert!(!optional.contains("ok_or_else"), "optional input preserves None");
 
     let contract = generated_method(&module, "contract");
     assert_eq!(contract.sig.inputs.len(), 3);

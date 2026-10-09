@@ -346,7 +346,7 @@ fn device_chain(runtime: RuntimeContext) {
         timestamp: -1234567,
         make: "測試".into(),
         model: "x".into(),
-        datetime: String::new(),
+        datetime: Vec::new(),
     };
     let desc = MetadataDesc::of(&metadata);
     let device = CaptureMetadata::upload(&desc, &metadata, &runtime).unwrap();
@@ -468,7 +468,7 @@ fn bad_producer(
     image: Read<'_, Cpu<ColorRgb>>,
     output: Write<'_, Cpu<ColorRgb>>,
 ) -> Result<()> {
-    *output.data = image.data[..1].to_vec();
+    *output.data = image.data[..1].to_vec().into();
     Ok(())
 }
 #[test]
@@ -623,7 +623,7 @@ fn global_context_describes_and_computes_each_request_without_changing_the_dag()
     let global = GlobalContext { scale: 3 };
     let value = evaluator.evaluate::<Cpu<ColorRgb>>(&dag, &global, copy.output).unwrap();
     assert_eq!(value.desc.extent.width, 3);
-    assert_eq!(*value.data, vec![[3.; 3]; 3]);
+    assert_eq!(&**value.data, &[[3.; 3]; 3]);
     assert_eq!(dag.description(copy.output).unwrap().unwrap().extent.width, 1);
     let batch = evaluator.evaluate_inputs(&dag, &global, &[copy.node, fixed.node]);
     let value = batch[&copy.node].as_ref().unwrap().get("image").unwrap();

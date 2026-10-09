@@ -5,7 +5,7 @@ use cubecl::prelude::*;
 
 #[cube(launch)]
 pub fn matrix(input: &[f32], coeff: &[f32], output: &mut [f32]) {
-    let i = ABSOLUTE_POS * 4;
+    let i = ABSOLUTE_POS * 3;
     if i < input.len() {
         let r = input[i];
         let g = input[i + 1];
@@ -13,7 +13,6 @@ pub fn matrix(input: &[f32], coeff: &[f32], output: &mut [f32]) {
         for c in 0..3 {
             output[i + c] = coeff[c * 3] * r + coeff[c * 3 + 1] * g + coeff[c * 3 + 2] * b;
         }
-        output[i + 3] = 0.0f32;
     }
 }
 #[cube]

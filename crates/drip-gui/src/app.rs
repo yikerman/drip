@@ -719,7 +719,7 @@ mod tests {
                     width: 1,
                     height: 1,
                     requested_scale: 1,
-                    pixels: vec![[0.5; 3]].into(),
+                    pixels: std::sync::Arc::new(vec![[0.5; 3]].into()),
                 })))
             });
         }

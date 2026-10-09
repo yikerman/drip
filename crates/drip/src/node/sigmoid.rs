@@ -110,7 +110,7 @@ pub fn apply(
     output: Write<'_, Device<ColorRgb>>,
 ) -> Result<()> {
     // These constants belong to this invocation, not to a graph payload.
-    let coefficients = F32Buffer::<()>::new(
+    let coefficients = DeviceBuffer::<()>::new(
         ctx.client()?.create(cubecl::bytes::Bytes::from_elems(prepare_values(p).to_vec())),
     );
     let (count, dim) = crate::runtime::dispatch_dims(image.desc.extent.pixels());
@@ -164,7 +164,7 @@ mod kernel {
     #[allow(clippy::manual_swap)]
     #[cube(launch)]
     pub fn sigmoid(input: &[f32], p: &[f32], output: &mut [f32]) {
-        let i = ABSOLUTE_POS * 4;
+        let i = ABSOLUTE_POS * 3;
         if i < input.len() {
             let mut rgb = Array::<f32>::new(3usize);
             let mut work = Array::<f32>::new(3usize);
@@ -240,7 +240,6 @@ mod kernel {
                     + p[14 + c * 3] * mapped[1]
                     + p[15 + c * 3] * mapped[2];
             }
-            output[i + 3] = 0.0f32;
         }
     }
 }

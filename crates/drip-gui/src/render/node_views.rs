@@ -76,7 +76,7 @@ mod tests {
             width: 1,
             height: 1,
             requested_scale: 1,
-            pixels: vec![[-1.0, 0.5, 2.0]].into(),
+            pixels: std::sync::Arc::new(vec![[-1.0, 0.5, 2.0]].into()),
         });
         let raw = Arc::downgrade(&source);
         let mut value = PreviewImage::new(&Rec2020Mat::from(source));

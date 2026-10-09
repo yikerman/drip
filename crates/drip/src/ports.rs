@@ -1,5 +1,9 @@
 //! Typed views at nodes; type erasure is confined to the graph adapter.
-use crate::{Error, Result, payload::Payload, runtime::RuntimeContext};
+use crate::{
+    Error, Result,
+    payload::{DeviceBuffer, Payload},
+    runtime::RuntimeContext,
+};
 use std::{
     any::{Any, TypeId},
     marker::PhantomData,
@@ -34,7 +38,7 @@ pub trait Port: Send + Sync + 'static {
 }
 impl<P: Payload> Port for Cpu<P> {
     type Payload = P;
-    type Storage = P::Cpu;
+    type Storage = P::Data;
     const PLACEMENT: Placement = Placement::Cpu;
     fn validate(desc: &P::Desc, data: &Self::Storage) -> Result<()> {
         P::validate_cpu(desc, data)
@@ -51,13 +55,13 @@ impl<P: Payload> Port for Cpu<P> {
 }
 impl<P: Payload> Port for Device<P> {
     type Payload = P;
-    type Storage = P::Device;
+    type Storage = DeviceBuffer<P>;
     const PLACEMENT: Placement = Placement::Device;
     fn validate(_: &P::Desc, _: &Self::Storage) -> Result<()> {
         Ok(())
     }
     fn allocate(d: &P::Desc, r: &RuntimeContext) -> Result<Self::Storage> {
-        P::allocate_device(d, r)
+        Ok(DeviceBuffer::new(r.client()?.empty(P::byte_len(d))))
     }
     fn transport(v: &Data, from: Placement, d: &P::Desc, r: &RuntimeContext) -> Result<Data> {
         match from {
@@ -74,6 +78,46 @@ pub struct Read<'a, P: Port> {
 pub struct Write<'a, P: Port> {
     pub data: &'a mut P::Storage,
     pub desc: &'a <P::Payload as Payload>::Desc,
+}
+
+impl<'a, P: Port> Read<'a, P> {
+    #[doc(hidden)]
+    pub fn bind(desc: &'a Option<Description>, data: &'a Option<Data>) -> Result<Option<Self>> {
+        data.as_ref()
+            .map(|data| {
+                let desc = desc
+                    .as_ref()
+                    .ok_or_else(|| Error::Contract("input is not described".into()))?;
+                Ok(Self { data: downcast(data), desc: downcast(desc) })
+            })
+            .transpose()
+    }
+}
+
+/// Fresh output storage owned by the generated node adapter until publication.
+#[doc(hidden)]
+pub struct OutputSlot<'a, P: Port> {
+    desc: &'a <P::Payload as Payload>::Desc,
+    data: P::Storage,
+}
+impl<'a, P: Port> OutputSlot<'a, P> {
+    pub fn allocate(
+        desc: &'a Option<Description>,
+        context: &crate::runtime::KernelContext<'_>,
+    ) -> Result<Self> {
+        let desc = desc
+            .as_ref()
+            .ok_or_else(|| Error::Contract("node outputs are not fully described".into()))?;
+        let desc = downcast(desc);
+        Ok(Self { desc, data: context.allocate::<P>(desc)? })
+    }
+    pub fn write(&mut self) -> Write<'_, P> {
+        Write { desc: self.desc, data: &mut self.data }
+    }
+    pub fn finish(self) -> Result<Data> {
+        P::validate(self.desc, &self.data)?;
+        Ok(Arc::new(self.data))
+    }
 }
 
 #[doc(hidden)]

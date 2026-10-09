@@ -33,7 +33,8 @@ pub fn prepare(
     let mut view = match pixels {
         None => PreviewImage::new(image),
         Some(pixels) => {
-            let proof = Arc::new(Rgb { pixels: pixels.into(), ..(**input).clone() });
+            let proof =
+                Arc::new(Rgb { pixels: std::sync::Arc::new(pixels.into()), ..(**input).clone() });
             PreviewImage::new(&proof)
         }
     };

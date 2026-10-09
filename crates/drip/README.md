@@ -18,3 +18,8 @@ Each GUI node has its own module; shared helpers stay alongside them.
 Windowing, the graph editor, worker scheduling and shared rendering machinery
 remain outside. File organization does not justify splitting one algorithm
 into more DAG nodes or changing GUI interaction behavior.
+
+Payloads keep concrete Rust data types and separate interpretation descriptions.
+Device allocation and transport are shared; a payload may supply a small local
+packing adapter for nested allocations. Do not duplicate CPU/GPU schemas or
+flatten unrelated ports merely to make their storage uniform.

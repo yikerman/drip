@@ -122,13 +122,13 @@ impl KernelContext<'_> {
     }
 
     /// Algorithm-local scratch allocated by the runtime. It has no port meaning.
-    pub fn scratch_f32(&self, elements: usize) -> Result<crate::payload::F32Buffer<()>> {
+    pub fn scratch_f32(&self, elements: usize) -> Result<crate::payload::DeviceBuffer<()>> {
         let bytes = elements
             .checked_mul(4)
             .filter(|&n| n > 0)
             .ok_or_else(|| Error::Runtime("invalid scratch extent".into()))?;
         let handle = self.client()?.empty(bytes);
-        Ok(crate::payload::F32Buffer::new(handle))
+        Ok(crate::payload::DeviceBuffer::new(handle))
     }
 }
 

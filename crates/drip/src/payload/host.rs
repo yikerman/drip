@@ -15,6 +15,17 @@ pub struct HostBuffer<T> {
     element: PhantomData<T>,
 }
 
+impl<T: Pod + std::fmt::Debug> std::fmt::Debug for HostBuffer<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.deref().fmt(f)
+    }
+}
+impl<T: Pod + PartialEq> PartialEq for HostBuffer<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.deref() == other.deref()
+    }
+}
+
 impl<T: Pod> HostBuffer<T> {
     /// Retain an already resident allocation, checking its element layout once.
     pub(crate) fn from_bytes(bytes: Bytes) -> Result<Self> {

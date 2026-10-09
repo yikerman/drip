@@ -202,8 +202,7 @@ The CubeCL Bayer 2x2 and exposure kernels live with their nodes under
 `crates/drip/src/node/`; the reusable matrix kernel is in
 `crates/drip/src/node/shared_kernel.rs`. They derive from Drip revision
 `b9b1045da65376fd5812b7b00362806cde37eaf0` through the validated runtime PoC.
-RGB device storage adds a zero padding lane; host storage retains three f32
-channels. Bayer binning drops incomplete edge cells and averages the two greens.
+RGB uses packed three-f32 pixels on both host and device. Bayer binning drops incomplete edge cells and averages the two greens.
 The same CubeCL source is used by each enabled computation runtime. The original
 PoC source and its complete notices are preserved in the external benchmark
 archive documented in `agent-docs/CUBECL_REWRITE.md`.

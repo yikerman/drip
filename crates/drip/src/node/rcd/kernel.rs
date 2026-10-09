@@ -45,7 +45,7 @@ fn weighted(a: (f32, f32), b: (f32, f32)) -> f32 {
 }
 #[cube]
 fn rgb_at(a: &[f32], i: usize, d: i32, c: usize) -> f32 {
-    a[((i as i32 + d) as usize) * 4 + c]
+    a[((i as i32 + d) as usize) * 3 + c]
 }
 #[cube]
 fn estimate_rgb(a: &[f32], i: usize, d: i32, c: usize) -> (f32, f32) {
@@ -77,13 +77,12 @@ pub fn rcd_maps(
         p[i] = 0.0f32;
         q[i] = 0.0f32;
         for ch in 0..3 {
-            rgb[i * 4 + ch] = if ch == color(r, 0, phase) || ch == color(r, 1, phase) {
+            rgb[i * 3 + ch] = if ch == color(r, 0, phase) || ch == color(r, 1, phase) {
                 a[i].max(0.0f32)
             } else {
                 0.0f32
             };
         }
-        rgb[i * 4 + 3] = 0.0f32;
         if r >= 4 && c >= 4 && r + 4 < h && c + 4 < w {
             let v = (high(a, i - w, d) + high(a, i, d) + high(a, i + w, d)).max(1e-10f32);
             let hh = (high(a, i, 1) + high(a, i - 1, 1) + high(a, i + 1, 1)).max(1e-10f32);
@@ -123,7 +122,7 @@ pub fn rcd_green(
             let d = w as i32;
             let v = weighted(estimate_green(a, low, i, -d), estimate_green(a, low, i, d));
             let hh = weighted(estimate_green(a, low, i, -1), estimate_green(a, low, i, 1));
-            rgb[i * 4 + 1] = blend(direction(vh, i, w), hh, v);
+            rgb[i * 3 + 1] = blend(direction(vh, i, w), hh, v);
         }
     }
 }
@@ -150,8 +149,8 @@ pub fn rcd_opposite(rgb: &[f32], pq: &[f32], out: &mut [f32], w: usize, h: usize
     if i < pq.len() {
         let r = i / w;
         let c = i % w;
-        for ch in 0..4 {
-            out[i * 4 + ch] = rgb[i * 4 + ch];
+        for ch in 0..3 {
+            out[i * 3 + ch] = rgb[i * 3 + ch];
         }
         if r >= 4 && c >= 4 && r + 4 < h && c + 4 < w && color(r, c, phase) != 1 {
             let ch = 2 - color(r, c, phase);
@@ -161,7 +160,7 @@ pub fn rcd_opposite(rgb: &[f32], pq: &[f32], out: &mut [f32], w: usize, h: usize
                 weighted(estimate_rgb(rgb, i, -d + 1, ch), estimate_rgb(rgb, i, d - 1, ch)),
                 weighted(estimate_rgb(rgb, i, -d - 1, ch), estimate_rgb(rgb, i, d + 1, ch)),
             );
-            out[i * 4 + ch] = rgb[i * 4 + 1] + v;
+            out[i * 3 + ch] = rgb[i * 3 + 1] + v;
         }
     }
 }
@@ -181,7 +180,7 @@ pub fn rcd_finish(
         let c = i % w;
         if r >= 10 && c >= 10 && r + 10 < h && c + 10 < w {
             for ch in 0..3 {
-                out[i * 4 + ch] = rgb[i * 4 + ch].max(0.0f32);
+                out[i * 3 + ch] = rgb[i * 3 + ch].max(0.0f32);
             }
             if color(r, c, phase) == 1 {
                 for k in 0..2 {
@@ -192,7 +191,7 @@ pub fn rcd_finish(
                         weighted(estimate_rgb(rgb, i, -1, ch), estimate_rgb(rgb, i, 1, ch)),
                         weighted(estimate_rgb(rgb, i, -d, ch), estimate_rgb(rgb, i, d, ch)),
                     );
-                    out[i * 4 + ch] = (rgb[i * 4 + 1] + v).max(0.0f32);
+                    out[i * 3 + ch] = (rgb[i * 3 + 1] + v).max(0.0f32);
                 }
             }
         } else {
@@ -214,10 +213,9 @@ pub fn rcd_finish(
                 }
             }
             for ch in 0..3 {
-                out[i * 4 + ch] = sum[ch] / count[ch].max(1.0f32);
+                out[i * 3 + ch] = sum[ch] / count[ch].max(1.0f32);
             }
-            out[i * 4 + color(r, c, phase)] = a[i].max(0.0f32);
+            out[i * 3 + color(r, c, phase)] = a[i].max(0.0f32);
         }
-        out[i * 4 + 3] = 0.0f32;
     }
 }

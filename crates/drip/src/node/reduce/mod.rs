@@ -49,7 +49,7 @@ pub(super) fn dispatch_bayer(
     ctx: &KernelContext<'_>,
     input: &Read<'_, Device<Bayer>>,
     desc: &BayerDesc,
-    output: &F32Buffer<Bayer>,
+    output: &DeviceBuffer<Bayer>,
     factor: u32,
 ) -> Result<()> {
     let (count, dim) = crate::runtime::dispatch_dims(desc.extent.pixels());
@@ -72,7 +72,7 @@ pub(super) fn dispatch_bayer(
 pub(super) fn for_demosaic(
     ctx: &KernelContext<'_>,
     input: &Read<'_, Device<Bayer>>,
-) -> Result<Option<(BayerDesc, F32Buffer<Bayer>)>> {
+) -> Result<Option<(BayerDesc, DeviceBuffer<Bayer>)>> {
     let extent = demosaic_extent(ctx.global, &input.desc.extent);
     if extent == input.desc.extent {
         return Ok(None);

@@ -1,7 +1,7 @@
 //! Encode an evaluated image. File writes belong to the requesting frontend.
 use crate::{
     Error, Result,
-    node::data::{Color, ColorRgb, ImageDesc, Payload},
+    node::data::{CaptureData, Color, ColorRgb, ImageDesc, Payload},
     node::profile,
 };
 use lcms2::PixelFormat;
@@ -19,7 +19,7 @@ pub fn tiff(
     pixels: &[[f32; 3]],
     output: &profile::Output,
     floating: bool,
-    metadata: Option<&drip_raw::Metadata>,
+    metadata: Option<&CaptureData>,
 ) -> Result<Vec<u8>> {
     tiff_compressed(
         desc,
@@ -37,7 +37,7 @@ pub fn tiff_compressed(
     pixels: &[[f32; 3]],
     output: &profile::Output,
     floating: bool,
-    metadata: Option<&drip_raw::Metadata>,
+    metadata: Option<&CaptureData>,
     compression: Compression,
 ) -> Result<Vec<u8>> {
     ColorRgb::validate_desc(desc)?;
@@ -82,7 +82,7 @@ fn write_image<C: ColorType>(
     tiff: &mut Tiff,
     extent: &crate::node::data::Extent,
     icc: &[u8],
-    metadata: Option<&drip_raw::Metadata>,
+    metadata: Option<&CaptureData>,
     data: &[C::Inner],
 ) -> tiff::TiffResult<()>
 where
@@ -105,7 +105,7 @@ where
 /// those tags are omitted. Orientation is not copied: pixels stay unrotated.
 ///
 /// \[10\] CIPA DC-008-2019, Exif 2.32. Full reference in `THIRD_PARTY.md`.
-fn write_exif(tiff: &mut Tiff, m: &drip_raw::Metadata) -> tiff::TiffResult<u32> {
+fn write_exif(tiff: &mut Tiff, m: &CaptureData) -> tiff::TiffResult<u32> {
     const EXPOSURE_TIME: u16 = 0x829a;
     const F_NUMBER: u16 = 0x829d;
     const PHOTOGRAPHIC_SENSITIVITY: u16 = 0x8827;
@@ -132,8 +132,11 @@ fn write_exif(tiff: &mut Tiff, m: &drip_raw::Metadata) -> tiff::TiffResult<u32> 
 fn write_text<W: Write + Seek, K: TiffKind>(
     ifd: &mut DirectoryEncoder<W, K>,
     tag: Tag,
-    text: &str,
+    text: &[u8],
 ) -> tiff::TiffResult<()> {
+    let text = std::str::from_utf8(text).map_err(|e| {
+        tiff::TiffError::IoError(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    })?;
     if text.is_empty() { Ok(()) } else { ifd.write_tag(tag, text) }
 }
 

@@ -31,7 +31,7 @@ pub struct RawSource {
 }
 struct Bound {
     levels: Arc<[f32; 4]>,
-    metadata: Arc<drip_raw::Metadata>,
+    metadata: Arc<CaptureData>,
     desc: BayerDesc,
     mosaic: Arc<HostBuffer<f32>>,
     gains: Option<Arc<[f32; 4]>>,
@@ -166,7 +166,12 @@ fn normalize(raw: &drip_raw::Raw) -> Result<Bound> {
     )
     .filter(|m| m.iter().flatten().all(|v| v.is_finite()));
     let camera = Camera {
-        coordinates: format!("{}/{}:{:?}", raw.metadata.make, raw.metadata.model, raw.xyz_to_cam),
+        coordinates: format!(
+            "{}/{}:{:?}",
+            std::str::from_utf8(&raw.metadata.make).expect("decoder returns UTF-8"),
+            std::str::from_utf8(&raw.metadata.model).expect("decoder returns UTF-8"),
+            raw.xyz_to_cam,
+        ),
         scale: "black-relative-white-reference".into(),
     };
     let balanced = gains.map(|gains| Camera {
