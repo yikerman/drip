@@ -1,6 +1,8 @@
 //! One explicit compute device per evaluator. Host nodes remain ordinary Rust.
 use crate::{Error, Result};
-use cubecl::{__private::Runtime, prelude::*};
+use cubecl::prelude::*;
+
+mod backend;
 
 /// Processing request shared by every node and its contract. A scale of one
 /// requests full detail. Demosaic applies this spatial reduction internally;
@@ -29,42 +31,26 @@ pub struct RuntimeContext {
 }
 
 impl RuntimeContext {
-    /// Select computation with DRIP_BACKEND: wgpu (default), cpu or cuda.
-    /// CPU and CUDA require their corresponding Cargo features. An explicit
-    /// unavailable backend is an error; this does not change GUI rendering.
+    /// Select computation with DRIP_BACKEND (default: wgpu). See the crate
+    /// README for build features and compiler/API choices. Unavailable choices
+    /// are errors; this setting does not change GUI rendering.
     pub fn from_env() -> Result<Self> {
         let name = match std::env::var("DRIP_BACKEND") {
             Ok(name) => name,
             Err(std::env::VarError::NotPresent) => "wgpu".into(),
             Err(_) => return Err(Error::Runtime("DRIP_BACKEND must be valid UTF-8".into())),
         };
-        Ok(backend(&name)?())
+        Ok(backend::select(&name)?())
     }
 
     pub fn host() -> Self {
         Self { client: None }
     }
 
-    pub fn wgpu() -> Self {
-        Self::from_client(cubecl::wgpu::WgpuRuntime::<cubecl::wgpu::AutoCompiler>::client(
-            &Default::default(),
-        ))
-    }
-
     /// Adopt an explicitly initialized compute client. Device identity belongs
     /// to this context; port buffers are allocated by its evaluator.
     pub fn from_client(client: Client) -> Self {
         Self { client: Some(client) }
-    }
-
-    #[cfg(feature = "cpu")]
-    pub fn cpu() -> Self {
-        Self::from_client(cubecl::cpu::CpuRuntime::client(&Default::default()))
-    }
-
-    #[cfg(feature = "cuda")]
-    pub fn cuda() -> Self {
-        Self::from_client(cubecl::cuda::CudaRuntime::client(&Default::default()))
     }
 
     pub(crate) fn client(&self) -> Result<&Client> {
@@ -76,22 +62,6 @@ impl RuntimeContext {
             pollster::block_on(client.sync()).map_err(|e| Error::Runtime(e.to_string()))?;
         }
         Ok(())
-    }
-}
-
-fn backend(name: &str) -> Result<fn() -> RuntimeContext> {
-    match name {
-        "wgpu" => Ok(RuntimeContext::wgpu),
-        #[cfg(feature = "cpu")]
-        "cpu" => Ok(RuntimeContext::cpu),
-        #[cfg(feature = "cuda")]
-        "cuda" => Ok(RuntimeContext::cuda),
-        name if matches!(name, "cpu" | "cuda") => Err(Error::Runtime(format!(
-            "DRIP_BACKEND={name} requires a build with --features drip/{name}"
-        ))),
-        _ => Err(Error::Runtime(format!(
-            "unknown DRIP_BACKEND={name:?}; expected wgpu, cpu or cuda"
-        ))),
     }
 }
 
@@ -129,22 +99,5 @@ impl KernelContext<'_> {
             .ok_or_else(|| Error::Runtime("invalid scratch extent".into()))?;
         let handle = self.client()?.empty(bytes);
         Ok(crate::payload::DeviceBuffer::new(handle))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn backend_selection_requires_an_available_explicit_choice() {
-        assert!(backend("wgpu").is_ok());
-        assert_eq!(backend("cpu").is_ok(), cfg!(feature = "cpu"));
-        assert_eq!(backend("cuda").is_ok(), cfg!(feature = "cuda"));
-        for name in ["", "CPU", "auto", "unknown"] {
-            assert!(backend(name).err().unwrap().to_string().contains("unknown DRIP_BACKEND"));
-        }
-        #[cfg(not(feature = "cpu"))]
-        assert!(backend("cpu").err().unwrap().to_string().contains("--features drip/cpu"));
     }
 }

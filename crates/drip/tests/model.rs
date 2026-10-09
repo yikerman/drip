@@ -416,10 +416,16 @@ fn device_chain(runtime: RuntimeContext) {
     assert_eq!(timings.len(), 8);
     assert!(timings.iter().all(|timing| timing.success));
 }
+#[cfg(feature = "wgpu")]
 #[test]
 #[ignore = "requires a compute adapter; run explicitly"]
 fn cubecl_wgpu_hybrid() {
     device_chain(RuntimeContext::wgpu());
+}
+#[test]
+#[ignore = "requires the DRIP_BACKEND runtime and device; run explicitly"]
+fn selected_backend_hybrid() {
+    device_chain(RuntimeContext::from_env().unwrap());
 }
 #[cfg(feature = "cpu")]
 #[test]

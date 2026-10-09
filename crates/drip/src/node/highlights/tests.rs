@@ -192,10 +192,16 @@ fn chrominance_count_boundary(runtime: &RuntimeContext, phase: BayerPhase) {
         }
     }
 }
+#[cfg(feature = "wgpu")]
 #[test]
 #[ignore = "requires a compute-capable wgpu device"]
 fn wgpu_opposed() {
     algorithms(RuntimeContext::wgpu());
+}
+#[test]
+#[ignore = "requires the DRIP_BACKEND runtime and device; run explicitly"]
+fn selected_backend_opposed() {
+    algorithms(RuntimeContext::from_env().unwrap());
 }
 #[cfg(feature = "cpu")]
 #[test]

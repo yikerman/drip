@@ -620,6 +620,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "c2rust-bitfields"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46dc7d2bffa0d0b3d47eb2dc69973466858281446c2ac9f6d8a10e92ab1017df"
+dependencies = [
+ "c2rust-bitfields-derive",
+]
+
+[[package]]
+name = "c2rust-bitfields-derive"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebe1117afa5937ce280034e31fa1e84ed1824a252f75380327eed438535333f8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "calloop"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1322,6 +1342,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "pliron",
+ "pliron-spirv",
  "portable-atomic",
  "rustc_apfloat",
  "serde",
@@ -1505,6 +1526,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "cubecl-spirv"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89c7e0144d3dfb614ebbe48887b69690789bd50635e5039b04d04eeb38c45fc2"
+dependencies = [
+ "bitflags 2.13.2",
+ "cubecl-common",
+ "cubecl-core",
+ "cubecl-environment",
+ "cubecl-ir",
+ "cubecl-opt",
+ "cubecl-runtime",
+ "half",
+ "hashbrown 0.17.1",
+ "itertools 0.15.0",
+ "paste",
+ "pliron",
+ "pliron-spirv",
+ "sanitize-filename",
+ "serde",
+ "tracel-rspirv",
+]
+
+[[package]]
 name = "cubecl-std"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1528,6 +1573,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b8c6f4eb4af39ed3bbb3e4126373d8132cbe018e669172d8d4f1c775b828497"
 dependencies = [
+ "ash",
  "bytemuck",
  "cfg-if",
  "cfg_aliases",
@@ -1539,16 +1585,20 @@ dependencies = [
  "cubecl-monitoring",
  "cubecl-opt",
  "cubecl-server",
+ "cubecl-spirv",
  "derive-new",
  "derive_more",
  "half",
  "hashbrown 0.17.1",
  "itertools 0.15.0",
  "log",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
  "pliron",
  "sanitize-filename",
  "thiserror 2.0.21",
+ "tracel-ash",
  "wasm-bindgen-futures",
  "wgpu",
 ]
@@ -4253,6 +4303,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pliron-spirv"
+version = "0.16.0+sdk-1.4.357.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bf161ba39ae0577f141933d3213bbb2fe255442c8528fd5caf4b5706e63c09a"
+dependencies = [
+ "derive-new",
+ "derive_more",
+ "itertools 0.15.0",
+ "pliron",
+ "thiserror 2.0.21",
+ "tracel-rspirv",
+]
+
+[[package]]
 name = "png"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5297,6 +5361,17 @@ checksum = "a7973cce6668464ea31f176d85b13c7ab3bba2cb3b77a2ed26abd7801688010a"
 
 [[package]]
 name = "syn"
+version = "1.0.109"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
 version = "2.0.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
@@ -5572,6 +5647,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06bdbd8cfc056b8d2e2e85f29b56a3bdbecb527cef81eb39e3e7b98af4652770"
 
 [[package]]
+name = "tracel-ash"
+version = "0.39.5+sdk1.4.357"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9802d90b2e66f00a395a3acf337ddd49dd1e90cb3287fc31a4148f875d7be7c5"
+dependencies = [
+ "ash",
+ "c2rust-bitfields",
+]
+
+[[package]]
 name = "tracel-llvm-bundler"
 version = "23.1.0-3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5589,6 +5674,18 @@ dependencies = [
  "tar",
  "ureq",
  "walkdir",
+]
+
+[[package]]
+name = "tracel-rspirv"
+version = "0.16.0+sdk-1.4.357.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66a203420d85384f39eccada940df9c747ef36ddf59e64230f5251cfb76fb331"
+dependencies = [
+ "bitflags 2.13.2",
+ "pliron",
+ "rustc-hash 2.1.3",
+ "serde",
 ]
 
 [[package]]
