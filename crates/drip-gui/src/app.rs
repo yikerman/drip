@@ -490,6 +490,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a compute-capable wgpu device; run with --ignored"]
     fn shared_edits_redraw_windows_without_evaluating_presentation_changes() {
         let mut h = harness(App::new(None, true, || {}));
         settle(&mut h);
@@ -531,6 +532,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a compute-capable wgpu device; run with --ignored"]
     fn previews_use_the_selected_global_detail() {
         let file = fixture_project("open");
         let mut h = harness(App::new(Some(file.clone()), true, || {}));
@@ -651,6 +653,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires a compute-capable wgpu device; run with --ignored"]
         fn evaluation_is_independent_of_node_positions() {
             let kind = Registry.get("test.offscreen").unwrap();
 
@@ -727,6 +730,7 @@ mod tests {
         static SLOW_UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<SlowGui>();
 
         #[test]
+        #[ignore = "requires a compute-capable wgpu device; run with --ignored"]
         fn evaluating_message_keeps_the_ui_and_previous_preview_available() {
             let (started, entered) = mpsc::channel();
             let (release, resume) = mpsc::channel();
@@ -917,6 +921,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a compute-capable wgpu device; run with --ignored"]
     fn nodes_with_parameters_and_views_pop_them_out() {
         use crate::node_ui::Part;
         let mut h = harness(App::new(None, true, || {}));

@@ -648,6 +648,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires a compute-capable wgpu device; run with --ignored"]
         fn preview_logs_failures_and_passive_node_timings() {
             use std::cell::{Cell, RefCell};
             thread_local! {
@@ -794,6 +795,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires a compute-capable wgpu device; run with --ignored"]
         fn latest_targets_win_and_project_reset_rejects_old_results() {
             let source_kind = Registry.get("test.blocking").unwrap();
 
@@ -931,6 +933,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires a compute-capable wgpu device; run with --ignored"]
         fn exports_follow_invalidation_order_and_always_use_full_detail() {
             let input =
                 std::env::temp_dir().join(format!("drip-worker-input-{}", std::process::id()));
@@ -1047,6 +1050,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a compute-capable wgpu device; run with --ignored"]
     fn preparation_retries_each_request_without_persistent_image_cache() {
         use preparation_probe::CALLS;
         use std::sync::atomic::Ordering;
@@ -1089,6 +1093,7 @@ mod tests {
         }
 
         #[test]
+        #[ignore = "requires a compute-capable wgpu device; run with --ignored"]
         fn panic_wakes_the_ui_and_ends_the_busy_state() {
             let mut graph = Graph::default();
             let id = graph.add_node(Registry.get("test.panic").unwrap()).unwrap();

@@ -2,6 +2,12 @@
 
 Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
+## 2026-10-08
+
+- Linux CI run 37893323997 failed in nine GUI tests after CubeCL device-service
+  initialization disconnected. Those tests and the worker panic test now require
+  explicit `--ignored`; distribution jobs proceed after test failures.
+
 ## 2026-10-07
 
 - Inspector node help now reflows source-wrapped sentences while preserving

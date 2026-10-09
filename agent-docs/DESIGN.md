@@ -23,6 +23,10 @@ in [PROGRESS](PROGRESS.md).
 
 ## Distribution
 
+- **Decided:** GUI tests requiring compute-device initialization are opt-in with
+  `--ignored`, like existing GPU tests, so ordinary headless CI needs no adapter.
+  Distribution jobs wait for tests but run after failures; cancellation still
+  stops them. Failed tests remain visible in the workflow result.
 - **Requirement:** Minimize dependencies users must install. Native processing
   libraries should be static; the normal Linux C/C++ runtime may remain external.
 - **Decided:** Vendor unmodified sources at release tags. Builds must not fetch
