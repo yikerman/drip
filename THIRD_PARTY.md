@@ -203,6 +203,9 @@ The CubeCL Bayer 2x2 and exposure kernels live with their nodes under
 `crates/drip/src/node/shared_kernel.rs`. They derive from Drip revision
 `b9b1045da65376fd5812b7b00362806cde37eaf0` through the validated runtime PoC.
 RGB uses packed three-f32 pixels on both host and device. Bayer binning drops incomplete edge cells and averages the two greens.
+Explicit RGB box reduction also shares one CubeCL kernel across runtimes. It
+retains partial edge blocks and uses f32 accumulation with exponent scaling for
+large finite values, replacing the former CPU f64 sum.
 The same CubeCL source is used by each enabled computation runtime. The original
 PoC source and its complete notices are preserved in the external benchmark
 archive documented in `agent-docs/CUBECL_REWRITE.md`.

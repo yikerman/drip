@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Source pins and numerical deviations: THIRD_PARTY.md.
-use super::data::Extent;
 use cubecl::prelude::*;
 
 #[cube(launch)]
@@ -85,25 +84,47 @@ pub fn reduce_bayer(
     }
 }
 
-pub(crate) fn reduce_rgb(
+// Packed RGB box mean, shared by camera/color nodes and all compute backends.
+// One invocation owns one output channel. Two passes provide the same finite
+// headroom as Bayer reduction without requiring device f64 support.
+#[cube(launch)]
+pub fn reduce_rgb(
+    input: &[f32],
+    output: &mut [f32],
+    width: usize,
+    height: usize,
+    out_width: usize,
     factor: usize,
-    input: &Extent,
-    pixels: &[[f32; 3]],
-    output: &Extent,
-    result: &mut [[f32; 3]],
 ) {
-    let (width, height) = (input.width as usize, input.height as usize);
-    for (i, pixel) in result.iter_mut().enumerate() {
-        let (x, y) = (i % output.width as usize * factor, i / output.width as usize * factor);
-        let (end_x, end_y) = ((x + factor).min(width), (y + factor).min(height));
-        let mut sum = [0.0f64; 3];
+    let i = ABSOLUTE_POS;
+    if i < output.len() {
+        let pixel = i / 3;
+        let channel = i % 3;
+        let x = pixel % out_width * factor;
+        let y = pixel / out_width * factor;
+        let end_x = (x + factor).min(width);
+        let end_y = (y + factor).min(height);
+        let mut magnitude = 0.0f32;
         for row in y..end_y {
-            for sample in &pixels[row * width + x..row * width + end_x] {
-                for c in 0..3 {
-                    sum[c] += f64::from(sample[c]);
-                }
+            for col in x..end_x {
+                magnitude = magnitude.max(input[(row * width + col) * 3 + channel].abs());
             }
         }
-        *pixel = sum.map(|v| (v / ((end_x - x) * (end_y - y)) as f64) as f32);
+        let rescale = magnitude > 1.844_674_4e19_f32 && magnitude <= f32::MAX;
+        let mut sum = 0.0f32;
+        for row in y..end_y {
+            for col in x..end_x {
+                let value = input[(row * width + col) * 3 + channel];
+                // Preserve NaN/Inf propagation when another sample needs scaling.
+                sum += if rescale && value.abs() <= f32::MAX { down64(value) } else { value };
+            }
+        }
+        let mean = sum / ((end_x - x) * (end_y - y)) as f32;
+        output[i] = if rescale && mean.abs() <= f32::MAX {
+            let bound = down64(magnitude);
+            mean.clamp(-bound, bound) * 1.844_674_4e19_f32
+        } else {
+            mean
+        };
     }
 }

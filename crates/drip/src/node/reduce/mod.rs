@@ -67,6 +67,27 @@ pub(super) fn dispatch_bayer(
     Ok(())
 }
 
+fn dispatch_rgb<I: Interpretation>(
+    ctx: &KernelContext<'_>,
+    image: Read<'_, Device<Rgb<I>>>,
+    output: Write<'_, Device<Rgb<I>>>,
+    factor: u32,
+) -> Result<()> {
+    let (count, dim) = crate::runtime::dispatch_dims(output.desc.extent.pixels() * 3);
+    crate::node::shared_kernel::reduce_rgb::launch(
+        ctx.client()?,
+        count,
+        dim,
+        image.data.argument(),
+        output.data.argument(),
+        image.desc.extent.width as usize,
+        image.desc.extent.height as usize,
+        output.desc.extent.width as usize,
+        factor as usize,
+    );
+    Ok(())
+}
+
 /// Demosaic owns the request's reduction. This is local scratch, not a graph
 /// operation or port transfer. The same kernel serves the explicit reducer.
 pub(super) fn for_demosaic(

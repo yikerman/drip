@@ -1,4 +1,4 @@
-use super::{Settings, contract};
+use super::{Settings, contract, dispatch_rgb};
 use crate::{
     Result,
     node::data::*,
@@ -16,17 +16,10 @@ fn color_contract(
 /// Box-average ColorRgb samples without changing their interpretation.
 #[crate::node(id="reduce-rgb", name="RGB box reduction", category="geometry", contract=color_contract)]
 pub fn compute(
-    _: &KernelContext<'_>,
+    ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Cpu<ColorRgb>>,
-    output: Write<'_, Cpu<ColorRgb>>,
+    image: Read<'_, Device<ColorRgb>>,
+    output: Write<'_, Device<ColorRgb>>,
 ) -> Result<()> {
-    crate::node::shared_kernel::reduce_rgb(
-        p.factor as usize,
-        &image.desc.extent,
-        image.data,
-        &output.desc.extent,
-        output.data,
-    );
-    Ok(())
+    dispatch_rgb(ctx, image, output, p.factor as u32)
 }

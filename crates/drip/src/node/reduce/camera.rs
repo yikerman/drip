@@ -1,4 +1,4 @@
-use super::{Settings, contract};
+use super::{Settings, contract, dispatch_rgb};
 use crate::{
     Result,
     node::data::*,
@@ -16,17 +16,10 @@ fn camera_contract(
 /// Box-average CameraRgb native samples without a color conversion.
 #[crate::node(id="reduce-camera-rgb", name="Camera RGB box reduction", category="geometry", contract=camera_contract)]
 pub fn compute(
-    _: &KernelContext<'_>,
+    ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Cpu<CameraRgb>>,
-    output: Write<'_, Cpu<CameraRgb>>,
+    image: Read<'_, Device<CameraRgb>>,
+    output: Write<'_, Device<CameraRgb>>,
 ) -> Result<()> {
-    crate::node::shared_kernel::reduce_rgb(
-        p.factor as usize,
-        &image.desc.extent,
-        image.data,
-        &output.desc.extent,
-        output.data,
-    );
-    Ok(())
+    dispatch_rgb(ctx, image, output, p.factor as u32)
 }
