@@ -2,6 +2,14 @@
 
 Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
+## 2026-10-10
+
+- Blocked exports during asset reloads in the main and popped-out windows and
+  guarded action submission against same-frame bindings. Regression checks cover
+  invalidation, re-enabling after commit and replacement parameters.
+- CPU-backed GUI tests passed (76 passed, one GPU-only test ignored), including
+  both new regressions. GUI strict Clippy and workspace formatting checks passed.
+
 ## 2026-10-08
 
 - Linux CI run 37893323997 failed in nine GUI tests after CubeCL device-service

@@ -139,10 +139,12 @@ impl Worker {
     }
 
     pub fn busy(&self) -> bool {
-        self.in_flight
-            || self.pending.is_some()
-            || !self.bindings.is_empty()
-            || self.opening.is_some()
+        self.in_flight || self.pending.is_some() || self.binding_pending() || self.opening.is_some()
+    }
+
+    /// True until the latest binding results are handed to the app for commit.
+    pub fn binding_pending(&self) -> bool {
+        !self.bindings.is_empty()
     }
 
     pub fn bind(
@@ -211,6 +213,10 @@ impl Worker {
     }
 
     pub fn action(&self, graph: &Graph, id: NodeId, name: &'static str) -> Result<(), String> {
+        // Processing Bind first cannot update an action's immutable graph snapshot.
+        if self.binding_pending() {
+            return Err("wait for asset loading to finish before exporting".into());
+        }
         self.send(Command::Action { graph: graph.clone(), id, name })
     }
 

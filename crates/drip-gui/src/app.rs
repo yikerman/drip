@@ -89,7 +89,7 @@ impl App {
         Panel::top("menu").show_separator_line(false).show(ui, |ui| self.menu(ui));
         Panel::bottom("status").show_separator_line(false).show(ui, |ui| self.status_line(ui));
         let results = |id| self.worker.result(id);
-        let mut frame = Frame::new(&results, &self.popped, self.action.is_some());
+        let mut frame = Frame::new(&results, &self.popped, self.actions_disabled());
         let graph = &mut self.project.graph;
         Panel::right("inspector").resizable(true).default_size(320.0).show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -110,7 +110,7 @@ impl App {
     /// A popped-out window.
     pub fn window(&mut self, ui: &mut Ui, popped: Popped) {
         let results = |id| self.worker.result(id);
-        let mut frame = Frame::new(&results, &self.popped, self.action.is_some());
+        let mut frame = Frame::new(&results, &self.popped, self.actions_disabled());
         let graph = &mut self.project.graph;
         CentralPanel::default().show(ui, |ui| {
             if graph.node(popped.node).is_some() {
@@ -384,6 +384,10 @@ impl App {
         self.report(result.map(|()| "invalidating cache…".into()));
     }
 
+    fn actions_disabled(&self) -> bool {
+        self.action.is_some() || self.worker.binding_pending()
+    }
+
     fn run_action(&mut self, id: NodeId, name: &'static str) {
         match self.worker.action(&self.project.graph, id, name) {
             Ok(()) => {
@@ -411,7 +415,7 @@ mod tests {
     use crate::node_ui::preview::ImageView;
     use drip::param::ParamKind;
     use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{NodeT, Queryable};
     use serde_json::json;
 
     use super::*;
@@ -484,9 +488,68 @@ mod tests {
 
     fn edit(app: &mut App, edit: crate::editing::Edit<'_>) {
         let results = |id| app.worker.result(id);
-        let mut frame = Frame::new(&results, &app.popped, app.action.is_some());
+        let mut frame = Frame::new(&results, &app.popped, app.actions_disabled());
         frame.edit(&mut app.project.graph, edit);
         app.apply(frame.report);
+    }
+
+    fn finish_bindings(app: &mut App) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while app.worker.binding_pending() {
+            app.poll();
+            assert!(std::time::Instant::now() < deadline, "binding did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn invalidation_disables_export_in_main_and_popped_windows_until_bindings_commit() {
+        for popped in [false, true] {
+            let mut app = App::new(None, true, || {});
+            let export = app.project.graph.find("Export").unwrap();
+            app.selected = Some(export);
+            app.invalidate_cache();
+            // Do not poll: even a completed load must block exports until committed.
+            let mut h = Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).build_ui_state(
+                move |ui, app: &mut App| {
+                    if popped {
+                        app.window(ui, Popped { node: export, part: node_ui::Part::Parameters });
+                    } else {
+                        app.ui(ui);
+                    }
+                },
+                app,
+            );
+            h.run();
+            assert!(h.get_by_label("export").accesskit_node().is_disabled());
+            h.state_mut().run_action(export, "export");
+            assert!(h.state().action.is_none());
+            assert!(h.state().status.as_ref().unwrap().text.contains("asset loading"));
+
+            finish_bindings(h.state_mut());
+            h.run();
+            assert!(!h.get_by_label("export").accesskit_node().is_disabled());
+        }
+    }
+
+    #[test]
+    fn binding_and_export_in_the_same_frame_cannot_snapshot_old_parameters() {
+        let mut app = App::new(None, true, || {});
+        let exposure = app.project.graph.find("Exposure").unwrap();
+        let export = app.project.graph.find("Export").unwrap();
+        app.apply(Report {
+            bindings: vec![(exposure, json!({"ev": 2.0}))],
+            action: Some((export, "export")),
+            ..Default::default()
+        });
+        assert!(app.action.is_none());
+        assert!(app.status.as_ref().unwrap().text.contains("asset loading"));
+        assert_ne!(app.project.graph.node(exposure).unwrap().params["ev"], json!(2.0));
+
+        finish_bindings(&mut app);
+        assert_eq!(app.project.graph.node(exposure).unwrap().params["ev"], json!(2.0));
+        app.run_action(export, "export");
+        assert_eq!(app.action, Some("export"));
     }
 
     #[test]

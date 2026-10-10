@@ -21,6 +21,13 @@ in [PROGRESS](PROGRESS.md).
   paragraph breaks, so prose wraps to the sidebar width. Node metadata retains
   the source line breaks; reflow belongs to presentation.
 
+## GUI actions
+
+- **Decided:** Disable exports while asset bindings are pending, including cache
+  invalidation reloads. Reject same-frame actions before snapshotting the graph;
+  worker command ordering cannot refresh an immutable RAW already in a snapshot.
+  The app commits binding notices before accepting further UI actions.
+
 ## Distribution
 
 - **Decided:** Headless CI builds `drip/cpu` and runs tests with `DRIP_BACKEND=cpu`.

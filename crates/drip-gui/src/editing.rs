@@ -15,8 +15,8 @@ pub struct Frame<'a> {
     pub results: &'a dyn Fn(NodeId) -> Option<&'a ViewResult>,
     /// The windows popped out.
     pub popped: &'a BTreeSet<Popped>,
-    /// Disables actions while one runs.
-    pub action_running: bool,
+    /// Disables actions while one runs or assets are loading.
+    pub actions_disabled: bool,
     pub report: Report,
 }
 
@@ -55,9 +55,9 @@ impl<'a> Frame<'a> {
     pub fn new(
         results: &'a dyn Fn(NodeId) -> Option<&'a ViewResult>,
         popped: &'a BTreeSet<Popped>,
-        action_running: bool,
+        actions_disabled: bool,
     ) -> Self {
-        Frame { results, popped, action_running, report: Report::default() }
+        Frame { results, popped, actions_disabled, report: Report::default() }
     }
 
     /// Applies an edit immediately; adding a node returns its id for selection.
@@ -162,9 +162,9 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
         self.frame.report.action = Some((self.id, action));
     }
 
-    /// Whether actions are disabled because one runs.
-    pub fn action_running(&self) -> bool {
-        self.frame.action_running
+    /// Whether actions are disabled while one runs or assets are loading.
+    pub fn actions_disabled(&self) -> bool {
+        self.frame.actions_disabled
     }
 
     /// Whether `part` of the node is shown in its own window.
