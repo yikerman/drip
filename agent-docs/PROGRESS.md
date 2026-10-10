@@ -4,6 +4,22 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
 
+- Parallelized preview RGB f32 to RGBA f16 packing with Rayon over disjoint
+  output slices, preserving pixel order and conversion. Existing packed-byte
+  and image-cache ownership regression passed; GUI strict Clippy passed.
+  User-provided Vulkan traces show half-resolution preparation at 7–23 ms,
+  previously 74–80 ms. Interactions were not controlled; full-resolution
+  preparation was 62–85 ms. Formatting and whitespace checks passed.
+- Compared user-provided interactive Vulkan/WGPU traces: visible warm half-detail
+  updates overlap around 175–202 ms; first loaded previews were 321.8/540.6 ms.
+  Different interactions and truncated logs prevent a controlled comparison.
+  Backend selection uses direct SPIR-V versus WGSL through the same wgpu runtime;
+  node host timings include submission and readback waits, not isolated GPU work.
+- Traced preparation costs in those logs: Vulkan generation 65 spent 144.9 ms
+  of 174.6 ms preparing preview/scopes on the CPU. Before parallel packing,
+  preview converted RGB f32 to RGBA f16 serially; scopes scanned separately
+  with Rayon. Its 29.2 ms
+  preview evaluation includes upstream GPU completion and shared RGB readback.
 - Shortened RCD scratch ownership to the passes that use each buffer, without
   changing kernels or adding waits. Peak Drip-owned scratch falls from eleven
   to eight f32 lanes per pixel; physical allocation savings remain unmeasured.

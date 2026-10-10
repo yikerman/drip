@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use crate::node_ui::data::Rgb;
 use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
+use rayon::prelude::*;
 
 /// An image packed as `Rgba16Float` texels. Packing is CPU work, done off the
 /// UI thread; the renderer only uploads the bytes.
@@ -20,12 +21,14 @@ pub struct Image {
 
 impl Image {
     pub fn new(rgb: &Rgb) -> Self {
-        let texels = rgb
-            .pixels
-            .iter()
-            .flat_map(|&[r, g, b]| [r, g, b, 1.0])
-            .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
-            .collect();
+        let mut texels = vec![0; rgb.pixels.len() * 8];
+        texels.par_chunks_exact_mut(8).zip(rgb.pixels.par_iter()).with_min_len(4096).for_each(
+            |(texel, &[r, g, b])| {
+                for (bytes, value) in texel.as_chunks_mut::<2>().0.iter_mut().zip([r, g, b, 1.0]) {
+                    bytes.copy_from_slice(&half::f16::from_f32(value).to_ne_bytes());
+                }
+            },
+        );
         Image { width: rgb.width, height: rgb.height, requested_scale: rgb.requested_scale, texels }
     }
 }

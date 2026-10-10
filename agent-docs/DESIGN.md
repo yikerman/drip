@@ -28,6 +28,13 @@ in [PROGRESS](PROGRESS.md).
   not add host waits. This reduces Drip-owned scratch lifetimes without changing
   kernels. Runtime reservations and actual peak memory need separate measurement.
 
+## Preview packing
+
+- **Decided:** Pack preview pixels into disjoint RGBA f16 byte slices with Rayon.
+  Pixel conversion is independent; preserve pixel order and native-endian bytes.
+  Reuse the existing CPU pool and avoid splitting below 4096 pixels to amortize
+  scheduling. Packing still completes before publishing the prepared view.
+
 ## GUI actions
 
 - **Decided:** Disable exports while asset bindings are pending, including cache
