@@ -4,6 +4,20 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
 
+- Diagnosed CI run 38046592913: CPU-backed GUI evaluation timed out on all
+  three platforms after scope migration. Enabling `drip/cpu` alone does not
+  select that runtime for GUI tests; CI explicitly sets `DRIP_BACKEND=cpu`.
+  Exposure scopes forced 256 barrier lanes, while the CPU runtime needs a host
+  worker per lane. Capped lanes at the reported limit and distributed the bins
+  across them. Added a small-workgroup histogram/waveform regression.
+  Worker evaluation waits now share the GUI's 90-second bound because the
+  compute client queues requests from concurrent full-RAW tests; synchronization
+  gates retain their five-second bound. No test was disabled.
+  The exact CPU-backed workspace command passes locally: 132 passed, 13 ignored,
+  including a two-core affinity run. All six scope tests pass explicitly on CPU,
+  Vulkan and WGPU; the small-workgroup regression also passes on Vulkan. Four
+  doctests, strict workspace Clippy, formatting and whitespace checks pass.
+  Hosted Windows/macOS validation remains pending the follow-up commit.
 - Applied the approved frontend naming, parameter, template and presentation
   changes; refreshed current help, READMEs and maintained design notes. Typed
   choice variants round-trip through Serde and show only their own settings,

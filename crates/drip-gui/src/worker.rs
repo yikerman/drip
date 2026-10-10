@@ -584,7 +584,9 @@ mod tests {
     }
 
     fn wait(worker: &mut Worker) -> Vec<Notice> {
-        let deadline = Instant::now() + TIMEOUT;
+        // The compute client is shared with full-RAW GUI tests. Allow their
+        // queued work and cold kernel compilation; channel gates stay short.
+        let deadline = Instant::now() + Duration::from_secs(90);
         let mut notices = Vec::new();
         loop {
             notices.extend(worker.poll());

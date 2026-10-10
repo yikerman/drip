@@ -37,6 +37,10 @@ in [PROGRESS](PROGRESS.md).
 
 ## Device scopes
 
+- **Decided:** Exposure reductions cap workgroup lanes at the runtime's reported
+  limit and distribute all bins across those lanes. CPU barrier kernels require
+  a host worker per lane; a fixed GPU-sized group oversubscribes CI machines.
+  Keep the same reduction implementation and 256-lane GPU launches.
 - **Decided:** GUI observer ports request device RGB for histogram, waveform and
   vectorscope (including camera exposure scopes). Preparation uses the evaluator's
   client and reads back integer counts. Keep kernels in `drip-gui`; LittleCMS

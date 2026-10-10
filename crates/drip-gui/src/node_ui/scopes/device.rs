@@ -35,6 +35,9 @@ pub fn exposure<I: DisplayInterpretation>(
     waveform: bool,
 ) -> Result<Vec<[u32; 3]>> {
     let client = ctx.client()?;
+    // Barrier kernels need one runnable worker per lane on the CPU runtime.
+    // Respect its reported workgroup limit instead of forcing 256 host threads.
+    let dim = CubeDim::new_1d(client.properties().hardware.max_units_per_cube.min(256));
     // Upload the same f32 edges as the host implementation: comparing edges
     // preserves exact exposure boundaries without device log2 rounding.
     let edges: Vec<f32> =
@@ -45,7 +48,7 @@ pub fn exposure<I: DisplayInterpretation>(
         kernels::exposure_counts::launch(
             client,
             CubeCount::Static(256, image.desc.extent.height.div_ceil(32).min(256), 1),
-            CubeDim::new_1d(256),
+            dim,
             image.pixels.argument(),
             argument(&edges),
             argument(&output),
@@ -59,7 +62,7 @@ pub fn exposure<I: DisplayInterpretation>(
         kernels::exposure_counts::launch(
             client,
             CubeCount::Static(groups as u32, 1, 1),
-            CubeDim::new_1d(256),
+            dim,
             image.pixels.argument(),
             argument(&edges),
             argument(&partial),
@@ -147,8 +150,12 @@ mod kernels {
         #[comptime] waveform: bool,
     ) {
         let counts = Shared::<[Atomic<u32>]>::new_slice(768usize);
-        for c in 0..3usize {
-            counts[(UNIT_POS as usize) * 3 + c].store(0);
+        let mut bin = UNIT_POS as usize;
+        while bin < 256 {
+            for c in 0..3usize {
+                counts[bin * 3 + c].store(0);
+            }
+            bin += CUBE_DIM as usize;
         }
         sync_cube();
         if waveform {
@@ -182,16 +189,19 @@ mod kernels {
             }
         }
         sync_cube();
-        for c in 0..3usize {
-            let value = counts[(UNIT_POS as usize) * 3 + c].load();
-            if waveform {
-                if value > 0 {
-                    output[((255 - (UNIT_POS as usize)) * 256 + (CUBE_POS_X as usize)) * 3 + c]
-                        .fetch_add(value);
+        let mut bin = UNIT_POS as usize;
+        while bin < 256 {
+            for c in 0..3usize {
+                let value = counts[bin * 3 + c].load();
+                if waveform {
+                    if value > 0 {
+                        output[((255 - bin) * 256 + CUBE_POS_X as usize) * 3 + c].fetch_add(value);
+                    }
+                } else {
+                    output[CUBE_POS * 768 + bin * 3 + c].store(value);
                 }
-            } else {
-                output[CUBE_POS * 768 + (UNIT_POS as usize) * 3 + c].store(value);
             }
+            bin += CUBE_DIM as usize;
         }
     }
 
@@ -260,6 +270,42 @@ mod kernels {
         }
         if count > 0 {
             output[shard + previous].fetch_add(count);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exposure_counts_cover_all_bins_with_small_workgroups() {
+        let ctx = crate::node_ui::scopes::tests::context();
+        let client = ctx.client().unwrap();
+        let edges: Vec<f32> = (0..256).map(|i| 2f32.powf(-12.0 + i as f32 / 16.0)).collect();
+        let input = client
+            .create(Bytes::from_elems(edges.iter().flat_map(|&v| [v; 3]).collect::<Vec<_>>()));
+        let edges = client.create(Bytes::from_elems(edges));
+        let dim = CubeDim::new_1d(client.properties().hardware.max_units_per_cube.min(3));
+        for waveform in [false, true] {
+            let len = if waveform { 256 * 256 * 3 } else { 256 * 3 };
+            let output = zeroed(client, len);
+            kernels::exposure_counts::launch(
+                client,
+                CubeCount::Static(if waveform { 256 } else { 1 }, 1, 1),
+                dim,
+                argument(&input),
+                argument(&edges),
+                argument(&output),
+                256,
+                waveform,
+            );
+            let counts = read(client, output).unwrap();
+            assert_eq!(counts.iter().sum::<u32>(), 256 * 3);
+            for bin in 0..256 {
+                let index = if waveform { ((255 - bin) * 256 + bin) * 3 } else { bin * 3 };
+                assert_eq!(&counts[index..index + 3], &[1; 3]);
+            }
         }
     }
 }
