@@ -1,9 +1,9 @@
-//! Host images prepared for GUI views. Processing payloads remain in `drip`.
+//! Images prepared for GUI views. Processing payloads remain in `drip`.
 use drip::{
     Error, Result,
     eval::InputValues,
     node::data::{Camera, Color, HostBuffer, Interpretation, Rgb as PayloadRgb},
-    ports::Cpu,
+    ports::{Cpu, Device},
     resource::Resources,
 };
 use std::sync::Arc;
@@ -36,10 +36,29 @@ impl DisplayInterpretation for Color {
 }
 #[derive(Default)]
 pub struct PrepareContext {
+    pub client: Option<cubecl::prelude::Client>,
     pub resources: Resources,
     pub level: u8,
 }
+pub struct DeviceRgb<I: DisplayInterpretation> {
+    pub desc: drip::node::data::ImageDesc<I>,
+    pub pixels: Arc<drip::node::data::DeviceBuffer<PayloadRgb<I>>>,
+}
+
 impl PrepareContext {
+    pub fn client(&self) -> Result<&cubecl::prelude::Client> {
+        self.client.as_ref().ok_or_else(|| Error::Runtime("no compute runtime is bound".into()))
+    }
+
+    pub fn device_image<I: DisplayInterpretation>(
+        &self,
+        inputs: &InputValues,
+    ) -> Result<DeviceRgb<I>> {
+        let value = inputs.get("image").ok_or_else(|| Error::Contract("missing image".into()))?;
+        let (desc, _) = value.get::<Device<PayloadRgb<I>>>()?;
+        Ok(DeviceRgb { desc: desc.clone(), pixels: value.shared::<Device<PayloadRgb<I>>>()? })
+    }
+
     pub fn image<I: DisplayInterpretation>(&self, inputs: &InputValues) -> Result<Arc<Rgb>> {
         let value = inputs.get("image").ok_or_else(|| Error::Contract("missing image".into()))?;
         let (desc, _) = value.get::<Cpu<PayloadRgb<I>>>()?;

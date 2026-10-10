@@ -14,6 +14,36 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
   regressions. Strict workspace Clippy, formatting and whitespace checks passed.
   Native dialogs and visual layout were not exercised interactively. Persisted
   IDs and changed parameter layouts intentionally have no migration aliases.
+- Moved histogram, waveform and vectorscope preparation (including camera
+  exposure scopes) to GUI-owned CubeCL kernels consuming device RGB. LittleCMS
+  proofing and CPU preview packing are unchanged. GPU scope regressions pass on
+  Vulkan and WGPU; exposure counts match the CPU reference exactly. One of
+  262,144 vectorscope test samples changes bins versus f64; counts, neutrals,
+  primaries and HDR cases pass. GUI suite: 77 passed, 7 opt-in ignored; six scope
+  tests also pass explicitly on both GPU paths. Strict GUI Clippy and formatting
+  pass. CPU backend tests were skipped at the user's request.
+- Preserved the original profile and reran after the user confirmed competing
+  compilation had finished; excluded the earlier contaminated attempt. Clean
+  WGPU baseline→device scopes: quarter 83.3→44.5 ms, half 187.5→68.0 ms,
+  full 597.4→164.0 ms. Vulkan: 82.6→45.4, 195.0→67.8, 571.9→170.6 ms.
+  Each case has five samples; desktop activity/clocks remain uncontrolled.
+  Separate full-detail tracing measures scopes at 9.4 ms, packing at 63.7 ms,
+  and GPU completion/shared readback at 85.8 ms. CubeCL scope kernels total
+  6.5–6.9 ms; all kernels total 28.9 ms. Nsight CPU samples now concentrate on
+  preview packing. Preview bytes match both backends and the saved baseline.
+  Source, binaries, raw results, report and profiler captures are preserved in
+  `../drip-benchmark-results/2026-10-10-device-scopes/`. No benchmark hooks were
+  added to production code; these worker timings exclude drawing/texture upload.
+- Ran the uniform Sony worker benchmark after scratch/packing changes, with
+  release builds and 12 Rayon threads. Vulkan quarter/half/full medians were
+  83.0/184.1/552.9 ms; WGPU 81.5/190.0/552.1 ms (five warm samples each).
+  Separate host tracing measured full-detail scope preparation at about 376 ms
+  and packing at 80 ms. CubeCL kernel timings totaled 22–23 ms, including
+  10.5–11.7 ms for RCD; Nsight CPU samples confirmed the scope hotspot.
+  Saved source/binary identities, raw samples and CPU/Vulkan capture under
+  `../drip-benchmark-results/2026-10-10-profile/`. Preview bytes matched between
+  backends and the prior simplified baseline. Drawing/upload remain excluded;
+  profiler runs are separate and do not isolate exact readback copy cost.
 - Parallelized preview RGB f32 to RGBA f16 packing with Rayon over disjoint
   output slices, preserving pixel order and conversion. Existing packed-byte
   and image-cache ownership regression passed; GUI strict Clippy passed.

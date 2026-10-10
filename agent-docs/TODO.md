@@ -28,7 +28,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Project-relative paths | Open | Resolve against the project location alongside CLI work. |
 | Save/close protection | Deferred | Failure-safe saves/exports, unsaved-close confirmation and in-flight export handling. |
 | Resource changes | Idea | Detect changed input files. |
-| End-to-end latency | Open | Measure preparation/upload/draw too; consider Tracy via `profiling`. |
+| End-to-end latency | Measured | Device scopes reduce full-detail worker latency to 164–171 ms. Profile display upload/draw; remaining worker costs include about 64 ms of CPU preview packing and an 86 ms GPU-completion/readback span. Consider device RGBA packing; keep LittleCMS proofing on CPU. |
 | Memory and drawing cost | Deferred | Measure retained RAWs/export buffers, duplicate GPU uploads across windows and scope mesh copies before considering streaming TIFF/shared textures. |
 | Evaluation performance | Deferred | Cooperative cancellation, full-detail ROI and backend optimization, driven by measured latency. |
 | Capture metadata | Deferred | Lens, GPS, orientation, time zone and maker-note passthrough. |

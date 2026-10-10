@@ -35,6 +35,19 @@ in [PROGRESS](PROGRESS.md).
   Reuse the existing CPU pool and avoid splitting below 4096 pixels to amortize
   scheduling. Packing still completes before publishing the prepared view.
 
+## Device scopes
+
+- **Decided:** GUI observer ports request device RGB for histogram, waveform and
+  vectorscope (including camera exposure scopes). Preparation uses the evaluator's
+  client and reads back integer counts. Keep kernels in `drip-gui`; LittleCMS
+  softproof/gamut check and preview packing keep their existing CPU path.
+- **Decided:** Exposure scopes compare uploaded f32 thresholds to preserve exact
+  bin edges. Vectorscope uses portable f32 arithmetic, normalizes RGB before XYZ
+  to avoid HDR overflow and explicitly centers exact neutrals. Values very near
+  bin boundaries can differ from the former f64 calculation; validate count
+  conservation and bound drift against the reference. Scratch is image-size
+  independent, with 32 chromaticity count shards (8 MiB).
+
 ## GUI actions
 
 - **Decided:** Use sentence-case display labels independently of persisted keys.

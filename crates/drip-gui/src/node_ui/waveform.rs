@@ -10,7 +10,7 @@ use std::sync::Arc;
 pub fn observe(
     _: &KernelContext<'_>,
     _: &ExposureSettings,
-    image: Read<'_, Cpu<ColorRgb>>,
+    image: Read<'_, Device<ColorRgb>>,
 ) -> Result<()> {
     let _ = image;
     Ok(())
@@ -21,6 +21,7 @@ impl crate::node_ui::GuiNode for WaveformGui {
     type Parameters = ExposureSettings;
     type Presentation = Arc<Scope>;
     const ID: &'static str = "view.waveform";
-    const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-        Some(|p, inputs, ctx| waveform(p, (&*ctx.image::<drip::node::data::Color>(inputs)?,), ctx));
+    const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|p, inputs, ctx| {
+        waveform(p, (&ctx.device_image::<drip::node::data::Color>(inputs)?,), ctx)
+    });
 }

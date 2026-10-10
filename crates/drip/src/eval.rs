@@ -43,6 +43,12 @@ impl Evaluator {
         Self { runtime }
     }
 
+    /// The compute client that owns this evaluator's device inputs. External
+    /// consumers can dispatch presentation kernels against retained inputs.
+    pub fn client(&self) -> Result<&cubecl::prelude::Client> {
+        self.runtime.client()
+    }
+
     /// Prepare declared inputs for several external consumers in one run.
     /// Shared ancestors execute once; an incomplete branch does not prevent
     /// unrelated consumers from receiving their inputs. No values survive here.

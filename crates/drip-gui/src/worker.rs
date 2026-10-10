@@ -385,8 +385,11 @@ fn evaluate(
     let trace = log::log_enabled!(log::Level::Trace);
     let mut timings = Vec::new();
     let mut preparation_timings = Vec::new();
-    let ctx =
-        crate::node_ui::data::PrepareContext { resources: resources.clone(), level: request.level };
+    let ctx = crate::node_ui::data::PrepareContext {
+        resources: resources.clone(),
+        level: request.level,
+        client: evaluator.ok().and_then(|e| e.client().ok()).cloned(),
+    };
     let mut inputs = evaluate_nodes(request, evaluator, trace.then_some(&mut timings));
     let mut failures = BTreeMap::new();
     let views = request
@@ -510,7 +513,11 @@ fn run_action(
         .remove(&id)
         .expect("requested action")
         .map_err(|e| e.to_string())?;
-    let ctx = crate::node_ui::data::PrepareContext { resources: resources.clone(), level: 0 };
+    let ctx = crate::node_ui::data::PrepareContext {
+        resources: resources.clone(),
+        level: 0,
+        client: evaluator.client().ok().cloned(),
+    };
     binding.run_action(name, node.params, &inputs, &ctx).map_err(|e| e.to_string())
 }
 
@@ -733,7 +740,7 @@ mod tests {
             graph.connect(Port(source, "image".into()), Port(preview, "image".into())).unwrap();
             let request =
                 Request { generation: 42, graph, level: 1, targets: vec![preview, histogram] };
-            let evaluator = Evaluator::new(drip::runtime::RuntimeContext::host());
+            let evaluator = Evaluator::new(drip::runtime::RuntimeContext::from_env().unwrap());
             for enabled in [true, false] {
                 TRACE.set(enabled);
                 let Event::Evaluated { failures, .. } = super::super::evaluate(

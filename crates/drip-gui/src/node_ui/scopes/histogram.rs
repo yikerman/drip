@@ -2,9 +2,10 @@
 
 use super::ExposureSettings;
 use crate::node_ui::data::PrepareContext;
-use crate::node_ui::data::Rgb;
+use crate::node_ui::data::{DeviceRgb, DisplayInterpretation};
 use drip::Error as KernelError;
 
+#[cfg(test)]
 use rayon::prelude::*;
 use std::sync::Arc;
 
@@ -21,28 +22,29 @@ pub struct Histogram {
     pub color_space: String,
 }
 
+#[cfg(test)]
 const BINS: usize = 256;
 
-pub fn histogram(
+pub fn histogram<I: DisplayInterpretation>(
     p: ExposureSettings,
-    (image,): (&Rgb,),
-    _: &PrepareContext,
+    (image,): (&DeviceRgb<I>,),
+    ctx: &PrepareContext,
 ) -> Result<Arc<Histogram>, KernelError> {
     let (min, max) = (p.min_ev as f32, p.max_ev as f32);
-    let thresholds = std::array::from_fn(|i| 2f32.powf(min + i as f32 * (max - min) / BINS as f32));
-    let counts = count(&image.pixels, &thresholds);
+    let counts = super::device::exposure(image, ctx, min, max, false)?;
     let log = super::logarithmic(p.scale);
     let histogram = Histogram {
         min_stop: min,
         max_stop: max,
         counts,
         log,
-        color_space: image.color_space.clone(),
+        color_space: image.desc.interpretation.label(),
     };
     Ok(Arc::new(histogram))
 }
 
-fn count(input: &[[f32; 3]], thresholds: &[f32; BINS]) -> Vec<[u32; 3]> {
+#[cfg(test)]
+pub(super) fn count(input: &[[f32; 3]], thresholds: &[f32; BINS]) -> Vec<[u32; 3]> {
     input
         .par_chunks(4096)
         .map(|pixels| {

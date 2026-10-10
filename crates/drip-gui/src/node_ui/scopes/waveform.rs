@@ -1,25 +1,31 @@
 //! Waveform reduction shared by color and camera scopes.
-use super::{ExposureSettings, SIZE, Scope, ScopeAxes, scope};
-use crate::node_ui::data::{PrepareContext, Rgb};
+#[cfg(test)]
+use super::SIZE;
+use super::{ExposureSettings, Scope, ScopeAxes, scope};
+#[cfg(test)]
+use crate::node_ui::data::Rgb;
+use crate::node_ui::data::{DeviceRgb, DisplayInterpretation, PrepareContext};
 use drip::Error as KernelError;
+#[cfg(test)]
 use rayon::prelude::*;
 use std::sync::Arc;
-pub fn waveform(
+pub fn waveform<I: DisplayInterpretation>(
     p: ExposureSettings,
-    (image,): (&Rgb,),
-    _: &PrepareContext,
+    (image,): (&DeviceRgb<I>,),
+    ctx: &PrepareContext,
 ) -> Result<Arc<Scope>, KernelError> {
     let (min, max) = (p.min_ev as f32, p.max_ev as f32);
-    let counts = waveform_counts(image, min, max);
+    let counts = super::device::exposure(image, ctx, min, max, true)?;
     Ok(scope(
         counts,
         ScopeAxes::Waveform { min_stop: min, max_stop: max },
         super::logarithmic(p.scale),
-        image.color_space.clone(),
+        image.desc.interpretation.label(),
     ))
 }
 
-fn waveform_counts(image: &Rgb, min: f32, max: f32) -> Vec<[u32; 3]> {
+#[cfg(test)]
+pub(super) fn waveform_counts(image: &Rgb, min: f32, max: f32) -> Vec<[u32; 3]> {
     let edges: [f32; SIZE] =
         std::array::from_fn(|i| 2f32.powf(min + i as f32 * (max - min) / SIZE as f32));
     // Each worker owns one scope column, avoiding full-grid partial histograms

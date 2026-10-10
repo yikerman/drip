@@ -2,13 +2,14 @@
 use drip::{Error, Result, node::data::*, param::ParamKind};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+pub(super) mod device;
 pub(super) mod histogram;
 mod view;
 pub(super) mod waveform;
 pub use super::vectorscope::vectorscope_xyz;
 pub use histogram::Histogram;
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 #[derive(Clone, Copy, Default, drip::Choice)]
 pub enum Scale {
     #[default]

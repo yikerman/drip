@@ -1897,6 +1897,7 @@ dependencies = [
 name = "drip-gui"
 version = "0.1.0-dev"
 dependencies = [
+ "cubecl",
  "drip",
  "drip-macros",
  "egui",

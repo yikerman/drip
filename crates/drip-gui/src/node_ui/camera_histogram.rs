@@ -11,7 +11,7 @@ use std::sync::Arc;
 pub fn observe(
     _: &KernelContext<'_>,
     _: &ExposureSettings,
-    image: Read<'_, Cpu<CameraRgb>>,
+    image: Read<'_, Device<CameraRgb>>,
 ) -> Result<()> {
     let _ = image;
     Ok(())
@@ -23,6 +23,6 @@ impl crate::node_ui::GuiNode for CameraHistogramGui {
     type Presentation = Arc<Histogram>;
     const ID: &'static str = "view.camera-histogram";
     const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|p, inputs, ctx| {
-        histogram(p, (&*ctx.image::<drip::node::data::Camera>(inputs)?,), ctx)
+        histogram(p, (&ctx.device_image::<drip::node::data::Camera>(inputs)?,), ctx)
     });
 }
