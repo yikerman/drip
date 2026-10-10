@@ -4,6 +4,18 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
 
+- Shortened RCD scratch ownership to the passes that use each buffer, without
+  changing kernels or adding waits. Peak Drip-owned scratch falls from eleven
+  to eight f32 lanes per pixel; physical allocation savings remain unmeasured.
+  Existing CPU and WGPU algorithm tests passed, including RCD upstream vectors
+  for all four Bayer phases, small images and context-driven reduction.
+  Library strict Clippy, workspace formatting and whitespace checks passed.
+- Audited recorded memory results against master and current RCD/evaluator code.
+  The latest uniform WGPU run reduced peak RSS from 3240.5 to 2297.0 MiB;
+  sampled whole-GPU maximum rose from 1342 to 4325 MiB. Before lifetime changes,
+  full-detail RCD requested eleven f32 scratch lanes per pixel (1.74 GiB for Sony),
+  whereas master uses bounded tile scratch. Pool reservations, transfer storage
+  and live buffers were not separately measured; no new benchmark was run.
 - Blocked exports during asset reloads in the main and popped-out windows and
   guarded action submission against same-frame bindings. Regression checks cover
   invalidation, re-enabling after commit and replacement parameters.

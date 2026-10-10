@@ -21,6 +21,13 @@ in [PROGRESS](PROGRESS.md).
   paragraph breaks, so prose wraps to the sidebar width. Node metadata retains
   the source line breaks; reflow belongs to presentation.
 
+## RCD scratch
+
+- **Decided:** Allocate scratch immediately before its first pass and release it
+  after its final dispatch. CubeCL owns queued bindings and storage reuse; do
+  not add host waits. This reduces Drip-owned scratch lifetimes without changing
+  kernels. Runtime reservations and actual peak memory need separate measurement.
+
 ## GUI actions
 
 - **Decided:** Disable exports while asset bindings are pending, including cache

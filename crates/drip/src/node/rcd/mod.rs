@@ -40,14 +40,9 @@ pub fn compute(
     let h = image.desc.extent.height as usize;
     let phase = image.desc.phase as usize;
     let (count, dim) = dispatch_dims(n);
-    let (vh, low, p, q, pq) = (
-        ctx.scratch_f32(n)?,
-        ctx.scratch_f32(n)?,
-        ctx.scratch_f32(n)?,
-        ctx.scratch_f32(n)?,
-        ctx.scratch_f32(n)?,
-    );
-    let (rgb, other) = (ctx.scratch_f32(n * 3)?, ctx.scratch_f32(n * 3)?);
+    let (vh, low, p, q) =
+        (ctx.scratch_f32(n)?, ctx.scratch_f32(n)?, ctx.scratch_f32(n)?, ctx.scratch_f32(n)?);
+    let rgb = ctx.scratch_f32(n * 3)?;
     let client = ctx.client()?;
     kernel::rcd_maps::launch(
         client,
@@ -75,6 +70,10 @@ pub fn compute(
         h,
         phase,
     );
+    // Release scratch after its final dispatch so the runtime can reuse storage
+    // for later passes. Queued work owns its bindings; no host wait is needed.
+    drop(low);
+    let pq = ctx.scratch_f32(n)?;
     kernel::rcd_pq::launch(
         client,
         count.clone(),
@@ -86,6 +85,8 @@ pub fn compute(
         h,
         phase,
     );
+    drop((p, q));
+    let other = ctx.scratch_f32(n * 3)?;
     kernel::rcd_opposite::launch(
         client,
         count.clone(),
@@ -97,6 +98,7 @@ pub fn compute(
         h,
         phase,
     );
+    drop((rgb, pq));
     kernel::rcd_finish::launch(
         client,
         count,
