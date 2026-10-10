@@ -13,9 +13,9 @@ pub enum PortRole {
 impl PortRole {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Input => "input",
-            Self::OptionalInput => "optional input",
-            Self::Output => "output",
+            Self::Input => "Input",
+            Self::OptionalInput => "Optional input",
+            Self::Output => "Output",
         }
     }
 }
@@ -29,12 +29,25 @@ pub struct PortText {
 }
 
 impl PortText {
+    pub fn heading(&self) -> String {
+        if matches!(self.role, PortRole::Output) && self.port == "output" {
+            "Output".into()
+        } else {
+            format!("{} · {}", self.role.label(), self.port)
+        }
+    }
+
+    pub fn canvas(&self) -> String {
+        let optional = if matches!(self.role, PortRole::OptionalInput) { "?" } else { "" };
+        format!("{}{optional} · {}", self.port, self.label)
+    }
+
     pub fn hover(&self) -> String {
         let requires = match self.role {
             PortRole::Input | PortRole::OptionalInput => "requires ",
             PortRole::Output => "",
         };
-        format!("{} {}: {requires}{}", self.role.label(), self.port, self.label)
+        format!("{}: {requires}{}", self.heading(), self.label)
     }
 }
 
@@ -67,13 +80,13 @@ mod tests {
     fn concrete_outputs_are_known_before_inputs_are_connected() {
         let mut graph = Graph::default();
         for kind in [
-            crate::model::Registry.get("apply-rec2020-sigmoid").unwrap(),
-            crate::model::Registry.get("rgb-exposure").unwrap(),
+            crate::model::Registry.get("tone.sigmoid").unwrap(),
+            crate::model::Registry.get("tone.exposure").unwrap(),
         ] {
             let id = graph.add_node(kind).unwrap();
             let ports = texts(&graph, id);
-            assert_eq!(ports[0].hover(), "input image: requires ColorRgb");
-            assert_eq!(ports.last().unwrap().hover(), "output output: ColorRgb");
+            assert_eq!(ports[0].hover(), "Input · image: requires ColorRgb");
+            assert_eq!(ports.last().unwrap().hover(), "Output: ColorRgb");
         }
     }
 
@@ -85,7 +98,7 @@ mod tests {
             for kind in crate::model::Registry.kinds() {
                 let id = graph.add_node(kind).unwrap();
                 let width = super::super::of(kind).size(&graph.node(id).unwrap()).x - 16.0;
-                for text in texts(&graph, id).into_iter().map(|t| t.label) {
+                for text in texts(&graph, id).into_iter().map(|t| t.canvas()) {
                     let galley = ui.fonts_mut(|fonts| {
                         fonts.layout_job({
                             let mut job = egui::text::LayoutJob::simple(

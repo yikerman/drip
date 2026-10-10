@@ -24,9 +24,10 @@ fn gain_contract(
     }
     Ok((None,))
 }
-/// Apply BayerGains to independent BayerLevels, keeping clipping coordinates
-/// consistent with a Bayer image transformed by the same gains.
-#[crate::node(id="bayer-gain-levels", name="Balance clipping levels", category="raw", contract=gain_contract)]
+/// Apply BayerGains to BayerLevels in matching response coordinates and CFA phase.
+/// Output is BayerLevels in the gains' target interpretation. Use the same gains
+/// as the Bayer image to keep its clipping levels in matching coordinates.
+#[crate::node(id="sensor.clipping-level-gains", name="Apply clipping-level gains", category="Sensor", contract=gain_contract)]
 pub fn compute(
     _: &KernelContext<'_>,
     _: &(),

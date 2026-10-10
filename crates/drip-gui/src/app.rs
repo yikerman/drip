@@ -22,13 +22,16 @@ pub struct App {
     registry: Registry,
     worker: Worker,
     dirty: bool,
+    modified: bool,
+    /// Namespaces temporary control drafts when node IDs are reused by a new project.
+    ui_generation: u64,
     file: Option<PathBuf>,
     selected: Option<NodeId>,
     editor: Editor,
     /// One user-selected level for every preview target.
     level: u8,
     status: Option<Status>,
-    action: Option<&'static str>,
+    action: Option<ActionStatus>,
     wide_gamut: bool,
     /// Parts of nodes shown in their own windows; not saved.
     popped: BTreeSet<Popped>,
@@ -47,6 +50,11 @@ struct Status {
     text: String,
 }
 
+struct ActionStatus {
+    running: String,
+    completed: String,
+}
+
 impl App {
     pub fn new(
         file: Option<PathBuf>,
@@ -58,6 +66,8 @@ impl App {
             registry: Registry,
             worker: Worker::new(wake),
             dirty: true,
+            modified: false,
+            ui_generation: 0,
             file: None,
             selected: None,
             editor: Editor::default(),
@@ -86,6 +96,10 @@ impl App {
 
     /// The main window: menu, status line, inspector and editor.
     pub fn ui(&mut self, ui: &mut Ui) {
+        ui.push_id(self.ui_generation, |ui| self.main_ui(ui));
+    }
+
+    fn main_ui(&mut self, ui: &mut Ui) {
         Panel::top("menu").show_separator_line(false).show(ui, |ui| self.menu(ui));
         Panel::bottom("status").show_separator_line(false).show(ui, |ui| self.status_line(ui));
         let results = |id| self.worker.result(id);
@@ -129,6 +143,15 @@ impl App {
         self.popped.iter().map(|&popped| window(popped)).collect()
     }
 
+    pub fn title(&self) -> String {
+        let name = self
+            .file
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .map_or_else(|| "Untitled".into(), |name| name.to_string_lossy());
+        format!("{name}{} · Drip", if self.modified { " *" } else { "" })
+    }
+
     /// The size, in points, to open window `popped` at. egui has no pass
     /// that only measures, so the content is laid out once, unseen, in a
     /// scratch context at the window's scale; a size it records there wins
@@ -164,6 +187,7 @@ impl App {
             }
         }
         self.redraw |= report.redraw;
+        self.modified |= report.changed;
         self.dirty |= report.edited;
         if let Some(refused) = report.refused {
             log::debug!("graph edit refused: {refused}");
@@ -199,23 +223,43 @@ impl App {
             match notice {
                 Notice::Bound { id, result } => {
                     if self.project.graph.dag.node(id).is_ok() {
-                        let result =
-                            result.and_then(|node| self.project.graph.dag.replace(id, node));
+                        let result = result.and_then(|node| {
+                            let old = self.project.graph.dag.node(id)?.parameters()?;
+                            let changed = old != node.parameters()?;
+                            self.project.graph.dag.replace(id, node)?;
+                            self.modified |= changed;
+                            Ok(())
+                        });
                         self.dirty |= result.is_ok();
-                        self.report(result.map(|()| "loaded".into()).map_err(|e| e.to_string()));
+                        let node = self.project.graph.node(id).expect("bound node exists");
+                        let source = node.params.get("path").and_then(|v| v.as_str());
+                        let text = match source {
+                            Some(path) => format!("Loaded {}: {path}", node.name),
+                            None => format!("Updated {}", node.name),
+                        };
+                        self.report(result.map(|()| text).map_err(|e| e.to_string()));
                         action_reported = true;
                     }
                 }
                 Notice::Opened { file, result } => {
-                    let result =
-                        result.and_then(|project| self.set_project(project, Some(file.clone())));
-                    self.report(result.map(|()| format!("opened {}", file.display())));
+                    let destination = if file
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("drip-template"))
+                    {
+                        None
+                    } else {
+                        Some(file.clone())
+                    };
+                    let result = result.and_then(|project| self.set_project(project, destination));
+                    self.report(result.map(|()| format!("Opened {}", file.display())));
                     action_reported = true;
                 }
                 Notice::Evaluated(result) => evaluated = Some(result),
                 Notice::Action(result) => {
-                    self.action = None;
-                    self.report(result.map(|()| "done".into()));
+                    let action = self.action.take();
+                    self.report(result.map(|()| {
+                        action.map_or_else(|| "Action completed".into(), |a| a.completed)
+                    }));
                     action_reported = true;
                 }
                 Notice::Failed => {
@@ -230,7 +274,7 @@ impl App {
             && self.action.is_none()
             && let Some(result) = evaluated
         {
-            self.report(result.map(|()| "done".into()));
+            self.report(result.map(|()| "Preview updated".into()));
         }
     }
 
@@ -246,15 +290,19 @@ impl App {
                 self.report(Err(error));
             }
             if ui.button("Open…").clicked()
-                && let Some(file) =
-                    rfd::FileDialog::new().add_filter("Drip project", &["drip"]).pick_file()
+                && let Some(file) = rfd::FileDialog::new()
+                    .set_title("Open Drip project or template")
+                    .add_filter("Drip project or template", &["drip", "drip-template"])
+                    .pick_file()
             {
                 self.open(file);
             }
             if ui.button("Save").clicked() {
                 match self.file.clone() {
                     Some(file) => {
-                        self.save(&file, self.project.clone());
+                        if self.save(&file, self.project.clone()) {
+                            self.modified = false;
+                        }
                     }
                     None => self.save_as(false),
                 }
@@ -284,6 +332,7 @@ impl App {
             if self.level != previous {
                 log::debug!("preview level changed from {previous} to {}", self.level);
                 ui_state::set_preview_level(&mut self.project.ui, self.level);
+                self.modified = true;
                 self.dirty = true;
             }
         });
@@ -292,16 +341,16 @@ impl App {
     fn status_line(&self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             if !self.wide_gamut {
-                ui.label(RichText::new("previews clipped to sRGB").color(theme::ERROR));
+                ui.label(RichText::new("Previews clipped to sRGB").color(theme::ERROR));
             }
             if self.worker.busy() {
-                let label = ui.label("evaluating…");
+                let label = ui.label("Evaluating…");
                 if self.worker.showing_previous() {
                     label.on_hover_text("Views retain the previous completed evaluation while the current request runs.");
                 }
             }
-            if let Some(action) = self.action {
-                ui.label(format!("running {action}…"));
+            if let Some(action) = &self.action {
+                ui.label(&action.running);
             }
             if let Some(status) = &self.status
                 && (status.error || (!self.worker.busy() && self.action.is_none()))
@@ -316,7 +365,9 @@ impl App {
         let level = ui_state::preview_level(&project.ui)?;
         self.level = level;
         self.project = project;
+        self.ui_generation += 1;
         self.file = file;
+        self.modified = false;
         self.selected = None;
         self.editor = Editor::default();
         // Node ids are reused across projects.
@@ -327,17 +378,22 @@ impl App {
 
     fn open(&mut self, file: PathBuf) {
         let result = self.worker.open(file.clone());
-        self.report(result.map(|()| format!("opening {}", file.display())));
+        self.report(result.map(|()| format!("Opening {}", file.display())));
     }
 
     fn save_as(&mut self, template: bool) {
         let name = if template { "Drip template" } else { "Drip project" };
-        let Some(file) = rfd::FileDialog::new().add_filter(name, &["drip"]).save_file() else {
+        let extension = if template { "drip-template" } else { "drip" };
+        let Some(file) = rfd::FileDialog::new()
+            .set_title(format!("Save {name}"))
+            .add_filter(name, &[extension])
+            .save_file()
+        else {
             return;
         };
         let mut file = file.into_os_string();
-        if !file.as_encoded_bytes().ends_with(b".drip") {
-            file.push(".drip");
+        if !Path::new(&file).extension().is_some_and(|ext| ext.eq_ignore_ascii_case(extension)) {
+            file.push(format!(".{extension}"));
         }
         let file = PathBuf::from(file);
         if template {
@@ -349,6 +405,7 @@ impl App {
             }
         } else if self.save(&file, self.project.clone()) {
             self.file = Some(file);
+            self.modified = false;
         }
     }
 
@@ -364,7 +421,7 @@ impl App {
             Ok(()) => log::info!("saved project {shown}"),
             Err(error) => log::error!("cannot save project {shown}: {error}"),
         }
-        self.report(result.map(|()| format!("saved {shown}")).map_err(|e| format!("{shown}: {e}")));
+        self.report(result.map(|()| format!("Saved {shown}")).map_err(|e| format!("{shown}: {e}")));
         saved
     }
 
@@ -381,7 +438,7 @@ impl App {
             }
             Ok(())
         })();
-        self.report(result.map(|()| "invalidating cache…".into()));
+        self.report(result.map(|()| "Invalidating cache…".into()));
     }
 
     fn actions_disabled(&self) -> bool {
@@ -391,8 +448,22 @@ impl App {
     fn run_action(&mut self, id: NodeId, name: &'static str) {
         match self.worker.action(&self.project.graph, id, name) {
             Ok(()) => {
-                self.action = Some(name);
-                self.report(Ok(format!("running {name}…")));
+                let node = self.project.graph.node(id).expect("action node exists");
+                let destination = node.kind.params.iter().find_map(|p| {
+                    matches!(p.kind, drip::param::ParamKind::Path { output: true })
+                        .then(|| node.params[p.name].as_str())
+                        .flatten()
+                });
+                let subject = match destination {
+                    Some(path) => format!("{} → {path}", node.name),
+                    None => node.name.clone(),
+                };
+                let running = format!("Running {name}: {subject}…");
+                self.action = Some(ActionStatus {
+                    running: running.clone(),
+                    completed: format!("Completed {name}: {subject}"),
+                });
+                self.report(Ok(running));
             }
             Err(error) => {
                 log::error!("cannot start action node={id:?} action={name}: {error}");
@@ -506,7 +577,7 @@ mod tests {
     fn invalidation_disables_export_in_main_and_popped_windows_until_bindings_commit() {
         for popped in [false, true] {
             let mut app = App::new(None, true, || {});
-            let export = app.project.graph.find("Export").unwrap();
+            let export = app.project.graph.find("Export TIFF").unwrap();
             app.selected = Some(export);
             app.invalidate_cache();
             // Do not poll: even a completed load must block exports until committed.
@@ -521,14 +592,14 @@ mod tests {
                 app,
             );
             h.run();
-            assert!(h.get_by_label("export").accesskit_node().is_disabled());
-            h.state_mut().run_action(export, "export");
+            assert!(h.get_by_label("Export").accesskit_node().is_disabled());
+            h.state_mut().run_action(export, "Export");
             assert!(h.state().action.is_none());
             assert!(h.state().status.as_ref().unwrap().text.contains("asset loading"));
 
             finish_bindings(h.state_mut());
             h.run();
-            assert!(!h.get_by_label("export").accesskit_node().is_disabled());
+            assert!(!h.get_by_label("Export").accesskit_node().is_disabled());
         }
     }
 
@@ -536,10 +607,10 @@ mod tests {
     fn binding_and_export_in_the_same_frame_cannot_snapshot_old_parameters() {
         let mut app = App::new(None, true, || {});
         let exposure = app.project.graph.find("Exposure").unwrap();
-        let export = app.project.graph.find("Export").unwrap();
+        let export = app.project.graph.find("Export TIFF").unwrap();
         app.apply(Report {
             bindings: vec![(exposure, json!({"ev": 2.0}))],
-            action: Some((export, "export")),
+            action: Some((export, "Export")),
             ..Default::default()
         });
         assert!(app.action.is_none());
@@ -548,8 +619,8 @@ mod tests {
 
         finish_bindings(&mut app);
         assert_eq!(app.project.graph.node(exposure).unwrap().params["ev"], json!(2.0));
-        app.run_action(export, "export");
-        assert_eq!(app.action, Some("export"));
+        app.run_action(export, "Export");
+        assert!(app.action.as_ref().unwrap().running.contains("Export TIFF"));
     }
 
     #[test]
@@ -575,7 +646,7 @@ mod tests {
             assert!(app.take_redraw(), "other windows must see the shared edit");
             assert!(!app.worker.busy(), "presentation edits need no evaluation");
         }
-        assert_eq!(app.windows()[0].title, "tone parameters · Drip");
+        assert_eq!(app.windows()[0].title, "tone · Parameters · Drip");
         assert!(app.project.graph.inputs().any(|input| input == (id, "contrast")));
 
         edit(app, crate::editing::Edit::Name(id, ""));
@@ -782,6 +853,7 @@ mod tests {
                     width: 1,
                     height: 1,
                     requested_scale: 1,
+                    color_space: "Rec.2020 / D65".into(),
                     pixels: std::sync::Arc::new(vec![[0.5; 3]].into()),
                 })))
             });
@@ -818,7 +890,7 @@ mod tests {
             entered.recv_timeout(Duration::from_secs(5)).unwrap();
             let start = Instant::now();
             h.step();
-            assert!(h.query_by_label("evaluating…").is_some());
+            assert!(h.query_by_label("Evaluating…").is_some());
             let shown = &h
                 .state()
                 .worker
@@ -841,8 +913,8 @@ mod tests {
             assert!(start.elapsed() < Duration::from_secs(2));
             release.send(()).unwrap();
             settle(&mut h);
-            assert!(h.query_by_label("evaluating…").is_none());
-            assert!(h.query_by_label("done").is_some());
+            assert!(h.query_by_label("Evaluating…").is_none());
+            assert!(h.query_by_label("Preview updated").is_some());
         }
     }
 
@@ -867,24 +939,63 @@ mod tests {
     }
 
     #[test]
+    fn opening_templates_creates_untitled_projects_and_saving_clears_modified_title() {
+        let template =
+            std::env::temp_dir().join(format!("drip-title-{}.drip-template", std::process::id()));
+        let destination = template.with_extension("drip");
+        std::fs::write(&template, Project::default().to_json().unwrap()).unwrap();
+        let mut h = harness(App::new(Some(template.clone()), true, || {}));
+        settle(&mut h);
+        assert!(h.state().file.is_none());
+        assert_eq!(h.state().title(), "Untitled · Drip");
+        edit(
+            h.state_mut(),
+            crate::editing::Edit::Add(Registry.get("tone.exposure").unwrap(), Vec2::ZERO),
+        );
+        assert_eq!(h.state().title(), "Untitled * · Drip");
+        h.state_mut().file = Some(destination.clone());
+        h.run();
+        h.get_by_label("Save").click();
+        h.run();
+        assert!(!h.state().modified);
+        assert_eq!(
+            h.state().title(),
+            format!("{} · Drip", destination.file_name().unwrap().to_string_lossy())
+        );
+        let id = h.state().project.graph.find("Exposure").unwrap();
+        edit(h.state_mut(), crate::editing::Edit::Name(id, "Test exposure"));
+        assert!(h.state().modified, "renaming affects persistence without evaluation");
+        h.state_mut().set_project(Project::default(), None).unwrap();
+        assert_eq!(h.state().title(), "Untitled · Drip");
+        std::fs::remove_file(template).unwrap();
+        std::fs::remove_file(destination).unwrap();
+    }
+
+    #[test]
     fn warns_when_previews_are_clipped() {
         let mut h = harness(App::new(None, false, || {}));
         h.run();
-        assert!(h.query_by_label("previews clipped to sRGB").is_some());
+        assert!(h.query_by_label("Previews clipped to sRGB").is_some());
         let mut h = harness(App::new(None, true, || {}));
         h.run();
-        assert!(h.query_by_label("previews clipped to sRGB").is_none());
+        assert!(h.query_by_label("Previews clipped to sRGB").is_none());
     }
 
     #[test]
     fn inspector_shows_the_selected_node_and_the_inputs() {
         let mut app = App::new(None, true, || {});
-        app.selected = app.project.graph.find("Export");
+        app.selected = app.project.graph.find("Export TIFF");
         let mut h = harness(app);
         h.run();
-        for label in
-            ["profile", "intent", "depth", "export", "path (input)", "RAW · path", "Export · path"]
-        {
+        for label in [
+            "Output profile",
+            "Rendering intent",
+            "Depth",
+            "Export",
+            "Output file (template)",
+            "RAW · RAW file",
+            "Export TIFF · Output file",
+        ] {
             assert!(h.query_by_label(label).is_some(), "{label}");
         }
     }
@@ -892,16 +1003,16 @@ mod tests {
     #[test]
     fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
         let documentation =
-            Registry.get("apply-rec2020-sigmoid").unwrap().documentation.trim().replace('\n', " ");
+            Registry.get("tone.sigmoid").unwrap().documentation.trim().replace('\n', " ");
         let mut app = App::new(None, true, || {});
         let id = app.project.graph.find("Sigmoid").unwrap();
         app.selected = Some(id);
         let mut h = harness(app);
         h.run();
-        let kind = h.get_by_label("apply-rec2020-sigmoid").rect();
+        let kind = h.get_by_label("tone.sigmoid").rect();
         let description = h.get_by_label(&documentation).rect();
-        let output = h.get_by_label("output output").rect();
-        let control = h.get_by_label("contrast").rect();
+        let output = h.get_by_label("Output").rect();
+        let control = h.get_by_label("Contrast").rect();
         assert!(kind.bottom() <= description.top());
         assert!(description.bottom() <= output.top());
         assert!(output.bottom() <= control.top());
@@ -916,8 +1027,8 @@ mod tests {
             },
         );
         popup.run();
-        assert!(popup.query_by_label("apply-rec2020-sigmoid").is_some());
-        assert!(popup.query_by_label("contrast").is_some());
+        assert!(popup.query_by_label("tone.sigmoid").is_some());
+        assert!(popup.query_by_label("Contrast").is_some());
         assert!(popup.query_by_label("Rec.2020 RGB").is_none());
         assert!(popup.query_by_label("darktable: sigmoid").is_none());
         assert!(popup.query_by_label(&documentation).is_none());
@@ -926,12 +1037,12 @@ mod tests {
     #[test]
     fn nodes_without_controls_show_documentation_and_references() {
         let mut app = App::new(None, true, || {});
-        app.selected = app.project.graph.find("Demosaic");
+        app.selected = app.project.graph.find("RCD demosaic");
         let mut h = harness(app);
         h.run();
-        let kind = h.get_by_label("bayer-rcd").rect();
-        let input = h.get_by_label("input image").rect();
-        let output = h.get_by_label("output output").rect();
+        let kind = h.get_by_label("demosaic.rcd").rect();
+        let input = h.get_by_label("Input · image").rect();
+        let output = h.get_by_label("Output").rect();
         let reference = h.get_by_label("RCD source").rect();
         assert!(kind.bottom() <= input.top());
         assert!(input.bottom() <= output.top());
@@ -972,8 +1083,8 @@ mod tests {
             let mut h = harness(app);
             h.run();
             let kind = h.get_by_label("test.generic").rect();
-            let input = h.get_by_label("input image").rect();
-            let output = h.get_by_label("output output").rect();
+            let input = h.get_by_label("Input · image").rect();
+            let output = h.get_by_label("Output").rect();
             assert!(kind.bottom() <= input.top() && input.bottom() <= output.top());
             assert!(h.query_by_label("pending").is_none());
         }
@@ -1007,14 +1118,14 @@ mod tests {
         assert_eq!(
             titles,
             [
-                (parameters, "Histogram parameters · Drip".into()),
-                (view, "Histogram view · Drip".into())
+                (parameters, "Histogram · Parameters · Drip".into()),
+                (view, "Histogram · View · Drip".into())
             ]
         );
-        assert!(h.query_by_label("shown in its window").is_some());
+        assert!(h.query_by_label("Shown in its window").is_some());
         h.state_mut().close_window(view);
         h.run();
-        assert!(h.query_by_label("shown in its window").is_none());
+        assert!(h.query_by_label("Shown in its window").is_none());
 
         // Node ids are reused, so a new project closes every window.
         h.state_mut().set_project(templates::raw_to_tiff(), None).unwrap();
@@ -1037,7 +1148,7 @@ mod tests {
             let windows = h.state().windows();
             assert_eq!(windows.len(), 1);
             assert_eq!(windows[0].popped.node, id);
-            assert_eq!(windows[0].title, format!("{} view · Drip", kind.name));
+            assert_eq!(windows[0].title, format!("{} · View · Drip", kind.name));
         }
     }
 
@@ -1072,7 +1183,7 @@ mod tests {
             let windows = h.state().windows();
             assert_eq!(windows.len(), 1);
             assert_eq!(windows[0].popped.node, id);
-            assert_eq!(windows[0].title, "Declared view view · Drip");
+            assert_eq!(windows[0].title, "Declared view · View · Drip");
         }
     }
 
@@ -1132,11 +1243,11 @@ mod tests {
             h.run();
             let popped = Popped { node: id, part: crate::node_ui::Part::View };
             assert_eq!(h.state().windows()[0].popped, popped);
-            assert!(h.query_by_label("shown in its window").is_some());
+            assert!(h.query_by_label("Shown in its window").is_some());
             assert!(h.query_by_label("Custom view controls").is_some());
             h.state_mut().close_window(popped);
             h.run();
-            assert!(h.query_by_label("shown in its window").is_none());
+            assert!(h.query_by_label("Shown in its window").is_none());
             assert!(h.query_by_label("Custom view controls").is_some());
         }
     }
@@ -1144,10 +1255,10 @@ mod tests {
     #[test]
     fn parameter_windows_show_the_parameters_and_close_with_their_node() {
         for (name, labels) in [
-            ("Export", &["profile", "intent", "depth", "export"][..]),
+            ("Export TIFF", &["Output profile", "Rendering intent", "Depth", "Export"][..]),
             (
                 "Sigmoid",
-                &["contrast", "skew", "preserve_hue", "−8 … +8 EV relative to middle grey"][..],
+                &["Contrast", "Skew", "Preserve hue", "−8 … +8 EV relative to middle grey"][..],
             ),
         ] {
             let mut app = App::new(None, true, || {});
@@ -1157,7 +1268,7 @@ mod tests {
             // The window opens at the size its content takes, smaller than a
             // guess yet with every parameter inside.
             let size = app.window_size(popped, 1.25);
-            assert!(size.x < 360.0 && size.y < 320.0, "{size:?}");
+            assert!(size.x < 480.0 && size.y < 320.0, "{size:?}");
             let mut h = Harness::builder()
                 .with_size(size)
                 .build_ui_state(move |ui, app: &mut App| app.window(ui, popped), app);
@@ -1176,7 +1287,7 @@ mod tests {
     #[test]
     fn empty_canvas_above_the_nodes_takes_clicks() {
         let mut app = App::new(None, true, || {});
-        app.selected = app.project.graph.find("Export");
+        app.selected = app.project.graph.find("Export TIFF");
         let mut h = harness(app);
         h.run();
         // Above the fitted graph, inside the area the nodes' layer spans.

@@ -8,11 +8,11 @@ pub fn raw_to_tiff() -> Project {
     let mut graph = Graph::from_dag(pipeline.dag).expect("registered built-in nodes");
     let positions = [
         ("RAW", [0.0, 0.0]),
-        ("White balance", [195.0, 0.0]),
-        ("Balance clipping levels", [195.0, 200.0]),
-        ("Highlights", [390.0, 0.0]),
-        ("Demosaic", [585.0, 0.0]),
-        ("Camera to RGB", [780.0, 0.0]),
+        ("Bayer site gains", [195.0, 0.0]),
+        ("Apply clipping-level gains", [195.0, 200.0]),
+        ("Reconstruct highlights (opposed)", [390.0, 0.0]),
+        ("RCD demosaic", [585.0, 0.0]),
+        ("Camera RGB to color RGB", [780.0, 0.0]),
         ("Exposure", [975.0, 0.0]),
         ("Sigmoid", [1170.0, 0.0]),
     ];
@@ -25,12 +25,12 @@ pub fn raw_to_tiff() -> Project {
         ("view.histogram", [2057.0, 0.0], json!([320, 240])),
         ("view.waveform", [2057.0, 300.0], json!([320, 240])),
         ("view.vectorscope", [2397.0, 0.0], json!([320, 320])),
-        ("export.tiff", [1170.0, 220.0], json!(null)),
+        ("output.tiff", [1170.0, 220.0], json!(null)),
     ] {
         let id = graph.add_node(Registry.get(kind).expect("built-in observer")).unwrap();
         graph.set_ui(id, json!({"pos":pos, "size":size})).unwrap();
         graph.dag.connect_ids(target, graph.dag.input_port(id, "image").unwrap()).unwrap();
-        if kind == "export.tiff" {
+        if kind == "output.tiff" {
             graph.connect(Port(raw, "metadata".into()), Port(id, "metadata".into())).unwrap();
         }
     }

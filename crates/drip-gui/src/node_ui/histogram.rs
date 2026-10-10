@@ -4,8 +4,10 @@ use drip::{Result, node::data::*, ports::*, runtime::KernelContext};
 #[cfg(test)]
 pub use observe::add;
 use std::sync::Arc;
-/// Count identity-encoded ColorRgb channel samples by exposure. No color conversion is applied.
-#[drip::node(id="view.histogram", name="Histogram", category="view", contract=scope_contract)]
+/// Plot ColorRgb channel counts by exposure. Requires identity encoding and
+/// applies no color conversion. Exposure is measured relative to sample value 1;
+/// the density scale controls counts, not the exposure axis.
+#[drip::node(id="view.histogram", name="Histogram", category="View", contract=scope_contract)]
 pub fn observe(
     _: &KernelContext<'_>,
     _: &ExposureSettings,

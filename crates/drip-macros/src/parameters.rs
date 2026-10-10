@@ -27,6 +27,7 @@ pub(crate) fn expand(item: syn::DeriveInput) -> syn::Result<proc_macro2::TokenSt
             groups.push(quote!(<#ty as ::drip::param::Parameters>::SPECS));
         } else {
             let key = ident.to_string();
+            let label = crate::documentation::label(&field.attrs, &key)?;
             let external = field.attrs.iter().any(|attr| attr.path().is_ident("external"));
             let docs = documentation(&field.attrs);
             groups.push(quote! {
@@ -37,6 +38,7 @@ pub(crate) fn expand(item: syn::DeriveInput) -> syn::Result<proc_macro2::TokenSt
                     );
                     ::drip::param::ParamSpec {
                         name: #key,
+                        label: #label,
                         kind: #kind,
                         external: #external,
                         documentation: #docs,

@@ -601,7 +601,7 @@ mod tests {
     #[test]
     fn newest_binding_wins_and_reset_discards_in_flight_loads() {
         let mut graph = Graph::default();
-        let id = graph.add_node(Registry.get("rgb-exposure").unwrap()).unwrap();
+        let id = graph.add_node(Registry.get("tone.exposure").unwrap()).unwrap();
         let mut worker = Worker::new(|| {});
         worker.bind(&graph, id, json!({"ev":1.0})).unwrap();
         worker.bind(&graph, id, json!({"ev":2.0})).unwrap();
@@ -982,11 +982,10 @@ mod tests {
             worker.request(&graph, 3, vec![preview]).unwrap();
             wait(&mut worker);
             assert_eq!(pixel(&worker, preview), [3.0, 1.0, 0.0, 1.0]);
-            graph.set_param(preview, "mode", json!("softproof")).unwrap();
-            graph.set_param(preview, "profile", json!("file")).unwrap();
-            graph
-                .set_param(preview, "profile_file", json!(input.with_extension("missing.icc")))
-                .unwrap();
+            let mut profile =
+                serde_json::to_value(drip::node::profile::Settings::default()).unwrap();
+            profile["profile"] = json!({"file": {"path": input.with_extension("missing.icc")}});
+            graph.set_param(preview, "mode", json!({"softproof": profile})).unwrap();
             worker.request(&graph, 3, vec![preview]).unwrap();
             wait(&mut worker);
             assert!(worker.result(preview).unwrap().is_err());

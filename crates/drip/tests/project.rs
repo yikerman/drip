@@ -92,7 +92,7 @@ fn missing_raw_preserves_editable_parameters_and_reports_load_error() {
         .err()
         .unwrap();
     assert!(error.to_string().contains("drip-deliberately-missing-raw-source.nef"));
-    let raw = restored.dag.nodes().find(|(_, n)| n.metadata().id == "raw-bayer").unwrap().0;
+    let raw = restored.dag.nodes().find(|(_, n)| n.metadata().id == "input.bayer-raw").unwrap().0;
     let values = Evaluator::new(RuntimeContext::host()).evaluate_inputs(
         &restored.dag,
         &Default::default(),

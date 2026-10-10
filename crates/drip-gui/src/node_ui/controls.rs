@@ -6,6 +6,19 @@ use serde::de::DeserializeOwned;
 use egui::Ui;
 use std::marker::PhantomData;
 
+/// Presentation hints owned by a node's GUI, shared by all parameter surfaces.
+#[derive(Clone, Copy, Default)]
+pub struct ParameterUi {
+    pub file: Option<FileUi>,
+}
+
+#[derive(Clone, Copy)]
+pub struct FileUi {
+    pub title: &'static str,
+    pub filter: &'static str,
+    pub extensions: &'static [&'static str],
+}
+
 pub struct ControlCx<'n, 'g, 'f, 'a, N: DeserializeOwned> {
     node: &'n mut NodeCx<'g, 'f, 'a>,
     parameters: PhantomData<fn() -> N>,

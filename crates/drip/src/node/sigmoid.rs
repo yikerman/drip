@@ -98,9 +98,9 @@ fn apply_contract(
 /// stays zero and the curve approaches one. Outputs edited ColorRgb in the same
 /// coordinates. Negative channels use an achromatic projection; this does not
 /// apply sRGB encoding.
-#[crate::node(id="apply-rec2020-sigmoid",
+#[crate::node(id="tone.sigmoid",
 name="Sigmoid",
-category="tone",
+category="Tone",
 contract=apply_contract,
 references=[("darktable sigmoid", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/sigmoid.c")])]
 pub fn apply(

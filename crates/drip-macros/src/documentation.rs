@@ -16,3 +16,11 @@ pub(crate) fn documentation(attrs: &[syn::Attribute]) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+pub(crate) fn label(attrs: &[syn::Attribute], key: &str) -> syn::Result<String> {
+    if let Some(attr) = attrs.iter().find(|attr| attr.path().is_ident("label")) {
+        return Ok(attr.parse_args::<syn::LitStr>()?.value());
+    }
+    let text = key.replace('_', " ");
+    let mut chars = text.chars();
+    Ok(chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect()))
+}

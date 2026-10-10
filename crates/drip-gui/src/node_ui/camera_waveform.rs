@@ -3,8 +3,10 @@ use super::scopes::{ExposureSettings, Scope, camera_scope_contract};
 use drip::{Result, node::data::*, ports::*, runtime::KernelContext};
 
 use std::sync::Arc;
-/// Plot CameraRgb native channel exposure against horizontal image position.
-#[drip::node(id="view.camera-waveform", name="Camera waveform", category="view", contract=camera_scope_contract)]
+/// Plot CameraRgb native-channel exposure against horizontal image position.
+/// No color conversion is applied. Exposure is measured relative to sample value 1;
+/// the density scale controls bin brightness.
+#[drip::node(id="view.camera-waveform", name="Camera waveform", category="View", contract=camera_scope_contract)]
 pub fn observe(
     _: &KernelContext<'_>,
     _: &ExposureSettings,

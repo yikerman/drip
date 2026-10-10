@@ -48,16 +48,15 @@ pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
     egui::Grid::new(("params", id)).num_columns(2).show(ui, |ui| {
         for spec in kind.params {
             let external = node.external.contains(spec.name);
-            let text = if external { format!("{} (input)", spec.name) } else { spec.name.into() };
+            let text =
+                if external { format!("{} (template)", spec.label) } else { spec.label.into() };
             // Generated from the parameter's doc comment; empty when undocumented.
             let hint = match spec.documentation {
-                "" => "right-click to change".to_owned(),
-                doc => format!("{doc}\n\nright-click to change"),
+                "" => "Right-click for reset and template options".to_owned(),
+                doc => format!("{doc}\n\nRight-click for reset and template options"),
             };
             let name = ui.label(text).interact(Sense::click()).on_hover_text(hint);
-            if let Some(value) =
-                edit_value(ui, egui::Id::new((id, spec.name)), &spec.kind, &node.params[spec.name])
-            {
+            if let Some(value) = edit_parameter(ui, egui::Id::new((id, spec.name)), &node, spec) {
                 cx.set_param(spec.name, value);
             }
             crate::theme::context_menu(&name).show(|ui| {
@@ -65,7 +64,11 @@ pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
                     cx.set_param(spec.name, value);
                 }
                 ui.separator();
-                let toggle = if external { "Fix in template" } else { "Make template input" };
+                let toggle = if external {
+                    "Keep value in template"
+                } else {
+                    "Expose as template parameter"
+                };
                 if ui.button(toggle).clicked() {
                     cx.set_external(spec.name, !external);
                     ui.close();
@@ -77,7 +80,33 @@ pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
 }
 
 /// A widget for one parameter value; returns the new value when edited.
+#[cfg(test)]
 pub fn edit_value(ui: &mut Ui, id: egui::Id, kind: &ParamKind, value: &Json) -> Option<Json> {
+    edit_value_with(ui, id, kind, value, "", &|_| super::ParameterUi::default())
+}
+
+pub fn edit_parameter(
+    ui: &mut Ui,
+    id: egui::Id,
+    node: &crate::model::Node,
+    spec: &drip::param::ParamSpec,
+) -> Option<Json> {
+    edit_value_with(ui, id, &spec.kind, &node.params[spec.name], spec.name, &|path| {
+        super::binding(node.kind).map_or_else(super::ParameterUi::default, |binding| {
+            binding.parameter_ui(node.params.clone(), path)
+        })
+    })
+}
+
+fn edit_value_with(
+    ui: &mut Ui,
+    id: egui::Id,
+    kind: &ParamKind,
+    value: &Json,
+    path: &str,
+    hints: &dyn Fn(&str) -> super::ParameterUi,
+) -> Option<Json> {
+    let id = ui.make_persistent_id(id);
     let (response, mut chosen) = match *kind {
         ParamKind::Float { min, max, .. } => {
             let mut v = value.as_f64().expect("validated float");
@@ -103,34 +132,95 @@ pub fn edit_value(ui: &mut Ui, id: egui::Id, kind: &ParamKind, value: &Json) -> 
             (response, Some(json!(v)))
         }
         ParamKind::Choice { options, .. } => {
-            let mut current = value.as_str().expect("validated choice");
-            let response = dropdown(
-                ui,
-                egui::ComboBox::from_id_salt(id),
-                &mut current,
-                options,
-                str::to_owned,
-            );
-            (response, Some(json!(current)))
+            ui.vertical(|ui| {
+                let previous = options
+                    .iter()
+                    .position(|option| option.selected(value))
+                    .expect("validated choice");
+                let mut selected = previous;
+                let response = dropdown(
+                    ui,
+                    egui::ComboBox::from_id_salt(id),
+                    &mut selected,
+                    &(0..options.len()).collect::<Vec<_>>(),
+                    |index| options[index].label.into(),
+                );
+                let option = &options[selected];
+                let mut edited = if selected == previous {
+                    value.clone()
+                } else {
+                    ui.data_mut(|data| {
+                        data.insert_temp(id.with(options[previous].name), value.clone())
+                    });
+                    ui.data(|data| data.get_temp::<Json>(id.with(option.name)))
+                        .unwrap_or_else(|| option.default_value())
+                };
+                if let Some(parameters) = option.parameters {
+                    ui.indent(id.with(option.name), |ui| {
+                        egui::Grid::new(id.with((option.name, "fields"))).num_columns(2).show(
+                            ui,
+                            |ui| {
+                                for spec in parameters {
+                                    let label = ui.label(spec.label);
+                                    if !spec.documentation.is_empty() {
+                                        label.on_hover_text(spec.documentation);
+                                    }
+                                    let field_path =
+                                        format!("{path}.{}.{}", option.name, spec.name);
+                                    if let Some(value) = edit_value_with(
+                                        ui,
+                                        id.with((option.name, spec.name)),
+                                        &spec.kind,
+                                        &edited[option.name][spec.name],
+                                        &field_path,
+                                        hints,
+                                    ) {
+                                        edited[option.name][spec.name] = value;
+                                    }
+                                    ui.end_row();
+                                }
+                            },
+                        );
+                    });
+                }
+                (response, Some(edited))
+            })
+            .inner
         }
         ParamKind::Path { output } => {
-            let path = value.as_str().map(std::path::Path::new);
-            let name =
-                path.and_then(|p| p.file_name()).map_or("none".into(), |n| n.to_string_lossy());
+            let selected_path = value.as_str().map(std::path::Path::new);
+            let name = selected_path
+                .and_then(|p| p.file_name())
+                .map_or("Not selected".into(), |n| n.to_string_lossy());
             let mut chosen = None;
             let response = ui
                 .horizontal(|ui| {
-                    if ui.button("…").clicked() {
-                        let dialog = rfd::FileDialog::new();
-                        let dialog = match path.and_then(|p| p.parent()) {
+                    if ui.button("Browse…").clicked() {
+                        let file = hints(path).file;
+                        let mut dialog = rfd::FileDialog::new();
+                        if let Some(file) = file {
+                            dialog = dialog
+                                .set_title(file.title)
+                                .add_filter(file.filter, file.extensions);
+                        }
+                        let dialog = match selected_path.and_then(|p| p.parent()) {
                             Some(dir) => dialog.set_directory(dir),
                             None => dialog,
                         };
-                        chosen = if output { dialog.save_file() } else { dialog.pick_file() }
-                            .map(|p| json!(p));
+                        chosen = if output { dialog.save_file() } else { dialog.pick_file() }.map(
+                            |mut p| {
+                                if output
+                                    && p.extension().is_none()
+                                    && let Some(extension) = file.and_then(|f| f.extensions.first())
+                                {
+                                    p.set_extension(extension);
+                                }
+                                json!(p)
+                            },
+                        );
                     }
                     let label = ui.add(egui::Label::new(name).sense(Sense::click()));
-                    if let Some(path) = path {
+                    if let Some(path) = selected_path {
                         label.clone().on_hover_text(path.display().to_string());
                     }
                     label

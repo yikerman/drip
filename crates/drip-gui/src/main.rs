@@ -189,6 +189,10 @@ impl ApplicationHandler<WorkerReady> for Shell {
     /// every window when what they show changed.
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let Some(r) = &mut self.running else { return };
+        let title = r.app.title();
+        if r.main.window.title() != title {
+            r.main.window.set_title(&title);
+        }
         let wanted = r.app.windows();
         r.windows.retain(|(popped, _)| wanted.iter().any(|w| w.popped == *popped));
         for w in wanted {

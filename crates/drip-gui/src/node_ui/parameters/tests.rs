@@ -12,6 +12,29 @@ struct State {
     offset: f32,
 }
 
+#[test]
+fn enum_controls_show_only_active_fields_and_restore_variant_edits() {
+    let mut h = harness(super::super::preview::Mode::None.schema(), json!("none"));
+    assert!(h.query_by_label("Output profile").is_none());
+    h.get_by_role(egui::accesskit::Role::ComboBox).click();
+    h.run();
+    h.get_by_label("Softproof").click();
+    h.run();
+    assert!(h.query_by_label("Output profile").is_some());
+    assert!(h.query_by_label("ICC profile file").is_none());
+    h.state_mut().value["softproof"]["profile"] = json!({"file": {"path": "chosen.icc"}});
+    h.run();
+    assert!(h.query_by_label("ICC profile file").is_some());
+    for mode in ["None", "Softproof"] {
+        h.get_all_by_role(egui::accesskit::Role::ComboBox).next().unwrap().click();
+        h.run();
+        h.get_by_label(mode).click();
+        h.run();
+    }
+    assert_eq!(h.state().value["softproof"]["profile"]["file"]["path"], "chosen.icc");
+    assert!(serde_json::from_value::<super::super::preview::Mode>(h.state().value.clone()).is_ok());
+}
+
 fn harness(kind: ParamKind, value: Json) -> Harness<'static, State> {
     Harness::builder()
         .with_size(vec2(400.0, 200.0))
@@ -131,7 +154,16 @@ fn context_menu_resets_without_editing_on_right_click() {
         (ParamKind::Float { min: -10.0, max: 10.0, default: 0.0 }, json!(2.0)),
         (ParamKind::Int { min: -24, max: -1, default: -12 }, json!(-10)),
         (ParamKind::Bool { default: true }, json!(false)),
-        (ParamKind::Choice { options: &["first", "second"], default: "first" }, json!("second")),
+        (
+            ParamKind::Choice {
+                options: &[
+                    drip::param::ChoiceSpec { name: "first", label: "first", parameters: None },
+                    drip::param::ChoiceSpec { name: "second", label: "second", parameters: None },
+                ],
+                default: "first",
+            },
+            json!("second"),
+        ),
         (ParamKind::Path { output: false }, json!("/tmp/example.raw")),
     ] {
         let mut h = harness(kind, value.clone());
@@ -168,7 +200,14 @@ fn numeric_readout_menu_resets_without_restoring_its_edit_buffer() {
 
 #[test]
 fn dropdown_wheel_follows_menu_order_and_stops_at_ends() {
-    let kind = ParamKind::Choice { options: &["first", "second", "third"], default: "first" };
+    let kind = ParamKind::Choice {
+        options: &[
+            drip::param::ChoiceSpec { name: "first", label: "first", parameters: None },
+            drip::param::ChoiceSpec { name: "second", label: "second", parameters: None },
+            drip::param::ChoiceSpec { name: "third", label: "third", parameters: None },
+        ],
+        default: "first",
+    };
     let mut h = harness(kind, json!("first"));
     let pos = h.get_by_role(egui::accesskit::Role::ComboBox).rect().center();
     for (delta, expected) in [

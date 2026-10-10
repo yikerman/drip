@@ -4,12 +4,27 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
 
+- Applied the approved frontend naming, parameter, template and presentation
+  changes; refreshed current help, READMEs and maintained design notes. Typed
+  choice variants round-trip through Serde and show only their own settings,
+  retaining inactive edits in temporary UI state. Scope overlays keep axes and
+  compact color-space labels, without counts or repeated configuration.
+- CPU-backed workspace tests passed (138 passed, seven ignored), including
+  nested-choice editing, imported node naming and untitled-template save/title
+  regressions. Strict workspace Clippy, formatting and whitespace checks passed.
+  Native dialogs and visual layout were not exercised interactively. Persisted
+  IDs and changed parameter layouts intentionally have no migration aliases.
 - Parallelized preview RGB f32 to RGBA f16 packing with Rayon over disjoint
   output slices, preserving pixel order and conversion. Existing packed-byte
   and image-cache ownership regression passed; GUI strict Clippy passed.
   User-provided Vulkan traces show half-resolution preparation at 7–23 ms,
   previously 74–80 ms. Interactions were not controlled; full-resolution
   preparation was 62–85 ms. Formatting and whitespace checks passed.
+- Audited frontend naming and display paths against node metadata, parameter
+  schemas and worker results. Found exposed persistence keys, ambiguous operation
+  names, inconsistent port/state presentation, contradictory Bayer reduction
+  help and scope/curve reference differences. Source inspection only; no GUI
+  changes, visual run or tests. Naming choices remain open.
 - Compared user-provided interactive Vulkan/WGPU traces: visible warm half-detail
   updates overlap around 175–202 ms; first loaded previews were 321.8/540.6 ms.
   Different interactions and truncated logs prevent a controlled comparison.

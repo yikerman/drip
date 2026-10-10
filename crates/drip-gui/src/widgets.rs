@@ -68,7 +68,7 @@ pub fn pop_out(ui: &mut Ui, rect: Rect, node: &mut NodeCx, part: Part) {
         Part::View => "🗗",
     };
     let button = egui::Button::new(icon).frame(false).selected(popped);
-    let hint = if popped { "close its window" } else { "show in its own window" };
+    let hint = if popped { "Close window" } else { "Open separate window" };
     if ui.put(rect, button).on_hover_text(format!("{}: {hint}", part.name())).clicked() {
         node.toggle(part);
     }

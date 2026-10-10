@@ -1,7 +1,6 @@
 # Drip
 
 A Rust RAW processor with a checked node graph and CubeCL image kernels.
-This branch rewrites the processing model directly in the existing crates.
 
 Nodes declare concrete payloads, CPU/device placement, and interpretation
 contracts. Graph edits validate contracts before committing. Evaluation runs
@@ -12,8 +11,8 @@ The current RAW path is Bayer normalization, independent as-shot gains and
 camera matrix outputs, opposed highlight reconstruction, RCD demosaic, matrix
 conversion, exposure, and sigmoid.
 The GUI retains color-managed wgpu presentation, ICC proofing, diagnostic scopes,
-and TIFF export. See [rewrite status](agent-docs/CUBECL_REWRITE.md) for migration
-limits and verification.
+and TIFF export. Current decisions and validation are recorded in
+[Design](agent-docs/DESIGN.md) and [Progress](agent-docs/PROGRESS.md).
 
 ## Build & install
 
@@ -27,7 +26,7 @@ system installations of those libraries are unnecessary. Linux uses the system
 C++ runtime (`libstdc++` with GCC).
 
 <details>
-<summary>Fedora (Tier 0 Support!)</summary>
+<summary>Fedora</summary>
 
 ```sh
 sudo dnf install gcc-c++ cmake make nasm pkgconf-pkg-config wayland-devel libxkbcommon-devel git-lfs
@@ -48,7 +47,7 @@ Use rustup if your distribution's Rust version is too old.
 </details>
 
 <details>
-<summary>macOS (Homebrew; Tier 1 support)</summary>
+<summary>macOS (Homebrew)</summary>
 
 Install the Xcode Command Line Tools and [Homebrew](https://brew.sh/), then:
 
@@ -60,7 +59,7 @@ brew install cmake nasm git-lfs
 </details>
 
 <details>
-<summary>Windows x64 (here be dragons)</summary>
+<summary>Windows x64 (MSVC)</summary>
 
 Install Git with Git LFS, Rust's MSVC toolchain, and Visual Studio Build Tools
 with **Desktop development with C++** and a Windows SDK. Install CMake and NASM
@@ -100,7 +99,7 @@ Launch the installed editor with `drip-gui`, or run it from the checkout:
 cargo run --release -p drip-gui
 ```
 
-Choose a RAW file under **inputs** to start editing. Select a node to adjust it,
+Choose a RAW file under **Template parameters** to start editing. Select a node to adjust it,
 or use its gear button to open the controls in a separate window. The pop-out
 button on previews and scopes opens their views separately.
 
@@ -119,12 +118,13 @@ Moving a node changes its layout, so it uses the right button too.
 | Wire | Clear selection | Pan canvas | Disconnect highlighted wire | No action |
 
 The Add node menu groups kinds by category, with categories and node names sorted
-alphabetically. Choose, for example, **color → Exposure**. New nodes use the
-capitalized default name; **Rename** edits that node's name.
+alphabetically. Choose, for example, **Tone → Exposure**. New nodes use the
+declared operation name; **Rename** edits that node's name.
 
 Scroll to zoom around the pointer. A port's navigation menu lists connected
 `node · port` entries; choose one to select that node and bring it into view.
-Opening the menu preserves selection. Hover over a port to see its type.
+Opening the menu preserves selection. Canvas ports show the port name and declared payload type; `?` marks an optional input.
+Hover over a port for its full contract, or a truncated node title for its full name.
 
 Buttons, menu items and parameter controls use ordinary left-click operation;
 drag a view's corner handle to resize it.
@@ -139,14 +139,21 @@ and the preview pop-out's zoom selector.
 
 Right-click a slider, checkbox, dropdown or filename and choose **Reset to default**
 to restore its node-defined default (or clear a path). These gestures also work
-in pop-outs and template inputs. The parameter name's menu also offers reset.
+in pop-outs and template parameters. The parameter name's menu also offers reset.
 
-In **Preview**, choose `none`, `softproof` to simulate the selected profile and
-intent, or `gamutcheck` to mark out-of-gamut colors in cyan. Match the profile,
-intent and black-point compensation to Export. These modes affect only the
-preview and its pop-out.
+In **Preview**, set **Proof mode** to **None** for the original image,
+**Softproof** to simulate an output profile, or **Gamut check** to mark
+out-of-gamut colors in cyan. The active proof mode contains its profile,
+rendering intent and black point compensation settings. Match them to
+**Export TIFF**. Choose **File** under **Output profile** to select an ICC file.
+These modes affect only the preview and its pop-out.
 
-Gamutcheck is an approximate warning near the gamut boundary.
+Gamut check is approximate near the gamut boundary.
+
+Histogram and waveform axes show exposure in stops relative to sample value 1.
+**Density scale** changes counts, not the exposure axis. Scopes identify their source color space; other settings remain in the
+parameter panel and global detail control.
+Camera scopes plot native channels without a color conversion.
 
 In the preview pop-out, scroll to zoom around the pointer and left-drag to pan.
 The zoom selector offers **Fit**, **25%**, **50%**, **100%**, **200%** and **400%**.
@@ -170,11 +177,20 @@ and report the reason.
 **Escape** or **right-click on empty canvas** cancels the
 temporary wire without changing existing connections or opening the Add node menu.
 
-Set an output path and press **export** in the export node's panel when you're
-ready.
+Set **Output file** and press **Export** in **Export TIFF**. Export always
+uses full processing detail. **Deflate** compression exposes its compression
+level; **None** writes an uncompressed TIFF.
 
-Save your work as a `.drip` project, or use **Save template** to reuse the
-pipeline. Right-click a parameter name to make it a template input.
+Save your work as a `.drip` project, or use **Save template…** to write a
+`.drip-template`. Opening a template creates an untitled project; **Save** asks
+for a project destination. The title bar shows the current filename and an
+asterisk after unsaved changes.
+
+Right-click a parameter name and choose **Expose as template parameter** to
+include it under **Template parameters**. Saving a template resets exposed
+parameters to their node-defined defaults; **Keep value in template** retains
+the current value instead. An exposed enum includes its selected variant and
+that variant's settings.
 
 You can also open a saved project from the command line:
 
@@ -183,7 +199,9 @@ cargo run --release -p drip-gui -- project.drip
 ```
 
 Saved projects use format version 2 and repeat connection checks when opened.
-Legacy project files are rejected without modification. RAW files are bound as
+Node IDs use `category.operation`; this revision also nests variant-specific
+parameters in their enum values. Older IDs and parameter layouts are rejected
+without migration or modification. RAW files are bound as
 immutable decoded snapshots; reopening or invalidating reloads them.
 Preview detail is passed in the global evaluation context. Demosaic reduces its
 Bayer phase planes internally before interpolation, after upstream sensor
@@ -229,18 +247,16 @@ still add a small cost. Use `drip_gui::worker=debug` for preview totals alone.
 ## Development
 
 ```sh
-cargo test --workspace
-cargo test -p drip --features cpu
+DRIP_BACKEND=cpu cargo test --workspace --features drip/cpu
 cargo test -p drip --test algorithms -- --ignored
 cargo test -p drip --test model cubecl_wgpu_hybrid -- --ignored
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --no-deps -- -D warnings
 ```
 
 The ignored tests require a compute-capable GPU. `drip/cpu` uses CubeCL's CPU
 runtime; `drip/cuda` enables CUDA. All use the same image kernel sources.
-Presentation shaders remain WGSL in `drip-gui`. The first GUI integration uses
-a host preview endpoint; GPU resource sharing and scheduling optimization are
-separate follow-up work.
+Presentation shaders remain WGSL in `drip-gui`. GUI preparation consumes host RGB values. Device-side scope preparation and
+GPU resource sharing remain follow-up work.
 
 The macro crate separates parsing/validation from binding generation.
 Node functions own Rustdoc help and contracts; the macro generates port handles,
@@ -248,20 +264,31 @@ discovery, parameter persistence and invocation adapters.
 Parameter schemas come from the function's parameter type via `Parameters`;
 derive it on settings structs and use `&()` for nodes without parameters.
 
-Display labels can be set alongside the node declaration:
+Parameter and choice labels default to sentence case; `#[label("sRGB")]`
+overrides display text without renaming the persisted key. A `Choice` variant
+may be empty or contain one struct deriving `Parameters` and Serde traits:
 
 ```rust
-#[node(
-    id = "my-operation",
-    contract = my_contract,
-    port_labels(image = "RGB", output = "RGB"),
-)]
+#[derive(drip::Choice)]
+enum Proof {
+    #[choice("none")]
+    None,
+    #[choice("softproof")]
+    Softproof(drip::node::profile::Settings),
+}
 ```
 
-The keys are port argument names. Labels override the displayed payload names;
-they do not rename connection endpoints or change compatibility checks. Omitted
-labels retain the declared payload names. Unknown ports and duplicate labels
-are compile errors.
+The generated schema renders only the selected variant's fields. Serde uses
+`"none"` for an empty variant and `{"softproof": {...}}` for a variant with
+settings. File-dialog hints belong to the node's GUI binding and apply in the
+inspector, parameter pop-out and template panel.
+
+Port labels retain declared payload names. The node macro's optional
+`port_labels(port = "PayloadName")` overrides display text without changing
+connection names or compatibility. Unknown ports and duplicate labels are
+compile errors. RAW sources currently implement `Node` directly to bind assets
+before evaluation and return shared buffers; the function macro handles
+parameter-only nodes with allocated outputs.
 
 Borrowed algorithms and dependency licenses are in [THIRD_PARTY.md](THIRD_PARTY.md).
 Benchmark outputs and retired experiment sources live outside this repository;

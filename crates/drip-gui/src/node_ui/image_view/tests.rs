@@ -3,6 +3,17 @@ use egui::{Event, Modifiers, MouseWheelUnit, TouchPhase};
 use egui_kittest::{Harness, kittest::Queryable};
 
 #[test]
+fn wheel_zoom_labels_remain_distinct_from_presets() {
+    for preset in [0.25f32, 0.5, 1.0, 2.0, 4.0] {
+        let options = [None, Some(preset), Some(preset.next_up()), Some(preset.next_down())];
+        let labels: std::collections::BTreeSet<_> =
+            options.iter().map(|&zoom| zoom_label(zoom, &options)).collect();
+        assert_eq!(labels.len(), options.len());
+    }
+    assert_eq!(zoom_label(Some(1.0), &[None, Some(1.0), Some(2.0)]), "100%");
+}
+
+#[test]
 fn pixel_zoom_tracks_desktop_scale_and_fit_tracks_window_size() {
     let pixels = vec2(1000.0, 800.0);
     for ppp in [1.0, 1.25, 2.0] {

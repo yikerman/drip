@@ -17,12 +17,12 @@ fn rcd_contract(
         interpretation: d.interpretation.clone(),
     }),))
 }
-/// Ratio-corrected Bayer demosaic into CameraRgb. Clamps negative sensor samples
-/// to zero as in the source algorithm.
-/// Global scale averages CFA phase planes before RCD; scale 1 uses full detail.
-/// Uses a ten-pixel bilinear border; Bayer phase is explicit. RCD direction ties
-/// may differ slightly across backends. See the pinned darktable derivation.
-#[crate::node(id="bayer-rcd", name="Demosaic", category="demosaic",contract=rcd_contract,references=[("RCD source", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/demosaicing/rcd.c")])]
+/// Demosaic Bayer to CameraRgb with ratio-corrected demosaicing (RCD).
+/// Requires an explicit Bayer phase. Requested preview detail first reduces each
+/// CFA phase plane; full detail preserves the input grid. Negative samples are
+/// clipped to zero, and a ten-pixel border uses bilinear interpolation.
+/// Adapted from darktable RCD; direction ties may differ slightly across backends.
+#[crate::node(id="demosaic.rcd", name="RCD demosaic", category="Demosaic",contract=rcd_contract,references=[("RCD source", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/demosaicing/rcd.c")])]
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),

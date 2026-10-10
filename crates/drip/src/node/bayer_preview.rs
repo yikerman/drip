@@ -25,10 +25,10 @@ fn bayer_preview_contract(
         .transpose()?;
     Ok((output,))
 }
-/// Average each Bayer 2x2 cell into CameraRgb, averaging the two green samples.
-/// Global scale first reduces its four CFA phase planes. Drops incomplete edge
-/// cells. Requires declared Bayer phase; no CFA guessing.
-#[crate::node(id = "bayer-preview-2x2", name="Bayer 2×2", category="demosaic", contract = bayer_preview_contract)]
+/// Demosaic Bayer by averaging each 2×2 cell into CameraRgb, including both green
+/// sites. Requires an explicit Bayer phase and drops incomplete edge cells.
+/// Requested preview detail first reduces each CFA phase plane.
+#[crate::node(id = "demosaic.bayer-2x2", name="Bayer 2×2 demosaic", category="Demosaic", contract = bayer_preview_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),

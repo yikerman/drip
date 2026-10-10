@@ -20,7 +20,7 @@ pub(super) fn body(ui: &mut Ui, node: &mut NodeCx) {
     if node.popped(SHOWN) {
         let layout = egui::Layout::centered_and_justified(egui::Direction::TopDown);
         ui.scope_builder(UiBuilder::new().max_rect(rect).layout(layout), |ui| {
-            ui.weak("shown in its window")
+            ui.weak("Shown in its window")
         });
     } else if let Some(view) = node.view() {
         let font = FontId::proportional(theme::SMALL_SIZE);

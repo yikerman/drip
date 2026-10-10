@@ -19,19 +19,17 @@ pub fn inputs(ui: &mut Ui, graph: &mut Graph, frame: &mut Frame) {
     if inputs.is_empty() {
         return;
     }
-    ui.weak("inputs");
+    ui.weak("Template parameters");
     egui::Grid::new("inputs").num_columns(2).show(ui, |ui| {
         for (id, param) in inputs {
             let node = graph.node(id).expect("listed");
             let spec = node.kind.param(param).expect("listed");
-            let label = ui.label(format!("{} · {param}", node.name));
+            let label = ui.label(format!("{} · {}", node.name, spec.label));
             if !spec.documentation.is_empty() {
                 label.on_hover_text(spec.documentation);
             }
-            let kind = spec.kind;
-            let value = &node.params[param];
             if let Some(value) =
-                parameters::edit_value(ui, egui::Id::new(("input", id, param)), &kind, value)
+                parameters::edit_parameter(ui, egui::Id::new(("input", id, param)), &node, spec)
             {
                 frame.edit(graph, Edit::Param(id, param, value));
             }

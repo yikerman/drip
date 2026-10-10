@@ -228,6 +228,12 @@ impl Editor {
             return None;
         }
         let node = graph.node(l.id).expect("laid out from the graph");
+        ui.interact(
+            Rect::from_min_size(l.rect.min, vec2(l.rect.width(), HEADER)),
+            ui.id().with((l.id, "title")),
+            Sense::hover(),
+        )
+        .on_hover_text(&node.name);
         let (kind, kind_params) = (node_ui::of(node.kind), node.kind.params);
         let texts = node_ui::ports::texts(graph, l.id);
         paint(&painter, l, &node, &texts, *selected == Some(l.id));
@@ -428,13 +434,19 @@ fn paint(painter: &Painter, l: &NodeLayout, node: &Node, texts: &[PortText], sel
     let fill = if selected { theme::LIGHTER } else { theme::DARKER };
     painter.rect_filled(l.rect, 0.0, fill);
     let title = l.rect.min + vec2(8.0, HEADER / 2.0);
-    painter.text(title, Align2::LEFT_CENTER, &node.name, font, theme::TEXT);
+    let title_width =
+        l.rect.width() - 16.0 - if node.kind.params.is_empty() { 0.0 } else { HEADER };
+    let mut job = egui::text::LayoutJob::simple(node.name.clone(), font, theme::TEXT, title_width);
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    let galley = painter.layout_job(job);
+    painter.galley(title - vec2(0.0, galley.size().y / 2.0), galley, theme::TEXT);
     let inputs = l.inputs.iter().map(|(_, pos)| (*pos, 8.0, Align2::LEFT_CENTER));
     let outputs = l.outputs.iter().map(|(_, pos)| (*pos, -8.0, Align2::RIGHT_CENTER));
     for ((pos, offset, align), text) in inputs.chain(outputs).zip(texts) {
         painter.circle_filled(pos, PORT, theme::TEXT);
         let mut job = egui::text::LayoutJob::simple(
-            text.label.clone(),
+            text.canvas(),
             small.clone(),
             theme::WEAK,
             l.rect.width() - 16.0,

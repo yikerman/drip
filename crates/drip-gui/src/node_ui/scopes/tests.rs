@@ -15,6 +15,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
         width: 2,
         height: 2,
         requested_scale: 1,
+        color_space: "Rec.2020 / D65".into(),
         pixels: std::sync::Arc::new(
             vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36], [1.0, 0.5, 2.0], [0.25; 3]].into(),
         ),
@@ -63,7 +64,11 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
     let (histogram, waveform) = prepare(&a);
     assert_eq!(histogram.counts.iter().flatten().sum::<u32>(), 12);
     assert_eq!(waveform.counts.iter().flatten().sum::<u32>(), 12);
-    assert_eq!((histogram, waveform), prepare(&b));
+    let (camera_histogram, camera_waveform) = prepare(&b);
+    assert_eq!(histogram.counts, camera_histogram.counts);
+    assert_eq!(waveform.counts, camera_waveform.counts);
+    assert_eq!(histogram.color_space, "Rec.2020 / D65");
+    assert_eq!(camera_histogram.color_space, "Camera RGB");
 }
 
 #[test]
@@ -72,6 +77,7 @@ fn histogram_bins_by_stops() {
         width: 2,
         height: 1,
         requested_scale: 1,
+        color_space: "Rec.2020 / D65".into(),
         pixels: std::sync::Arc::new(vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]].into()),
     };
     let mut graph = Graph::default();
@@ -105,6 +111,7 @@ fn vectorscope_uses_working_rec2020_coordinates() {
         width: 1,
         height: 1,
         requested_scale: 1,
+        color_space: "Rec.2020 / D65".into(),
         pixels: std::sync::Arc::new(vec![[1.0, 0.0, 0.0]].into()),
     };
     let context = PrepareContext::default();

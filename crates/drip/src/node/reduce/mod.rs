@@ -8,7 +8,7 @@ use crate::{
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
-    /// Width and height of each averaging block. Partial edge blocks are retained.
+    /// Reduction factor in each dimension. Bayer averages each CFA phase separately.
     #[param(crate::param::ParamKind::Int { min:1, max:256, default:2 })]
     pub factor: i64,
 }

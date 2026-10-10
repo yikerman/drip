@@ -81,9 +81,13 @@ fn ev_position(ev: f32, min: f32, max: f32) -> f32 {
 /// Each channel's counts per stop, linearly or on a log scale that keeps small
 /// populations visible; the marked line is 1.0 (0 EV).
 fn histogram(painter: &Painter, rect: Rect, h: &Histogram, font: &FontId) {
+    if !rect.is_positive() {
+        return;
+    }
     let plot = Plot::new(painter, rect, font);
     let painter = &plot.painter;
     let density = normalized_counts(&h.counts, h.log);
+    plot.label(rect.right_top(), Align2::RIGHT_TOP, &h.color_space);
     let x = |i: usize| rect.left() + rect.width() * (i as f32 + 0.5) / h.counts.len() as f32;
     for c in 0..3 {
         let color =
@@ -96,7 +100,7 @@ fn histogram(painter: &Painter, rect: Rect, h: &Histogram, font: &FontId) {
     painter.vline(zero, rect.y_range(), Stroke::new(1.0, theme::LIGHTER));
     plot.label(rect.left_bottom(), Align2::LEFT_BOTTOM, &format!("{} EV", h.min_stop));
     plot.label(egui::pos2(zero + 2.0, rect.top()), Align2::LEFT_TOP, "0 EV");
-    plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, &format!("+{} EV", h.max_stop));
+    plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, &format!("{:+} EV", h.max_stop));
 }
 
 // Build density geometry on the worker. Drawing only transforms the shared
@@ -142,6 +146,9 @@ fn vectorscope_color(position: [f32; 2], density: f32, xyz_to_srgb: &color::Mat3
 }
 
 fn draw_scope(painter: &Painter, rect: Rect, scope: &Scope, mesh: &egui::Mesh, font: &FontId) {
+    if !rect.is_positive() {
+        return;
+    }
     let rect = match scope.axes {
         ScopeAxes::Waveform { .. } => rect,
         ScopeAxes::Vectorscope { .. } => Rect::from_center_size(
@@ -159,12 +166,13 @@ fn draw_scope(painter: &Painter, rect: Rect, scope: &Scope, mesh: &egui::Mesh, f
     painter.add(egui::Shape::mesh(mesh));
     match scope.axes {
         ScopeAxes::Waveform { min_stop, max_stop } => {
+            plot.label(rect.right_top(), Align2::RIGHT_TOP, &scope.color_space);
             let zero = at([0.0, 1.0 - ev_position(0.0, min_stop, max_stop)]).y;
             painter.hline(rect.x_range(), zero, Stroke::new(1.0, theme::LIGHTER));
-            plot.label(rect.left_top(), Align2::LEFT_TOP, &format!("+{max_stop} EV"));
+            plot.label(rect.left_top(), Align2::LEFT_TOP, &format!("{max_stop:+} EV"));
             plot.label(egui::pos2(rect.left(), zero), Align2::LEFT_BOTTOM, "0 EV");
             plot.label(rect.left_bottom(), Align2::LEFT_BOTTOM, &format!("{min_stop} EV"));
-            plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, "image x");
+            plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, "Image position →");
         }
         ScopeAxes::Vectorscope { primaries, color_space } => {
             painter.hline(rect.x_range(), rect.center().y, Stroke::new(0.5, theme::LIGHTER));
@@ -175,7 +183,7 @@ fn draw_scope(painter: &Painter, rect: Rect, scope: &Scope, mesh: &egui::Mesh, f
                 painter.circle_stroke(at(point), 3.0, Stroke::new(1.0, theme::LIGHTER));
                 plot.label(at(point) + egui::vec2(4.0, 0.0), Align2::LEFT_CENTER, name);
             }
-            plot.label(rect.left_top(), Align2::LEFT_TOP, "u'v' · D65");
+            plot.label(rect.left_top(), Align2::LEFT_TOP, "u′v′ · D65");
             plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, color_space);
         }
     }

@@ -79,27 +79,22 @@ fn softproof_matches_bounded_export_across_profiles_and_intents() {
     let mut project = Project::default();
     let source = project.graph.add_node(Registry.get("test.proof-source").unwrap()).unwrap();
     let preview = project.graph.add_node(Registry.get("view.preview").unwrap()).unwrap();
-    let tiff = project.graph.add_node(Registry.get("export.tiff").unwrap()).unwrap();
+    let tiff = project.graph.add_node(Registry.get("output.tiff").unwrap()).unwrap();
     for node in [preview, tiff] {
         project.graph.connect(Port(source, "image".into()), Port(node, "image".into())).unwrap();
     }
     set(&mut project, tiff, json!({ "path": path }));
     let evaluator = Evaluator::new(RuntimeContext::host());
-    set(&mut project, preview, json!({ "mode": "softproof" }));
 
     for target in ["srgb", "display_p3", "rec2020", "file"] {
         for intent in ["perceptual", "relative", "saturation", "absolute"] {
             for bpc in [false, true] {
-                for node in [preview, tiff] {
-                    set(
-                        &mut project,
-                        node,
-                        json!({
-                            "profile": target, "profile_file": custom,
-                            "intent": intent, "black_point_compensation": bpc,
-                        }),
-                    );
-                }
+                let settings = json!({
+                    "profile": if target == "file" { json!({"file": {"path": custom}}) } else { json!(target) },
+                    "intent": intent, "black_point_compensation": bpc,
+                });
+                set(&mut project, tiff, settings.clone());
+                set(&mut project, preview, json!({"mode": {"softproof": settings}}));
                 let mut inputs = evaluator.evaluate_inputs(
                     &project.graph.dag,
                     &Default::default(),
@@ -115,7 +110,7 @@ fn softproof_matches_bounded_export_across_profiles_and_intents() {
                 let node = project.graph.node(tiff).unwrap();
                 crate::node_ui::binding(node.kind)
                     .unwrap()
-                    .run_action("export", node.params, &values, &ctx)
+                    .run_action("Export", node.params, &values, &ctx)
                     .unwrap();
                 let (data, icc, _) = read(&path);
                 let DecodingResult::U16(data) = data else { panic!("16-bit export") };

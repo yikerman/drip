@@ -21,6 +21,7 @@ pub fn working_color() -> Color {
 pub struct Settings {
     /// Bayer RAW to bind as an immutable decoded snapshot.
     #[param(crate::param::ParamKind::Path {output:false})]
+    #[label("RAW file")]
     #[external]
     pub path: Option<PathBuf>,
 }
@@ -65,10 +66,10 @@ impl Node for RawSource {
     }
     fn metadata(&self) -> Metadata {
         Metadata {
-            id: "raw-bayer",
+            id: "input.bayer-raw",
             name: "RAW",
-            category: "input",
-            help: "Bind a Bayer RAW, subtract black and normalize by the common white reference. Image, site gains and camera matrix are independent outputs. Fill the source path before evaluation. Calibration remains approximate.",
+            category: "Input",
+            help: "Read a Bayer RAW, subtract black and normalize by a common white reference. Outputs are Bayer, BayerGains, CameraMatrix, BayerLevels and CaptureMetadata. Gains and matrix may be unavailable when camera metadata is insufficient. Choose a RAW file before evaluation; calibration remains approximate.",
             references: &[(
                 "LibRaw black normalization",
                 "https://github.com/LibRaw/LibRaw/blob/0.22.0/src/utils/utils_libraw.cpp",
@@ -139,7 +140,7 @@ impl Node for RawSource {
 }
 #[linkme::distributed_slice(crate::definition::NODES)]
 static REGISTRATION: Registration = Registration {
-    id: "raw-bayer",
+    id: "input.bayer-raw",
     defaults: || serde_json::json!({"path":null}),
     build: |p| {
         Ok(RawSource::bind(serde_json::from_value(p).map_err(|e| Error::Contract(e.to_string()))?))

@@ -28,7 +28,7 @@ impl<P: Payload> Node for Source<P> {
         Metadata {
             id: "bound-source",
             name: "Bound source",
-            category: "input",
+            category: "Input",
             help: "Immutable, validated source value.",
             references: &[],
             parameters: &[],

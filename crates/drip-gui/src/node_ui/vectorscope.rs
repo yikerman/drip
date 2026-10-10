@@ -21,9 +21,10 @@ fn vector_contract(
     super::contracts::working(image)
 }
 
-/// Plot identity Rec.2020 ColorRgb chromaticity in CIE 1976 u′v′. Negative channels
-/// are clipped for visualization; black has no chromaticity and is omitted.
-#[drip::node(id="view.vectorscope", name="Vectorscope", category="view", contract=vector_contract)]
+/// Plot identity-encoded Rec.2020/D65 ColorRgb chromaticity in CIE 1976 u′v′.
+/// Requires relative white 1. Negative channels are clipped for visualization;
+/// black has no chromaticity and is omitted. Density uses logarithmic counts.
+#[drip::node(id="view.vectorscope", name="Vectorscope", category="View", contract=vector_contract)]
 fn observe(_: &KernelContext<'_>, _: &(), image: Read<'_, Cpu<ColorRgb>>) -> drip::Result<()> {
     let _ = image;
     Ok(())
@@ -36,7 +37,12 @@ pub fn vectorscope(
     let matrix = &color::rgb_to_xyz(REC2020, D65);
     let counts = vector_counts(&image.pixels, matrix);
     let primaries = color::transpose(*matrix).map(|primary| position(uv(primary)));
-    Ok(scope(counts, ScopeAxes::Vectorscope { primaries, color_space: "Rec.2020" }, true))
+    Ok(scope(
+        counts,
+        ScopeAxes::Vectorscope { primaries, color_space: "Rec.2020" },
+        true,
+        image.color_space.clone(),
+    ))
 }
 
 fn uv([x, y, z]: [f64; 3]) -> [f32; 2] {

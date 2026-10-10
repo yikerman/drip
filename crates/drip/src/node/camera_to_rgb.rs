@@ -26,10 +26,10 @@ fn camera_to_rgb_contract(
     }
     Ok((Some(ImageDesc { extent: image.extent.clone(), interpretation: matrix.target.clone() }),))
 }
-/// Apply a row-major Camera-to-Color matrix, supplied on its own reusable port.
-/// The CameraRgb interpretation must match the matrix source. Produces ColorRgb
-/// in the declared target coordinates; no implicit decoding or clipping.
-#[crate::node(id = "camera-to-rgb-matrix", name="Camera to RGB", category="color", contract = camera_to_rgb_contract)]
+/// Convert CameraRgb to ColorRgb with the supplied CameraMatrix.
+/// The image interpretation must match the matrix source. Output uses the matrix's
+/// target coordinates, without implicit decoding, normalization or clipping.
+#[crate::node(id = "color.camera-to-color-rgb", name="Camera RGB to color RGB", category="Color", contract = camera_to_rgb_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),

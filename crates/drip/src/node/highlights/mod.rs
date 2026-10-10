@@ -41,11 +41,11 @@ fn contract(
     }
     Ok((image.cloned(),))
 }
-/// Reconstruct clipped Bayer samples with inpaint opposed. Assumes balanced
-/// camera channels; clipping levels are an independent BayerLevels input in
-/// the same coordinates. Approximate levels are allowed. Output retains the
-/// declared Bayer interpretation. [1] darktable opposed.c, see THIRD_PARTY.md.
-#[crate::node(id="bayer-highlights-opposed", name="Highlights", category="raw", contract=contract, references=[("darktable inpaint opposed", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/hlreconstruct/opposed.c")])]
+/// Reconstruct clipped Bayer samples with inpaint opposed, assuming balanced
+/// camera channels. BayerLevels supplies clipping levels in matching coordinates;
+/// approximate levels are allowed. Output retains the Bayer interpretation.
+/// Adapted from darktable's inpaint opposed algorithm; see the linked source.
+#[crate::node(id="sensor.highlights-opposed", name="Reconstruct highlights (opposed)", category="Sensor", contract=contract, references=[("darktable inpaint opposed", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/hlreconstruct/opposed.c")])]
 pub fn reconstruct(
     ctx: &KernelContext<'_>,
     p: &Settings,

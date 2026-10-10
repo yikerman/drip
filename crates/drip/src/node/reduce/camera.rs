@@ -13,8 +13,10 @@ fn camera_contract(
 ) -> Result<(Option<ImageDesc<Camera>>,)> {
     contract(global, p, image)
 }
-/// Box-average CameraRgb native samples without a color conversion.
-#[crate::node(id="reduce-camera-rgb", name="Camera RGB box reduction", category="geometry", contract=camera_contract)]
+/// Reduce CameraRgb by box averaging without a color conversion.
+/// The factor applies to both dimensions; partial edge blocks use available
+/// samples. Output retains the input interpretation.
+#[crate::node(id="geometry.reduce-camera-rgb", name="Camera RGB box reduction", category="Geometry", contract=camera_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     p: &Settings,

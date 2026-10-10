@@ -3,8 +3,10 @@ use super::scopes::{ExposureSettings, Scope, scope_contract};
 use drip::{Result, node::data::*, ports::*, runtime::KernelContext};
 
 use std::sync::Arc;
-/// Plot identity-encoded ColorRgb channel exposure against horizontal image position.
-#[drip::node(id="view.waveform", name="Waveform", category="view", contract=scope_contract)]
+/// Plot ColorRgb channel exposure against horizontal image position.
+/// Requires identity encoding and applies no color conversion. Exposure is measured
+/// relative to sample value 1; the density scale controls bin brightness.
+#[drip::node(id="view.waveform", name="Waveform", category="View", contract=scope_contract)]
 pub fn observe(
     _: &KernelContext<'_>,
     _: &ExposureSettings,

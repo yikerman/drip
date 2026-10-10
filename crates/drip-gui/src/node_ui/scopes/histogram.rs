@@ -18,6 +18,7 @@ pub struct Histogram {
     pub counts: Vec<[u32; 3]>,
     /// Whether the view plots the counts on a log scale rather than linearly.
     pub log: bool,
+    pub color_space: String,
 }
 
 const BINS: usize = 256;
@@ -31,7 +32,13 @@ pub fn histogram(
     let thresholds = std::array::from_fn(|i| 2f32.powf(min + i as f32 * (max - min) / BINS as f32));
     let counts = count(&image.pixels, &thresholds);
     let log = super::logarithmic(p.scale);
-    let histogram = Histogram { min_stop: min, max_stop: max, counts, log };
+    let histogram = Histogram {
+        min_stop: min,
+        max_stop: max,
+        counts,
+        log,
+        color_space: image.color_space.clone(),
+    };
     Ok(Arc::new(histogram))
 }
 

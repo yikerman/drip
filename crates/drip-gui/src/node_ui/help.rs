@@ -15,7 +15,7 @@ pub fn show(ui: &mut Ui, graph: &Graph, id: NodeId) {
     }
     egui::Grid::new(("node help", id)).num_columns(2).show(ui, |ui| {
         for port in ports::texts(graph, id) {
-            ui.weak(format!("{} {}", port.role.label(), port.port));
+            ui.weak(port.heading());
             ui.label(port.label);
             ui.end_row();
         }

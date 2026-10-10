@@ -4,8 +4,10 @@ use drip::{Result, node::data::*, ports::*, runtime::KernelContext};
 #[cfg(test)]
 pub use observe::add;
 use std::sync::Arc;
-/// Count CameraRgb native channels by exposure, without interpreting camera primaries as a display space.
-#[drip::node(id="view.camera-histogram", name="Camera histogram", category="view", contract=camera_scope_contract)]
+/// Plot CameraRgb native-channel counts by exposure, without a color conversion.
+/// Exposure is measured relative to sample value 1; the density scale controls
+/// counts, not the exposure axis.
+#[drip::node(id="view.camera-histogram", name="Camera histogram", category="View", contract=camera_scope_contract)]
 pub fn observe(
     _: &KernelContext<'_>,
     _: &ExposureSettings,

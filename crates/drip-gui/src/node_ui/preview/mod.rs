@@ -24,11 +24,14 @@ pub fn prepare(
     ctx: &PrepareContext,
 ) -> Result<PreviewImage, KernelError> {
     let input = image;
-    let output = || profile::Output::load(&p.output, &ctx.resources);
     let pixels = match p.mode {
         Mode::None => None,
-        Mode::Softproof => Some(softproof(&output()?, &input.pixels)?),
-        Mode::Gamutcheck => Some(gamutcheck(&output()?, &input.pixels)?),
+        Mode::Softproof(output) => {
+            Some(softproof(&profile::Output::load(&output, &ctx.resources)?, &input.pixels)?)
+        }
+        Mode::Gamutcheck(output) => {
+            Some(gamutcheck(&profile::Output::load(&output, &ctx.resources)?, &input.pixels)?)
+        }
     };
     let mut view = match pixels {
         None => PreviewImage::new(image),
@@ -48,6 +51,9 @@ impl super::GuiNode for PreviewGui {
     type Parameters = Preview;
     type Presentation = PreviewImage;
     const ID: &'static str = "view.preview";
+    fn parameter_ui(_: &Preview, path: &str) -> super::ParameterUi {
+        super::profile::parameter_ui(path)
+    }
     const PREPARE: Option<super::Prepare<Self>> =
         Some(|p, inputs, ctx| prepare(p, &ctx.image::<drip::node::data::Color>(inputs)?, ctx));
 }
@@ -59,26 +65,27 @@ use drip::{
     runtime::KernelContext,
 };
 use serde::{Deserialize, Serialize};
-#[derive(Clone, Copy, Default, drip::Choice)]
+#[derive(Clone, Default, drip::Choice)]
 pub enum Mode {
     #[default]
     #[choice("none")]
     None,
     #[choice("softproof")]
-    Softproof,
+    Softproof(profile::Settings),
     #[choice("gamutcheck")]
-    Gamutcheck,
+    #[label("Gamut check")]
+    Gamutcheck(profile::Settings),
 }
 #[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Preview {
+    /// Use bilinear display sampling when enabled, nearest-neighbor sampling otherwise.
     #[param(ParamKind::Bool { default: false })]
     pub interpolation: bool,
+    /// Show the image directly, simulate the output profile, or mark out-of-gamut colors in cyan.
+    #[label("Proof mode")]
     #[param(Mode::None.schema())]
     pub mode: Mode,
-    #[param(flatten)]
-    #[serde(flatten)]
-    pub output: profile::Settings,
 }
 fn preview_contract(
     _: &drip::runtime::GlobalContext,
@@ -87,9 +94,11 @@ fn preview_contract(
 ) -> drip::Result<()> {
     super::contracts::working(image)
 }
-/// Preview identity Rec.2020 ColorRgb. Softproof simulates the output profile;
-/// gamutcheck marks clipping in cyan. Interpolation controls display sampling.
-#[drip::node(id="view.preview", name="Preview", category="view", contract=preview_contract)]
+/// Display identity-encoded Rec.2020/D65 ColorRgb with relative white 1.
+/// Softproof simulates an output profile; Gamut check marks out-of-gamut colors in
+/// cyan. Each proof mode owns its output settings. Interpolation selects bilinear
+/// or nearest-neighbor display sampling and does not alter processing pixels.
+#[drip::node(id="view.preview", name="Preview", category="View", contract=preview_contract)]
 fn observe(_: &KernelContext<'_>, _: &Preview, image: Read<'_, Cpu<ColorRgb>>) -> drip::Result<()> {
     let _ = image;
     Ok(())

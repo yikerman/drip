@@ -68,7 +68,7 @@ pub(super) fn show(ui: &mut Ui, image: &Arc<Image>, interpolation: bool) {
             egui::ComboBox::from_id_salt(id.with("zoom")).width(75.0),
             &mut state.zoom,
             &options,
-            |zoom| zoom.map_or_else(|| "Fit".into(), |z| format!("{:.0}%", z * 100.0)),
+            |zoom| zoom_label(zoom, &options),
         )
         .on_hover_text("100%: one rendered image pixel per display pixel");
         if state.zoom.is_none() {
@@ -116,6 +116,21 @@ pub(super) fn show(ui: &mut Ui, image: &Arc<Image>, interpolation: bool) {
     let rect = Rect::from_min_size((rect.min.to_vec2() * ppp).round().to_pos2() / ppp, size);
     image::draw(&ui.painter().with_clip_rect(area), rect, id, image.clone(), interpolation);
     ui.data_mut(|data| data.insert_temp(id, state));
+}
+
+/// Retain enough precision to distinguish a wheel zoom from nearby presets.
+fn zoom_label(zoom: Option<f32>, options: &[Option<f32>]) -> String {
+    let Some(zoom) = zoom else { return "Fit".into() };
+    let percent = f64::from(zoom) * 100.0;
+    for precision in 0..=9 {
+        let label = format!("{percent:.precision$}%");
+        if options.iter().flatten().all(|&other| {
+            other == zoom || format!("{:.precision$}%", f64::from(other) * 100.0) != label
+        }) {
+            return label;
+        }
+    }
+    unreachable!("nine decimals distinguish supported f32 zoom values")
 }
 
 #[cfg(test)]

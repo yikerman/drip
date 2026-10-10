@@ -25,13 +25,12 @@ fn bayer_contract(
     Ok((output,))
 }
 
-/// Reduce Bayer by averaging each of its four phase planes separately. Sensor
-/// corrections belong before this spatial approximation; demosaic follows it.
-/// Complete blocks are retained, with a minimum of one Bayer cell for small
-/// inputs. Factor 1 preserves every sample, including incomplete edge cells.
-/// This explicit operation uses its factor parameter, independently of the
-/// global context's requested demosaic scale.
-#[crate::node(id="reduce-bayer", name="Bayer box reduction", category="geometry", contract=bayer_contract)]
+/// Reduce Bayer by averaging each CFA phase plane separately. Output retains the
+/// input interpretation and phase. Complete blocks are retained, with at least
+/// one Bayer cell for small inputs; factor 1 preserves incomplete edge cells too.
+/// The explicit factor is independent of requested preview detail. Apply sensor
+/// corrections before this spatial approximation when physical correspondence matters.
+#[crate::node(id="geometry.reduce-bayer", name="Bayer box reduction", category="Geometry", contract=bayer_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     p: &Settings,

@@ -15,11 +15,20 @@ fn preview(image: &Rec2020Mat, params: serde_json::Value) -> Result<PreviewImage
     super::prepare(params, image, &PrepareContext::default())
 }
 
+fn proof(mode: &str, overrides: serde_json::Value) -> serde_json::Value {
+    let mut output = serde_json::to_value(profile::Settings::default()).unwrap();
+    for (name, value) in overrides.as_object().unwrap() {
+        output[name] = value.clone();
+    }
+    json!({ "mode": {mode: output} })
+}
+
 fn image(pixels: Vec<[f32; 3]>) -> Arc<Rgb> {
     Arc::new(Rgb {
         width: pixels.len(),
         height: 1,
         requested_scale: 4,
+        color_space: "Rec.2020 / D65".into(),
         pixels: std::sync::Arc::new(pixels.into()),
     })
 }
@@ -36,7 +45,7 @@ fn none_reuses_linear_rec2020_pixels_without_loading_a_profile() {
     let input = Rec2020Mat::from(rgb.clone());
     {
         let input = &input;
-        let shown = preview(input, json!({ "profile": "file" })).unwrap();
+        let shown = preview(input, json!({})).unwrap();
         assert!(Arc::ptr_eq(shown.rgb(), &rgb));
         assert!(!shown.interpolation);
         let interpolated = preview(input, json!({ "interpolation": true })).unwrap();
@@ -48,7 +57,7 @@ fn none_reuses_linear_rec2020_pixels_without_loading_a_profile() {
 #[test]
 fn softproof_bounds_the_target_gamut_and_keeps_image_geometry() {
     let rgb = image(vec![[0.0; 3], [0.18; 3], [1.0; 3], [0.0, 1.0, 0.0], [-0.1; 3], [2.0; 3]]);
-    let shown = preview(&Rec2020Mat::from(rgb.clone()), json!({ "mode": "softproof" })).unwrap();
+    let shown = preview(&Rec2020Mat::from(rgb.clone()), proof("softproof", json!({}))).unwrap();
     let shown = shown.rgb();
     assert_eq!(
         (shown.width, shown.height, shown.requested_scale),
@@ -71,7 +80,7 @@ fn gamutcheck_marks_colors_against_the_selected_profile() {
     let rgb = image(vec![[0.0; 3], [0.18; 3], [1.0; 3], [0.0, 1.0, 0.0]]);
     let input = Rec2020Mat::from(rgb.clone());
     for target in ["srgb", "display_p3", "rec2020"] {
-        let shown = preview(&input, json!({ "mode": "gamutcheck", "profile": target })).unwrap();
+        let shown = preview(&input, proof("gamutcheck", json!({"profile": target}))).unwrap();
         for i in 0..3 {
             close(shown.rgb().pixels[i], rgb.pixels[i]);
         }
@@ -85,7 +94,7 @@ fn gamutcheck_preserves_dark_neutrals_and_interior_colors() {
     let mut pixels: Vec<_> = [-6, -5, -4, -3, -2, -1, 0].map(|ev| [10.0f32.powi(ev); 3]).into();
     pixels.extend([[0.002, 0.003, 0.002], [0.02, 0.03, 0.02], [0.2, 0.3, 0.2]]);
     let rgb = image(pixels);
-    let shown = preview(&Rec2020Mat::from(rgb.clone()), json!({"mode":"gamutcheck"})).unwrap();
+    let shown = preview(&Rec2020Mat::from(rgb.clone()), proof("gamutcheck", json!({}))).unwrap();
     for (&got, &want) in shown.rgb().pixels.iter().zip(rgb.pixels.iter()) {
         close(got, want);
     }
@@ -107,7 +116,7 @@ fn proofing_is_identical_across_worker_counts_and_chunk_boundaries() {
             .num_threads(workers)
             .build()
             .unwrap()
-            .install(|| preview(&input, json!({"mode":mode})).unwrap())
+            .install(|| preview(&input, proof(mode, json!({}))).unwrap())
     };
     for mode in ["softproof", "gamutcheck"] {
         assert_eq!(run(1, mode), run(4, mode));
@@ -153,7 +162,7 @@ fn gamut_warnings_agree_with_lcms_round_trips_away_from_the_boundary() {
         })
         .collect();
     let rgb = image(pixels);
-    let shown = preview(&Rec2020Mat::from(rgb.clone()), json!({"mode":"gamutcheck"})).unwrap();
+    let shown = preview(&Rec2020Mat::from(rgb.clone()), proof("gamutcheck", json!({}))).unwrap();
     let mut original = vec![[0.0f64; 3]; rgb.pixels.len()];
     to_lab.transform_pixels(&rgb.pixels, &mut original);
     let mut device = vec![[0u16; 3]; original.len()];
@@ -193,7 +202,8 @@ fn gamut_warnings_agree_with_lcms_round_trips_away_from_the_boundary() {
 fn active_modes_report_missing_profiles() {
     let input = Rec2020Mat::from(image(vec![[0.18; 3]]));
     for mode in ["softproof", "gamutcheck"] {
-        let error = preview(&input, json!({ "mode": mode, "profile": "file" })).unwrap_err();
+        let error =
+            preview(&input, proof(mode, json!({"profile": {"file": {"path": null}}}))).unwrap_err();
         assert_eq!(error, KernelError::Contract("no output profile file chosen".into()));
     }
 }
@@ -202,16 +212,22 @@ fn active_modes_report_missing_profiles() {
 fn proof_settings_round_trip_as_ordinary_node_parameters() {
     let mut project = Project::default();
     let id = project.graph.add_node(crate::model::Registry.get("view.preview").unwrap()).unwrap();
-    for (name, value) in [
-        ("interpolation", json!(true)),
-        ("mode", json!("softproof")),
-        ("profile", json!("file")),
-        ("profile_file", json!("proof.icc")),
-        ("intent", json!("absolute")),
-        ("black_point_compensation", json!(false)),
-    ] {
-        project.graph.set_param(id, name, value).unwrap();
-    }
+    project.graph.set_param(id, "interpolation", json!(true)).unwrap();
+    project
+        .graph
+        .set_param(
+            id,
+            "mode",
+            proof(
+                "softproof",
+                json!({
+                    "profile": {"file": {"path": "proof.icc"}},
+                    "intent": "absolute", "black_point_compensation": false,
+                }),
+            )["mode"]
+                .clone(),
+        )
+        .unwrap();
     let loaded = Project::from_json(&project.to_json().unwrap(), &crate::model::Registry).unwrap();
     assert_eq!(loaded.to_json().unwrap(), project.to_json().unwrap());
 }

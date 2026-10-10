@@ -9,10 +9,12 @@ pub mod scopes;
 #[cfg(test)]
 pub use binding::Action;
 pub use binding::{Binding, GuiNode, Prepare};
-pub use controls::ControlCx;
+pub use controls::{ControlCx, FileUi, ParameterUi};
 mod image_view;
 pub mod parameters;
 pub mod ports;
+mod profile;
+mod raw;
 mod sigmoid;
 mod viewer;
 use crate::editing::NodeCx;
@@ -93,15 +95,15 @@ pub enum Part {
 impl Part {
     pub fn name(self) -> &'static str {
         match self {
-            Part::Parameters => "parameters",
-            Part::View => "view",
+            Part::Parameters => "Parameters",
+            Part::View => "View",
         }
     }
 }
 
 impl Popped {
     pub fn title(self, node: &Node) -> String {
-        format!("{} {} · Drip", node.name, self.part.name())
+        format!("{} · {} · Drip", node.name, self.part.name())
     }
 
     /// The window's size, in points, when its content does not ask for one.

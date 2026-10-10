@@ -33,17 +33,21 @@ pub fn node(args: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Derive editor ranges and documentation from typed parameter fields.
 /// Flattening reuses a shared schema. Serde owns parameter persistence.
-#[proc_macro_derive(Parameters, attributes(param, external))]
+/// Labels default to sentence case; `#[label("Exposure (EV)")]` overrides them.
+#[proc_macro_derive(Parameters, attributes(param, external, label))]
 pub fn parameters(input: TokenStream) -> TokenStream {
     parameters::expand(parse_macro_input!(input as syn::DeriveInput))
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
 
-/// A finite parameter choice. Each unit variant declares its persisted spelling
+/// A finite parameter choice. Each variant declares its persisted spelling
 /// with `#[choice("name")]`. Generates JSON conversion and `variant.schema()`;
 /// use that schema in `#[param(...)]` on a field of this enum type.
-#[proc_macro_derive(Choice, attributes(choice))]
+/// Variants may contain one parameter struct; its fields render only when selected.
+/// Serialization uses Serde's externally tagged representation.
+/// `#[label("sRGB")]` supplies display text independently of the persisted key.
+#[proc_macro_derive(Choice, attributes(choice, label))]
 pub fn choice(input: TokenStream) -> TokenStream {
     choice::expand(parse_macro_input!(input as syn::DeriveInput))
         .unwrap_or_else(syn::Error::into_compile_error)

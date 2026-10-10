@@ -83,7 +83,7 @@ mod tests {
     fn layout_handles_invalid_saved_coordinates_without_losing_other_state() {
         let mut graph = crate::model::Graph::default();
         let ids: Vec<_> = (0..7)
-            .map(|_| graph.add_node(crate::model::Registry.get("rgb-exposure").unwrap()).unwrap())
+            .map(|_| graph.add_node(crate::model::Registry.get("tone.exposure").unwrap()).unwrap())
             .collect();
         let mut ui = json!({"pos": [1e300, 2], "size": [-1, 200], "other": {"keep": true}});
         assert_eq!(position(&ui, ids[6]), vec2(240.0, 180.0));

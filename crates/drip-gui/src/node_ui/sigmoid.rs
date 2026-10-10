@@ -10,7 +10,7 @@ struct SigmoidGui;
 impl GuiNode for SigmoidGui {
     type Parameters = sigmoid::Settings;
     type Presentation = ();
-    const ID: &'static str = "apply-rec2020-sigmoid";
+    const ID: &'static str = "tone.sigmoid";
     fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Parameters>) {
         node.schema(ui);
         let settings = node.parameters();

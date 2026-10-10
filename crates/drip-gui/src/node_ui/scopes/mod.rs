@@ -15,16 +15,23 @@ pub enum Scale {
     #[choice("linear")]
     Linear,
     #[choice("log")]
+    #[label("Logarithmic")]
     Log,
 }
 #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct ExposureSettings {
+    /// Lower exposure bound in stops relative to sample value 1. Values below it enter the first bin.
     #[param(ParamKind::Int { min: -24, max: -1, default: -12 })]
+    #[label("Minimum exposure (EV)")]
     pub min_ev: i64,
+    /// Upper exposure bound in stops relative to sample value 1. Values above it enter the last bin.
     #[param(ParamKind::Int { min: 1, max: 10, default: 4 })]
+    #[label("Maximum exposure (EV)")]
     pub max_ev: i64,
+    /// Scale sample counts linearly or logarithmically; the exposure axis remains in stops.
     #[param(Scale::Linear.schema())]
+    #[label("Density scale")]
     pub scale: Scale,
 }
 impl Default for ExposureSettings {
@@ -63,6 +70,7 @@ pub struct Scope {
     pub counts: Vec<[u32; 3]>,
     pub axes: ScopeAxes,
     pub log: bool,
+    pub color_space: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,8 +87,13 @@ pub enum ScopeAxes {
 }
 
 pub(super) const SIZE: usize = 256;
-pub(super) fn scope(counts: Vec<[u32; 3]>, axes: ScopeAxes, log: bool) -> Arc<Scope> {
-    Arc::new(Scope { size: SIZE, counts, axes, log })
+pub(super) fn scope(
+    counts: Vec<[u32; 3]>,
+    axes: ScopeAxes,
+    log: bool,
+    color_space: String,
+) -> Arc<Scope> {
+    Arc::new(Scope { size: SIZE, counts, axes, log, color_space })
 }
 
 fn logarithmic(scale: Scale) -> bool {

@@ -4,16 +4,43 @@
 use serde_json::Value as Json;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChoiceSpec {
+    pub name: &'static str,
+    pub label: &'static str,
+    pub parameters: Option<&'static [ParamSpec]>,
+}
+impl ChoiceSpec {
+    pub fn default_value(&self) -> Json {
+        match self.parameters {
+            None => self.name.into(),
+            Some(parameters) => {
+                let fields: serde_json::Map<_, _> =
+                    parameters.iter().map(|p| (p.name.into(), p.kind.default_value())).collect();
+                serde_json::json!({ self.name: fields })
+            }
+        }
+    }
+
+    pub fn selected(&self, value: &Json) -> bool {
+        match self.parameters {
+            None => value.as_str() == Some(self.name),
+            Some(_) => value.as_object().is_some_and(|v| v.len() == 1 && v.contains_key(self.name)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ParamSpec {
     pub documentation: &'static str,
     pub name: &'static str,
+    pub label: &'static str,
     pub kind: ParamKind,
     pub external: bool,
 }
 
 impl ParamSpec {
     pub const fn new(name: &'static str, kind: ParamKind) -> Self {
-        ParamSpec { name, kind, documentation: "", external: false }
+        ParamSpec { name, label: name, kind, documentation: "", external: false }
     }
 }
 
@@ -33,7 +60,7 @@ pub enum ParamKind {
         default: bool,
     },
     Choice {
-        options: &'static [&'static str],
+        options: &'static [ChoiceSpec],
         default: &'static str,
     },
     /// A file path, unset (`null`) by default; `output` if the node writes it.
@@ -48,7 +75,11 @@ impl ParamKind {
             ParamKind::Float { default, .. } => default.into(),
             ParamKind::Int { default, .. } => default.into(),
             ParamKind::Bool { default } => default.into(),
-            ParamKind::Choice { default, .. } => default.into(),
+            ParamKind::Choice { options, default } => options
+                .iter()
+                .find(|option| option.name == default)
+                .expect("declared default")
+                .default_value(),
             ParamKind::Path { .. } => Json::Null,
         }
     }
@@ -62,9 +93,12 @@ impl ParamKind {
                 value.as_i64().is_some_and(|v| (min..=max).contains(&v))
             }
             ParamKind::Bool { .. } => value.is_boolean(),
-            ParamKind::Choice { options, .. } => {
-                value.as_str().is_some_and(|v| options.contains(&v))
-            }
+            ParamKind::Choice { options, .. } => options.iter().any(|option| {
+                option.selected(value)
+                    && option.parameters.is_none_or(|params| {
+                        params.iter().all(|p| p.kind.accepts(&value[option.name][p.name]))
+                    })
+            }),
             ParamKind::Path { .. } => value.is_null() || value.is_string(),
         }
     }
@@ -87,7 +121,7 @@ impl ParamKind {
 /// enum Mode { #[choice("linear")] Linear }
 /// #[derive(drip::Parameters)]
 /// struct Bad {
-///     #[param(ParamKind::Choice { options: &["linear", "unknown"], default: "linear" })]
+///     #[param(ParamKind::Choice { options: &[], default: "unknown" })]
 ///     mode: Mode,
 /// }
 /// const SPECS: &[drip::param::ParamSpec] = Bad::SPECS;
@@ -163,7 +197,7 @@ impl FieldType {
                 let mut i = 0;
                 let mut has_default = false;
                 while i < names.len() {
-                    if !same_name(names[i], options[i]) {
+                    if !same_name(names[i], options[i].name) {
                         return false;
                     }
                     has_default |= same_name(names[i], default);

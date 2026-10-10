@@ -8,6 +8,7 @@ pub struct Project {
     pub graph: Graph,
     pub ui: Value,
 }
+
 impl Project {
     pub fn template(&self) -> Result<Self> {
         let mut template = self.clone();
@@ -32,7 +33,7 @@ impl Project {
         let targets: Vec<_> = self
             .graph
             .nodes()
-            .filter(|(_, n)| n.kind.id == "export.tiff")
+            .filter(|(_, n)| n.kind.id == "output.tiff")
             .filter_map(|(id, _)| self.graph.source(&super::Port(id, "image".into())))
             .map(|p| self.graph.dag.output_port(p.0, &p.1))
             .collect::<Result<_>>()?;
@@ -50,6 +51,7 @@ impl Project {
     pub fn from_json(text: &str, registry: &Registry) -> Result<Self> {
         let core = drip::project::Project::from_json(text)?;
         let mut graph = Graph { dag: core.dag, ..Default::default() };
+        let mut missing = Vec::new();
         for (id, node) in graph.dag.nodes() {
             let kind = registry
                 .get(node.metadata().id)
@@ -57,10 +59,10 @@ impl Project {
             let state: State = match core.node_ui.get(&id).filter(|v| !v.is_null()) {
                 Some(value) => serde_json::from_value(value.clone())
                     .map_err(|e| drip::Error::Graph(e.to_string()))?,
-                None => State {
-                    name: format!("{} {}", kind.name, id.index() + 1),
-                    ..Default::default()
-                },
+                None => {
+                    missing.push((id, kind));
+                    continue;
+                }
             };
             if state.name.trim().is_empty()
                 || graph.state.values().any(|s| s.name == state.name)
@@ -70,6 +72,28 @@ impl Project {
             }
             graph.state.insert(id, state);
         }
+        for (id, kind) in missing {
+            graph.initialize_state(id, kind);
+        }
         Ok(Self { graph, ui: core.ui })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn imported_names_use_kind_suffixes_and_respect_saved_names() {
+        let mut core = drip::project::Project::default();
+        drip::node::exposure::add(&mut core.dag, Default::default()).unwrap();
+        let b = drip::node::exposure::add(&mut core.dag, Default::default()).unwrap();
+        core.node_ui
+            .insert(b.node, serde_json::json!({"name":"Exposure", "external":[], "ui":null}));
+        let mut project = Project::from_json(&core.to_json().unwrap(), &Registry).unwrap();
+        let names: Vec<_> = project.graph.nodes().map(|(_, node)| node.name).collect();
+        assert_eq!(names, ["Exposure 2", "Exposure"]);
+        let added = project.graph.add_node(Registry.get("tone.exposure").unwrap()).unwrap();
+        assert_eq!(project.graph.node(added).unwrap().name, "Exposure 3");
     }
 }

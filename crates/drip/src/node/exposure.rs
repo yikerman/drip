@@ -10,6 +10,7 @@ pub use compute::{Definition, Ports, add, definition};
 pub struct Exposure {
     /// Exposure adjustment in stops, applied as a positive multiplier.
     #[param(crate::param::ParamKind::Float { min: -32.0, max: 32.0, default: 0.0 })]
+    #[label("Exposure (EV)")]
     pub ev: f32,
 }
 fn exposure_contract(
@@ -25,9 +26,10 @@ fn exposure_contract(
     }
     Ok((image.cloned(),))
 }
-/// Multiply identity-encoded ColorRgb by 2^stops. Preserve its coordinates and
-/// declared scale; permit negative and above-one samples. No scene/display order rule.
-#[crate::node(id = "rgb-exposure", name="Exposure", category="color", contract = exposure_contract)]
+/// Adjust identity-encoded ColorRgb exposure by multiplying samples by 2^EV.
+/// Output retains the input coordinates and scale. Negative and above-one samples
+/// are allowed; this operation does not impose a scene/display processing order.
+#[crate::node(id = "tone.exposure", name="Exposure", category="Tone", contract = exposure_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     params: &Exposure,

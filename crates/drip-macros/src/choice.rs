@@ -1,4 +1,4 @@
-//! Persisted spellings and schemas for finite parameter choices.
+//! Persisted enum variants and their parameter schemas.
 use quote::quote;
 
 pub(crate) fn expand(item: syn::DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
@@ -8,13 +8,15 @@ pub(crate) fn expand(item: syn::DeriveInput) -> syn::Result<proc_macro2::TokenSt
     if !item.generics.params.is_empty() || data.variants.is_empty() {
         return Err(syn::Error::new_spanned(&item, "choices must be concrete and nonempty"));
     }
-    let mut variants = Vec::new();
     let mut names = Vec::new();
+    let mut schemas = Vec::new();
+    let mut patterns = Vec::new();
+    let mut serialize = Vec::new();
+    let mut decode_variants = Vec::new();
+    let mut decode_arms = Vec::new();
     let mut unique = std::collections::BTreeSet::new();
-    for variant in &data.variants {
-        if !matches!(variant.fields, syn::Fields::Unit) {
-            return Err(syn::Error::new_spanned(variant, "choice variants must be unit variants"));
-        }
+    let ty = &item.ident;
+    for (index, variant) in data.variants.iter().enumerate() {
         let attrs: Vec<_> = variant.attrs.iter().filter(|a| a.path().is_ident("choice")).collect();
         if attrs.len() != 1 {
             return Err(syn::Error::new_spanned(variant, "expected one #[choice(\"name\")]"));
@@ -23,47 +25,69 @@ pub(crate) fn expand(item: syn::DeriveInput) -> syn::Result<proc_macro2::TokenSt
         if !unique.insert(name.value()) {
             return Err(syn::Error::new_spanned(name, "duplicate persisted choice name"));
         }
-        variants.push(&variant.ident);
+        let label = crate::documentation::label(&variant.attrs, &name.value())?;
+        let ident = &variant.ident;
+        let index = index as u32;
+        let params = match &variant.fields {
+            syn::Fields::Unit => {
+                patterns.push(quote!(Self::#ident));
+                serialize.push(quote!(Self::#ident => serializer.serialize_unit_variant(stringify!(#ty), #index, #name)));
+                decode_variants.push(quote!(#[serde(rename = #name)] #ident));
+                decode_arms.push(quote!(Decoded::#ident => Self::#ident));
+                quote!(None)
+            }
+            syn::Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                let payload = &fields.unnamed[0].ty;
+                patterns.push(quote!(Self::#ident(..)));
+                serialize.push(quote!(Self::#ident(value) => serializer.serialize_newtype_variant(stringify!(#ty), #index, #name, value)));
+                decode_variants.push(quote!(#[serde(rename = #name)] #ident(#payload)));
+                decode_arms.push(quote!(Decoded::#ident(value) => Self::#ident(value)));
+                quote!(Some(<#payload as ::drip::param::Parameters>::SPECS))
+            }
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    variant,
+                    "choice variants must be unit variants or contain one parameter struct",
+                ));
+            }
+        };
+        schemas.push(
+            quote!(::drip::param::ChoiceSpec { name: #name, label: #label, parameters: #params }),
+        );
         names.push(name);
     }
-    let name = &item.ident;
     Ok(quote! {
-        impl #name {
+        impl #ty {
             pub const OPTIONS: &'static [&'static str] = &[#(#names),*];
-
+            pub const CHOICES: &'static [::drip::param::ChoiceSpec] = &[#(#schemas),*];
             pub const fn as_str(&self) -> &'static str {
-                match self { #(Self::#variants => #names),* }
+                match self { #(#patterns => #names),* }
             }
             pub const fn schema(&self) -> ::drip::param::ParamKind {
-                ::drip::param::ParamKind::Choice {
-                    options: Self::OPTIONS,
-                    default: self.as_str(),
-                }
+                ::drip::param::ParamKind::Choice { options: Self::CHOICES, default: self.as_str() }
             }
         }
-        impl ::drip::param::ParameterField for #name {
+        impl ::drip::param::ParameterField for #ty {
             const TYPE: ::drip::param::FieldType = ::drip::param::FieldType::Choice(Self::OPTIONS);
         }
-        impl<'de> ::drip::__private::serde::Deserialize<'de> for #name {
+        impl<'de> ::drip::__private::serde::Deserialize<'de> for #ty {
             fn deserialize<D: ::drip::__private::serde::Deserializer<'de>>(
                 deserializer: D,
             ) -> ::core::result::Result<Self, D::Error> {
-                let value = <String as ::drip::__private::serde::Deserialize>::deserialize(deserializer)?;
-                match value.as_str() {
-                    #(#names => Ok(Self::#variants),)*
-                    _ => Err(::drip::__private::serde::de::Error::unknown_variant(
-                        &value,
-                        Self::OPTIONS,
-                    )),
-                }
+                #[derive(::drip::__private::serde::Deserialize)]
+                #[serde(crate = "::drip::__private::serde")]
+                enum Decoded { #(#decode_variants),* }
+                Ok(match <Decoded as ::drip::__private::serde::Deserialize>::deserialize(deserializer)? {
+                    #(#decode_arms),*
+                })
             }
         }
-        impl ::drip::__private::serde::Serialize for #name {
+        impl ::drip::__private::serde::Serialize for #ty {
             fn serialize<S: ::drip::__private::serde::Serializer>(
                 &self,
                 serializer: S,
             ) -> ::core::result::Result<S::Ok, S::Error> {
-                serializer.serialize_str(self.as_str())
+                match self { #(#serialize),* }
             }
         }
     })

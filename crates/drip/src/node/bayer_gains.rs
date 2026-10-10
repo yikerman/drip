@@ -21,9 +21,10 @@ fn gain_contract(
     d.interpretation = gains.target.clone();
     Ok((Some(d),))
 }
-/// Apply four site gains to Bayer samples in the matching response convention.
-/// Gains are ordered by local 2x2 position. No guessed white balance or CFA.
-#[crate::node(id="bayer-site-gains", name="White balance", category="color",contract=gain_contract)]
+/// Apply four BayerGains to Bayer samples in matching response coordinates.
+/// Gains are ordered by local 2×2 site position. Output is Bayer in the gains'
+/// target interpretation. White balance is one use; no gains or CFA are inferred.
+#[crate::node(id="sensor.bayer-site-gains", name="Bayer site gains", category="Sensor",contract=gain_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),

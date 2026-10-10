@@ -13,9 +13,9 @@ in [PROGRESS](PROGRESS.md).
   the primary development platform; X11 is unsupported. A replacement GUI must
   cover all three color paths.
 - **Decided:** Sub-300 ms latency is acceptable without further optimization.
-  The CubeCL trial lost to Rayon on latency and development effort at host-valued
-  node boundaries. Reconsider GPU execution only with whole-node measurements
-  including transfers and allocations.
+  Evaluate the current CubeCL path with whole-node measurements, including
+  transfers and allocations. Earlier Rayon comparisons are historical evidence,
+  not the current backend policy.
 - **Decided:** Prototype project formats have no migration guarantee.
 - **Decided:** Inspector help treats Rustdoc source wraps as spaces and retains
   paragraph breaks, so prose wraps to the sidebar width. Node metadata retains
@@ -37,6 +37,26 @@ in [PROGRESS](PROGRESS.md).
 
 ## GUI actions
 
+- **Decided:** Use sentence-case display labels independently of persisted keys.
+  Registered IDs use `category.operation`, without migration aliases. Categories
+  follow the agreed pipeline groups: Input, Sensor, Demosaic, Color, Tone,
+  Geometry, View and Output. Names identify concrete operations and algorithms.
+- **Decided:** Enum variants own their dependent parameter structs. Generate
+  Serde adapters and recursive UI schemas together; use externally tagged JSON.
+  Only the selected variant's fields are shown. Inactive variant edits may live
+  in temporary UI state, but are not part of the saved parameter value.
+- **Decided:** Projects use `.drip`; templates use `.drip-template`. Opening a
+  template creates an untitled project. Exposed template parameters reset to
+  their declared defaults when saving a template. No explanatory UI text is added.
+- **Decided:** Keep declared payload names on ports and include endpoint names;
+  mark optional canvas inputs with `?`. Elide long titles and expose full names
+  on hover. Track unsaved persisted edits separately from evaluation requests.
+- **Decided:** Scope overlays retain axes and compact color-space labels. Omit
+  pixel/peak counts, dimensions and repeated detail/density settings; those
+  settings already appear in the scope or global configuration.
+- **Open:** Generate bound-source metadata and ports without losing immutable
+  asset binding, shared output buffers or unavailable outputs. The current node
+  macro assumes parameter-only state and allocated outputs; RAW is handwritten.
 - **Decided:** Disable exports while asset bindings are pending, including cache
   invalidation reloads. Reject same-frame actions before snapshotting the graph;
   worker command ordering cannot refresh an immutable RAW already in a snapshot.

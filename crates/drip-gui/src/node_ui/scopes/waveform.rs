@@ -15,6 +15,7 @@ pub fn waveform(
         counts,
         ScopeAxes::Waveform { min_stop: min, max_stop: max },
         super::logarithmic(p.scale),
+        image.color_space.clone(),
     ))
 }
 
@@ -52,6 +53,7 @@ mod tests {
             width: 2,
             height: 2,
             requested_scale: 1,
+            color_space: "Rec.2020 / D65".into(),
             pixels: std::sync::Arc::new(
                 vec![[1.0, 0.0, 16.0], [0.5; 3], [1.0, -1.0, 32.0], [0.5; 3]].into(),
             ),

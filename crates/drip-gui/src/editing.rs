@@ -23,6 +23,8 @@ pub struct Frame<'a> {
 /// What node GUIs did in one frame, for the app to apply.
 #[derive(Default)]
 pub struct Report {
+    /// A persisted project value changed, including names and layout.
+    pub changed: bool,
     /// Whether processing inputs or connections changed.
     pub edited: bool,
     /// Whether shared presentation changed, including noncomputational edits.
@@ -99,6 +101,7 @@ impl<'a> Frame<'a> {
         })();
         match result {
             Ok(added) => {
+                self.report.changed = true;
                 self.report.redraw = true;
                 self.report.edited |= evaluate;
                 added

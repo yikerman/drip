@@ -76,6 +76,7 @@ mod tests {
             width: 1,
             height: 1,
             requested_scale: 1,
+            color_space: "Rec.2020 / D65".into(),
             pixels: std::sync::Arc::new(vec![[-1.0, 0.5, 2.0]].into()),
         });
         let raw = Arc::downgrade(&source);

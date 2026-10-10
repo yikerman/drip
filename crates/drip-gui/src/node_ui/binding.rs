@@ -1,5 +1,5 @@
 //! Optional typed controls, preparation and actions over declared node inputs.
-use super::ControlCx;
+use super::{ControlCx, ParameterUi};
 use crate::{
     model::NodeKind,
     node_ui::data::PrepareContext,
@@ -23,7 +23,10 @@ pub trait GuiNode: Sized + 'static {
     const ID: &'static str;
     const PREPARE: Option<Prepare<Self>> = None;
     const ACTION: Option<Action<Self>> = None;
-    const ACTION_NAME: &'static str = "export";
+    const ACTION_NAME: &'static str = "Export";
+    fn parameter_ui(_: &Self::Parameters, _: &str) -> ParameterUi {
+        ParameterUi::default()
+    }
     fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Parameters>) {
         node.schema(ui);
     }
@@ -37,6 +40,7 @@ pub struct Binding {
     prepare: Option<PrepareErased>,
     action: Option<ActionErased>,
     action_name: &'static str,
+    parameter_ui: fn(Value, &str) -> ParameterUi,
 }
 impl Binding {
     pub const fn new<G: GuiNode>() -> Self {
@@ -60,10 +64,16 @@ impl Binding {
                 None
             },
             action_name: G::ACTION_NAME,
+            parameter_ui: |params, name| {
+                G::parameter_ui(&decode(params).expect("validated parameters"), name)
+            },
         }
     }
     pub fn kind(&self) -> &'static NodeKind {
         crate::model::Registry.get(self.id).expect("GUI binds a registered node")
+    }
+    pub fn parameter_ui(&self, params: Value, name: &str) -> ParameterUi {
+        (self.parameter_ui)(params, name)
     }
     pub fn has_preparation(&self) -> bool {
         self.prepare.is_some()

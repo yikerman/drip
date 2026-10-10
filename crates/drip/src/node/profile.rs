@@ -11,16 +11,28 @@ use crate::Error;
 use crate::node::color::{D65, P3, REC709, REC2020};
 use crate::param::ParamKind;
 
-#[derive(Clone, Copy, crate::Choice)]
+#[derive(Clone, crate::Choice)]
 pub enum ProfileSource {
     #[choice("srgb")]
+    #[label("sRGB")]
     Srgb,
     #[choice("display_p3")]
+    #[label("Display P3")]
     DisplayP3,
     #[choice("rec2020")]
+    #[label("Rec.2020")]
     Rec2020,
     #[choice("file")]
-    File,
+    File(ProfileFile),
+}
+
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize, crate::Parameters)]
+#[serde(deny_unknown_fields)]
+pub struct ProfileFile {
+    /// RGB ICC profile used for output conversion or proofing.
+    #[label("ICC profile file")]
+    #[param(ParamKind::Path { output: false })]
+    pub path: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Copy, crate::Choice)]
@@ -37,12 +49,16 @@ enum RenderingIntent {
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 pub struct Settings {
+    /// RGB output profile used for conversion or proofing.
+    #[label("Output profile")]
     #[param(ProfileSource::Srgb.schema())]
     pub profile: ProfileSource,
-    #[param(ParamKind::Path { output: false })]
-    pub profile_file: Option<std::path::PathBuf>,
+    /// Rendering intent for the conversion into the output profile.
+    #[label("Rendering intent")]
     #[param(RenderingIntent::Relative.schema())]
     intent: RenderingIntent,
+    /// Map the source black point to the output profile black point.
+    #[label("Black point compensation")]
     #[param(ParamKind::Bool { default: true })]
     black_point_compensation: bool,
 }
@@ -51,7 +67,6 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             profile: ProfileSource::Srgb,
-            profile_file: None,
             intent: RenderingIntent::Relative,
             black_point_compensation: true,
         }
@@ -70,8 +85,11 @@ impl Output {
     pub fn load(p: &Settings, resources: &crate::resource::Resources) -> Result<Self, Error> {
         let (profile, icc) = match p.profile.built_in() {
             None => {
-                let file = p
-                    .profile_file
+                let ProfileSource::File(source) = &p.profile else {
+                    unreachable!("built-in profile")
+                };
+                let file = source
+                    .path
                     .as_deref()
                     .ok_or(Error::Contract("no output profile file chosen".into()))?;
                 let in_file = |e| format!("{}: {e}", file.display());
@@ -141,12 +159,12 @@ pub fn convert_in_place<T: Send>(pixels: &mut [T], convert: impl Fn(&mut [T]) + 
 
 impl ProfileSource {
     /// Construct a built-in profile, or request external ICC bytes for `File`.
-    pub fn built_in(self) -> Option<Profile> {
+    pub fn built_in(&self) -> Option<Profile> {
         match self {
             Self::Srgb => Some(rgb("sRGB", REC709, srgb_curve())),
             Self::DisplayP3 => Some(rgb("Display P3", P3, srgb_curve())),
-            Self::Rec2020 => Some(rgb("Rec. 2020", REC2020, rec2020_curve())),
-            Self::File => None,
+            Self::Rec2020 => Some(rgb("Rec.2020", REC2020, rec2020_curve())),
+            Self::File(_) => None,
         }
     }
 }

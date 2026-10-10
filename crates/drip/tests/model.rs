@@ -113,7 +113,9 @@ fn typed_macro_supplies_docs_ports_and_discovery() {
     assert!(n.inputs()[0].is::<ColorRgb>());
     assert!(n.outputs()[0].is::<ColorRgb>());
     assert!(n.metadata().parameters.is_empty());
-    assert!(drip::definition::registered("rgb-exposure", serde_json::json!({"ev":"bad"})).is_err());
+    assert!(
+        drip::definition::registered("tone.exposure", serde_json::json!({"ev":"bad"})).is_err()
+    );
 }
 #[test]
 fn parameter_schema_comes_from_the_function_parameter_type() {

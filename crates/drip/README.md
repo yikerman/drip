@@ -1,4 +1,6 @@
-# Organization
+# Drip library
+
+## Organization
 
 - `src/node/` owns node-specific behavior. Each node has a file or directory
   containing its parameters, contracts, computation and private helpers/kernels.
@@ -24,7 +26,26 @@ Device allocation and transport are shared; a payload may supply a small local
 packing adapter for nested allocations. Do not duplicate CPU/GPU schemas or
 flatten unrelated ports merely to make their storage uniform.
 
-# Compute backends
+## Node metadata and parameters
+
+Declare operation names, categories, help and port contracts beside node functions.
+Registered IDs use `category.operation`; display labels use sentence case and
+retain technical spellings such as RAW, RGB, ICC, sRGB and Rec.2020. Labels do
+not determine compatibility or persistence keys.
+
+`Parameters` generates field schemas and Rustdoc help. `Choice` generates
+Serde adapters and schemas for unit variants or variants containing a parameter
+struct. Unit variants serialize as strings; variants with settings use Serde's
+externally tagged object form. The GUI renders only the active variant. Keep
+profile-file paths, proof settings and compression levels in the variants that
+consume them, rather than independent inactive fields.
+
+File-dialog hints and scope annotations belong to `drip-gui`. The library owns
+processing values and their interpretations. `RawSource` binds a decoded asset
+before evaluation and publishes shared buffers through a handwritten `Node`
+implementation; extending the function macro to cover bound sources is open.
+
+## Compute backends
 
 Cargo features include compute runtimes; `DRIP_BACKEND` selects one at startup.
 An unset environment variable selects `metal-native` on macOS if that feature

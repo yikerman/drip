@@ -13,8 +13,10 @@ fn color_contract(
 ) -> Result<(Option<ImageDesc<Color>>,)> {
     contract(global, p, image)
 }
-/// Box-average ColorRgb samples without changing their interpretation.
-#[crate::node(id="reduce-rgb", name="RGB box reduction", category="geometry", contract=color_contract)]
+/// Reduce ColorRgb by box averaging without changing its interpretation.
+/// The factor applies to both dimensions; partial edge blocks use available
+/// samples. Output retains the input coordinates, encoding and scale.
+#[crate::node(id="geometry.reduce-color-rgb", name="RGB box reduction", category="Geometry", contract=color_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     p: &Settings,
