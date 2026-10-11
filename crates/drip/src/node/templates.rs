@@ -6,9 +6,9 @@ use crate::{
     ports::Output,
 };
 
-/// The editable starting pipeline, wired before its RAW file is chosen, and
-/// its rendered output.
-pub fn raw_pipeline() -> Result<(Dag, Output<Rgb>)> {
+/// RAW to TIFF: the editable starting pipeline, wired before its RAW and
+/// output files are chosen, and its rendered output for further consumers.
+pub fn raw_to_tiff() -> Result<(Dag, Output<Rgb>)> {
     let mut dag = Dag::new();
     let raw = raw::add(&mut dag, Default::default())?;
     let (mosaic, metadata) = (raw.mosaic, raw.metadata);
@@ -20,6 +20,7 @@ pub fn raw_pipeline() -> Result<(Dag, Output<Rgb>)> {
     let orientation = node::orientation::add(&mut dag, Default::default())?;
     let exposure = node::exposure::add(&mut dag, Default::default())?;
     let sigmoid = sigmoid::apply::add(&mut dag, Default::default())?;
+    let export = node::export::tiff::add(&mut dag, Default::default())?;
     dag.edit(|edit| {
         edit.connect(mosaic, gains.image)?;
         edit.connect(metadata, gains.metadata)?;
@@ -34,6 +35,8 @@ pub fn raw_pipeline() -> Result<(Dag, Output<Rgb>)> {
         edit.connect(metadata, orientation.metadata)?;
         edit.connect(orientation.output, exposure.image)?;
         edit.connect(exposure.output, sigmoid.image)?;
+        edit.connect(sigmoid.output, export.image)?;
+        edit.connect(metadata, export.metadata)?;
         Ok(())
     })?;
     Ok((dag, sigmoid.output))

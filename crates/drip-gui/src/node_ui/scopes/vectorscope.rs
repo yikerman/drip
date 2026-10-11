@@ -20,7 +20,7 @@ const RADIUS: f32 = 0.5;
 /// are clipped for visualization; black has no chromaticity and is omitted.
 /// Density uses logarithmic counts.
 #[drip::node(id = "view.vectorscope", name = "Vectorscope", category = "View")]
-fn observe(
+pub fn observe(
     _: &KernelContext<'_>,
     _: &(),
     _image: Read<'_, Device<Rgb>, Rec2020>,

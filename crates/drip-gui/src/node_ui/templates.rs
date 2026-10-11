@@ -1,42 +1,42 @@
 //! The core starting pipeline, laid out with the editor's universal views.
-use crate::model::{Graph, Port, Project, Registry};
+use super::{preview, scopes};
+use crate::model::{Graph, Project};
 use serde_json::json;
 
 pub fn raw_to_tiff() -> Project {
-    let (dag, output) = drip::node::templates::raw_pipeline().expect("valid built-in pipeline");
-    let target = output.id();
+    let (mut dag, rendered) =
+        drip::node::templates::raw_to_tiff().expect("valid built-in pipeline");
+    let views = [
+        preview::observe::add(&mut dag, Default::default()).map(|v| v.image),
+        scopes::histogram::observe::add(&mut dag, Default::default()).map(|v| v.image),
+        scopes::waveform::observe::add(&mut dag, Default::default()).map(|v| v.image),
+        scopes::vectorscope::observe::add(&mut dag, ()).map(|v| v.image),
+    ];
+    for view in views {
+        dag.connect(rendered, view.expect("registered view")).expect("views accept rendered RGB");
+    }
     let mut graph = Graph::from_dag(dag).expect("registered built-in nodes");
     // Align views on the top edge, stack histogram/waveform in one column,
     // and stagger processing through Orientation to separate metadata branches.
     // Exposure/Sigmoid align with Orientation; RAW and TIFF sit below the chain.
-    let positions = [
-        ("RAW", [0.0, 800.0]),
-        ("Bayer site gains", [195.0, 550.0]),
-        ("Reconstruct highlights (opposed)", [390.0, 565.0]),
-        ("RCD demosaic", [585.0, 600.0]),
-        ("Camera RGB to color RGB", [780.0, 635.0]),
-        ("Chromatic adaptation", [975.0, 670.0]),
-        ("Orientation", [1170.0, 720.0]),
-        ("Exposure", [1365.0, 720.0]),
-        ("Sigmoid", [1560.0, 720.0]),
+    let layout = [
+        ("RAW", json!({"pos": [0.0, 800.0]})),
+        ("Bayer site gains", json!({"pos": [195.0, 550.0]})),
+        ("Reconstruct highlights (opposed)", json!({"pos": [390.0, 565.0]})),
+        ("RCD demosaic", json!({"pos": [585.0, 600.0]})),
+        ("Camera RGB to color RGB", json!({"pos": [780.0, 635.0]})),
+        ("Chromatic adaptation", json!({"pos": [975.0, 670.0]})),
+        ("Orientation", json!({"pos": [1170.0, 720.0]})),
+        ("Exposure", json!({"pos": [1365.0, 720.0]})),
+        ("Sigmoid", json!({"pos": [1560.0, 720.0]})),
+        ("Export TIFF", json!({"pos": [1560.0, 900.0], "size": null})),
+        ("Preview", json!({"pos": [195.0, 0.0], "size": [672, 440]})),
+        ("Histogram", json!({"pos": [975.0, 0.0], "size": [320, 240]})),
+        ("Waveform", json!({"pos": [975.0, 320.0], "size": [320, 240]})),
+        ("Vectorscope", json!({"pos": [1365.0, 0.0], "size": [320, 320]})),
     ];
-    for (name, pos) in positions {
-        graph.set_ui(graph.find(name).expect("pipeline node"), json!({"pos":pos})).unwrap();
-    }
-    let raw = graph.find("RAW").unwrap();
-    for (kind, pos, size) in [
-        ("view.preview", [195.0, 0.0], json!([672, 440])),
-        ("view.histogram", [975.0, 0.0], json!([320, 240])),
-        ("view.waveform", [975.0, 320.0], json!([320, 240])),
-        ("view.vectorscope", [1365.0, 0.0], json!([320, 320])),
-        ("output.tiff", [1560.0, 900.0], json!(null)),
-    ] {
-        let id = graph.add_node(Registry.get(kind).expect("built-in observer")).unwrap();
-        graph.set_ui(id, json!({"pos":pos, "size":size})).unwrap();
-        graph.dag.connect_ids(target, graph.dag.input_port(id, "image").unwrap()).unwrap();
-        if kind == "output.tiff" {
-            graph.connect(Port(raw, "metadata".into()), Port(id, "metadata".into())).unwrap();
-        }
+    for (name, ui) in layout {
+        graph.set_ui(graph.find(name).expect("template node"), ui).unwrap();
     }
     Project { graph, ui: json!(null) }
 }
@@ -44,6 +44,7 @@ pub fn raw_to_tiff() -> Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{Port, Registry};
 
     #[test]
     fn raw_adjustments_are_shared_by_views_and_export_and_survive_reopening() {

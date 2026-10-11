@@ -86,7 +86,7 @@ pub struct Preview {
 /// settings. Interpolation selects bilinear or nearest-neighbor display sampling
 /// and does not alter processing pixels.
 #[drip::node(id = "view.preview", name = "Preview", category = "View")]
-fn observe(
+pub fn observe(
     _: &KernelContext<'_>,
     _: &Preview,
     _image: Read<'_, Cpu<Rgb>, Rec2020>,

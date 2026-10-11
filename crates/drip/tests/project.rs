@@ -71,7 +71,7 @@ fn tiff_profile_extent_and_pixels_survive_encoding() {
 fn missing_raw_preserves_editable_parameters_and_reports_load_error() {
     let path = std::path::Path::new("/tmp/drip-deliberately-missing-raw-source.nef");
     assert!(!path.exists());
-    let (mut dag, _) = drip::node::templates::raw_pipeline().unwrap();
+    let (mut dag, _) = drip::node::templates::raw_to_tiff().unwrap();
     let raw = dag.nodes().find(|(_, n)| n.kind().id == "input.bayer-raw").unwrap().0;
     dag.set_parameters(raw, json!({ "path": path })).unwrap();
     let text = Project { dag, ..Default::default() }.to_json().unwrap();
