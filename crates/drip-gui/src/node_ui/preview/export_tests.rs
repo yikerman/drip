@@ -167,7 +167,7 @@ fn softproof_matches_bounded_export_across_profiles_and_intents() {
                 let bound = values.bind::<super::observe::Definition>().unwrap();
                 let image = std::sync::Arc::new(crate::node_ui::data::HostImage::new(
                     &bound.image,
-                    ctx.requested_scale(),
+                    ctx.global.scale,
                 ));
                 let shown = super::prepare(params, &image, &ctx).unwrap();
                 let values = inputs.remove(&tiff).unwrap().unwrap();

@@ -19,27 +19,32 @@ pub type Prepare<G> = for<'a> fn(
     Inputs<'a, G>,
     &PrepareContext,
 ) -> Result<<G as GuiNode>::Presentation>;
-pub type Action<G> = for<'a> fn(Parameters<G>, Inputs<'a, G>, &PrepareContext) -> Result<()>;
+type Run<G> =
+    for<'a> fn(Parameters<G>, Inputs<'a, G>, &PrepareContext) -> Result<Option<Parameters<G>>>;
+/// A named frontend action. It may return new parameters for its node, which
+/// the app applies as an ordinary edit once the action finishes.
+pub struct Action<G: Typed> {
+    pub name: &'static str,
+    pub run: Run<G>,
+}
 
 /// Implemented on a node's generated `Definition` with `#[gui_node]`.
 pub trait GuiNode: Typed {
     type Presentation: IntoDrawable;
     const PREPARE: Option<Prepare<Self>> = None;
     const ACTION: Option<Action<Self>> = None;
-    const ACTION_NAME: &'static str = "Export";
     fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Parameters>) {
         node.schema(ui);
     }
 }
 type PrepareErased =
     fn(Value, &InputValues, &PrepareContext, &mut ImageCache) -> Result<Arc<dyn Drawable>>;
-type ActionErased = fn(Value, &InputValues, &PrepareContext) -> Result<()>;
+type ActionErased = fn(Value, &InputValues, &PrepareContext) -> Result<Option<Value>>;
 pub struct Binding {
     kind: &'static Kind,
     controls: fn(&mut Ui, &mut crate::editing::NodeCx),
     prepare: Option<PrepareErased>,
-    action: Option<ActionErased>,
-    action_name: &'static str,
+    action: Option<(&'static str, ActionErased)>,
 }
 impl Binding {
     pub const fn new<G: GuiNode>() -> Self {
@@ -54,14 +59,13 @@ impl Binding {
             } else {
                 None
             },
-            action: if G::ACTION.is_some() {
-                Some(|params, inputs, ctx| {
-                    G::ACTION.expect("declared action")(decode(params)?, inputs.bind::<G>()?, ctx)
-                })
-            } else {
-                None
+            action: match G::ACTION {
+                Some(action) => Some((action.name, |params, inputs, ctx| {
+                    let run = G::ACTION.expect("declared action").run;
+                    run(decode(params)?, inputs.bind::<G>()?, ctx)?.map(encode).transpose()
+                })),
+                None => None,
             },
-            action_name: G::ACTION_NAME,
         }
     }
     pub fn kind(&self) -> &'static Kind {
@@ -83,7 +87,7 @@ impl Binding {
         self.prepare.map(|prepare| prepare(params, inputs, ctx, cache)).transpose()
     }
     pub fn action_name(&self) -> Option<&'static str> {
-        self.action.map(|_| self.action_name)
+        self.action.map(|(name, _)| name)
     }
     pub fn run_action(
         &self,
@@ -91,13 +95,16 @@ impl Binding {
         params: Value,
         inputs: &InputValues,
         ctx: &PrepareContext,
-    ) -> Result<()> {
-        let action = self
+    ) -> Result<Option<Value>> {
+        let (_, action) = self
             .action
-            .filter(|_| name == self.action_name)
+            .filter(|(declared, _)| name == *declared)
             .ok_or_else(|| drip::Error::Graph("unknown node action".into()))?;
         action(params, inputs, ctx)
     }
+}
+fn encode<P: serde::Serialize>(params: P) -> Result<Value> {
+    serde_json::to_value(params).map_err(|e| drip::Error::Contract(e.to_string()))
 }
 fn decode<P: serde::de::DeserializeOwned>(params: Value) -> Result<P> {
     serde_json::from_value(params).map_err(|e| drip::Error::Contract(e.to_string()))

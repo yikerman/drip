@@ -4,6 +4,7 @@ use drip::{
     node::data::{DeviceBuffer, HostBuffer, Rgb, RgbDesc},
     ports::{Cpu, Device, Read},
     resource::Resources,
+    runtime::GlobalContext,
 };
 
 /// Host pixels prepared for presentation, with the labels views show.
@@ -32,7 +33,8 @@ impl HostImage {
 pub struct PrepareContext {
     pub client: Option<cubecl::prelude::Client>,
     pub resources: Resources,
-    pub level: u8,
+    /// The demand's context: the preview's, or full detail for actions.
+    pub global: GlobalContext,
 }
 /// Device RGB retained for GUI-owned scope kernels.
 pub struct DeviceRgb {
@@ -48,9 +50,5 @@ impl DeviceRgb {
 impl PrepareContext {
     pub fn client(&self) -> Result<&cubecl::prelude::Client> {
         self.client.as_ref().ok_or_else(|| Error::Runtime("no compute runtime is bound".into()))
-    }
-
-    pub fn requested_scale(&self) -> u32 {
-        1 << self.level
     }
 }

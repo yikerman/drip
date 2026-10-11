@@ -4,6 +4,11 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- One worker queue: previews and actions are demands forced by one evaluator;
+  actions no longer start a thread and runtime. Auto exposure meters Exposure's
+  input as a queued action and applies its EV as an edit; an end-to-end test
+  runs it twice on the Sony fixture. GPU workspace tests, Clippy and formatting
+  pass.
 - Implemented typed payloads and port requirements: one RGB payload, typed
   interpretations, requirement type arguments, contracts over known
   descriptions, admission-time parameter checks, device layouts only for

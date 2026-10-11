@@ -48,6 +48,8 @@ pub enum Edit<'a> {
     Connect(Port, Port),
     Disconnect(Port),
     Param(NodeId, &'a str, Json),
+    /// All of a node's parameters, as an action returns them.
+    Parameters(NodeId, Json),
     Name(NodeId, &'a str),
     External(NodeId, &'a str, bool),
     Ui(NodeId, LayoutField, Vec2),
@@ -80,19 +82,14 @@ impl<'a> Frame<'a> {
                     graph.disconnect(&input)?;
                 }
                 Edit::Param(id, name, value) => {
-                    let node = graph.dag.node(id)?;
-                    if node.kind().loads_assets {
-                        let mut params = node.parameters()?;
-                        let field = params.get_mut(name).ok_or_else(|| {
-                            GraphError::Graph(format!("unknown parameter {name}"))
-                        })?;
-                        *field = value;
-                        self.report.bindings.push((id, params));
-                        self.report.redraw = true;
-                        return Ok(None);
-                    }
-                    graph.set_param(id, name, value)?;
+                    let mut params = graph.dag.node(id)?.parameters()?;
+                    let field = params
+                        .get_mut(name)
+                        .ok_or_else(|| GraphError::Graph(format!("unknown parameter {name}")))?;
+                    *field = value;
+                    self.set_parameters(graph, id, params)?;
                 }
+                Edit::Parameters(id, params) => self.set_parameters(graph, id, params)?,
                 Edit::Name(id, name) => graph.set_name(id, name)?,
                 Edit::External(id, name, external) => graph.set_external(id, name, external)?,
                 Edit::Ui(id, key, value) => set_ui(graph, id, key, value),
@@ -111,6 +108,20 @@ impl<'a> Frame<'a> {
                 None
             }
         }
+    }
+
+    /// Nodes that load assets are rebuilt on the worker, then committed.
+    fn set_parameters(
+        &mut self,
+        graph: &mut Graph,
+        id: NodeId,
+        params: Json,
+    ) -> Result<(), GraphError> {
+        if graph.dag.node(id)?.kind().loads_assets {
+            self.report.bindings.push((id, params));
+            return Ok(());
+        }
+        graph.dag.set_parameters(id, params)
     }
 }
 

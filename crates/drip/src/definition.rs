@@ -66,7 +66,7 @@ pub trait Node: Send + Sync + 'static {
 /// Frontends bind presentation and actions through this, not through strings.
 pub trait Typed: Node + Sized {
     const KIND: &'static Kind;
-    type Parameters: Parameters + serde::de::DeserializeOwned;
+    type Parameters: Parameters + serde::Serialize + serde::de::DeserializeOwned;
     type Inputs<'a>;
     /// View erased input values in this node's input order and types.
     fn bind(inputs: &[Option<(Description, Data)>]) -> Result<Self::Inputs<'_>>;

@@ -10,7 +10,7 @@ use crate::model::Registry;
 use crate::node_ui::templates;
 use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
 
-use crate::editing::{Frame, NodeCx, Report};
+use crate::editing::{Edit, Frame, NodeCx, Report};
 use crate::editor::Editor;
 use crate::node_ui::{self, Popped};
 use crate::ui_state::{self, DEFAULT_LEVEL, MAX_LEVEL};
@@ -213,6 +213,15 @@ impl App {
         }
     }
 
+    /// Applies one edit outside a GUI frame.
+    fn edit(&mut self, edit: Edit<'_>) {
+        let results = |id| self.worker.result(id);
+        let mut frame = Frame::new(&results, &self.popped, self.actions_disabled());
+        frame.edit(&mut self.project.graph, edit);
+        let report = frame.report;
+        self.apply(report);
+    }
+
     /// Takes the worker's notices; called whenever the worker wakes the app.
     pub fn poll(&mut self) {
         let mut evaluated = None;
@@ -255,11 +264,16 @@ impl App {
                     action_reported = true;
                 }
                 Notice::Evaluated(result) => evaluated = Some(result),
-                Notice::Action(result) => {
+                Notice::Performed { id, result } => {
                     let action = self.action.take();
-                    self.report(result.map(|()| {
+                    let parameters = result.as_ref().ok().cloned().flatten();
+                    self.report(result.map(|_| {
                         action.map_or_else(|| "Action completed".into(), |a| a.completed)
                     }));
+                    // Applied however the node changed meanwhile; a refusal is reported.
+                    if let Some(parameters) = parameters {
+                        self.edit(Edit::Parameters(id, parameters));
+                    }
                     action_reported = true;
                 }
                 Notice::Failed => {
@@ -555,14 +569,7 @@ mod tests {
 
     /// A parameter edit as the inspector reports it.
     fn set_param(h: &mut Harness<'_, App>, id: NodeId, name: &str, value: serde_json::Value) {
-        edit(h.state_mut(), crate::editing::Edit::Param(id, name, value));
-    }
-
-    fn edit(app: &mut App, edit: crate::editing::Edit<'_>) {
-        let results = |id| app.worker.result(id);
-        let mut frame = Frame::new(&results, &app.popped, app.actions_disabled());
-        frame.edit(&mut app.project.graph, edit);
-        app.apply(frame.report);
+        h.state_mut().edit(Edit::Param(id, name, value));
     }
 
     fn finish_bindings(app: &mut App) {
@@ -605,6 +612,37 @@ mod tests {
     }
 
     #[test]
+    fn auto_exposure_is_queued_and_applies_its_ev_as_an_edit() {
+        let file = fixture_project("auto-exposure");
+        let mut h = harness(App::new(Some(file.clone()), true, || {}));
+        settle(&mut h);
+        let exposure = h.state().project.graph.find("Exposure").unwrap();
+        h.state_mut().selected = Some(exposure);
+        let mut metered = Vec::new();
+        for _ in 0..2 {
+            h.run();
+            h.get_by_label("Auto exposure").click();
+            h.run();
+            assert!(h.state().action.as_ref().unwrap().running.contains("Auto exposure"));
+            assert!(h.get_by_label("Auto exposure").accesskit_node().is_disabled());
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+            while h.state().action.is_some() {
+                assert!(std::time::Instant::now() < deadline, "action did not finish");
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                h.step();
+            }
+            let app = h.state();
+            assert!(!app.status.as_ref().unwrap().error, "{}", app.status.as_ref().unwrap().text);
+            assert!(app.modified && app.worker.busy(), "applied as an ordinary edit");
+            metered.push(app.project.graph.node(exposure).unwrap().params["ev"].as_f64().unwrap());
+            settle(&mut h);
+        }
+        // The meter reads Exposure's input, so the current EV does not matter.
+        assert!(metered[0] != 0.0 && metered[0] == metered[1], "{metered:?}");
+        std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
     fn binding_and_export_in_the_same_frame_cannot_snapshot_old_parameters() {
         let mut app = App::new(None, true, || {});
         let exposure = app.project.graph.find("Exposure").unwrap();
@@ -643,19 +681,19 @@ mod tests {
                 egui::vec2(40.0, 50.0),
             ),
         ] {
-            edit(app, change);
+            app.edit(change);
             assert!(app.take_redraw(), "other windows must see the shared edit");
             assert!(!app.worker.busy(), "presentation edits need no evaluation");
         }
         assert_eq!(app.windows()[0].title, "tone · Parameters · Drip");
         assert!(app.project.graph.inputs().any(|input| input == (id, "contrast")));
 
-        edit(app, crate::editing::Edit::Name(id, ""));
+        app.edit(crate::editing::Edit::Name(id, ""));
         assert_eq!(app.project.graph.node(id).unwrap().name, "tone");
         assert!(app.status.as_ref().unwrap().error);
         assert!(!app.worker.busy());
 
-        edit(app, crate::editing::Edit::Param(id, "contrast", json!(2.0)));
+        app.edit(Edit::Param(id, "contrast", json!(2.0)));
         assert!(app.take_redraw());
         assert!(app.worker.busy(), "processing edits must request evaluation");
     }
@@ -947,10 +985,8 @@ mod tests {
         settle(&mut h);
         assert!(h.state().file.is_none());
         assert_eq!(h.state().title(), "Untitled · Drip");
-        edit(
-            h.state_mut(),
-            crate::editing::Edit::Add(Registry.get("tone.exposure").unwrap(), Vec2::ZERO),
-        );
+        h.state_mut()
+            .edit(crate::editing::Edit::Add(Registry.get("tone.exposure").unwrap(), Vec2::ZERO));
         assert_eq!(h.state().title(), "Untitled * · Drip");
         h.state_mut().file = Some(destination.clone());
         h.run();
@@ -962,7 +998,7 @@ mod tests {
             format!("{} · Drip", destination.file_name().unwrap().to_string_lossy())
         );
         let id = h.state().project.graph.find("Exposure").unwrap();
-        edit(h.state_mut(), crate::editing::Edit::Name(id, "Test exposure"));
+        h.state_mut().edit(crate::editing::Edit::Name(id, "Test exposure"));
         assert!(h.state().modified, "renaming affects persistence without evaluation");
         h.state_mut().set_project(Project::default(), None).unwrap();
         assert_eq!(h.state().title(), "Untitled · Drip");

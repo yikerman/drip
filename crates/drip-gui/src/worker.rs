@@ -1,4 +1,5 @@
-//! Background evaluation of explicit targets at one global preview level.
+//! One sequential queue: previews, asset bindings, project loading and node
+//! actions run in order on one worker with one evaluator.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, mpsc};
@@ -8,33 +9,45 @@ use std::time::Instant;
 use crate::model::{Graph, NodeId};
 use drip::Error as NodeError;
 use drip::eval::{Evaluator, InputValues, NodeTiming};
+use drip::runtime::GlobalContext;
+use serde_json::Value as Json;
 
 use crate::render::node_views::{Drawable, ImageCache};
 
 pub type ViewResult = Result<Option<Arc<dyn Drawable>>, NodeError>;
 type Snapshot = BTreeMap<NodeId, ViewResult>;
 
-struct Request {
-    generation: u64,
+/// Forces part of one graph snapshot under one context. Shared ancestors run
+/// once and each output lives until its last consumer is done; the effect then
+/// consumes the inputs of its nodes.
+struct Demand {
     graph: Graph,
-    level: u8,
-    targets: Vec<NodeId>,
+    global: GlobalContext,
+    effect: Effect,
+}
+
+enum Effect {
+    /// Report every target's status and prepare the views of those that have
+    /// one. A newer generation makes the result stale.
+    Preview { generation: u64, targets: Vec<NodeId> },
+    /// Run a node's named action. Actions override the preview's context with
+    /// full detail.
+    Perform { id: NodeId, name: &'static str },
 }
 
 enum Command {
-    Evaluate(Request),
+    Force(Demand),
     Reset,
     Invalidate,
-    Action { graph: Graph, id: NodeId, name: &'static str },
     Collect,
     Shutdown,
-    Bind { ticket: u64, id: NodeId, kind: &'static str, params: serde_json::Value },
+    Bind { ticket: u64, id: NodeId, kind: &'static str, params: Json },
     Open { ticket: u64, file: std::path::PathBuf },
 }
 
 enum Event {
-    Evaluated { generation: u64, level: u8, views: Snapshot, failures: BTreeMap<NodeId, Failure> },
-    Action(Result<(), String>),
+    Evaluated { generation: u64, views: Snapshot, failures: BTreeMap<NodeId, Failure> },
+    Performed { id: NodeId, result: Result<Option<Json>, String> },
     Stopped,
     Bound { ticket: u64, id: NodeId, result: drip::Result<Arc<dyn drip::definition::Node>> },
     Opened { ticket: u64, file: std::path::PathBuf, result: Result<crate::model::Project, String> },
@@ -42,10 +55,20 @@ enum Event {
 
 pub enum Notice {
     Evaluated(Result<(), String>),
-    Action(Result<(), String>),
+    /// An action finished; it may carry new parameters for its node.
+    Performed {
+        id: NodeId,
+        result: Result<Option<Json>, String>,
+    },
     Failed,
-    Bound { id: NodeId, result: drip::Result<Arc<dyn drip::definition::Node>> },
-    Opened { file: std::path::PathBuf, result: Result<crate::model::Project, String> },
+    Bound {
+        id: NodeId,
+        result: drip::Result<Arc<dyn drip::definition::Node>>,
+    },
+    Opened {
+        file: std::path::PathBuf,
+        result: Result<crate::model::Project, String>,
+    },
 }
 
 #[derive(Clone, PartialEq)]
@@ -86,7 +109,7 @@ pub struct Worker {
     events: mpsc::Receiver<Event>,
     generation: u64,
     in_flight: bool,
-    pending: Option<Request>,
+    pending: Option<Demand>,
     views: Snapshot,
     views_generation: Option<u64>,
     failures: BTreeMap<NodeId, Failure>,
@@ -178,16 +201,15 @@ impl Worker {
         self.generation += 1;
         self.views.retain(|id, _| graph.node(*id).is_some());
         self.failures.retain(|id, _| graph.node(*id).is_some());
-        if let Some(previous) = &self.pending {
-            log::trace!(
-                "coalesced preview generation={} into generation={}",
-                previous.generation,
-                self.generation
-            );
+        if self.pending.is_some() {
+            log::trace!("coalesced pending preview into generation={}", self.generation);
         }
         self.collect = true;
-        self.pending =
-            Some(Request { generation: self.generation, graph: graph.clone(), level, targets });
+        self.pending = Some(Demand {
+            graph: graph.clone(),
+            global: GlobalContext { scale: 1 << level },
+            effect: Effect::Preview { generation: self.generation, targets },
+        });
         self.start()
     }
 
@@ -215,9 +237,14 @@ impl Worker {
     pub fn action(&self, graph: &Graph, id: NodeId, name: &'static str) -> Result<(), String> {
         // Processing Bind first cannot update an action's immutable graph snapshot.
         if self.binding_pending() {
-            return Err("wait for asset loading to finish before exporting".into());
+            return Err("wait for asset loading to finish before running an action".into());
         }
-        self.send(Command::Action { graph: graph.clone(), id, name })
+        let effect = Effect::Perform { id, name };
+        self.send(Command::Force(Demand {
+            graph: graph.clone(),
+            global: Default::default(),
+            effect,
+        }))
     }
 
     pub fn poll(&mut self) -> Vec<Notice> {
@@ -236,7 +263,7 @@ impl Worker {
                         notices.push(Notice::Opened { file, result });
                     }
                 }
-                Event::Evaluated { generation, level, views, failures } => {
+                Event::Evaluated { generation, views, failures } => {
                     self.in_flight = false;
                     self.collect = true;
                     if generation != self.generation {
@@ -250,7 +277,7 @@ impl Worker {
                         if self.failures.get(id) != Some(failure) {
                             log::log!(
                                 failure.level(),
-                                "preview generation={generation} level={level} node={id:?} kind={}: {}",
+                                "preview generation={generation} node={id:?} kind={}: {}",
                                 failure.kind,
                                 failure.error
                             );
@@ -264,9 +291,9 @@ impl Worker {
                     self.views_generation = Some(generation);
                     notices.push(Notice::Evaluated(error.map_or(Ok(()), Err)));
                 }
-                Event::Action(result) => {
+                Event::Performed { id, result } => {
                     if !self.failed {
-                        notices.push(Notice::Action(result));
+                        notices.push(Notice::Performed { id, result });
                     }
                 }
                 Event::Stopped => {
@@ -303,7 +330,7 @@ impl Worker {
         if !self.in_flight
             && let Some(request) = self.pending.take()
         {
-            self.send(Command::Evaluate(request))?;
+            self.send(Command::Force(request))?;
             self.in_flight = true;
         }
         Ok(())
@@ -345,29 +372,15 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
                     });
                 notify.send(Event::Opened { ticket, file, result });
             }
-            Command::Evaluate(request) => {
+            Command::Force(demand) => {
                 let evaluator = evaluator.get_or_insert_with(|| {
                     drip::runtime::RuntimeContext::from_env().map(Evaluator::new)
                 });
-                notify.send(evaluate(&request, evaluator.as_ref(), &mut images, &resources));
+                notify.send(force(&demand, evaluator.as_ref(), &mut images, &resources));
             }
             Command::Reset | Command::Invalidate => {
                 resources = Default::default();
                 images.collect();
-            }
-            Command::Action { graph, id, name } => {
-                let notify = notify.clone();
-                let resources = resources.clone();
-                thread::spawn(move || {
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let runtime =
-                            drip::runtime::RuntimeContext::from_env().map_err(|e| e.to_string())?;
-                        let evaluator = Evaluator::new(runtime);
-                        run_action(&evaluator, &graph, id, name, &resources)
-                    }))
-                    .unwrap_or_else(|_| Err("the action crashed".into()));
-                    notify.send(Event::Action(result));
-                });
             }
             Command::Collect => images.collect(),
             Command::Shutdown => break,
@@ -375,8 +388,8 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
     }
 }
 
-fn evaluate(
-    request: &Request,
+fn force(
+    demand: &Demand,
     evaluator: Result<&Evaluator, &NodeError>,
     images: &mut ImageCache,
     resources: &drip::resource::Resources,
@@ -384,80 +397,121 @@ fn evaluate(
     let start = Instant::now();
     let trace = log::log_enabled!(log::Level::Trace);
     let mut timings = Vec::new();
-    let mut preparation_timings = Vec::new();
     let ctx = crate::node_ui::data::PrepareContext {
         resources: resources.clone(),
-        level: request.level,
+        global: demand.global,
         client: evaluator.ok().and_then(|e| e.client().ok()).cloned(),
     };
-    let mut inputs = evaluate_nodes(request, evaluator, trace.then_some(&mut timings));
-    let mut failures = BTreeMap::new();
-    let views = request
-        .targets
-        .iter()
-        .filter_map(|&id| {
-            let node = request.graph.node(id)?;
-            let kind = node.kind;
-            let result = match inputs.remove(&id) {
-                Some(inputs) => inputs.and_then(|inputs| {
-                    prepare_view(
-                        id,
-                        node,
-                        &inputs,
-                        &ctx,
-                        images,
-                        trace.then_some(&mut preparation_timings),
-                    )
-                }),
-                None => Ok(None),
-            };
-            if let Err(error) = &result {
-                let (id, kind) = match error {
-                    NodeError::Node { node, kind, .. } => (*node, *kind),
-                    _ => (id, kind.id),
-                };
-                failures.insert(id, Failure { kind, error: error.clone() });
-            }
-            Some((id, result))
-        })
-        .collect();
-    let elapsed = start.elapsed();
-    // Emit after evaluation/preparation so log I/O is outside measured work.
-    log_timings(request, "evaluate", &timings);
-    log_timings(request, "prepare", &preparation_timings);
-    log::debug!(
-        "preview generation={} level={} elapsed={:.1?} failures={}",
-        request.generation,
-        request.level,
-        elapsed,
-        failures.len()
-    );
-    Event::Evaluated { generation: request.generation, level: request.level, views, failures }
-}
-
-fn evaluate_nodes(
-    request: &Request,
-    evaluator: Result<&Evaluator, &NodeError>,
-    timings: Option<&mut Vec<NodeTiming>>,
-) -> BTreeMap<NodeId, drip::Result<InputValues>> {
-    let targets = &request.targets;
-    let evaluator = match evaluator {
-        Ok(evaluator) => evaluator,
-        Err(error) => return targets.iter().map(|&id| (id, Err(error.clone()))).collect(),
+    let (targets, observers) = demand.nodes();
+    let mut inputs = match evaluator {
+        Ok(evaluator) => evaluator.evaluate_batch_with_timings(
+            &demand.graph.dag,
+            &demand.global,
+            &targets,
+            &observers,
+            trace.then_some(&mut timings),
+        ),
+        Err(error) => targets.iter().map(|&id| (id, Err(error.clone()))).collect(),
     };
-    let viewers: Vec<_> = targets
-        .iter()
-        .copied()
-        .filter(|&id| {
-            request
+    demand.log_timings("evaluate", &timings);
+    match demand.effect {
+        Effect::Preview { generation, .. } => {
+            let mut timings = Vec::new();
+            let mut failures = BTreeMap::new();
+            let views = targets
+                .iter()
+                .filter_map(|&id| {
+                    let node = demand.graph.node(id)?;
+                    let kind = node.kind;
+                    let result = match inputs.remove(&id) {
+                        Some(inputs) => inputs.and_then(|inputs| {
+                            prepare_view(
+                                id,
+                                node,
+                                &inputs,
+                                &ctx,
+                                images,
+                                trace.then_some(&mut timings),
+                            )
+                        }),
+                        None => Ok(None),
+                    };
+                    if let Err(error) = &result {
+                        let (id, kind) = match error {
+                            NodeError::Node { node, kind, .. } => (*node, *kind),
+                            _ => (id, kind.id),
+                        };
+                        failures.insert(id, Failure { kind, error: error.clone() });
+                    }
+                    Some((id, result))
+                })
+                .collect();
+            demand.log_timings("prepare", &timings);
+            log::debug!(
+                "preview generation={generation} scale={} elapsed={:.1?} failures={}",
+                demand.global.scale,
+                start.elapsed(),
+                failures.len()
+            );
+            Event::Evaluated { generation, views, failures }
+        }
+        Effect::Perform { id, name } => {
+            let result = demand
                 .graph
                 .node(id)
-                .and_then(|n| crate::node_ui::binding(n.kind))
-                .is_some_and(|b| b.has_preparation())
-        })
-        .collect();
-    let global = drip::runtime::GlobalContext { scale: 1 << request.level };
-    evaluator.evaluate_batch_with_timings(&request.graph.dag, &global, targets, &viewers, timings)
+                .ok_or_else(|| "action node no longer exists".to_owned())
+                .and_then(|node| {
+                    let inputs = inputs.remove(&id).expect("demanded node");
+                    inputs
+                        .and_then(|inputs| {
+                            crate::node_ui::run_action(node.kind, name, node.params, &inputs, &ctx)
+                        })
+                        .map_err(|e| e.to_string())
+                });
+            log::debug!("action {name} node={id:?} elapsed={:.1?}", start.elapsed());
+            Event::Performed { id, result }
+        }
+    }
+}
+
+impl Demand {
+    /// The nodes to evaluate, and those whose inputs the effect consumes.
+    fn nodes(&self) -> (Vec<NodeId>, Vec<NodeId>) {
+        match &self.effect {
+            Effect::Preview { targets, .. } => {
+                let viewers = targets
+                    .iter()
+                    .copied()
+                    .filter(|&id| {
+                        self.graph
+                            .node(id)
+                            .and_then(|n| crate::node_ui::binding(n.kind))
+                            .is_some_and(|b| b.has_preparation())
+                    })
+                    .collect();
+                (targets.clone(), viewers)
+            }
+            Effect::Perform { id, .. } => (vec![*id], vec![*id]),
+        }
+    }
+
+    fn log_timings(&self, phase: &str, timings: &[NodeTiming]) {
+        let demand = match self.effect {
+            Effect::Preview { generation, .. } => format!("preview generation={generation}"),
+            Effect::Perform { name, .. } => format!("action {name}"),
+        };
+        for timing in timings {
+            log::trace!(
+                "node timing {demand} scale={} node={:?} kind={} phase={} host_elapsed={:.3?} success={}",
+                self.global.scale,
+                timing.node,
+                timing.kind,
+                phase,
+                timing.host_elapsed,
+                timing.success,
+            );
+        }
+    }
 }
 
 fn prepare_view(
@@ -482,43 +536,6 @@ fn prepare_view(
         });
     }
     result
-}
-
-fn log_timings(request: &Request, phase: &str, timings: &[NodeTiming]) {
-    for timing in timings {
-        log::trace!(
-            "node timing generation={} level={} node={:?} kind={} phase={} host_elapsed={:.3?} success={}",
-            request.generation,
-            request.level,
-            timing.node,
-            timing.kind,
-            phase,
-            timing.host_elapsed,
-            timing.success,
-        );
-    }
-}
-
-fn run_action(
-    evaluator: &Evaluator,
-    graph: &Graph,
-    id: NodeId,
-    name: &str,
-    resources: &drip::resource::Resources,
-) -> Result<(), String> {
-    let node = graph.node(id).ok_or("action node no longer exists")?;
-    let inputs = evaluator
-        .evaluate_inputs(&graph.dag, &Default::default(), &[id])
-        .remove(&id)
-        .expect("requested action")
-        .map_err(|e| e.to_string())?;
-    let ctx = crate::node_ui::data::PrepareContext {
-        resources: resources.clone(),
-        level: 0,
-        client: evaluator.client().ok().cloned(),
-    };
-    crate::node_ui::run_action(node.kind, name, node.params, &inputs, &ctx)
-        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -552,18 +569,23 @@ mod tests {
 
     const TIMEOUT: Duration = Duration::from_secs(5);
 
+    fn preview(generation: u64, graph: Graph, level: u8, targets: Vec<NodeId>) -> Demand {
+        let global = GlobalContext { scale: 1 << level };
+        Demand { graph, global, effect: Effect::Preview { generation, targets } }
+    }
+
     #[test]
     fn backend_configuration_errors_reach_preview_results() {
         let mut graph = Graph::default();
         let id = graph.add_node(Registry.get("view.preview").unwrap()).unwrap();
-        let request = Request { generation: 7, graph, level: 2, targets: vec![id] };
+        let demand = preview(7, graph, 2, vec![id]);
         let error = NodeError::Runtime("DRIP_BACKEND=cpu requires --features drip/cpu".into());
-        let Event::Evaluated { generation, level, views, failures } =
-            evaluate(&request, Err(&error), &mut ImageCache::default(), &Default::default())
+        let Event::Evaluated { generation, views, failures } =
+            force(&demand, Err(&error), &mut ImageCache::default(), &Default::default())
         else {
             panic!("expected preview completion");
         };
-        assert_eq!((generation, level), (7, 2));
+        assert_eq!(generation, 7);
         assert_eq!(views[&id].as_ref().err(), Some(&error));
         assert_eq!(failures[&id].error, error);
     }
@@ -707,7 +729,7 @@ mod tests {
                     assert_eq!(logs.len(), 1, "{logs:?}");
                     assert_eq!(logs[0].0, expected);
                     assert!(logs[0].1.contains(&format!("node={source:?} kind=test.diagnostics")));
-                    assert!(logs[0].1.contains("level=1"));
+                    assert!(logs[0].1.contains("preview generation="));
                 } else {
                     assert!(logs.is_empty(), "{logs:?}");
                 }
@@ -736,13 +758,12 @@ mod tests {
             assert!(logs[0].1.contains("missing input"));
 
             graph.connect(Port(source, "image".into()), Port(preview, "image".into())).unwrap();
-            let request =
-                Request { generation: 42, graph, level: 1, targets: vec![preview, histogram] };
+            let demand = super::preview(42, graph, 1, vec![preview, histogram]);
             let evaluator = Evaluator::new(drip::runtime::RuntimeContext::from_env().unwrap());
             for enabled in [true, false] {
                 TRACE.set(enabled);
-                let Event::Evaluated { failures, .. } = super::super::evaluate(
-                    &request,
+                let Event::Evaluated { failures, .. } = super::super::force(
+                    &demand,
                     Ok(&evaluator),
                     &mut ImageCache::default(),
                     &Default::default(),
@@ -761,7 +782,7 @@ mod tests {
                         logs.iter().filter(|line| line.contains("phase=prepare")).count(),
                         2
                     );
-                    assert!(logs.iter().all(|line| line.contains("generation=42 level=1")
+                    assert!(logs.iter().all(|line| line.contains("preview generation=42 scale=2")
                         && line.contains("host_elapsed=")
                         && line.contains("success=true")));
                 }
@@ -820,7 +841,10 @@ mod tests {
                 worker.request(&graph, 1, vec![preview, histogram]).unwrap();
             }
             assert!(worker.busy());
-            assert_eq!(worker.pending.as_ref().unwrap().targets, [preview, histogram]);
+            let Effect::Preview { targets, .. } = &worker.pending.as_ref().unwrap().effect else {
+                panic!("pending preview")
+            };
+            assert_eq!(targets, &[preview, histogram]);
             release.send(()).unwrap();
             woke.recv_timeout(TIMEOUT).unwrap();
             assert!(worker.poll().is_empty(), "obsolete completion is not presented");
@@ -924,12 +948,15 @@ mod tests {
         #[drip_macros::gui_node]
         impl crate::node_ui::GuiNode for write::Definition {
             type Presentation = ();
-            const ACTION_NAME: &'static str = "write";
-            const ACTION: Option<crate::node_ui::Action<Self>> = Some(|p, inputs, ctx| {
-                assert_eq!(ctx.level, 0);
-                let image = inputs.image.data;
-                std::fs::write(p.path.as_ref().unwrap(), format!("{:?}", image[0]))
-                    .map_err(|e| KernelError::Runtime(e.to_string()))
+            const ACTION: Option<crate::node_ui::Action<Self>> = Some(crate::node_ui::Action {
+                name: "write",
+                run: |p, inputs, ctx| {
+                    assert_eq!(ctx.global.scale, 1);
+                    let image = inputs.image.data;
+                    std::fs::write(p.path.as_ref().unwrap(), format!("{:?}", image[0]))
+                        .map_err(|e| KernelError::Runtime(e.to_string()))?;
+                    Ok(None)
+                },
             });
         }
 
@@ -957,7 +984,7 @@ mod tests {
                 let deadline = Instant::now() + TIMEOUT;
                 loop {
                     if worker.poll().into_iter().any(|notice| match notice {
-                        Notice::Action(result) => {
+                        Notice::Performed { result, .. } => {
                             result.unwrap();
                             true
                         }
@@ -990,7 +1017,7 @@ mod tests {
             let deadline = Instant::now() + TIMEOUT;
             loop {
                 if worker.poll().into_iter().any(|notice| match notice {
-                    Notice::Action(result) => {
+                    Notice::Performed { result, .. } => {
                         result.unwrap();
                         true
                     }

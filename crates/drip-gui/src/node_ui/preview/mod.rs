@@ -48,7 +48,7 @@ pub fn prepare(
 impl super::GuiNode for observe::Definition {
     type Presentation = PreviewImage;
     const PREPARE: Option<super::Prepare<Self>> = Some(|p, inputs, ctx| {
-        let image = Arc::new(HostImage::new(&inputs.image, ctx.requested_scale()));
+        let image = Arc::new(HostImage::new(&inputs.image, ctx.global.scale));
         prepare(p, &image, ctx)
     });
 }

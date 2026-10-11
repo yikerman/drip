@@ -1,79 +1,47 @@
-//! Meter the node's current output, then edit its ordinary exposure parameter.
-use super::{ControlCx, GuiNode};
+//! Auto exposure: meter the node's input at full detail, then set its EV.
+use super::{Action, GuiNode};
 use cubecl::{prelude::*, server::Handle};
 use drip::{
     Error, Result,
-    eval::Evaluator,
-    graph::Dag,
     node::{
         color,
         data::{Rec2020, Rgb},
         exposure,
     },
-    ports::{Device, NodeId, Requirement},
-    runtime::RuntimeContext,
+    ports::{Device, Read, Requirement},
 };
-use egui::Ui;
 
 #[drip_macros::gui_node]
 impl GuiNode for exposure::Definition {
     type Presentation = ();
-
-    fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Parameters>) {
-        node.schema(ui);
-        let error_id = ui.id().with((node.node.id(), "auto-exposure-error"));
-        if ui.add_enabled(!node.node.actions_disabled(), egui::Button::new("Auto exposure"))
-            .on_hover_text("Set the whole-image mean luminance to 18% grey. Meter before sigmoid; bright or dark subjects may need a manual adjustment.")
-            .clicked()
-        {
-            // This explicit, synchronous request stops at Exposure and uses full
-            // detail, independently of preview size and downstream rendering.
-            let result = RuntimeContext::from_env().and_then(|runtime| {
-                meter(&Evaluator::new(runtime), &node.node.graph().dag, node.node.id())
-            });
-            match result {
-                Ok(ev) => {
-                    ui.data_mut(|data| data.remove::<String>(error_id));
-                    node.node.set_param("ev", serde_json::json!(ev));
-                }
-                Err(error) => {
-                    ui.data_mut(|data| data.insert_temp(error_id, error.to_string()));
-                }
-            }
-        }
-        if let Some(error) = ui.data(|data| data.get_temp::<String>(error_id)) {
-            ui.colored_label(crate::theme::ERROR, error);
-        }
-    }
+    // Meter before sigmoid; bright or dark subjects may need a manual adjustment.
+    const ACTION: Option<Action<Self>> = Some(Action {
+        name: "Auto exposure",
+        run: |_, inputs, ctx| {
+            Ok(Some(exposure::Exposure { ev: ev(&inputs.image, ctx.client()?)? }))
+        },
+    });
 }
 
-fn meter(evaluator: &Evaluator, dag: &Dag, id: NodeId) -> Result<f32> {
-    let output = dag.typed_output(dag.output_port(id, "output")?)?;
-    let image = evaluator.evaluate::<Device<Rgb>>(dag, &Default::default(), output)?;
-    Rec2020::check(&image.desc)
-        .map_err(|e| Error::Contract(format!("auto exposure requires Rec.2020 / D65: {e}")))?;
+/// The EV that brings the whole-image mean luminance of `image` to 18% grey.
+fn ev(image: &Read<'_, Device<Rgb>>, client: &Client) -> Result<f32> {
+    Rec2020::check(image.desc)
+        .map_err(|e| Error::Contract(format!("auto exposure requires {}: {e}", Rec2020::LABEL)))?;
     // Like darktable's area exposure mapping [1], compare linear luminance
     // against a target. Here the area is the whole image and the target is
     // exactly Y=0.18, rather than its default L*=50 (Y≈0.1842).
     // [1] darktable contributors, “exposure,” development user manual.
     // https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/exposure/
-    let mean =
-        mean_luminance(evaluator.client()?, image.data.argument(), image.desc.extent.pixels())?;
+    let mean = mean_luminance(client, image.data.argument(), image.desc.extent.pixels())?;
     if !mean.is_finite() || mean <= 0.0 {
         return Err(Error::Contract(
             "auto exposure needs a finite, positive mean luminance".into(),
         ));
     }
-    let current: exposure::Exposure = serde_json::from_value(dag.node(id)?.parameters()?)
-        .map_err(|error| Error::Contract(error.to_string()))?;
-    // No reset to zero is needed: mean already includes 2^current.ev, so adding
-    // log2(0.18 / mean) cancels the current gain. This reaches the same fixed
-    // point as metering at zero EV (apart from floating-point rounding).
-    let ev = (f64::from(current.ev) + (0.18 / mean).log2()) as f32;
-    if !ev.is_finite() || !ev.exp2().is_finite() || ev.exp2() == 0.0 {
-        return Err(Error::Contract("auto exposure gain is not representable".into()));
-    }
-    Ok(ev)
+    let params = exposure::Exposure { ev: (0.18 / mean).log2() as f32 };
+    drip::param::Parameters::validate(&params)
+        .map_err(|_| Error::Contract("auto exposure gain is not representable".into()))?;
+    Ok(params.ev)
 }
 
 fn argument(handle: &Handle) -> BufferArg {
@@ -146,11 +114,15 @@ mod kernel {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use drip::{node, node::data::*};
+    use crate::node_ui::data::PrepareContext;
+    use drip::{
+        eval::Evaluator, graph::Dag, node, node::data::*, ports::NodeId, runtime::RuntimeContext,
+    };
 
-    fn graph(pixels: Vec<[f32; 3]>) -> (Dag, NodeId) {
+    /// Source → Exposure → Sigmoid; returns Exposure's node.
+    pub(crate) fn graph(pixels: Vec<[f32; 3]>) -> (Dag, NodeId) {
         let mut dag = Dag::new();
         let input = node::source::<Rgb>(
             &mut dag,
@@ -168,16 +140,28 @@ mod tests {
         (dag, exposure.output.node())
     }
 
+    /// Runs the action as the worker does: on the node's inputs at full detail.
+    fn meter(evaluator: &Evaluator, dag: &Dag, id: NodeId) -> Result<f32> {
+        let inputs =
+            evaluator.evaluate_inputs(dag, &Default::default(), &[id]).remove(&id).unwrap()?;
+        let ctx = PrepareContext {
+            client: evaluator.client().ok().cloned(),
+            resources: Default::default(),
+            global: Default::default(),
+        };
+        let run = <exposure::Definition as GuiNode>::ACTION.unwrap().run;
+        let current = serde_json::from_value(dag.node(id)?.parameters()?).unwrap();
+        Ok(run(current, inputs.bind::<exposure::Definition>()?, &ctx)?.unwrap().ev)
+    }
+
     #[test]
-    fn metering_reaches_the_same_fixed_point_from_different_ev() {
+    fn metering_reads_the_input_whatever_the_current_ev() {
         let evaluator = Evaluator::new(RuntimeContext::from_env().unwrap());
         let (mut dag, id) = graph(vec![[0.; 3], [0.045; 3], [0.09; 3]]);
         for start in [-3., 0., 4.] {
             dag.set_parameters(id, serde_json::json!({"ev": start})).unwrap();
             let ev = meter(&evaluator, &dag, id).unwrap();
             assert!((ev - 2.).abs() < 1e-6, "starting at {start}: {ev}");
-            dag.set_parameters(id, serde_json::json!({"ev": ev})).unwrap();
-            assert!((meter(&evaluator, &dag, id).unwrap() - ev).abs() < 1e-6);
         }
     }
 
@@ -231,55 +215,5 @@ mod tests {
         let (dag, id) = graph(vec![[1e35; 3]; 65_537]);
         let ev = meter(&evaluator, &dag, id).unwrap();
         assert!((f64::from(ev) - (0.18 / f64::from(1e35f32)).log2()).abs() < 1e-5);
-    }
-
-    #[test]
-    fn button_sets_ev_through_normal_edits_and_respects_loading() {
-        use crate::{
-            editing::{Frame, NodeCx, Report},
-            model::{Graph, Registry},
-        };
-        use egui_kittest::{
-            Harness,
-            kittest::{NodeT, Queryable},
-        };
-        // The source need not have GUI registration: the panel only edits Exposure.
-        let (dag, id) = graph(vec![[0.045; 3]]);
-        let mut graph = Graph::default();
-        graph.dag = dag;
-        assert_eq!(graph.node(id).unwrap().kind.id, Registry.get("tone.exposure").unwrap().id);
-        graph.set_param(id, "ev", serde_json::json!(3.)).unwrap();
-        struct State {
-            graph: Graph,
-            disabled: bool,
-            changed: bool,
-        }
-        let mut h = Harness::builder().with_size(egui::vec2(450., 300.)).build_ui_state(
-            move |ui, state: &mut State| {
-                let popped = Default::default();
-                let mut frame = Frame::new(&|_| None, &popped, state.disabled);
-                super::super::parameters::controls(
-                    ui,
-                    &mut NodeCx::new(&mut state.graph, id, &mut frame),
-                );
-                let Report { changed, edited, .. } = frame.report;
-                state.changed |= changed && edited;
-            },
-            State { graph, disabled: false, changed: false },
-        );
-        h.get_by_label("Auto exposure").click();
-        h.run();
-        assert!(h.state().changed);
-        assert!(
-            (h.state().graph.node(id).unwrap().params["ev"].as_f64().unwrap() - 2.).abs() < 1e-6
-        );
-        h.get_by_label("Auto exposure").click();
-        h.run();
-        assert!(
-            (h.state().graph.node(id).unwrap().params["ev"].as_f64().unwrap() - 2.).abs() < 1e-6
-        );
-        h.state_mut().disabled = true;
-        h.run();
-        assert!(h.get_by_label("Auto exposure").accesskit_node().is_disabled());
     }
 }

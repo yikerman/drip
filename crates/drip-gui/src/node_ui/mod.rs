@@ -2,13 +2,11 @@
 
 mod binding;
 mod controls;
-mod exposure;
+pub(crate) mod exposure;
 pub mod help;
 pub mod preview;
 pub mod scopes;
-#[cfg(test)]
-pub use binding::Action;
-pub use binding::{Binding, GuiNode, Prepare};
+pub use binding::{Action, Binding, GuiNode, Prepare};
 pub use controls::ControlCx;
 mod image_view;
 pub mod parameters;
@@ -76,18 +74,21 @@ pub fn action_name(kind: &'static Kind) -> Option<&'static str> {
     binding(kind).and_then(Binding::action_name).or(kind.action.map(|action| action.name))
 }
 
+/// Runs the node's action; a frontend action may return new node parameters.
 pub fn run_action(
     kind: &'static Kind,
     name: &str,
     params: serde_json::Value,
     inputs: &drip::eval::InputValues,
     ctx: &data::PrepareContext,
-) -> drip::Result<()> {
+) -> drip::Result<Option<serde_json::Value>> {
     if let Some(binding) = binding(kind).filter(|b| b.action_name() == Some(name)) {
         return binding.run_action(name, params, inputs, ctx);
     }
     match kind.action {
-        Some(action) if action.name == name => (action.run)(params, inputs, &ctx.resources),
+        Some(action) if action.name == name => {
+            (action.run)(params, inputs, &ctx.resources).map(|()| None)
+        }
         _ => Err(drip::Error::Graph("unknown node action".into())),
     }
 }

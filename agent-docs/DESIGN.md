@@ -51,8 +51,14 @@ Resolved with the user on 2026-10-11 after the review against
   write live in `drip`. `GuiNode` binds to the generated node type. File roles
   live in the parameter schema. `Default` derives from the schema.
 - **Decided:** One sequential worker queue with one evaluator runs previews,
-  bindings, project open, export and auto exposure. Auto exposure always applies
-  its EV on completion; this supersedes synchronous evaluation.
+  bindings, project open, export and auto exposure. A preview or an action is a
+  `Demand`: a graph snapshot forced under one `GlobalContext`, evaluated in one
+  batch (shared ancestors run once; each output lives until its last consumer
+  finishes), then its effect consumes the inputs. Actions override the preview
+  context with full detail. Demands are not merged: actions follow unchanged,
+  already-evaluated graphs, so reuse would need the excluded cache. A GUI action
+  may return new node parameters, applied as an ordinary edit; auto exposure
+  always applies its EV. This supersedes synchronous evaluation.
 
 ### Payloads and ports
 
@@ -106,7 +112,7 @@ Resolved with the user on 2026-10-11 after the review against
   action's label comes from the function name and lives in `Kind`. The GUI runs
   a `GuiNode` extra action if declared, otherwise the node's action. TIFF export
   is such a node in `drip`; its `write` also serves the CLI.
-- **Tentative:** Auto exposure becomes a GUI action metering the node's input:
+- **Decided:** Auto exposure is a GUI action metering the node's input:
   `ev = log2(0.18 / mean(input))`, which needs no current EV.
 - **Decided:** Each node kind has one generated `static Kind` (ID, labels,
   category, help, references, parameter schema and defaults, port specs,
@@ -131,7 +137,7 @@ Resolved with the user on 2026-10-11 after the review against
 - **Decided:** `#[gui_node] impl GuiNode for histogram::observe::Definition`:
   optional `PREPARE` and `ACTION` receive the parameters and typed `Inputs`;
   controls default to the schema. Registrations live in anonymous scopes.
-- **Tentative:** `PrepareContext` carries the `GlobalContext`, not a separate level.
+- **Decided:** `PrepareContext` carries the demand's `GlobalContext`, not a level.
 
 ## Processing
 
@@ -160,10 +166,10 @@ Resolved with the user on 2026-10-11 after the review against
   processing keeps sensor coordinates. TIFF omits the original orientation tag.
 - **Decided:** Exposure scaling is distinct from sensor-white normalization; the
   RAW denominator and sigmoid's 0.18 pivot do not establish ACES's 18% reflector
-  scale [6]. Auto exposure is a one-shot GUI action that meters linear Rec.2020
-  mean luminance on the device and adds `log2(0.18 / mean)` to EV through the
-  ordinary parameter edit. Mean-to-18% is a starting point, not
-  calibration.
+  scale [6]. Auto exposure is a one-shot GUI action that meters the linear
+  Rec.2020 mean luminance of Exposure's input on the device and sets EV to
+  `log2(0.18 / mean)` through the ordinary parameter edit. Mean-to-18% is a
+  starting point, not calibration.
 - **Decided:** Signed/HDR coordinates are valid before rendering [3]. Sigmoid is
   a rendering operation although its output stays identity-encoded; LittleCMS
   with the selected intent handles output conversion. ACES target-aware
