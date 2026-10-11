@@ -94,12 +94,13 @@ Resolved with the user on 2026-10-11 after the review against
 - **Decided:** Parameter validity is checked once at admission
   (`#[validate(fn)]` on the parameter struct), not in contracts. Schema ranges
   guide controls only.
-- **Tentative:** Two declaration forms. Computation, view and action nodes:
+- **Decided:** Two declaration forms. Computation, view and action nodes:
   `fn(&KernelContext, &Params, Read..., Write...) -> Result<()>`, with an empty
   body for views/actions. Sources: `fn(&Params, Load<'_, P>...) -> Result<()>`,
   run once at admission; `Load::set(desc, host)` validates at the boundary, and
   a failure is stored as the node's unknown reason. Loading stays separate
-  from computation.
+  from computation. Admission no longer canonicalizes the RAW path; the stored
+  path is the one supplied.
 - **Tentative:** Headless actions are declared with the node,
   `#[node(action = export)]`, as `fn(&Params, Inputs<'_>, &ActionContext)`;
   the label comes from the function name. GUI-only actions (auto exposure)

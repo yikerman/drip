@@ -1,10 +1,8 @@
-//! Bind an immutable Bayer asset or load error. Evaluation performs no file I/O.
+//! Load a Bayer RAW once at admission; a load error stays the reason its outputs are unknown.
 use crate::{
     Error, Result,
-    definition::{Metadata, Node, Outcome, Registration},
     node::{camera, data::*},
-    ports::*,
-    runtime::{GlobalContext, KernelContext},
+    ports::Load,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -17,99 +15,39 @@ pub struct Settings {
     #[external]
     pub path: Option<PathBuf>,
 }
-pub struct RawSource {
-    params: Settings,
-    bound: Result<Bound>,
+/// Read a Bayer RAW, subtract black and normalize by a common white reference.
+/// Outputs Bayer camera responses and the decoded capture metadata, including
+/// native calibration. The file is decoded once when the path is set; evaluation
+/// performs no file I/O. Calibration remains approximate.
+#[crate::node(id = "input.bayer-raw", name = "RAW", category = "Input", references = [(
+    "LibRaw black normalization",
+    "https://github.com/LibRaw/LibRaw/blob/0.22.0/src/utils/utils_libraw.cpp",
+)])]
+pub fn read(
+    p: &Settings,
+    mosaic: Load<'_, Bayer>,
+    metadata: Load<'_, CaptureMetadata>,
+) -> Result<()> {
+    let path =
+        p.path.as_ref().ok_or_else(|| Error::Contract("select a RAW before evaluation".into()))?;
+    let raw =
+        drip_raw::decode(path).map_err(|e| Error::Runtime(format!("{}: {e}", path.display())))?;
+    let (desc, samples) = normalize(&raw)?;
+    mosaic.set(desc, samples.into())?;
+    let facts = Arc::new(raw.metadata);
+    metadata.set(facts.clone(), facts)
 }
-struct Bound {
-    desc: BayerDesc,
-    mosaic: Arc<HostBuffer<f32>>,
-    metadata: Arc<drip_raw::Metadata>,
-}
-impl RawSource {
-    /// Snapshot a source or its load error. Failed assets remain editable and
-    /// serializable; no image interpretation is claimed until binding succeeds.
-    pub fn bind(mut params: Settings) -> Arc<dyn Node> {
-        if let Some(path) = &params.path
-            && let Ok(absolute) = path.canonicalize()
-        {
-            params.path = Some(absolute);
-        }
-        let bound = params
-            .path
-            .as_ref()
-            .ok_or_else(|| Error::Contract("select a RAW before evaluation".into()))
-            .and_then(|path| {
-                let raw = drip_raw::decode(path)
-                    .map_err(|e| Error::Runtime(format!("{}: {e}", path.display())))?;
-                normalize(raw)
-            });
-        Arc::new(Self { params, bound })
-    }
-}
-impl Node for RawSource {
-    fn loads_assets(&self) -> bool {
-        true
-    }
-    fn metadata(&self) -> Metadata {
-        Metadata {
-            id: "input.bayer-raw",
-            name: "RAW",
-            category: "Input",
-            help: "Read a Bayer RAW, subtract black and normalize by a common white reference. Outputs Bayer camera responses and the decoded capture metadata, including native calibration. Choose a RAW file before evaluation; calibration remains approximate.",
-            references: &[(
-                "LibRaw black normalization",
-                "https://github.com/LibRaw/LibRaw/blob/0.22.0/src/utils/utils_libraw.cpp",
-            )],
-            parameters: <Settings as crate::param::Parameters>::SPECS,
-        }
-    }
-    fn parameters(&self) -> Result<serde_json::Value> {
-        serde_json::to_value(&self.params).map_err(|e| Error::Graph(e.to_string()))
-    }
-    fn inputs(&self) -> Vec<PortSpec> {
-        vec![]
-    }
-    fn outputs(&self) -> Vec<PortSpec> {
-        vec![
-            PortSpec::of::<Cpu<Bayer>, Any>("mosaic"),
-            PortSpec::of::<Cpu<CaptureMetadata>, Any>("metadata"),
-        ]
-    }
-    fn contract(&self, _: &GlobalContext, _: &[Option<Description>]) -> Result<Outcome> {
-        Ok(match &self.bound {
-            Ok(b) => Outcome::Known(vec![Arc::new(b.desc.clone()), Arc::new(b.metadata.clone())]),
-            Err(reason) => Outcome::Unknown(reason.clone()),
-        })
-    }
-    fn run(
-        &self,
-        _: &KernelContext<'_>,
-        _: &[Option<(Description, Data)>],
-        _: &[Description],
-    ) -> Result<Vec<Data>> {
-        let b = self.bound.as_ref().map_err(Clone::clone)?;
-        Ok(vec![b.mosaic.clone(), Arc::new(b.metadata.clone())])
-    }
-}
-#[linkme::distributed_slice(crate::definition::NODES)]
-static REGISTRATION: Registration = Registration {
-    id: "input.bayer-raw",
-    defaults: || serde_json::json!({"path":null}),
-    build: |p| {
-        Ok(RawSource::bind(serde_json::from_value(p).map_err(|e| Error::Contract(e.to_string()))?))
-    },
-};
+pub use read::{Definition, Ports, add, definition};
 
 // Adapted from Drip b9b1045 raw normalization (LibRaw 0.22 model). The common
 // denominator avoids introducing a hidden per-channel white balance; consumers
 // derive gains and color calibration from the capture metadata.
-fn normalize(raw: drip_raw::Raw) -> Result<Bound> {
+fn normalize(raw: &drip_raw::Raw) -> Result<(BayerDesc, Vec<f32>)> {
     let m = &raw.metadata;
     let c = &m.calibration;
     let scale = 1.0 / camera::white_range(c)?;
     let width = m.sensor.width;
-    let mosaic: Vec<f32> = raw
+    let samples = raw
         .data
         .iter()
         .enumerate()
@@ -119,17 +57,8 @@ fn normalize(raw: drip_raw::Raw) -> Result<Bound> {
         width: m.sensor.width.try_into().map_err(|_| Error::Contract("RAW too wide".into()))?,
         height: m.sensor.height.try_into().map_err(|_| Error::Contract("RAW too high".into()))?,
     };
-    let desc = BayerDesc {
-        extent,
-        phase: camera::phase(m)?,
-        response: Response { camera: Camera::of(m), balance: None },
-    };
-    Bayer::validate(&desc)?;
-    let mosaic = mosaic.into();
-    Bayer::check(&desc, &mosaic)?;
-    let metadata = Arc::new(raw.metadata);
-    CaptureMetadata::validate(&metadata)?;
-    Ok(Bound { desc, mosaic: Arc::new(mosaic), metadata })
+    let response = Response { camera: Camera::of(m), balance: None };
+    Ok((BayerDesc { extent, phase: camera::phase(m)?, response }, samples))
 }
 
 #[cfg(test)]
@@ -155,34 +84,30 @@ mod tests {
         }
     }
     #[test]
-    fn normalization_preserves_capture_and_partial_bayer_cells() {
-        let r = raw();
-        let b = normalize(r.clone()).unwrap();
-        assert_eq!(b.desc.extent, Extent { width: 3, height: 2 });
-        assert_eq!(b.desc.phase, BayerPhase::Rggb);
-        assert_eq!(b.desc.response.balance, None);
-        assert!((b.mosaic[0] - 485. / 985.).abs() < 1e-7);
-        assert!((b.mosaic[3] - 455. / 985.).abs() < 1e-7);
-        assert_eq!(*b.metadata, r.metadata);
+    fn normalization_preserves_partial_bayer_cells_and_needs_no_calibration() {
+        let mut r = raw();
+        let (desc, mosaic) = normalize(&r).unwrap();
+        assert_eq!(desc.extent, Extent { width: 3, height: 2 });
+        assert_eq!(desc.phase, BayerPhase::Rggb);
+        assert_eq!(desc.response.balance, None);
+        assert!((mosaic[0] - 485. / 985.).abs() < 1e-7);
+        assert!((mosaic[3] - 455. / 985.).abs() < 1e-7);
+        // Processing calibration is derived by consumers, not required to load.
+        r.metadata.calibration.as_shot = [0.; 4];
+        r.metadata.calibration.xyz_to_cam = [[0.; 3]; 4];
+        assert_eq!(normalize(&r).unwrap().1, mosaic);
     }
 
     #[test]
-    fn missing_calibration_keeps_metadata_and_mosaic_available() {
-        let mut r = raw();
-        r.metadata.calibration.as_shot = [0.; 4];
-        r.metadata.calibration.xyz_to_cam = [[0.; 3]; 4];
-        let b = normalize(r.clone()).unwrap();
+    fn missing_or_unreadable_files_stay_editable_with_unknown_outputs() {
         let mut dag = crate::graph::Dag::new();
-        let id =
-            dag.add(Arc::new(RawSource { params: Settings::default(), bound: Ok(b) })).unwrap();
-        let eval = crate::eval::Evaluator::new(crate::runtime::RuntimeContext::host());
-        let mosaic =
-            eval.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), Output::new(id, 0)).unwrap();
-        assert_eq!(mosaic.data.len(), 6);
-        let metadata = eval
-            .evaluate::<Cpu<CaptureMetadata>>(&dag, &Default::default(), Output::new(id, 1))
-            .unwrap();
-        assert_eq!(**metadata.data, r.metadata);
+        let unset = add(&mut dag, Settings::default()).unwrap();
+        let missing = Settings { path: Some("/nonexistent/drip.nef".into()) };
+        let missing = add(&mut dag, missing).unwrap();
+        for ports in [unset, missing] {
+            assert!(dag.description(ports.mosaic).unwrap().is_none());
+            assert!(dag.node(ports.node).unwrap().parameters().is_ok());
+        }
     }
 
     #[cfg(feature = "cpu")]
@@ -204,15 +129,15 @@ mod tests {
                 [2500, 5000, 1250, 5000][r.metadata.calibration.cfa[i / 64 % 2][i % 2] as usize]
             })
             .collect();
-        let b = normalize(r).unwrap();
-        let balanced = camera::matrix(&b.metadata, camera::as_shot_balance(&b.metadata).ok());
+        let (desc, mosaic) = normalize(&r).unwrap();
+        let facts = Arc::new(r.metadata);
+        let balanced = camera::matrix(&facts, camera::as_shot_balance(&facts).ok());
         let mapped = color::apply(&balanced.unwrap(), [0.5; 3]);
         assert!((mapped[0] - mapped[1]).abs() > 0.01); // WB is deferred to CAT16.
         let expected_y = color::apply(&color::rgb_to_xyz(color::REC2020, color::D65), mapped)[1];
         let mut dag = crate::graph::Dag::new();
-        let mosaic = node::source::<Bayer>(&mut dag, b.desc, b.mosaic.to_vec()).unwrap();
-        let metadata =
-            node::source::<CaptureMetadata>(&mut dag, b.metadata.clone(), b.metadata).unwrap();
+        let mosaic = node::source::<Bayer>(&mut dag, desc, mosaic).unwrap();
+        let metadata = node::source::<CaptureMetadata>(&mut dag, facts.clone(), facts).unwrap();
         let gains = node::bayer_gains::add(&mut dag, ()).unwrap();
         let highlights = node::highlights::reconstruct::add(&mut dag, Default::default()).unwrap();
         let demosaic = node::rcd::add(&mut dag, ()).unwrap();

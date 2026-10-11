@@ -43,6 +43,43 @@ fn nodes_with_outputs_need_a_contract() {
 }
 
 #[test]
+fn sources_load_cpu_outputs_at_admission_without_a_contract() {
+    let function: syn::ItemFn = syn::parse_quote! {
+        fn read(p: &Settings, mosaic: Load<'_, Bayer>, metadata: Load<'_, Facts>) -> Result<()> {
+            Ok(())
+        }
+    };
+    let signature = Signature::parse(&function.sig).unwrap();
+    assert!(signature.source);
+    let module = generated_module(expand(quote!(id = "raw"), function.clone()).unwrap());
+    assert_port_specs(
+        &module,
+        "outputs",
+        quote!(
+            ::drip::ports::PortSpec::of::<::drip::ports::Cpu<Bayer>, ::drip::ports::Any>("mosaic"),
+            ::drip::ports::PortSpec::of::<::drip::ports::Cpu<Facts>, ::drip::ports::Any>(
+                "metadata"
+            )
+        ),
+    );
+    let items = &module.content.as_ref().unwrap().1;
+    assert!(items.iter().any(|item| matches!(item, syn::Item::Fn(f) if f.sig.ident == "load")));
+    let error = expand(quote!(id = "raw", contract = c), function).unwrap_err();
+    assert!(error.to_string().contains("remove the contract"));
+    for declaration in [
+        quote!(
+            fn x(p: &P, a: Load<A>, b: Read<Cpu<B>>) {}
+        ),
+        quote!(
+            fn x(c: &C, p: &P, a: Load<A>) {}
+        ),
+    ] {
+        let error = expand(quote!(id = "x"), syn::parse2(declaration).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("only Load ports"), "{error}");
+    }
+}
+
+#[test]
 fn rejects_unsupported_signatures() {
     let declarations = [
         (
@@ -121,13 +158,13 @@ fn rejects_unsupported_signatures() {
             quote!(
                 fn x(c: &C, p: &P, a: Either<A, B>) {}
             ),
-            "expected Read or Write; wrapper aliases are not resolved",
+            "expected Read, Write or Load; wrapper aliases are not resolved",
         ),
         (
             quote!(
                 fn x(c: &C, p: &P, a: Alias<A>) {}
             ),
-            "expected Read or Write; wrapper aliases are not resolved",
+            "expected Read, Write or Load; wrapper aliases are not resolved",
         ),
         (
             quote!(

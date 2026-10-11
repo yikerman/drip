@@ -81,7 +81,7 @@ impl<'a> Frame<'a> {
                 }
                 Edit::Param(id, name, value) => {
                     let node = graph.dag.node(id)?;
-                    if node.loads_assets() {
+                    if node.metadata().loads_assets {
                         let mut params = node.parameters()?;
                         let field = params.get_mut(name).ok_or_else(|| {
                             GraphError::Graph(format!("unknown parameter {name}"))

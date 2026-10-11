@@ -13,20 +13,16 @@ pub struct Metadata {
     pub help: &'static str,
     pub references: &'static [(&'static str, &'static str)],
     pub parameters: &'static [crate::param::ParamSpec],
+    /// Admitting parameters loads assets (file I/O), so frontends should do it
+    /// away from their UI thread.
+    pub loads_assets: bool,
 }
 
 /// Mechanical adapter interface. Use #[node] for computational nodes.
 /// Implementations are trusted producers, just like a Payload implementation.
 pub trait Node: Send + Sync + 'static {
     fn metadata(&self) -> Metadata;
-    /// Rebuilding this source may perform file I/O before producing an immutable
-    /// node. Frontends should schedule admission away from their UI thread.
-    fn loads_assets(&self) -> bool {
-        false
-    }
-    fn parameters(&self) -> Result<serde_json::Value> {
-        Err(crate::Error::Graph("this bound value has no persistent source definition".into()))
-    }
+    fn parameters(&self) -> Result<serde_json::Value>;
     fn inputs(&self) -> Vec<PortSpec>;
     fn outputs(&self) -> Vec<PortSpec>;
     /// Pure output description/check using the same global configuration as run.

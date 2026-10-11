@@ -126,7 +126,7 @@ fn bound_raw_snapshot_survives_file_removal_until_explicit_rebind() {
     std::fs::copy(&fixture, &temporary).unwrap();
     let mut dag = drip::graph::Dag::new();
     let source = dag
-        .add(node::raw::RawSource::bind(node::raw::Settings { path: Some(temporary.clone()) }))
+        .add(node::raw::definition(node::raw::Settings { path: Some(temporary.clone()) }).unwrap())
         .unwrap();
     std::fs::remove_file(&temporary).unwrap();
     let output = dag.typed_output::<Bayer>(dag.output_port(source, "mosaic").unwrap()).unwrap();

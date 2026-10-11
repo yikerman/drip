@@ -33,7 +33,11 @@ impl<P: Payload> Node for Source<P> {
             help: "Immutable, validated source value.",
             references: &[],
             parameters: &[],
+            loads_assets: false,
         }
+    }
+    fn parameters(&self) -> Result<serde_json::Value> {
+        Err(crate::Error::Graph("this bound value has no persistent source definition".into()))
     }
     fn inputs(&self) -> Vec<PortSpec> {
         vec![]

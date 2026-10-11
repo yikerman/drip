@@ -45,9 +45,10 @@ profile-file paths, proof settings and compression levels in the variants that
 consume them, rather than independent inactive fields.
 
 File-dialog hints and scope annotations belong to `drip-gui`. The library owns
-processing values and their interpretations. `RawSource` binds a decoded asset
-before evaluation and publishes shared buffers through a handwritten `Node`
-implementation; extending the function macro to cover bound sources is open.
+processing values and their interpretations. Sources use the same `#[node]`
+declaration with `Load` ports, `fn(&Settings, Load<'_, P>...)`: they load once
+when parameters are admitted and publish shared values; a load failure is the
+reason their outputs are unknown.
 
 ## Compute backends
 

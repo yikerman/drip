@@ -14,16 +14,35 @@ pub(super) fn node(
     let ports = ports(signature);
     let adapter = adapter(function, options, signature);
     let registration = registration(options, parameters);
+    let (definition, admission) = if signature.source {
+        let load = load(name, signature);
+        (
+            quote! {
+                pub struct Definition {
+                    pub parameters: #parameters,
+                    loaded: ::drip::Result<Vec<(::drip::ports::Description, ::drip::ports::Data)>>,
+                }
+                #load
+            },
+            quote!(Definition { loaded: load(&parameters), parameters }),
+        )
+    } else {
+        (
+            quote! {
+                pub struct Definition {
+                    pub parameters: #parameters,
+                }
+            },
+            quote!(Definition { parameters }),
+        )
+    };
 
     quote! {
         #function
         #visibility mod #name {
             use super::*;
 
-            pub struct Definition {
-                pub parameters: #parameters,
-            }
-
+            #definition
             #ports
 
             /// Admit checked parameters as a graph node.
@@ -31,7 +50,7 @@ pub(super) fn node(
                 parameters: #parameters,
             ) -> ::drip::Result<::std::sync::Arc<dyn ::drip::definition::Node>> {
                 ::drip::param::Parameters::validate(&parameters)?;
-                Ok(::std::sync::Arc::new(Definition { parameters }))
+                Ok(::std::sync::Arc::new(#admission))
             }
 
             pub fn add(dag: &mut ::drip::graph::Dag, parameters: #parameters) -> ::drip::Result<Ports> {
@@ -86,8 +105,12 @@ fn adapter(function: &syn::ItemFn, options: &Options, signature: &Signature) -> 
     let parameters = &signature.parameters;
     let inputs = signature.inputs().map(port_spec);
     let outputs = signature.outputs().map(port_spec);
-    let contract = contract(options, signature);
-    let run = run(&function.sig.ident, signature);
+    let (contract, run) = if signature.source {
+        (loaded_contract(), loaded_run())
+    } else {
+        (contract(options, signature), run(&function.sig.ident, signature))
+    };
+    let loads_assets = signature.source;
 
     quote! {
         impl ::drip::definition::Node for Definition {
@@ -99,6 +122,7 @@ fn adapter(function: &syn::ItemFn, options: &Options, signature: &Signature) -> 
                     help: #help,
                     references: &#references,
                     parameters: <#parameters as ::drip::param::Parameters>::SPECS,
+                    loads_assets: #loads_assets,
                 }
             }
 
@@ -220,6 +244,68 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
             #(#allocations)*
             super::#name(context, &self.parameters, #(#arguments),*)?;
             Ok(vec![#(#results),*])
+        }
+    }
+}
+
+/// Run a source once at admission. A failure is kept as the reason its outputs
+/// are unknown, so the node stays editable and persistable.
+fn load(name: &syn::Ident, signature: &Signature) -> TokenStream {
+    let slots: Vec<_> =
+        signature.outputs().map(|port| format_ident!("slot_{}", port.index)).collect();
+    let names = signature.outputs().map(|port| port.name.to_string());
+    let loads = signature.outputs().zip(&slots).map(|(port, slot)| {
+        let payload = payload(port);
+        quote!(::drip::ports::Load::<#payload>::new(#slot))
+    });
+    let count = slots.len();
+    let parameters = &signature.parameters;
+    quote! {
+        fn load(
+            parameters: &#parameters,
+        ) -> ::drip::Result<Vec<(::drip::ports::Description, ::drip::ports::Data)>> {
+            let mut slots: [Option<(::drip::ports::Description, ::drip::ports::Data)>; #count] =
+                ::std::array::from_fn(|_| None);
+            let [#(#slots),*] = &mut slots;
+            super::#name(parameters, #(#loads),*)?;
+            slots
+                .into_iter()
+                .zip([#(#names),*])
+                .map(|(slot, port)| slot.ok_or_else(|| ::drip::Error::Contract(
+                    format!("source did not load {port}"),
+                )))
+                .collect()
+        }
+    }
+}
+
+fn loaded_contract() -> TokenStream {
+    quote! {
+        fn contract(
+            &self,
+            _: &::drip::runtime::GlobalContext,
+            _: &[Option<::drip::ports::Description>],
+        ) -> ::drip::Result<::drip::definition::Outcome> {
+            Ok(match &self.loaded {
+                Ok(values) => ::drip::definition::Outcome::Known(
+                    values.iter().map(|(desc, _)| desc.clone()).collect(),
+                ),
+                Err(reason) => ::drip::definition::Outcome::Unknown(reason.clone()),
+            })
+        }
+    }
+}
+
+fn loaded_run() -> TokenStream {
+    quote! {
+        fn run(
+            &self,
+            _: &::drip::runtime::KernelContext<'_>,
+            _: &[Option<(::drip::ports::Description, ::drip::ports::Data)>],
+            _: &[::drip::ports::Description],
+        ) -> ::drip::Result<Vec<::drip::ports::Data>> {
+            let values = self.loaded.as_ref().map_err(Clone::clone)?;
+            Ok(values.iter().map(|(_, data)| data.clone()).collect())
         }
     }
 }

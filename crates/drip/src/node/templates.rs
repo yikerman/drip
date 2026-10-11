@@ -13,9 +13,8 @@ pub fn raw_to_rgb(path: &Path) -> Result<Project> {
 /// The editable starting pipeline can be wired before its source is selected.
 pub fn raw_pipeline(path: Option<&Path>) -> Result<Project> {
     let mut p = Project::default();
-    let raw = p.dag.add(raw::RawSource::bind(raw::Settings { path: path.map(Path::to_owned) }))?;
-    let mosaic = p.dag.typed_output(p.dag.output_port(raw, "mosaic")?)?;
-    let metadata = p.dag.typed_output(p.dag.output_port(raw, "metadata")?)?;
+    let raw = raw::add(&mut p.dag, raw::Settings { path: path.map(Path::to_owned) })?;
+    let (mosaic, metadata) = (raw.mosaic, raw.metadata);
     let gains = node::bayer_gains::add(&mut p.dag, ())?;
     let highlights = node::highlights::reconstruct::add(&mut p.dag, Default::default())?;
     let demosaic = node::rcd::add(&mut p.dag, ())?;

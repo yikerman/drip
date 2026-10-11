@@ -73,6 +73,8 @@ pub(super) struct Port {
 pub(super) struct Signature {
     pub parameters: syn::Type,
     pub ports: Vec<Port>,
+    /// `fn(&Params, Load<Payload>...)`: outputs loaded once at admission.
+    pub source: bool,
 }
 
 impl Signature {
@@ -87,8 +89,11 @@ impl Signature {
                 "node must be a concrete synchronous safe function",
             ));
         }
+        let source = signature.inputs.iter().any(is_load);
         let mut arguments = signature.inputs.iter();
-        arguments.next(); // Rust checks the context type when compiling the generated call.
+        if !source {
+            arguments.next(); // Rust checks the context type when compiling the generated call.
+        }
         let parameters = arguments
             .next()
             .ok_or_else(|| syn::Error::new(signature.span(), "expected context and &parameters"))?;
@@ -97,6 +102,12 @@ impl Signature {
         let mut outputs = 0;
         let mut ports = Vec::new();
         for argument in arguments {
+            if source != is_load(argument) {
+                return Err(syn::Error::new(
+                    argument.span(),
+                    "a source takes &parameters and only Load ports, without a context",
+                ));
+            }
             let mut port = Port::parse(argument)?;
             let count = match port.direction {
                 Direction::Input => &mut inputs,
@@ -106,7 +117,7 @@ impl Signature {
             *count += 1;
             ports.push(port);
         }
-        Ok(Self { parameters, ports })
+        Ok(Self { parameters, ports, source })
     }
 
     pub fn inputs(&self) -> impl Iterator<Item = &Port> {
@@ -116,6 +127,12 @@ impl Signature {
     pub fn outputs(&self) -> impl Iterator<Item = &Port> {
         self.ports.iter().filter(|port| port.direction == Direction::Output)
     }
+}
+
+fn is_load(argument: &syn::FnArg) -> bool {
+    let syn::FnArg::Typed(argument) = argument else { return false };
+    let syn::Type::Path(ty) = argument.ty.as_ref() else { return false };
+    ty.path.segments.last().is_some_and(|segment| segment.ident == "Load")
 }
 
 fn parameter_type(argument: &syn::FnArg) -> syn::Result<syn::Type> {
@@ -155,11 +172,11 @@ impl Port {
         }
         let direction = match wrapper.ident.to_string().as_str() {
             "Read" => Direction::Input,
-            "Write" => Direction::Output,
+            "Write" | "Load" => Direction::Output,
             _ => {
                 return Err(syn::Error::new(
                     wrapper.span(),
-                    "expected Read or Write; wrapper aliases are not resolved",
+                    "expected Read, Write or Load; wrapper aliases are not resolved",
                 ));
             }
         };
@@ -167,6 +184,11 @@ impl Port {
             return Err(syn::Error::new(wrapper.span(), "output Write ports cannot be optional"));
         }
         let (ty, requirement) = match types.as_slice() {
+            // A source loads host values; its ports are CPU outputs of that payload.
+            [payload] if wrapper.ident == "Load" => (
+                syn::parse_quote!(::drip::ports::Cpu<#payload>),
+                syn::parse_quote!(::drip::ports::Any),
+            ),
             [ty] => ((*ty).clone(), syn::parse_quote!(::drip::ports::Any)),
             [ty, requirement] => ((*ty).clone(), (*requirement).clone()),
             _ => {

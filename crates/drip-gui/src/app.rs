@@ -429,7 +429,9 @@ impl App {
         self.dirty = true;
         let result = (|| {
             self.worker.invalidate()?;
-            for (id, node) in self.project.graph.dag.nodes().filter(|(_, n)| n.loads_assets()) {
+            for (id, node) in
+                self.project.graph.dag.nodes().filter(|(_, n)| n.metadata().loads_assets)
+            {
                 self.worker.bind(
                     &self.project.graph,
                     id,

@@ -140,6 +140,25 @@ impl<'a, P: Port> OutputSlot<'a, P> {
     }
 }
 
+/// An output of a source node, set once when its parameters are admitted.
+/// Setting it is the boundary check of the loaded value.
+pub struct Load<'a, P> {
+    slot: &'a mut Option<(Description, Data)>,
+    payload: PhantomData<P>,
+}
+impl<'a, P: Payload> Load<'a, P> {
+    #[doc(hidden)]
+    pub fn new(slot: &'a mut Option<(Description, Data)>) -> Self {
+        Self { slot, payload: PhantomData }
+    }
+    pub fn set(self, desc: P::Desc, host: P::Host) -> Result<()> {
+        P::validate(&desc)?;
+        P::check(&desc, &host)?;
+        *self.slot = Some((Arc::new(desc), Arc::new(host)));
+        Ok(())
+    }
+}
+
 /// Check a connected input against its port requirement before the contract.
 #[doc(hidden)]
 pub fn input<'a, P: Port, R: Requirement<P::Payload>>(
