@@ -1,7 +1,9 @@
 //! One sequential queue: previews, asset bindings, project loading and node
-//! actions run in order on one worker with one evaluator.
+//! actions run in order on one worker with one evaluator. A worker serves one
+//! project; the app replaces it, discarding queued work and late replies.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::Instant;
@@ -37,9 +39,7 @@ enum Effect {
 
 enum Command {
     Force(Demand),
-    Reset,
     Collect,
-    Shutdown,
     Bind { ticket: u64, id: NodeId, kind: &'static str, params: Json },
     Open { ticket: u64, file: std::path::PathBuf },
 }
@@ -105,6 +105,8 @@ impl Notify {
 /// UI-side mailbox. At most one preview is sent and one latest request waits.
 pub struct Worker {
     commands: mpsc::Sender<Command>,
+    /// Set when dropped: the thread skips queued commands after its current one.
+    stopped: Arc<AtomicBool>,
     events: mpsc::Receiver<Event>,
     generation: u64,
     in_flight: bool,
@@ -124,18 +126,21 @@ impl Worker {
         let (commands, requests) = mpsc::channel();
         let (events, replies) = mpsc::channel();
         let notify = Notify { events, wake: Arc::new(wake) };
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stop = stopped.clone();
         thread::Builder::new()
             .name("drip-worker".into())
             .spawn(move || {
                 // A panic must wake the UI too, so it can stop showing “evaluating…”.
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    serve(requests, &notify)
+                    serve(requests, &stop, &notify)
                 }));
                 notify.send(Event::Stopped);
             })
             .expect("start worker");
         Self {
             commands,
+            stopped,
             events: replies,
             generation: 0,
             in_flight: false,
@@ -161,12 +166,12 @@ impl Worker {
     }
 
     pub fn busy(&self) -> bool {
-        self.in_flight || self.pending.is_some() || self.binding_pending() || self.opening.is_some()
+        self.in_flight || self.pending.is_some() || self.loading()
     }
 
-    /// True until the latest binding results are handed to the app for commit.
-    pub fn binding_pending(&self) -> bool {
-        !self.bindings.is_empty()
+    /// True until the latest bindings and project open are handed to the app.
+    pub fn loading(&self) -> bool {
+        !self.bindings.is_empty() || self.opening.is_some()
     }
 
     pub fn bind(
@@ -212,24 +217,11 @@ impl Worker {
         self.start()
     }
 
-    pub fn reset(&mut self) -> Result<(), String> {
-        // Generations never reset, even when node IDs are reused by a project.
-        self.generation += 1;
-        self.pending = None;
-        self.bindings.clear();
-        self.opening = None;
-        self.views.clear();
-        self.views_generation = None;
-        self.failures.clear();
-        log::debug!("reset preview generation={}", self.generation);
-        self.collect = true;
-        self.send(Command::Reset)
-    }
-
     pub fn action(&self, graph: &Graph, id: NodeId, name: &'static str) -> Result<(), String> {
-        // Processing Bind first cannot update an action's immutable graph snapshot.
-        if self.binding_pending() {
-            return Err("wait for asset loading to finish before running an action".into());
+        // A bind cannot update the action's graph snapshot, and an open
+        // replaces the project and this worker with it.
+        if self.loading() {
+            return Err("wait for loading to finish before running an action".into());
         }
         let effect = Effect::Perform { id, name };
         self.send(Command::Force(Demand {
@@ -338,15 +330,19 @@ impl Worker {
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        // Do not join a decode or kernel from the UI's shutdown path.
-        let _ = self.commands.send(Command::Shutdown);
+        // Do not join a decode or kernel from the UI thread; the thread ends
+        // after its current command, and its replies have no receiver.
+        self.stopped.store(true, Ordering::Relaxed);
     }
 }
 
-fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
+fn serve(commands: mpsc::Receiver<Command>, stopped: &AtomicBool, notify: &Notify) {
     let mut evaluator = None;
     let mut images = ImageCache::default();
     while let Ok(command) = commands.recv() {
+        if stopped.load(Ordering::Relaxed) {
+            break;
+        }
         match command {
             Command::Bind { ticket, id, kind, params } => {
                 notify.send(Event::Bound {
@@ -369,9 +365,7 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
                 });
                 notify.send(force(&demand, evaluator.as_ref(), &mut images));
             }
-            Command::Reset => images.collect(),
             Command::Collect => images.collect(),
-            Command::Shutdown => break,
         }
     }
 }
@@ -611,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn newest_binding_wins_and_reset_discards_in_flight_loads() {
+    fn newest_binding_wins() {
         let mut graph = Graph::default();
         let id = graph.add_node(Registry.get("tone.exposure").unwrap()).unwrap();
         let mut worker = Worker::new(|| {});
@@ -622,14 +616,6 @@ mod tests {
         let Notice::Bound { id: loaded, result } = &notices[0] else { panic!("expected binding") };
         assert_eq!(*loaded, id);
         assert_eq!(result.as_ref().unwrap().parameters().unwrap(), json!({"ev":2.0}));
-        worker.bind(&graph, id, json!({"ev":3.0})).unwrap();
-        worker.reset().unwrap();
-        // A later bind is also a barrier: both discarded work and reset precede it.
-        worker.bind(&graph, id, json!({"ev":4.0})).unwrap();
-        let notices = wait(&mut worker);
-        assert_eq!(notices.len(), 1);
-        let Notice::Bound { result, .. } = &notices[0] else { panic!("expected binding") };
-        assert_eq!(result.as_ref().unwrap().parameters().unwrap(), json!({"ev":4.0}));
     }
 
     mod preview_logs_only_changed_root_failures_at_their_severity_fixture {
@@ -724,13 +710,13 @@ mod tests {
                         && !error.contains("upstream"))));
                 }
             }
-            worker.reset().unwrap();
+            worker = Worker::new(|| {});
             worker.request(&graph, 1, vec![preview]).unwrap();
             wait(&mut worker);
             assert_eq!(
                 RECORDS.with_borrow_mut(std::mem::take).len(),
                 1,
-                "reset clears failure history"
+                "a new worker has no failure history"
             );
 
             graph.set_param(source, "state", json!("ok")).unwrap();
@@ -773,7 +759,7 @@ mod tests {
         }
     }
 
-    mod latest_targets_win_and_project_reset_rejects_old_results_fixture {
+    mod latest_targets_win_and_a_replaced_worker_skips_queued_work_fixture {
         use super::*;
 
         static GATE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
@@ -803,7 +789,7 @@ mod tests {
         }
 
         #[test]
-        fn latest_targets_win_and_project_reset_rejects_old_results() {
+        fn latest_targets_win_and_a_replaced_worker_skips_queued_work() {
             let source_kind = Registry.get("test.blocking").unwrap();
 
             let (started, entered) = mpsc::channel();
@@ -842,16 +828,28 @@ mod tests {
             assert!(worker.result(preview).is_none());
             assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0, 3.0]);
 
+            // A dropped worker finishes its current command, then skips its
+            // queue: here an action that would evaluate the source again.
+            let (wake, woke) = mpsc::channel();
+            let mut old = Worker::new(move || {
+                let _ = wake.send(());
+            });
             graph.set_param(source, "block", json!(true)).unwrap();
-            worker.request(&graph, 1, vec![preview]).unwrap();
+            old.request(&graph, 1, vec![preview]).unwrap();
             entered.recv_timeout(TIMEOUT).unwrap();
             graph.set_param(source, "block", json!(false)).unwrap();
-            worker.reset().unwrap();
-            assert!(worker.result(histogram).is_none());
-            worker.request(&graph, 2, vec![preview]).unwrap();
+            graph.set_param(source, "value", json!(4)).unwrap();
+            old.action(&graph, preview, "queued").unwrap();
+            drop(old);
             release.send(()).unwrap();
+            // It wakes the UI for its preview, then as it stops.
+            for _ in 0..2 {
+                woke.recv_timeout(TIMEOUT).unwrap();
+            }
+            assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0, 3.0, 3.0]);
+            worker.request(&graph, 2, vec![preview]).unwrap();
             wait(&mut worker);
-            assert_eq!(pixel(&worker, preview), [3.0, 1.0, 0.0, 1.0]);
+            assert_eq!(pixel(&worker, preview), [4.0, 1.0, 0.0, 1.0]);
             graph.disconnect(&Port(preview, "image".into())).unwrap();
             worker.request(&graph, 2, vec![preview]).unwrap();
             assert!(
@@ -961,7 +959,6 @@ mod tests {
             wait(&mut worker);
             assert_eq!(pixel(&worker, preview), [2.0, 1.0, 0.0, 1.0]);
             std::fs::write(&input, "3").unwrap();
-            worker.reset().unwrap();
             worker.request(&graph, 3, vec![preview]).unwrap();
             wait(&mut worker);
             assert_eq!(pixel(&worker, preview), [3.0, 1.0, 0.0, 1.0]);

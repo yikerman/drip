@@ -61,6 +61,11 @@ Resolved with the user on 2026-10-11 after the review against
   already-evaluated graphs, so reuse would need the excluded cache. A GUI action
   may return new node parameters, applied as an ordinary edit; auto exposure
   always applies its EV. This supersedes synchronous evaluation.
+- **Decided:** A worker serves one project. New and Open replace it: the old
+  thread finishes its current command, skips its queue, and its replies have no
+  receiver, so reused node IDs cannot pick up old results. Project changes are
+  disabled while an action runs (it cannot be interrupted, and its result would
+  be lost), and actions while a project opens.
 
 ### Payloads and ports
 
@@ -268,7 +273,8 @@ Resolved with the user on 2026-10-11 after the review against
   density, histograms to linear.
 - **Decided:** Inspector help joins Rustdoc source wraps and keeps paragraphs;
   reflow belongs to presentation.
-- **Decided:** Exports are disabled while asset bindings are pending. Same-frame
+- **Decided:** Actions are disabled while asset bindings or a project open are
+  pending. Same-frame
   actions are rejected before snapshotting the graph.
 - **Decided:** The default RAW template uses a landscape layout: views share a
   top edge, processing staggers down through Orientation, RAW and TIFF sit at

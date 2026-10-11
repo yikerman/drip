@@ -4,6 +4,9 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- The app replaces its worker with the project instead of resetting it; the
+  old thread skips its queue. New/Open wait for running actions, and actions
+  for an opening project. GPU workspace tests, Clippy and formatting pass.
 - Output ICC profiles load at admission as node assets; the per-path resource
   memo and worker cache invalidation are gone, and "Invalidate cache" became
   "Reload files". Actions and preparations receive the admitted node. GPU

@@ -3,6 +3,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::model::NodeId;
 use crate::model::Project;
@@ -20,7 +21,9 @@ use crate::{inspector, theme};
 pub struct App {
     project: Project,
     registry: Registry,
+    /// Serves the current project only; replaced with it.
     worker: Worker,
+    wake: Arc<dyn Fn() + Send + Sync>,
     dirty: bool,
     modified: bool,
     /// Namespaces temporary control drafts when node IDs are reused by a new project.
@@ -61,10 +64,12 @@ impl App {
         wide_gamut: bool,
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Self {
+        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
         let mut app = App {
             project: templates::raw_to_tiff(),
             registry: Registry,
-            worker: Worker::new(wake),
+            worker: worker(&wake),
+            wake,
             dirty: true,
             modified: false,
             ui_generation: 0,
@@ -297,12 +302,14 @@ impl App {
 
     fn menu(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            if ui.button("New").clicked()
+            // A running action cannot be interrupted, and its result would be lost.
+            let idle = self.action.is_none();
+            if ui.add_enabled(idle, egui::Button::new("New")).clicked()
                 && let Err(error) = self.set_project(templates::raw_to_tiff(), None)
             {
                 self.report(Err(error));
             }
-            if ui.button("Open…").clicked()
+            if ui.add_enabled(idle, egui::Button::new("Open…")).clicked()
                 && let Some(file) = rfd::FileDialog::new()
                     .set_title("Open Drip project or template")
                     .add_filter("Drip project or template", &["drip", "drip-template"])
@@ -386,7 +393,9 @@ impl App {
         // Node ids are reused across projects.
         self.popped.clear();
         self.dirty = true;
-        self.worker.reset()
+        // Queued work and late replies belong to the old project.
+        self.worker = worker(&self.wake);
+        Ok(())
     }
 
     fn open(&mut self, file: PathBuf) {
@@ -455,7 +464,7 @@ impl App {
     }
 
     fn actions_disabled(&self) -> bool {
-        self.action.is_some() || self.worker.binding_pending()
+        self.action.is_some() || self.worker.loading()
     }
 
     fn run_action(&mut self, id: NodeId, name: &'static str) {
@@ -479,6 +488,11 @@ impl App {
             }
         }
     }
+}
+
+fn worker(wake: &Arc<dyn Fn() + Send + Sync>) -> Worker {
+    let wake = wake.clone();
+    Worker::new(move || wake())
 }
 
 #[cfg(test)]
@@ -567,7 +581,7 @@ mod tests {
 
     fn finish_bindings(app: &mut App) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while app.worker.binding_pending() {
+        while app.worker.loading() {
             app.poll();
             assert!(std::time::Instant::now() < deadline, "binding did not finish");
             std::thread::sleep(std::time::Duration::from_millis(1));
@@ -596,12 +610,22 @@ mod tests {
             assert!(h.get_by_label("Export").accesskit_node().is_disabled());
             h.state_mut().run_action(export, "Export");
             assert!(h.state().action.is_none());
-            assert!(h.state().status.as_ref().unwrap().text.contains("asset loading"));
+            assert!(h.state().status.as_ref().unwrap().text.contains("wait for loading"));
 
             finish_bindings(h.state_mut());
             h.run();
             assert!(!h.get_by_label("Export").accesskit_node().is_disabled());
         }
+    }
+
+    #[test]
+    fn actions_wait_for_an_opening_project() {
+        let mut app = App::new(None, true, || {});
+        let export = app.project.graph.find("Export TIFF").unwrap();
+        app.open(fixture_project("opening"));
+        app.run_action(export, "Export");
+        assert!(app.action.is_none());
+        assert!(app.status.as_ref().unwrap().text.contains("wait for loading"));
     }
 
     #[test]
@@ -618,6 +642,10 @@ mod tests {
             h.run();
             assert!(h.state().action.as_ref().unwrap().running.contains("Auto exposure"));
             assert!(h.get_by_label("Auto exposure").accesskit_node().is_disabled());
+            // Replacing the project would drop the running action's result.
+            for project in ["New", "Open…"] {
+                assert!(h.get_by_label(project).accesskit_node().is_disabled());
+            }
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
             while h.state().action.is_some() {
                 assert!(std::time::Instant::now() < deadline, "action did not finish");
@@ -646,7 +674,7 @@ mod tests {
             ..Default::default()
         });
         assert!(app.action.is_none());
-        assert!(app.status.as_ref().unwrap().text.contains("asset loading"));
+        assert!(app.status.as_ref().unwrap().text.contains("wait for loading"));
         assert_ne!(app.project.graph.node(exposure).unwrap().params["ev"], json!(2.0));
 
         finish_bindings(&mut app);
