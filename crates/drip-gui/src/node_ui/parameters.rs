@@ -82,7 +82,7 @@ pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
 /// A widget for one parameter value; returns the new value when edited.
 #[cfg(test)]
 pub fn edit_value(ui: &mut Ui, id: egui::Id, kind: &ParamKind, value: &Json) -> Option<Json> {
-    edit_value_with(ui, id, kind, value, "", &|_| super::ParameterUi::default())
+    edit_value_with(ui, id, kind, value, "")
 }
 
 pub fn edit_parameter(
@@ -91,20 +91,16 @@ pub fn edit_parameter(
     node: &crate::model::Node,
     spec: &drip::param::ParamSpec,
 ) -> Option<Json> {
-    edit_value_with(ui, id, &spec.kind, &node.params[spec.name], spec.name, &|path| {
-        super::binding(node.kind).map_or_else(super::ParameterUi::default, |binding| {
-            binding.parameter_ui(node.params.clone(), path)
-        })
-    })
+    edit_value_with(ui, id, &spec.kind, &node.params[spec.name], spec.label)
 }
 
+/// `label` names the parameter in file dialogs.
 fn edit_value_with(
     ui: &mut Ui,
     id: egui::Id,
     kind: &ParamKind,
     value: &Json,
-    path: &str,
-    hints: &dyn Fn(&str) -> super::ParameterUi,
+    label: &str,
 ) -> Option<Json> {
     let id = ui.make_persistent_id(id);
     let (response, mut chosen) = match *kind {
@@ -165,15 +161,12 @@ fn edit_value_with(
                                     if !spec.documentation.is_empty() {
                                         label.on_hover_text(spec.documentation);
                                     }
-                                    let field_path =
-                                        format!("{path}.{}.{}", option.name, spec.name);
                                     if let Some(value) = edit_value_with(
                                         ui,
                                         id.with((option.name, spec.name)),
                                         &spec.kind,
                                         &edited[option.name][spec.name],
-                                        &field_path,
-                                        hints,
+                                        spec.label,
                                     ) {
                                         edited[option.name][spec.name] = value;
                                     }
@@ -187,7 +180,7 @@ fn edit_value_with(
             })
             .inner
         }
-        ParamKind::Path { output } => {
+        ParamKind::Path { output, extensions } => {
             let selected_path = value.as_str().map(std::path::Path::new);
             let name = selected_path
                 .and_then(|p| p.file_name())
@@ -196,12 +189,9 @@ fn edit_value_with(
             let response = ui
                 .horizontal(|ui| {
                     if ui.button("Browse…").clicked() {
-                        let file = hints(path).file;
-                        let mut dialog = rfd::FileDialog::new();
-                        if let Some(file) = file {
-                            dialog = dialog
-                                .set_title(file.title)
-                                .add_filter(file.filter, file.extensions);
+                        let mut dialog = rfd::FileDialog::new().set_title(label);
+                        if !extensions.is_empty() {
+                            dialog = dialog.add_filter(label, extensions);
                         }
                         let dialog = match selected_path.and_then(|p| p.parent()) {
                             Some(dir) => dialog.set_directory(dir),
@@ -211,7 +201,7 @@ fn edit_value_with(
                             |mut p| {
                                 if output
                                     && p.extension().is_none()
-                                    && let Some(extension) = file.and_then(|f| f.extensions.first())
+                                    && let Some(extension) = extensions.first()
                                 {
                                     p.set_extension(extension);
                                 }

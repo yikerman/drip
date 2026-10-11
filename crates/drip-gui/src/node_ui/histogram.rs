@@ -21,5 +21,5 @@ pub fn observe(
 impl crate::node_ui::GuiNode for observe::Definition {
     type Presentation = Arc<Histogram>;
     const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-        Some(|p, inputs, ctx| histogram(p, (&DeviceRgb::new(&inputs.image),), ctx));
+        Some(|p, inputs, ctx| histogram(&p.range, p.scale, (&DeviceRgb::new(&inputs.image),), ctx));
 }

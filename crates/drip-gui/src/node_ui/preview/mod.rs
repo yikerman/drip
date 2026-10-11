@@ -47,9 +47,6 @@ pub fn prepare(
 #[drip_macros::gui_node]
 impl super::GuiNode for observe::Definition {
     type Presentation = PreviewImage;
-    fn parameter_ui(_: &Preview, path: &str) -> super::ParameterUi {
-        super::profile::parameter_ui(path)
-    }
     const PREPARE: Option<super::Prepare<Self>> = Some(|p, inputs, ctx| {
         let image = Arc::new(HostImage::new(&inputs.image, ctx.requested_scale()));
         prepare(p, &image, ctx)
@@ -58,12 +55,11 @@ impl super::GuiNode for observe::Definition {
 
 use drip::{
     node::data::{Rec2020, Rgb},
-    param::ParamKind,
     ports::{Cpu, Read},
     runtime::KernelContext,
 };
 use serde::{Deserialize, Serialize};
-#[derive(Clone, Default, drip::Choice)]
+#[derive(Clone, drip::Choice)]
 pub enum Mode {
     #[default]
     #[choice("none")]
@@ -74,15 +70,15 @@ pub enum Mode {
     #[label("Gamut check")]
     Gamutcheck(profile::Settings),
 }
-#[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
+#[derive(Clone, Serialize, Deserialize, drip::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Preview {
     /// Use bilinear display sampling when enabled, nearest-neighbor sampling otherwise.
-    #[param(ParamKind::Bool { default: false })]
+    #[param(default = false)]
     pub interpolation: bool,
     /// Show the image directly, simulate the output profile, or mark out-of-gamut colors in cyan.
     #[label("Proof mode")]
-    #[param(Mode::None.schema())]
+    #[param(default = Mode::None)]
     pub mode: Mode,
 }
 /// Display linear Rec.2020/D65 RGB. Softproof simulates an output profile; Gamut

@@ -2,7 +2,6 @@
 
 mod binding;
 mod controls;
-mod export;
 mod exposure;
 pub mod help;
 pub mod preview;
@@ -10,12 +9,10 @@ pub mod scopes;
 #[cfg(test)]
 pub use binding::Action;
 pub use binding::{Binding, GuiNode, Prepare};
-pub use controls::{ControlCx, FileUi, ParameterUi};
+pub use controls::ControlCx;
 mod image_view;
 pub mod parameters;
 pub mod ports;
-mod profile;
-mod raw;
 mod sigmoid;
 mod viewer;
 use crate::editing::NodeCx;

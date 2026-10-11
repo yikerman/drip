@@ -1,6 +1,6 @@
 //! Histogram evaluation and its integer reduction.
 
-use super::ExposureSettings;
+use super::{ExposureRange, Scale};
 use crate::node_ui::data::DeviceRgb;
 use crate::node_ui::data::PrepareContext;
 use drip::Error as KernelError;
@@ -26,13 +26,14 @@ pub struct Histogram {
 const BINS: usize = 256;
 
 pub fn histogram(
-    p: ExposureSettings,
+    range: &ExposureRange,
+    scale: Scale,
     (image,): (&DeviceRgb,),
     ctx: &PrepareContext,
 ) -> Result<Arc<Histogram>, KernelError> {
-    let (min, max) = (p.min_ev as f32, p.max_ev as f32);
+    let (min, max) = (range.min_ev as f32, range.max_ev as f32);
     let counts = super::device::exposure(image, ctx, min, max, false)?;
-    let log = super::logarithmic(p.scale);
+    let log = super::logarithmic(scale);
     let histogram = Histogram {
         min_stop: min,
         max_stop: max,

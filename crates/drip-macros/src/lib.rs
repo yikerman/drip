@@ -29,8 +29,12 @@ pub fn node(args: TokenStream, item: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Derive editor ranges and documentation from typed parameter fields.
-/// Flattening reuses a shared schema. Serde owns parameter persistence.
+/// Derive `Default`, schemas and documentation from typed parameter fields:
+/// `#[param(default = 1.5, range = 0.5..=4.0)]` for f32/f64/i64,
+/// `#[param(default = true)]`, `#[param(default = Choice::Variant)]` or a bare
+/// `#[param]` for the choice's own default, `#[param(open = ["icc"])]` or
+/// `save = [..]` for `Option<PathBuf>` files, and `#[param(flatten)]` to reuse
+/// a nested schema (validated with its parent). Serde owns persistence.
 /// Labels default to sentence case; `#[label("Exposure (EV)")]` overrides them.
 /// `#[validate(path)]` on the struct names `fn(&Self) -> Result<()>`, checked
 /// when parameters are admitted to a node.
@@ -42,12 +46,13 @@ pub fn parameters(input: TokenStream) -> TokenStream {
 }
 
 /// A finite parameter choice. Each variant declares its persisted spelling
-/// with `#[choice("name")]`. Generates JSON conversion and `variant.schema()`;
-/// use that schema in `#[param(...)]` on a field of this enum type.
+/// with `#[choice("name")]`. Generates JSON conversion and `variant.schema()`.
+/// One `#[default]` variant generates `Default` (a variant's struct uses its own
+/// default) and `DEFAULT_SCHEMA`, used by a bare `#[param]` field.
 /// Variants may contain one parameter struct; its fields render only when selected.
 /// Serialization uses Serde's externally tagged representation.
 /// `#[label("sRGB")]` supplies display text independently of the persisted key.
-#[proc_macro_derive(Choice, attributes(choice, label))]
+#[proc_macro_derive(Choice, attributes(choice, label, default))]
 pub fn choice(input: TokenStream) -> TokenStream {
     choice::expand(parse_macro_input!(input as syn::DeriveInput))
         .unwrap_or_else(syn::Error::into_compile_error)

@@ -1,7 +1,7 @@
 //! Waveform reduction shared by color and camera scopes.
 #[cfg(test)]
 use super::SIZE;
-use super::{ExposureSettings, Scope, ScopeAxes, scope};
+use super::{ExposureRange, Scale, Scope, ScopeAxes, scope};
 #[cfg(test)]
 use crate::node_ui::data::HostImage;
 use crate::node_ui::data::{DeviceRgb, PrepareContext};
@@ -10,16 +10,17 @@ use drip::Error as KernelError;
 use rayon::prelude::*;
 use std::sync::Arc;
 pub fn waveform(
-    p: ExposureSettings,
+    range: &ExposureRange,
+    scale: Scale,
     (image,): (&DeviceRgb,),
     ctx: &PrepareContext,
 ) -> Result<Arc<Scope>, KernelError> {
-    let (min, max) = (p.min_ev as f32, p.max_ev as f32);
+    let (min, max) = (range.min_ev as f32, range.max_ev as f32);
     let counts = super::device::exposure(image, ctx, min, max, true)?;
     Ok(scope(
         counts,
         ScopeAxes::Waveform { min_stop: min, max_stop: max },
-        super::logarithmic(p.scale),
+        super::logarithmic(scale),
         image.desc.coordinates.to_string(),
     ))
 }

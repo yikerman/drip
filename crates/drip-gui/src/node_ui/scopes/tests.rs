@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::ScopeAxes;
 use crate::model::{Graph, Registry};
 use crate::node_ui::data::{HostImage, PrepareContext};
-use crate::node_ui::scopes::{ExposureSettings, Scale};
+use crate::node_ui::scopes::{ExposureRange, ExposureSettings, Scale};
 use drip::{eval::Evaluator, graph::Dag, node::data::*, runtime::RuntimeContext};
 use serde_json::json;
 
@@ -60,10 +60,10 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
         image: &crate::node_ui::data::DeviceRgb,
         ctx: &PrepareContext,
     ) -> (Arc<super::Histogram>, Arc<super::Scope>) {
-        let settings = || ExposureSettings { min_ev: -12, max_ev: 4, scale: Scale::Log };
+        let range = ExposureRange { min_ev: -12, max_ev: 4 };
         (
-            super::histogram::histogram(settings(), (image,), ctx).unwrap(),
-            waveform(settings(), (image,), ctx).unwrap(),
+            super::histogram::histogram(&range, Scale::Log, (image,), ctx).unwrap(),
+            waveform(&range, Scale::Log, (image,), ctx).unwrap(),
         )
     }
     let (histogram, waveform) = prepare(&a, &ctx);
@@ -90,8 +90,8 @@ fn histogram_bins_by_stops() {
     let id = graph.add_node(Registry.get("view.histogram").unwrap()).unwrap();
     let context = context();
     let prepare = |graph: &Graph| {
-        let params = serde_json::from_value(graph.node(id).unwrap().params).unwrap();
-        histogram(params, (&device(&image, &context),), &context).unwrap()
+        let p: ExposureSettings = serde_json::from_value(graph.node(id).unwrap().params).unwrap();
+        histogram(&p.range, p.scale, (&device(&image, &context),), &context).unwrap()
     };
     let h = prepare(&graph);
     let bin = |v: f32| ((v.log2() - h.min_stop) / (h.max_stop - h.min_stop) * 256.0) as usize;
@@ -184,11 +184,11 @@ fn device_reductions_match_reference() {
         };
         let gpu = device(&image, &ctx);
         assert_eq!(
-            histogram(settings.clone(), (&gpu,), &ctx).unwrap().counts,
+            histogram(&settings.range, settings.scale, (&gpu,), &ctx).unwrap().counts,
             super::histogram::count(&image.pixels, &edges)
         );
         assert_eq!(
-            waveform(settings.clone(), (&gpu,), &ctx).unwrap().counts,
+            waveform(&settings.range, settings.scale, (&gpu,), &ctx).unwrap().counts,
             super::waveform::waveform_counts(&image, -12.0, 4.0)
         );
     }

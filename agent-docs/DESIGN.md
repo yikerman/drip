@@ -122,11 +122,12 @@ Resolved with the user on 2026-10-11 after the review against
 
 ### Parameters and GUI
 
-- **Tentative:** `#[param(default = 1.5, range = 0.5..=4.0)]`, `#[param(default =
-  Scale::Log)]`, `#[param(open = ["icc", "icm"])]`/`save = [..]`,
-  `#[param(flatten)]`. The typed default is the source: the derive generates
-  `Default` and builds the schema from field types through `ParameterField`,
-  replacing `ParamKind` literals and the const field/schema assertions.
+- **Decided:** `#[param(default = 1.5, range = 0.5..=4.0)]`, `#[param(default =
+  Scale::Log)]` or a bare `#[param]` for the choice's `#[default]` variant,
+  `#[param(open = ["icc", "icm"])]`/`save = [..]`, `#[param(flatten)]`. The typed
+  default is the source of `Default` and the schema; `ParamKind` literals are
+  gone. The const field/schema assertion stays as the type check. Flattened
+  fields validate with their parent. Dialog titles and filters use the label.
 - **Decided:** `#[gui_node] impl GuiNode for histogram::observe::Definition`:
   optional `PREPARE` and `ACTION` receive the parameters and typed `Inputs`;
   controls default to the schema. Registrations live in anonymous scopes.

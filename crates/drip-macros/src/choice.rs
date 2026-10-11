@@ -15,6 +15,7 @@ pub(crate) fn expand(item: syn::DeriveInput) -> syn::Result<proc_macro2::TokenSt
     let mut decode_variants = Vec::new();
     let mut decode_arms = Vec::new();
     let mut unique = std::collections::BTreeSet::new();
+    let mut default = None;
     let ty = &item.ident;
     for (index, variant) in data.variants.iter().enumerate() {
         let attrs: Vec<_> = variant.attrs.iter().filter(|a| a.path().is_ident("choice")).collect();
@@ -27,6 +28,15 @@ pub(crate) fn expand(item: syn::DeriveInput) -> syn::Result<proc_macro2::TokenSt
         }
         let label = crate::documentation::label(&variant.attrs, &name.value())?;
         let ident = &variant.ident;
+        if variant.attrs.iter().any(|a| a.path().is_ident("default")) {
+            let value = match &variant.fields {
+                syn::Fields::Unit => quote!(Self::#ident),
+                _ => quote!(Self::#ident(::std::default::Default::default())),
+            };
+            if default.replace((name.clone(), value)).is_some() {
+                return Err(syn::Error::new_spanned(variant, "duplicate #[default] choice"));
+            }
+        }
         let index = index as u32;
         let params = match &variant.fields {
             syn::Fields::Unit => {
@@ -56,7 +66,22 @@ pub(crate) fn expand(item: syn::DeriveInput) -> syn::Result<proc_macro2::TokenSt
         );
         names.push(name);
     }
+    let default = default.map(|(name, value)| {
+        quote! {
+            impl #ty {
+                /// The schema of a field defaulting to the `#[default]` choice.
+                pub const DEFAULT_SCHEMA: ::drip::param::ParamKind =
+                    ::drip::param::ParamKind::Choice { options: Self::CHOICES, default: #name };
+            }
+            impl ::std::default::Default for #ty {
+                fn default() -> Self {
+                    #value
+                }
+            }
+        }
+    });
     Ok(quote! {
+        #default
         impl #ty {
             pub const OPTIONS: &'static [&'static str] = &[#(#names),*];
             pub const CHOICES: &'static [::drip::param::ChoiceSpec] = &[#(#schemas),*];

@@ -12,7 +12,7 @@ enum Mode {
 
 #[derive(drip::Parameters, serde::Deserialize)]
 struct Settings {
-    #[param(Mode::Second.schema())]
+    #[param(default = Mode::Second)]
     mode: Mode,
 }
 
@@ -36,7 +36,7 @@ fn choices_share_schema_json_and_typed_reads() {
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize, drip::Parameters)]
 #[serde(deny_unknown_fields)]
 struct Options {
-    #[param(drip::param::ParamKind::Bool { default: true })]
+    #[param(default = true)]
     enabled: bool,
 }
 

@@ -25,13 +25,13 @@ use crate::{
 #[validate(validate)]
 pub struct Settings {
     /// Contrast at the fixed 0.18 grey point.
-    #[param(crate::param::ParamKind::Float { min:0.5, max:4.0, default:1.5 })]
+    #[param(default = 1.5, range = 0.5..=4.0)]
     pub contrast: f32,
     /// Asymmetry of the curve around grey.
-    #[param(crate::param::ParamKind::Float { min:-1.0, max:1.0, default:-0.2 })]
+    #[param(default = -0.2, range = -1.0..=1.0)]
     pub skew: f32,
     /// Strength of the hue and energy correction.
-    #[param(crate::param::ParamKind::Float { min:0.0, max:1.0, default:0.0 })]
+    #[param(default = 0.0, range = 0.0..=1.0)]
     pub preserve_hue: f32,
 }
 impl Settings {
@@ -39,11 +39,6 @@ impl Settings {
     pub fn curve(&self) -> impl Fn(f32) -> f32 {
         let coefficients = prepare_values(self);
         move |value| kernel::curve(value, &coefficients, 0.0)
-    }
-}
-impl Default for Settings {
-    fn default() -> Self {
-        Self { contrast: 1.5, skew: -0.2, preserve_hue: 0.0 }
     }
 }
 fn validate(p: &Settings) -> Result<()> {

@@ -527,7 +527,6 @@ mod tests {
     use drip::{
         Error as KernelError,
         node::data::{Coordinates, Extent, REC2020_D65, Rgb, RgbDesc},
-        param::ParamKind,
         ports::{Cpu, Write},
         runtime::KernelContext,
     };
@@ -628,7 +627,7 @@ mod tests {
 
     mod preview_logs_only_changed_root_failures_at_their_severity_fixture {
         use super::*;
-        #[derive(Clone, Default, drip::Choice)]
+        #[derive(Clone, drip::Choice)]
         enum State {
             #[default]
             #[choice("incomplete")]
@@ -638,9 +637,9 @@ mod tests {
             #[choice("ok")]
             Ok,
         }
-        #[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
+        #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
         struct Source {
-            #[param(State::Incomplete.schema())]
+            #[param(default = State::Incomplete)]
             state: State,
         }
         #[drip::node(id="test.diagnostics", category="test", name="diagnostics", contract=image_contract)]
@@ -778,15 +777,10 @@ mod tests {
         static CALLS: Mutex<Vec<f32>> = Mutex::new(Vec::new());
         #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
         struct SourceKernel {
-            #[param(ParamKind::Float { min: 0.0, max: 10.0, default: 1.0 })]
+            #[param(default = 1.0, range = 0.0..=10.0)]
             value: f32,
-            #[param(ParamKind::Bool { default: false })]
+            #[param(default = false)]
             block: bool,
-        }
-        impl Default for SourceKernel {
-            fn default() -> Self {
-                Self { value: 1.0, block: false }
-            }
         }
         #[drip::node(id="test.blocking", category="test", name="blocking", contract=image_contract)]
         fn blocking(
@@ -887,9 +881,9 @@ mod tests {
     mod exports_follow_invalidation_order_and_always_use_full_detail_fixture {
         use super::*;
 
-        #[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
+        #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
         struct FileKernel {
-            #[param(ParamKind::Path { output: false })]
+            #[param(open = [])]
             path: Option<std::path::PathBuf>,
         }
         // This fixture deliberately loads during computation to exercise worker ordering.
@@ -906,9 +900,9 @@ mod tests {
             image.data[0] = [text.parse().unwrap(), 1.0, 0.0];
             Ok(())
         }
-        #[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
+        #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
         struct WriteKernel {
-            #[param(ParamKind::Path { output: true })]
+            #[param(save = [])]
             path: Option<std::path::PathBuf>,
         }
         fn sink_contract(
@@ -1026,15 +1020,10 @@ mod tests {
 
         #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
         pub struct Settings {
-            #[param(ParamKind::Bool { default: true })]
+            #[param(default = true)]
             fail: bool,
         }
 
-        impl Default for Settings {
-            fn default() -> Self {
-                Self { fail: true }
-            }
-        }
         #[drip::node(id="test.preparation_cache", category="test", name="Preparation", contract=empty_contract)]
         fn probe(_: &KernelContext<'_>, _: &Settings) -> drip::Result<()> {
             Ok(())

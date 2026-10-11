@@ -5,12 +5,12 @@ use crate::{
     runtime::{GlobalContext, KernelContext, dispatch_dims},
 };
 pub use compute::{Definition, Ports, add, definition};
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize, crate::Parameters)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 #[validate(validate)]
 pub struct Exposure {
     /// Exposure adjustment in stops, applied as a positive multiplier.
-    #[param(crate::param::ParamKind::Float { min: -32.0, max: 32.0, default: 0.0 })]
+    #[param(default = 0.0, range = -32.0..=32.0)]
     #[label("Exposure (EV)")]
     pub ev: f32,
 }

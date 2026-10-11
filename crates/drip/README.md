@@ -37,14 +37,17 @@ Registered IDs use `category.operation`; display labels use sentence case and
 retain technical spellings such as RAW, RGB, ICC, sRGB and Rec.2020. Labels do
 not determine compatibility or persistence keys.
 
-`Parameters` generates field schemas and Rustdoc help. `Choice` generates
-Serde adapters and schemas for unit variants or variants containing a parameter
-struct. Unit variants serialize as strings; variants with settings use Serde's
+`Parameters` generates `Default`, field schemas and Rustdoc help from one typed
+declaration per field: `#[param(default = 1.5, range = 0.5..=4.0)]`, a choice
+default, `open`/`save` file extensions, or `flatten`. `Choice` generates Serde
+adapters, schemas and `Default` from its `#[default]` variant, for unit variants
+or variants containing a parameter struct. Unit variants serialize as strings; variants with settings use Serde's
 externally tagged object form. The GUI renders only the active variant. Keep
 profile-file paths, proof settings and compression levels in the variants that
 consume them, rather than independent inactive fields.
 
-File-dialog hints and scope annotations belong to `drip-gui`. The library owns
+File extensions are file-format facts in the schema; the GUI derives its
+dialogs from them. Scope annotations belong to `drip-gui`. The library owns
 processing values and their interpretations. Sources use the same `#[node]`
 declaration with `Load` ports, `fn(&Settings, Load<'_, P>...)`: they load once
 when parameters are admitted and publish shared values; a load failure is the

@@ -11,7 +11,7 @@ use crate::{
 pub use compute::{Definition, Ports, add, definition};
 use std::sync::Arc;
 
-#[derive(Clone, Default, crate::Choice)]
+#[derive(Clone, crate::Choice)]
 pub enum Illuminant {
     #[default]
     #[choice("as_shot")]
@@ -26,21 +26,21 @@ pub enum Illuminant {
 #[serde(deny_unknown_fields)]
 pub struct WhitePoint {
     /// CIE 1931 x of the source illuminant; both whites are normalized to Y = 1.
-    #[param(crate::param::ParamKind::Float { min: 0.0, max: 1.0, default: color::D65[0] })]
+    #[param(default = color::D65[0], range = 0.0..=1.0)]
     #[label("x")]
     pub x: f64,
     /// CIE 1931 y of the source illuminant.
-    #[param(crate::param::ParamKind::Float { min: 0.0, max: 1.0, default: color::D65[1] })]
+    #[param(default = color::D65[1], range = 0.0..=1.0)]
     #[label("y")]
     pub y: f64,
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize, crate::Parameters)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 #[validate(validate)]
 pub struct Settings {
     /// Infer the scene white from CaptureMetadata, or supply its chromaticity.
-    #[param(Illuminant::AsShot.schema())]
+    #[param(default = Illuminant::AsShot)]
     pub illuminant: Illuminant,
 }
 

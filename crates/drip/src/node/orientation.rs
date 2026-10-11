@@ -6,7 +6,7 @@ use crate::{
 };
 pub use compute::{Definition, Ports, add, definition};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, crate::Choice)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, crate::Choice)]
 pub enum Orientation {
     #[default]
     #[choice("from_metadata")]
@@ -54,12 +54,12 @@ impl Orientation {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize, crate::Parameters)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     /// Use capture orientation, or replace it with an explicit transform.
     #[label("Orientation")]
-    #[param(Orientation::FromMetadata.schema())]
+    #[param(default = Orientation::FromMetadata)]
     pub orientation: Orientation,
 }
 

@@ -64,8 +64,10 @@ pub enum ParamKind {
         default: &'static str,
     },
     /// A file path, unset (`null`) by default; `output` if the node writes it.
+    /// Extensions name the accepted file formats, for dialogs and validation.
     Path {
         output: bool,
+        extensions: &'static [&'static str],
     },
 }
 
@@ -108,22 +110,9 @@ impl ParamKind {
 /// A schema incompatible with its field is a declaration error:
 ///
 /// ```compile_fail,E0080
-/// use drip::param::{Parameters, ParamKind};
+/// use drip::param::Parameters;
 /// #[derive(drip::Parameters)]
-/// struct Bad { #[param(ParamKind::Bool { default: false })] flag: f32 }
-/// const SPECS: &[drip::param::ParamSpec] = Bad::SPECS;
-/// ```
-/// Choice schemas must describe exactly the enum's persisted spellings:
-///
-/// ```compile_fail,E0080
-/// use drip::param::{Parameters, ParamKind};
-/// #[derive(drip::Choice)]
-/// enum Mode { #[choice("linear")] Linear }
-/// #[derive(drip::Parameters)]
-/// struct Bad {
-///     #[param(ParamKind::Choice { options: &[], default: "unknown" })]
-///     mode: Mode,
-/// }
+/// struct Bad { #[param(open = ["icc"])] file: f32 }
 /// const SPECS: &[drip::param::ParamSpec] = Bad::SPECS;
 /// ```
 pub trait Parameters: Sized {

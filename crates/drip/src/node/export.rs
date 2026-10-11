@@ -3,7 +3,6 @@ use crate::{
     Error, Result,
     node::data::{CaptureMetadata, Rec2020, Rgb, RgbDesc},
     node::profile,
-    param::ParamKind,
     payload::Payload,
     ports::{Cpu, Read, Requirement},
     resource::Resources,
@@ -18,7 +17,7 @@ use std::borrow::Cow;
 use std::io::{Cursor, Seek, Write};
 use std::path::PathBuf;
 
-#[derive(Clone, Copy, Default, crate::Choice)]
+#[derive(Clone, Copy, crate::Choice)]
 pub enum Depth {
     #[choice("u8")]
     U8,
@@ -32,15 +31,11 @@ pub enum Depth {
 pub enum CompressionMode {
     #[choice("none")]
     None,
+    #[default]
     #[choice("deflate")]
     Deflate(DeflateSettings),
 }
-impl Default for CompressionMode {
-    fn default() -> Self {
-        Self::Deflate(DeflateSettings::default())
-    }
-}
-#[derive(Clone, Copy, Default, crate::Choice)]
+#[derive(Clone, Copy, crate::Choice)]
 pub enum CompressionLevel {
     #[choice("fast")]
     Fast,
@@ -50,29 +45,29 @@ pub enum CompressionLevel {
     #[choice("best")]
     Best,
 }
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize, crate::Parameters)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct DeflateSettings {
     /// Trade encoding speed for compression ratio without changing pixels.
-    #[param(CompressionLevel::Balanced.schema())]
+    #[param(default = CompressionLevel::Balanced)]
     pub level: CompressionLevel,
 }
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize, crate::Parameters)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Export {
     /// Destination TIFF file, written at full processing detail.
     #[label("Output file")]
-    #[param(ParamKind::Path { output: true })]
+    #[param(save = ["tiff", "tif"])]
     #[external]
     pub path: Option<PathBuf>,
     #[param(flatten)]
     #[serde(flatten)]
     pub output: profile::Settings,
     /// u8/u16 clip to the output range; f32 retains the profile floating-point range.
-    #[param(Depth::U16.schema())]
+    #[param(default = Depth::U16)]
     pub depth: Depth,
     /// Lossless TIFF compression, or None for an uncompressed file.
-    #[param(CompressionMode::Deflate(DeflateSettings { level: CompressionLevel::Balanced }).schema())]
+    #[param]
     pub compression: CompressionMode,
 }
 

@@ -9,7 +9,6 @@ use rayon::prelude::*;
 
 use crate::Error;
 use crate::node::color::{D65, P3, REC709, REC2020};
-use crate::param::ParamKind;
 
 #[derive(Clone, crate::Choice)]
 pub enum ProfileSource {
@@ -26,12 +25,12 @@ pub enum ProfileSource {
     File(ProfileFile),
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize, crate::Parameters)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileFile {
     /// RGB ICC profile used for output conversion or proofing.
     #[label("ICC profile file")]
-    #[param(ParamKind::Path { output: false })]
+    #[param(open = ["icc", "icm"])]
     pub path: Option<std::path::PathBuf>,
 }
 
@@ -51,26 +50,16 @@ enum RenderingIntent {
 pub struct Settings {
     /// RGB output profile used for conversion or proofing.
     #[label("Output profile")]
-    #[param(ProfileSource::Srgb.schema())]
+    #[param(default = ProfileSource::Srgb)]
     pub profile: ProfileSource,
     /// Rendering intent for the conversion into the output profile.
     #[label("Rendering intent")]
-    #[param(RenderingIntent::Relative.schema())]
+    #[param(default = RenderingIntent::Relative)]
     intent: RenderingIntent,
     /// Map the source black point to the output profile black point.
     #[label("Black point compensation")]
-    #[param(ParamKind::Bool { default: true })]
+    #[param(default = true)]
     black_point_compensation: bool,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            profile: ProfileSource::Srgb,
-            intent: RenderingIntent::Relative,
-            black_point_compensation: true,
-        }
-    }
 }
 
 /// Loaded output settings, retaining the original ICC bytes for embedding.

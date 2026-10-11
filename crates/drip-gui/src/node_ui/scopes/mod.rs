@@ -1,5 +1,5 @@
 //! Shared exposure settings, reductions and plotting for scope nodes.
-use drip::{Error, Result, param::ParamKind};
+use drip::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 pub(super) mod device;
@@ -10,7 +10,7 @@ pub use super::vectorscope::vectorscope_xyz;
 pub use histogram::Histogram;
 #[cfg(test)]
 pub(super) mod tests;
-#[derive(Clone, Copy, Default, drip::Choice)]
+#[derive(Clone, Copy, drip::Choice)]
 pub enum Scale {
     #[default]
     #[choice("linear")]
@@ -19,29 +19,31 @@ pub enum Scale {
     #[label("Logarithmic")]
     Log,
 }
+/// The exposure axis shared by histogram and waveform settings.
 #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
 #[serde(deny_unknown_fields)]
 #[validate(exposure_range)]
-pub struct ExposureSettings {
+pub struct ExposureRange {
     /// Lower exposure bound in stops relative to sample value 1. Values below it enter the first bin.
-    #[param(ParamKind::Int { min: -24, max: -1, default: -12 })]
+    #[param(default = -12, range = -24..=-1)]
     #[label("Minimum exposure (EV)")]
     pub min_ev: i64,
     /// Upper exposure bound in stops relative to sample value 1. Values above it enter the last bin.
-    #[param(ParamKind::Int { min: 1, max: 10, default: 4 })]
+    #[param(default = 4, range = 1..=10)]
     #[label("Maximum exposure (EV)")]
     pub max_ev: i64,
+}
+#[derive(Clone, Serialize, Deserialize, drip::Parameters)]
+pub struct ExposureSettings {
+    #[param(flatten)]
+    #[serde(flatten)]
+    pub range: ExposureRange,
     /// Scale sample counts linearly or logarithmically; the exposure axis remains in stops.
-    #[param(Scale::Linear.schema())]
+    #[param(default = Scale::Linear)]
     #[label("Density scale")]
     pub scale: Scale,
 }
-impl Default for ExposureSettings {
-    fn default() -> Self {
-        Self { min_ev: -12, max_ev: 4, scale: Scale::Linear }
-    }
-}
-pub(super) fn exposure_range(p: &ExposureSettings) -> Result<()> {
+fn exposure_range(p: &ExposureRange) -> Result<()> {
     if p.min_ev >= p.max_ev || p.min_ev < -126 || p.max_ev > 127 {
         return Err(Error::Contract("exposure range needs finite ordered f32 thresholds".into()));
     }

@@ -200,7 +200,7 @@ fn context_menu_resets_without_editing_on_right_click() {
             },
             json!("second"),
         ),
-        (ParamKind::Path { output: false }, json!("/tmp/example.raw")),
+        (ParamKind::Path { output: false, extensions: &["raw"] }, json!("/tmp/example.raw")),
     ] {
         let mut h = harness(kind, value.clone());
         let pos = if matches!(kind, ParamKind::Path { .. }) {

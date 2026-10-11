@@ -178,9 +178,9 @@ fn handles_from_aborted_edits_and_removed_nodes_stay_stale() {
     assert!(d.connect(source, a.image).is_err());
     d.connect(source, b.image).unwrap();
 }
-#[derive(Default, serde::Serialize, serde::Deserialize, drip::Parameters)]
+#[derive(serde::Serialize, serde::Deserialize, drip::Parameters)]
 struct Relabel {
-    #[param(drip::param::ParamKind::Bool { default: false })]
+    #[param(default = false)]
     camera: bool,
 }
 fn relabel_contract(

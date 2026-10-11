@@ -10,13 +10,8 @@ use crate::{
 #[validate(validate)]
 pub struct Settings {
     /// Reduction factor in each dimension. Bayer averages each CFA phase separately.
-    #[param(crate::param::ParamKind::Int { min:1, max:256, default:2 })]
+    #[param(default = 2, range = 1..=256)]
     pub factor: i64,
-}
-impl Default for Settings {
-    fn default() -> Self {
-        Self { factor: 2 }
-    }
 }
 fn validate(p: &Settings) -> Result<()> {
     if !(1..=256).contains(&p.factor) {

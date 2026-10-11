@@ -1,7 +1,7 @@
 //! Frontend extras bound to a declared node type: custom controls, a prepared
-//! view, an action and parameter hints. Kind, parameters and typed inputs come
+//! view and an action. Kind, parameters and typed inputs come
 //! from the node's own declaration.
-use super::{ControlCx, ParameterUi};
+use super::ControlCx;
 use crate::{
     model::Kind,
     node_ui::data::PrepareContext,
@@ -27,9 +27,6 @@ pub trait GuiNode: Typed {
     const PREPARE: Option<Prepare<Self>> = None;
     const ACTION: Option<Action<Self>> = None;
     const ACTION_NAME: &'static str = "Export";
-    fn parameter_ui(_: &Self::Parameters, _: &str) -> ParameterUi {
-        ParameterUi::default()
-    }
     fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Parameters>) {
         node.schema(ui);
     }
@@ -43,7 +40,6 @@ pub struct Binding {
     prepare: Option<PrepareErased>,
     action: Option<ActionErased>,
     action_name: &'static str,
-    parameter_ui: fn(Value, &str) -> ParameterUi,
 }
 impl Binding {
     pub const fn new<G: GuiNode>() -> Self {
@@ -66,16 +62,10 @@ impl Binding {
                 None
             },
             action_name: G::ACTION_NAME,
-            parameter_ui: |params, name| {
-                G::parameter_ui(&decode(params).expect("validated parameters"), name)
-            },
         }
     }
     pub fn kind(&self) -> &'static Kind {
         self.kind
-    }
-    pub fn parameter_ui(&self, params: Value, name: &str) -> ParameterUi {
-        (self.parameter_ui)(params, name)
     }
     pub fn has_preparation(&self) -> bool {
         self.prepare.is_some()

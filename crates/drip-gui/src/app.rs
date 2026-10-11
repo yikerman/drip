@@ -451,7 +451,7 @@ impl App {
             Ok(()) => {
                 let node = self.project.graph.node(id).expect("action node exists");
                 let destination = node.kind.parameters.iter().find_map(|p| {
-                    matches!(p.kind, drip::param::ParamKind::Path { output: true })
+                    matches!(p.kind, drip::param::ParamKind::Path { output: true, .. })
                         .then(|| node.params[p.name].as_str())
                         .flatten()
                 });
@@ -485,7 +485,7 @@ mod tests {
     use crate::node_ui::{preview::PreviewImage, scopes::Histogram};
 
     use crate::node_ui::preview::ImageView;
-    use drip::param::ParamKind;
+
     use egui_kittest::Harness;
     use egui_kittest::kittest::{NodeT, Queryable};
     use serde_json::json;
@@ -774,9 +774,9 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         static CALLS: AtomicUsize = AtomicUsize::new(0);
-        #[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
+        #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
         struct OffscreenKernel {
-            #[param(ParamKind::Bool { default: false })]
+            #[param(default = false)]
             value: bool,
         }
         #[drip::node(id="test.offscreen", name="offscreen", category="test", contract=empty_contract)]
@@ -829,9 +829,9 @@ mod tests {
         use std::sync::{Arc, Mutex, mpsc};
         use std::time::{Duration, Instant};
         static GATE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
-        #[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
+        #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
         struct SlowKernel {
-            #[param(ParamKind::Bool { default: false })]
+            #[param(default = false)]
             block: bool,
         }
         #[drip::node(id="test.slow", name="slow", category="test", contract=empty_contract)]
@@ -1188,9 +1188,9 @@ mod tests {
     mod custom_controls_keep_the_generic_view_and_popout_fixture {
         use super::*;
 
-        #[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
+        #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
         pub struct Settings {
-            #[param(drip::param::ParamKind::Bool { default: false })]
+            #[param(default = false)]
             enabled: bool,
         }
         #[drip::node(id="test.custom_controls_view", category="test", name="Custom controls view", contract=empty_contract)]

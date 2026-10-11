@@ -16,13 +16,8 @@ mod tests;
 #[validate(validate)]
 pub struct Settings {
     /// Fraction of each site's clipping level at which reconstruction begins.
-    #[param(crate::param::ParamKind::Float { min: 0.5, max: 1.0, default: 0.98 })]
+    #[param(default = 0.98, range = 0.5..=1.0)]
     pub threshold: f32,
-}
-impl Default for Settings {
-    fn default() -> Self {
-        Self { threshold: 0.98 }
-    }
 }
 fn validate(p: &Settings) -> Result<()> {
     if !p.threshold.is_finite() || p.threshold <= 0.0 || p.threshold > 1.0 {
