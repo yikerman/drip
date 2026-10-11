@@ -1,17 +1,13 @@
 //! Typed views at nodes; type erasure is confined to the graph adapter.
 use crate::{
     Error, Result,
-    payload::{DeviceBuffer, Payload},
+    payload::{self, DeviceBuffer, DeviceLayout, Payload},
     runtime::RuntimeContext,
 };
-use std::{
-    any::{Any, TypeId},
-    marker::PhantomData,
-    sync::Arc,
-};
+use std::{any::TypeId, marker::PhantomData, sync::Arc};
 
-pub type Description = Arc<dyn Any + Send + Sync>;
-pub type Data = Arc<dyn Any + Send + Sync>;
+pub type Description = Arc<dyn std::any::Any + Send + Sync>;
+pub type Data = Arc<dyn std::any::Any + Send + Sync>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Placement {
     Cpu,
@@ -20,152 +16,200 @@ pub enum Placement {
 pub struct Cpu<P>(PhantomData<P>);
 pub struct Device<P>(PhantomData<P>);
 
+/// A port's payload and placement. Only payloads with a device layout have a
+/// device placement:
+///
+/// ```compile_fail
+/// use drip::{node::data::CaptureMetadata, ports::{Device, Port}};
+/// fn port<P: Port>() {}
+/// port::<Device<CaptureMetadata>>();
+/// ```
 pub trait Port: Send + Sync + 'static {
     type Payload: Payload;
     type Storage: Send + Sync + 'static;
-    const PLACEMENT: Placement;
-    fn validate(desc: &<Self::Payload as Payload>::Desc, data: &Self::Storage) -> Result<()>;
+    /// Device ports transfer between placements; host ports never transfer.
+    const TRANSFERS: Option<Transfers>;
+    const PLACEMENT: Placement =
+        if Self::TRANSFERS.is_some() { Placement::Device } else { Placement::Cpu };
+    fn check(desc: &<Self::Payload as Payload>::Desc, data: &Self::Storage) -> Result<()>;
     fn allocate(
         desc: &<Self::Payload as Payload>::Desc,
         runtime: &RuntimeContext,
     ) -> Result<Self::Storage>;
-    fn transport(
-        value: &Data,
-        from: Placement,
-        desc: &<Self::Payload as Payload>::Desc,
-        runtime: &RuntimeContext,
-    ) -> Result<Data>;
 }
 impl<P: Payload> Port for Cpu<P> {
     type Payload = P;
-    type Storage = P::Data;
-    const PLACEMENT: Placement = Placement::Cpu;
-    fn validate(desc: &P::Desc, data: &Self::Storage) -> Result<()> {
-        P::validate_cpu(desc, data)
+    type Storage = P::Host;
+    const TRANSFERS: Option<Transfers> = None;
+    fn check(desc: &P::Desc, data: &P::Host) -> Result<()> {
+        P::check(desc, data)
     }
-    fn allocate(d: &P::Desc, _: &RuntimeContext) -> Result<Self::Storage> {
-        Ok(P::allocate_cpu(d))
-    }
-    fn transport(v: &Data, from: Placement, d: &P::Desc, r: &RuntimeContext) -> Result<Data> {
-        match from {
-            Placement::Cpu => Ok(v.clone()),
-            Placement::Device => Ok(Arc::new(P::download(d, downcast(v), r)?)),
-        }
+    fn allocate(desc: &P::Desc, _: &RuntimeContext) -> Result<P::Host> {
+        Ok(P::allocate(desc))
     }
 }
-impl<P: Payload> Port for Device<P> {
+impl<P: DeviceLayout> Port for Device<P> {
     type Payload = P;
     type Storage = DeviceBuffer<P>;
-    const PLACEMENT: Placement = Placement::Device;
-    fn validate(_: &P::Desc, _: &Self::Storage) -> Result<()> {
+    const TRANSFERS: Option<Transfers> = Some(Transfers {
+        upload: |v, d, r| Ok(Arc::new(payload::upload::<P>(downcast(d), downcast(v), r)?)),
+        download: |v, d, r| Ok(Arc::new(payload::download::<P>(downcast(d), downcast(v), r)?)),
+    });
+    fn check(_: &P::Desc, _: &DeviceBuffer<P>) -> Result<()> {
         Ok(())
     }
-    fn allocate(d: &P::Desc, r: &RuntimeContext) -> Result<Self::Storage> {
-        Ok(DeviceBuffer::new(r.client()?.empty(P::byte_len(d))))
-    }
-    fn transport(v: &Data, from: Placement, d: &P::Desc, r: &RuntimeContext) -> Result<Data> {
-        match from {
-            Placement::Device => Ok(v.clone()),
-            Placement::Cpu => Ok(Arc::new(P::upload(d, downcast(v), r)?)),
-        }
+    fn allocate(desc: &P::Desc, runtime: &RuntimeContext) -> Result<DeviceBuffer<P>> {
+        Ok(DeviceBuffer::new(runtime.client()?.empty(P::byte_len(desc))))
     }
 }
 
-pub struct Read<'a, P: Port> {
+type Transfer = fn(&Data, &Description, &RuntimeContext) -> Result<Data>;
+/// Host/device movement of one device-capable payload. Evaluation uses the
+/// device side of an edge: the consumer's upload or the producer's download.
+#[derive(Clone, Copy)]
+pub struct Transfers {
+    pub(crate) upload: Transfer,
+    pub(crate) download: Transfer,
+}
+
+/// An interpretation a port requires (inputs) or guarantees (outputs), checked
+/// on descriptions before and after the node's contract.
+pub trait Requirement<P: Payload>: 'static {
+    /// Shown after the payload name; empty when the port accepts any description.
+    const LABEL: &'static str;
+    fn check(desc: &P::Desc) -> Result<()>;
+}
+/// No interpretation requirement beyond the payload itself.
+pub struct Any;
+impl<P: Payload> Requirement<P> for Any {
+    const LABEL: &'static str = "";
+    fn check(_: &P::Desc) -> Result<()> {
+        Ok(())
+    }
+}
+
+type Desc<P> = <<P as Port>::Payload as Payload>::Desc;
+
+pub struct Read<'a, P: Port, R = Any> {
     pub data: &'a P::Storage,
-    pub desc: &'a <P::Payload as Payload>::Desc,
+    pub desc: &'a Desc<P>,
+    requirement: PhantomData<R>,
 }
-pub struct Write<'a, P: Port> {
+pub struct Write<'a, P: Port, R = Any> {
     pub data: &'a mut P::Storage,
-    pub desc: &'a <P::Payload as Payload>::Desc,
+    pub desc: &'a Desc<P>,
+    requirement: PhantomData<R>,
 }
 
-impl<'a, P: Port> Read<'a, P> {
+impl<'a, P: Port, R> Read<'a, P, R> {
+    pub fn new(desc: &'a Desc<P>, data: &'a P::Storage) -> Self {
+        Self { data, desc, requirement: PhantomData }
+    }
     #[doc(hidden)]
-    pub fn bind(desc: &'a Option<Description>, data: &'a Option<Data>) -> Result<Option<Self>> {
-        data.as_ref()
-            .map(|data| {
-                let desc = desc
-                    .as_ref()
-                    .ok_or_else(|| Error::Contract("input is not described".into()))?;
-                Ok(Self { data: downcast(data), desc: downcast(desc) })
-            })
-            .transpose()
+    pub fn bind(value: Option<&'a (Description, Data)>) -> Option<Self> {
+        value.map(|(desc, data)| Self::new(downcast(desc), downcast(data)))
+    }
+}
+
+impl<'a, P: Port, R> Write<'a, P, R> {
+    pub fn new(desc: &'a Desc<P>, data: &'a mut P::Storage) -> Self {
+        Self { data, desc, requirement: PhantomData }
     }
 }
 
 /// Fresh output storage owned by the generated node adapter until publication.
 #[doc(hidden)]
 pub struct OutputSlot<'a, P: Port> {
-    desc: &'a <P::Payload as Payload>::Desc,
+    desc: &'a Desc<P>,
     data: P::Storage,
 }
 impl<'a, P: Port> OutputSlot<'a, P> {
     pub fn allocate(
-        desc: &'a Option<Description>,
+        desc: &'a Description,
         context: &crate::runtime::KernelContext<'_>,
     ) -> Result<Self> {
-        let desc = desc
-            .as_ref()
-            .ok_or_else(|| Error::Contract("node outputs are not fully described".into()))?;
         let desc = downcast(desc);
         Ok(Self { desc, data: context.allocate::<P>(desc)? })
     }
-    pub fn write(&mut self) -> Write<'_, P> {
-        Write { desc: self.desc, data: &mut self.data }
+    pub fn write<R>(&mut self) -> Write<'_, P, R> {
+        Write::new(self.desc, &mut self.data)
     }
     pub fn finish(self) -> Result<Data> {
-        P::validate(self.desc, &self.data)?;
+        P::check(self.desc, &self.data)?;
         Ok(Arc::new(self.data))
     }
 }
 
+/// Check a connected input against its port requirement before the contract.
 #[doc(hidden)]
-pub fn downcast<T: Any>(value: &Arc<dyn Any + Send + Sync>) -> &T {
-    value.downcast_ref().expect("typed node adapter invariant")
-}
-#[doc(hidden)]
-pub fn description<P: Payload>(value: &Option<Description>) -> Option<&P::Desc> {
-    value.as_ref().map(downcast)
-}
-#[doc(hidden)]
-pub fn erase<P: Payload>(desc: Option<P::Desc>) -> Result<Option<Description>> {
-    desc.map(|d| {
-        P::validate_desc(&d)?;
-        Ok(Arc::new(d) as Description)
+pub fn input<'a, P: Port, R: Requirement<P::Payload>>(
+    port: &str,
+    desc: Option<&'a Description>,
+) -> Result<Option<&'a Desc<P>>> {
+    desc.map(|desc| {
+        let desc = downcast(desc);
+        R::check(desc).map_err(|e| requirement_error(port, R::LABEL, e))?;
+        Ok(desc)
     })
     .transpose()
+}
+/// Validate a contract's output and its guaranteed interpretation.
+#[doc(hidden)]
+pub fn output<P: Port, R: Requirement<P::Payload>>(
+    port: &str,
+    desc: Desc<P>,
+) -> Result<Description> {
+    P::Payload::validate(&desc)?;
+    R::check(&desc).map_err(|e| requirement_error(port, R::LABEL, e))?;
+    Ok(Arc::new(desc))
+}
+fn requirement_error(port: &str, label: &str, error: Error) -> Error {
+    Error::Contract(format!("{port} requires {label}: {error}"))
+}
+
+#[doc(hidden)]
+pub fn downcast<T: std::any::Any>(value: &Arc<dyn std::any::Any + Send + Sync>) -> &T {
+    value.downcast_ref().expect("typed node adapter invariant")
 }
 
 #[derive(Clone)]
 pub struct PortSpec {
     pub name: &'static str,
-    pub payload_name: &'static str,
-    pub placement: Placement,
+    /// The payload's declared name.
+    pub payload: &'static str,
+    /// The port's requirement label; empty when it accepts any description.
+    pub requirement: &'static str,
     pub optional: bool,
-    pub(crate) payload: TypeId,
-    pub(crate) transport: fn(&Data, Placement, &Description, &RuntimeContext) -> Result<Data>,
+    pub(crate) payload_type: TypeId,
+    pub(crate) transfers: Option<Transfers>,
 }
 impl PortSpec {
-    pub fn named_payload(mut self, name: &'static str) -> Self {
-        self.payload_name = name;
-        self
+    pub fn of<P: Port, R: Requirement<P::Payload>>(name: &'static str) -> Self {
+        Self {
+            name,
+            payload: P::Payload::NAME,
+            requirement: R::LABEL,
+            optional: false,
+            payload_type: TypeId::of::<P::Payload>(),
+            transfers: P::TRANSFERS,
+        }
     }
     pub fn optional(mut self) -> Self {
         self.optional = true;
         self
     }
     pub fn is<P: Payload>(&self) -> bool {
-        self.payload == TypeId::of::<P>()
+        self.payload_type == TypeId::of::<P>()
     }
-    pub fn of<P: Port>(name: &'static str) -> Self {
-        Self {
-            name,
-            payload_name: std::any::type_name::<P::Payload>(),
-            placement: P::PLACEMENT,
-            optional: false,
-            payload: TypeId::of::<P::Payload>(),
-            transport: |v, from, d, r| P::transport(v, from, downcast(d), r),
+    pub fn placement(&self) -> Placement {
+        if self.transfers.is_some() { Placement::Device } else { Placement::Cpu }
+    }
+    /// Payload name and requirement, as help and the editor show a port.
+    pub fn label(&self) -> String {
+        if self.requirement.is_empty() {
+            self.payload.into()
+        } else {
+            format!("{} · {}", self.payload, self.requirement)
         }
     }
 }
@@ -227,15 +271,6 @@ pub(crate) fn wrong_handle() -> Error {
     Error::Graph("foreign, stale, or wrong-direction port handle".into())
 }
 
-/// Nominal payloads cannot be connected through the typed API merely because
-/// their storage layouts match.
-///
-/// ```compile_fail
-/// use drip::{graph::Dag, node::data::{CameraRgb, ColorRgb}, ports::{Input, Output}};
-/// fn wrong(dag: &mut Dag, camera: Output<CameraRgb>, color: Input<ColorRgb>) {
-///     dag.connect(camera, color).unwrap();
-/// }
-/// ```
 /// Port identity fields cannot be forged by deserialization.
 ///
 /// ```compile_fail

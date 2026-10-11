@@ -823,7 +823,7 @@ mod tests {
     mod evaluating_message_keeps_the_ui_and_previous_preview_available_fixture {
         use super::*;
 
-        use crate::node_ui::data::Rgb;
+        use crate::node_ui::data::HostImage;
 
         use std::sync::{Arc, Mutex, mpsc};
         use std::time::{Duration, Instant};
@@ -849,7 +849,7 @@ mod tests {
                     started.send(()).unwrap();
                     release.recv_timeout(Duration::from_secs(5)).unwrap();
                 }
-                Ok(PreviewImage::new(&Arc::new(Rgb {
+                Ok(PreviewImage::new(&Arc::new(HostImage {
                     width: 1,
                     height: 1,
                     requested_scale: 1,
@@ -1052,22 +1052,22 @@ mod tests {
     mod undocumented_nodes_show_generated_port_help_fixture {
         use super::*;
 
-        use drip::node::data::{Color, ColorRgb, ImageDesc};
+        use drip::node::data::{Rgb, RgbDesc};
         use drip::ports::Read;
         use drip::ports::{Cpu, Write};
         fn contract(
             _: &drip::runtime::GlobalContext,
             _: &(),
-            image: Option<&ImageDesc<Color>>,
-        ) -> drip::Result<(Option<ImageDesc<Color>>,)> {
-            Ok((image.cloned(),))
+            image: &RgbDesc,
+        ) -> drip::Result<(RgbDesc,)> {
+            Ok((image.clone(),))
         }
         #[drip::node(id="test.generic", name="generic", category="test", contract=contract)]
         fn generic(
             _: &KernelContext<'_>,
             _: &(),
-            image: Read<'_, Cpu<ColorRgb>>,
-            output: Write<'_, Cpu<ColorRgb>>,
+            image: Read<'_, Cpu<Rgb>>,
+            output: Write<'_, Cpu<Rgb>>,
         ) -> drip::Result<()> {
             output.data.copy_from_slice(image.data);
             Ok(())

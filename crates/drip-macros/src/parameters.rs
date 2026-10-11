@@ -15,6 +15,19 @@ pub(crate) fn expand(item: syn::DeriveInput) -> syn::Result<proc_macro2::TokenSt
         return Err(syn::Error::new_spanned(item.generics, "parameter schemas must be concrete"));
     }
     let name = &item.ident;
+    let validate = item
+        .attrs
+        .iter()
+        .find(|attr| attr.path().is_ident("validate"))
+        .map(|attr| {
+            let path: syn::Path = attr.parse_args()?;
+            Ok::<_, syn::Error>(quote! {
+                fn validate(&self) -> ::drip::Result<()> {
+                    #path(self)
+                }
+            })
+        })
+        .transpose()?;
     let mut groups = Vec::new();
     for field in &fields.named {
         let ident = field.ident.as_ref().unwrap();
@@ -51,6 +64,7 @@ pub(crate) fn expand(item: syn::DeriveInput) -> syn::Result<proc_macro2::TokenSt
         impl ::drip::param::Parameters for #name {
             const SPECS: &'static [::drip::param::ParamSpec] =
                 &::drip::param::concat_specs::<{0 #(+ (#groups).len())*}>(&[#(#groups),*]);
+            #validate
         }
     })
 }

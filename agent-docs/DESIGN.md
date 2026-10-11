@@ -56,24 +56,25 @@ Resolved with the user on 2026-10-11 after the review against
 
 ### Payloads and ports
 
-- **Tentative:** `Payload { const NAME; type Desc; type Host; fn validate(desc);
+- **Decided:** `Payload { const NAME; type Desc; type Host; fn validate(desc);
   fn check(desc, host); fn allocate(desc) }`. A subtrait `DeviceLayout`
   (`byte_len`, `encode`, `decode`) marks device-capable payloads.
   `Cpu<P: Payload>` and `Device<P: DeviceLayout>` are the port placements, so a
   device port of a host-only payload is a compile error. Transfers use the
   device-side port's functions: upload from the consumer's spec, download from
   the producer's. No representation marker or specialization is needed.
-- **Tentative:** Payloads: `Rgb` and `Bayer` (`HostBuffer` storage),
+- **Decided:** Payloads: `Rgb` and `Bayer` (`HostBuffer` storage),
   `BayerLevels` (`[f32; 4]`), `CaptureMetadata` (host-only; `Desc` is the shared
   `Arc` of the decoded facts, so contracts read the facts without a duplicate
   description). `Matrix3`, `Coefficients`, `Interpretation` and the string
-  descriptors are removed. `Scale` is dropped: no two producers differ in it.
-- **Tentative:** `RgbDesc { extent, coordinates, encoding }` with
+  descriptors are removed. `Scale` and `Encoding` are dropped: no two producers
+  differ in scale, and no producer emits encoded RGB; samples are linear.
+- **Decided:** `RgbDesc { extent, coordinates }` with
   `Coordinates::{Camera(Camera), Space(RgbSpace)}`, `Camera { make, model,
   balance: Option<[f32; 4]> }` and `BayerDesc { extent, phase, camera }`.
   Applying gains to balanced data composes the balance. `Display` impls supply
   every interpretation label; the GUI has no hardcoded space names.
-- **Tentative:** Requirements are type arguments on the port view:
+- **Decided:** Requirements are type arguments on the port view:
   `image: Read<'_, Device<Rgb>, LinearRec2020>`, defaulting to `Any`.
   `Requirement<P> { const LABEL; fn check(&P::Desc) }` is a zero-sized marker.
   On `Write` the same argument is a guarantee checked on contract output. Port
@@ -82,13 +83,15 @@ Resolved with the user on 2026-10-11 after the review against
 
 ### Nodes and contracts
 
-- **Tentative:** Contracts receive only known descriptions: `&Desc` for
+- **Decided:** Contracts receive only known descriptions: `&Desc` for
   required inputs, `Option<&Desc>` for optional ones (`None` = unconnected).
   If a connected input is unknown, the adapter skips the contract and the node
   is unknown, carrying the source's reason, which evaluation reports. Requirement
   checks run before the contract in the same generated path, at edit and at
-  evaluation. A contract is required only when the node has outputs.
-- **Tentative:** Parameter validity is checked once at admission
+  evaluation. A contract is required only when the node has outputs. An
+  unconnected optional input is incomplete wiring, not a contradiction: a node
+  that needs it in some mode (CAT16 As shot) reports its absence at evaluation.
+- **Decided:** Parameter validity is checked once at admission
   (`#[validate(fn)]` on the parameter struct), not in contracts. Schema ranges
   guide controls only.
 - **Tentative:** Two declaration forms. Computation, view and action nodes:

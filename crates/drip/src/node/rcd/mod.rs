@@ -7,17 +7,13 @@ use crate::{
 };
 pub use compute::{Definition, Ports, add, definition};
 mod kernel;
-fn rcd_contract(
-    global: &GlobalContext,
-    _: &(),
-    image: Option<&BayerDesc>,
-) -> Result<(Option<ImageDesc<Camera>>,)> {
-    Ok((image.map(|d| ImageDesc {
-        extent: reduce::demosaic_extent(global, &d.extent),
-        interpretation: d.interpretation.clone(),
-    }),))
+fn rcd_contract(global: &GlobalContext, _: &(), image: &BayerDesc) -> Result<(RgbDesc,)> {
+    Ok((RgbDesc {
+        extent: reduce::demosaic_extent(global, &image.extent),
+        coordinates: Coordinates::Camera(image.response.clone()),
+    },))
 }
-/// Demosaic Bayer to CameraRgb with ratio-corrected demosaicing (RCD).
+/// Demosaic Bayer to camera RGB with ratio-corrected demosaicing (RCD).
 /// Requires an explicit Bayer phase. Requested preview detail first reduces each
 /// CFA phase plane; full detail preserves the input grid. Negative samples are
 /// clipped to zero, and a ten-pixel border uses bilinear interpolation.
@@ -27,11 +23,11 @@ pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),
     image: Read<'_, Device<Bayer>>,
-    output: Write<'_, Device<CameraRgb>>,
+    output: Write<'_, Device<Rgb>, CameraRgb>,
 ) -> Result<()> {
     let reduced = reduce::for_demosaic(ctx, &image)?;
     let image = match &reduced {
-        Some((desc, data)) => Read { desc, data },
+        Some((desc, data)) => Read::new(desc, data),
         None => image,
     };
 

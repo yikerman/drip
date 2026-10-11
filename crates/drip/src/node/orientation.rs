@@ -39,9 +39,9 @@ pub enum Orientation {
 }
 
 impl Orientation {
-    fn resolve(self, metadata: Option<&MetadataDesc>) -> u8 {
+    fn resolve(self, metadata: Option<&drip_raw::Metadata>) -> u8 {
         match self {
-            Self::FromMetadata => metadata.map_or(1, |d| d.orientation),
+            Self::FromMetadata => metadata.map_or(1, |m| m.orientation),
             Self::Identity => 1,
             Self::MirrorHorizontal => 2,
             Self::Rotate180 => 3,
@@ -66,19 +66,17 @@ pub struct Settings {
 fn orientation_contract(
     _: &GlobalContext,
     p: &Settings,
-    image: Option<&ImageDesc<Color>>,
-    metadata: Option<&MetadataDesc>,
-) -> Result<(Option<ImageDesc<Color>>,)> {
-    let mut output = image.cloned();
-    if p.orientation.resolve(metadata) >= 5
-        && let Some(d) = &mut output
-    {
-        std::mem::swap(&mut d.extent.width, &mut d.extent.height);
+    image: &RgbDesc,
+    metadata: Option<&std::sync::Arc<drip_raw::Metadata>>,
+) -> Result<(RgbDesc,)> {
+    let mut output = image.clone();
+    if p.orientation.resolve(metadata.map(|m| &**m)) >= 5 {
+        std::mem::swap(&mut output.extent.width, &mut output.extent.height);
     }
     Ok((output,))
 }
 
-/// Rotate or reflect ColorRgb pixels using CaptureMetadata orientation.
+/// Rotate or reflect RGB pixels using the capture metadata's orientation.
 /// Missing metadata means identity; an explicit orientation replaces metadata.
 /// Transpose reflects across the top-left to bottom-right diagonal; transverse
 /// reflects across the other diagonal. Quarter turns and diagonal reflections
@@ -88,11 +86,11 @@ fn orientation_contract(
 pub fn compute(
     ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Device<ColorRgb>>,
+    image: Read<'_, Device<Rgb>>,
     metadata: Option<Read<'_, Cpu<CaptureMetadata>>>,
-    output: Write<'_, Device<ColorRgb>>,
+    output: Write<'_, Device<Rgb>>,
 ) -> Result<()> {
-    let orientation = p.orientation.resolve(metadata.as_ref().map(|m| m.desc));
+    let orientation = p.orientation.resolve(metadata.as_ref().map(|m| &**m.data));
     let (count, dim) = dispatch_dims(image.desc.extent.pixels());
     kernel::orient::launch(
         ctx.client()?,
@@ -142,7 +140,11 @@ mod kernel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::RuntimeContext;
+    use crate::{
+        payload::{download, upload},
+        runtime::RuntimeContext,
+    };
+    use std::sync::Arc;
 
     const EXPLICIT: [Orientation; 8] = [
         Orientation::Identity,
@@ -155,15 +157,14 @@ mod tests {
         Orientation::Rotate90Counterclockwise,
     ];
 
-    fn image_desc() -> ImageDesc<Color> {
-        ImageDesc {
+    fn image_desc() -> RgbDesc {
+        RgbDesc {
             extent: Extent { width: 3, height: 2 },
-            interpretation: Color {
-                space: "Rec.2020".into(),
-                encoding: Encoding::Srgb,
-                scale: "display".into(),
-            },
+            coordinates: Coordinates::Space(REC2020_D65),
         }
+    }
+    fn metadata(orientation: u8) -> Arc<drip_raw::Metadata> {
+        Arc::new(drip_raw::Metadata { orientation, ..Default::default() })
     }
 
     #[test]
@@ -171,32 +172,22 @@ mod tests {
         let global = GlobalContext::default();
         let image = image_desc();
         let automatic = Settings::default();
-        let (output,) = orientation_contract(&global, &automatic, Some(&image), None).unwrap();
-        assert_eq!(output.unwrap().extent, image.extent);
+        let (output,) = orientation_contract(&global, &automatic, &image, None).unwrap();
+        assert_eq!(output.extent, image.extent);
         for (i, orientation) in EXPLICIT.into_iter().enumerate() {
-            let metadata = MetadataDesc::of(&CaptureData {
-                capture: drip_raw::Metadata { orientation: i as u8 + 1, ..Default::default() },
-                ..Default::default()
-            });
+            let metadata = metadata(i as u8 + 1);
             let (output,) =
-                orientation_contract(&global, &automatic, Some(&image), Some(&metadata)).unwrap();
-            let output = output.unwrap();
+                orientation_contract(&global, &automatic, &image, Some(&metadata)).unwrap();
             let expected =
                 if i < 4 { image.extent.clone() } else { Extent { width: 2, height: 3 } };
             assert_eq!(output.extent, expected);
-            assert_eq!(output.interpretation, image.interpretation);
+            assert_eq!(output.coordinates, image.coordinates);
             assert_eq!(orientation.resolve(None), metadata.orientation);
             let identity = Settings { orientation: Orientation::Identity };
             let (output,) =
-                orientation_contract(&global, &identity, Some(&image), Some(&metadata)).unwrap();
-            assert_eq!(output.unwrap().extent, image.extent);
+                orientation_contract(&global, &identity, &image, Some(&metadata)).unwrap();
+            assert_eq!(output.extent, image.extent);
             assert_eq!(identity.orientation.resolve(Some(&metadata)), 1);
-            assert!(
-                orientation_contract(&global, &automatic, None, Some(&metadata))
-                    .unwrap()
-                    .0
-                    .is_none()
-            );
         }
     }
 
@@ -252,10 +243,10 @@ mod tests {
     }
 
     fn fixture(runtime: &RuntimeContext, width: u32, height: u32, expected: [&[usize]; 8]) {
-        let image = ImageDesc { extent: Extent { width, height }, ..image_desc() };
+        let image = RgbDesc { extent: Extent { width, height }, ..image_desc() };
         let samples: Vec<[f32; 3]> =
             (0..image.extent.pixels()).map(|i| [i as f32, -(i as f32), 8.0]).collect();
-        let input = ColorRgb::upload(&image, &samples.clone().into(), runtime).unwrap();
+        let input = upload::<Rgb>(&image, &samples.clone().into(), runtime).unwrap();
         let ctx = KernelContext { global: &GlobalContext::default(), runtime };
         for (index, orientation) in EXPLICIT.into_iter().enumerate() {
             // Exercise both metadata resolution and replacement of a conflicting
@@ -264,29 +255,20 @@ mod tests {
                 let p = Settings {
                     orientation: if mode == 1 { orientation } else { Orientation::FromMetadata },
                 };
-                let data = CaptureData {
-                    capture: drip_raw::Metadata {
-                        orientation: if mode == 0 { index as u8 + 1 } else { 1 },
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                };
-                let metadata = MetadataDesc::of(&data);
+                let metadata = metadata(if mode == 0 { index as u8 + 1 } else { 1 });
                 let metadata = (mode != 2).then_some(&metadata);
                 let (output_desc,) =
-                    orientation_contract(ctx.global, &p, Some(&image), metadata).unwrap();
-                let output_desc = output_desc.unwrap();
-                let mut output =
-                    <Device<ColorRgb> as Port>::allocate(&output_desc, runtime).unwrap();
+                    orientation_contract(ctx.global, &p, &image, metadata).unwrap();
+                let mut output = <Device<Rgb> as Port>::allocate(&output_desc, runtime).unwrap();
                 compute(
                     &ctx,
                     &p,
-                    Read { desc: &image, data: &input },
-                    metadata.map(|desc| Read { desc, data: &data }),
-                    Write { desc: &output_desc, data: &mut output },
+                    Read::new(&image, &input),
+                    metadata.map(|m| Read::new(m, m)),
+                    Write::new(&output_desc, &mut output),
                 )
                 .unwrap();
-                let actual = ColorRgb::download(&output_desc, &output, runtime).unwrap();
+                let actual = download::<Rgb>(&output_desc, &output, runtime).unwrap();
                 assert_eq!(actual.len(), expected[index].len());
                 for (actual, &source) in actual.iter().zip(expected[index]) {
                     for (actual, expected) in actual.iter().zip(samples[source]) {

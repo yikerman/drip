@@ -1,5 +1,5 @@
 //! Shared exposure settings, reductions and plotting for scope nodes.
-use drip::{Error, Result, node::data::*, param::ParamKind};
+use drip::{Error, Result, param::ParamKind};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 pub(super) mod device;
@@ -21,6 +21,7 @@ pub enum Scale {
 }
 #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
 #[serde(deny_unknown_fields)]
+#[validate(exposure_range)]
 pub struct ExposureSettings {
     /// Lower exposure bound in stops relative to sample value 1. Values below it enter the first bin.
     #[param(ParamKind::Int { min: -24, max: -1, default: -12 })]
@@ -40,24 +41,7 @@ impl Default for ExposureSettings {
         Self { min_ev: -12, max_ev: 4, scale: Scale::Linear }
     }
 }
-pub(super) fn scope_contract(
-    _: &drip::runtime::GlobalContext,
-    p: &ExposureSettings,
-    image: Option<&ImageDesc<Color>>,
-) -> Result<()> {
-    if image.is_some_and(|d| d.interpretation.encoding != Encoding::Identity) {
-        return Err(Error::Contract("channel exposure requires identity encoding".into()));
-    }
-    exposure_range(p)
-}
-pub(super) fn camera_scope_contract(
-    _: &drip::runtime::GlobalContext,
-    p: &ExposureSettings,
-    _: Option<&ImageDesc<Camera>>,
-) -> Result<()> {
-    exposure_range(p)
-}
-fn exposure_range(p: &ExposureSettings) -> Result<()> {
+pub(super) fn exposure_range(p: &ExposureSettings) -> Result<()> {
     if p.min_ev >= p.max_ev || p.min_ev < -126 || p.max_ev > 127 {
         return Err(Error::Contract("exposure range needs finite ordered f32 thresholds".into()));
     }

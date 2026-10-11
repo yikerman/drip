@@ -526,20 +526,17 @@ mod tests {
     use crate::model::Registry;
     use drip::{
         Error as KernelError,
-        node::data::{Color, ColorRgb, Extent, ImageDesc},
+        node::data::{Coordinates, Extent, REC2020_D65, Rgb, RgbDesc},
         param::ParamKind,
         ports::{Cpu, Write},
         runtime::KernelContext,
     };
     use serde::{Deserialize, Serialize};
-    fn image_contract<P>(
-        _: &drip::runtime::GlobalContext,
-        _: &P,
-    ) -> drip::Result<(Option<ImageDesc<Color>>,)> {
-        Ok((Some(ImageDesc {
+    fn image_contract<P>(_: &drip::runtime::GlobalContext, _: &P) -> drip::Result<(RgbDesc,)> {
+        Ok((RgbDesc {
             extent: Extent { width: 1, height: 1 },
-            interpretation: drip::node::raw::working_color(),
-        }),))
+            coordinates: Coordinates::Space(REC2020_D65),
+        },))
     }
     fn empty_contract<P>(_: &drip::runtime::GlobalContext, _: &P) -> drip::Result<()> {
         Ok(())
@@ -650,7 +647,7 @@ mod tests {
         fn diagnostics(
             _: &KernelContext<'_>,
             p: &Source,
-            image: Write<'_, Cpu<ColorRgb>>,
+            image: Write<'_, Cpu<Rgb>>,
         ) -> drip::Result<()> {
             match p.state {
                 State::Incomplete => Err(KernelError::Contract("choose a file".into())),
@@ -795,7 +792,7 @@ mod tests {
         fn blocking(
             _: &KernelContext<'_>,
             p: &SourceKernel,
-            image: Write<'_, Cpu<ColorRgb>>,
+            image: Write<'_, Cpu<Rgb>>,
         ) -> drip::Result<()> {
             CALLS.lock().unwrap().push(p.value);
             if p.block {
@@ -901,7 +898,7 @@ mod tests {
         fn file(
             _: &KernelContext<'_>,
             p: &FileKernel,
-            image: Write<'_, Cpu<ColorRgb>>,
+            image: Write<'_, Cpu<Rgb>>,
         ) -> drip::Result<()> {
             let path =
                 p.path.as_ref().ok_or_else(|| KernelError::Contract("choose a file".into()))?;
@@ -917,7 +914,7 @@ mod tests {
         fn sink_contract(
             _: &drip::runtime::GlobalContext,
             _: &WriteKernel,
-            _: Option<&ImageDesc<Color>>,
+            _: &RgbDesc,
         ) -> drip::Result<()> {
             Ok(())
         }
@@ -925,7 +922,7 @@ mod tests {
         fn write(
             _: &KernelContext<'_>,
             _: &WriteKernel,
-            image: Read<'_, Cpu<ColorRgb>>,
+            image: Read<'_, Cpu<Rgb>>,
         ) -> drip::Result<()> {
             let _ = image;
             Ok(())
@@ -939,7 +936,7 @@ mod tests {
             const ACTION_NAME: &'static str = "write";
             const ACTION: Option<crate::node_ui::Action<Self>> = Some(|p, inputs, ctx| {
                 assert_eq!(ctx.level, 0);
-                let (_, image) = inputs.get("image").unwrap().get::<Cpu<ColorRgb>>()?;
+                let (_, image) = inputs.get("image").unwrap().get::<Cpu<Rgb>>()?;
                 std::fs::write(p.path.as_ref().unwrap(), format!("{:?}", image[0]))
                     .map_err(|e| KernelError::Runtime(e.to_string()))
             });

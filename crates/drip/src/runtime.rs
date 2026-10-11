@@ -91,6 +91,13 @@ impl KernelContext<'_> {
         self.runtime.client()
     }
 
+    /// Per-invocation constants a kernel reads, such as a matrix flattened from
+    /// a host payload. Like scratch, they have no port meaning.
+    pub fn constants(&self, values: &[f32]) -> Result<crate::payload::DeviceBuffer<()>> {
+        let bytes = cubecl::bytes::Bytes::from_elems(values.to_vec());
+        Ok(crate::payload::DeviceBuffer::new(self.client()?.create(bytes)))
+    }
+
     /// Algorithm-local scratch allocated by the runtime. It has no port meaning.
     pub fn scratch_f32(&self, elements: usize) -> Result<crate::payload::DeviceBuffer<()>> {
         let bytes = elements

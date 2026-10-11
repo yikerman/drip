@@ -1,33 +1,37 @@
 use crate::{
     Error, Result,
-    node::data::*,
+    node::{camera, data::*},
     ports::*,
     runtime::{GlobalContext, KernelContext, dispatch_dims},
 };
 pub use compute::{Definition, Ports, add, definition};
+use std::sync::Arc;
 fn gain_contract(
     _: &GlobalContext,
     _: &(),
-    image: Option<&BayerDesc>,
-    metadata: Option<&MetadataDesc>,
-) -> Result<(Option<BayerDesc>, Option<BayerLevelDesc>)> {
-    let (Some(image), Some(calibration)) = (image, metadata.and_then(|m| m.bayer.as_ref())) else {
-        return Ok((None, None));
-    };
-    if image.phase != calibration.phase || image.interpretation != calibration.source {
-        return Err(Error::Contract("Bayer gain coordinates/phase do not match image".into()));
+    image: &BayerDesc,
+    metadata: &Arc<drip_raw::Metadata>,
+) -> Result<(BayerDesc, BayerLevelsDesc)> {
+    if image.response.camera != Camera::of(metadata) || image.phase != camera::phase(metadata)? {
+        return Err(Error::Contract("Bayer camera/phase differ from the capture metadata".into()));
     }
-    let Some(target) = &calibration.balanced else {
-        return Ok((None, None));
+    let response = Response {
+        camera: image.response.camera.clone(),
+        balance: Some(total_balance(image, metadata)?),
     };
-    let mut d = image.clone();
-    d.interpretation = target.clone();
-    Ok((Some(d), Some(BayerLevelDesc { phase: image.phase, interpretation: target.clone() })))
+    let levels = BayerLevelsDesc { phase: image.phase, response: response.clone() };
+    Ok((BayerDesc { response, ..image.clone() }, levels))
 }
-/// Apply CaptureMetadata's site gains to Bayer samples and their clipping levels.
-/// The image must match the calibration's response coordinates and local CFA phase.
-/// Outputs are Bayer and BayerLevels in the same gain-adjusted interpretation.
-/// No gains or CFA are inferred; missing calibration prevents evaluation.
+/// As-shot gains composed with any balance the samples already carry.
+fn total_balance(image: &BayerDesc, metadata: &drip_raw::Metadata) -> Result<[f32; 4]> {
+    let gains = camera::as_shot_balance(metadata)?;
+    let prior = image.response.balance.unwrap_or([1.; 4]);
+    Ok(std::array::from_fn(|c| prior[c] * gains[c]))
+}
+/// Apply the capture's as-shot white balance to Bayer samples and derive their
+/// clipping levels. Outputs Bayer and BayerLevels in the same balanced
+/// coordinates; gains compose with a balance the input already carries. No
+/// gains or CFA are inferred: missing as-shot balance prevents evaluation.
 #[crate::node(id="sensor.bayer-site-gains", name="Bayer site gains", category="Sensor",contract=gain_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
@@ -37,27 +41,18 @@ pub fn compute(
     output: Write<'_, Device<Bayer>>,
     levels: Write<'_, Cpu<BayerLevels>>,
 ) -> Result<()> {
-    let calibration = metadata
-        .data
-        .bayer
-        .as_ref()
-        .ok_or_else(|| Error::Contract("metadata has no Bayer calibration".into()))?;
-    let gains = &calibration
-        .gains
-        .as_ref()
-        .ok_or_else(|| Error::Contract("metadata has no Bayer site gains".into()))?
-        .values;
-    *levels.data = std::array::from_fn(|i| calibration.levels[i] * gains[i]);
-    let coefficients = DeviceBuffer::<()>::new(
-        ctx.client()?.create(cubecl::bytes::Bytes::from_elems(gains.to_vec())),
-    );
+    let m = metadata.data;
+    let clipping = camera::site_levels(m)?;
+    let total = camera::sites(m, total_balance(image.desc, m)?);
+    *levels.data = std::array::from_fn(|i| clipping[i] * total[i]);
+    let gains = ctx.constants(&camera::sites(m, camera::as_shot_balance(m)?))?;
     let (count, dim) = dispatch_dims(image.desc.extent.pixels());
     kernel::bayer_gains::launch(
         ctx.client()?,
         count,
         dim,
         image.data.argument(),
-        coefficients.argument(),
+        gains.argument(),
         output.data.argument(),
         image.desc.extent.width as usize,
     );

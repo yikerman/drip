@@ -1,6 +1,7 @@
 //! Processing nodes and their shared image-domain support.
+pub mod bayer_2x2;
 pub mod bayer_gains;
-pub mod bayer_preview;
+pub mod camera;
 pub mod camera_to_rgb;
 pub mod chromatic_adaptation;
 pub mod color;

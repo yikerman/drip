@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::ScopeAxes;
 use crate::model::{Graph, Registry};
-use crate::node_ui::data::{PrepareContext, Rgb};
+use crate::node_ui::data::{HostImage, PrepareContext};
 use crate::node_ui::scopes::{ExposureSettings, Scale};
 use drip::{eval::Evaluator, graph::Dag, node::data::*, runtime::RuntimeContext};
 use serde_json::json;
@@ -12,7 +12,7 @@ use serde_json::json;
 #[test]
 #[ignore = "requires the DRIP_BACKEND compute device; run explicitly"]
 fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
-    let pixels = Arc::new(Rgb {
+    let pixels = Arc::new(HostImage {
         width: 2,
         height: 2,
         requested_scale: 1,
@@ -22,33 +22,29 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
         ),
     });
     let mut dag = Dag::new();
-    let working = drip::node::source::<ColorRgb>(
+    let extent = Extent { width: 2, height: 2 };
+    let working = drip::node::source::<Rgb>(
         &mut dag,
-        ImageDesc {
-            extent: Extent { width: 2, height: 2 },
-            interpretation: drip::node::raw::working_color(),
-        },
+        RgbDesc { extent: extent.clone(), coordinates: Coordinates::Space(REC2020_D65) },
         pixels.pixels.to_vec(),
     )
     .unwrap();
-    let camera = drip::node::source::<CameraRgb>(
+    let response = Response {
+        camera: Camera { make: "Native".into(), model: "camera".into() },
+        balance: None,
+    };
+    let camera = drip::node::source::<Rgb>(
         &mut dag,
-        ImageDesc {
-            extent: Extent { width: 2, height: 2 },
-            interpretation: Camera {
-                coordinates: "native camera".into(),
-                scale: "relative".into(),
-            },
-        },
+        RgbDesc { extent, coordinates: Coordinates::Camera(response) },
         pixels.pixels.to_vec(),
     )
     .unwrap();
+    // One histogram kind plots either coordinate system without conversion.
     let histogram = crate::node_ui::histogram::add(&mut dag, ExposureSettings::default()).unwrap();
     let camera_histogram =
-        crate::node_ui::camera_histogram::add(&mut dag, ExposureSettings::default()).unwrap();
+        crate::node_ui::histogram::add(&mut dag, ExposureSettings::default()).unwrap();
     dag.connect(working, histogram.image).unwrap();
     dag.connect(camera, camera_histogram.image).unwrap();
-    assert!(dag.connect_ids(camera.id(), histogram.image.id()).is_err());
     let targets = [histogram.image.node(), camera_histogram.image.node()];
     let values = Evaluator::new(RuntimeContext::from_env().unwrap()).evaluate_inputs(
         &dag,
@@ -56,10 +52,10 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
         &targets,
     );
     let ctx = context();
-    let a = ctx.device_image::<Color>(values[&targets[0]].as_ref().unwrap()).unwrap();
-    let b = ctx.device_image::<Camera>(values[&targets[1]].as_ref().unwrap()).unwrap();
-    fn prepare<I: crate::node_ui::data::DisplayInterpretation>(
-        image: &crate::node_ui::data::DeviceRgb<I>,
+    let a = ctx.device_image(values[&targets[0]].as_ref().unwrap()).unwrap();
+    let b = ctx.device_image(values[&targets[1]].as_ref().unwrap()).unwrap();
+    fn prepare(
+        image: &crate::node_ui::data::DeviceRgb,
         ctx: &PrepareContext,
     ) -> (Arc<super::Histogram>, Arc<super::Scope>) {
         let settings = || ExposureSettings { min_ev: -12, max_ev: 4, scale: Scale::Log };
@@ -81,7 +77,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
 #[test]
 #[ignore = "requires the DRIP_BACKEND compute device; run explicitly"]
 fn histogram_bins_by_stops() {
-    let image = Rgb {
+    let image = HostImage {
         width: 2,
         height: 1,
         requested_scale: 1,
@@ -116,7 +112,7 @@ fn histogram_bins_by_stops() {
 #[test]
 #[ignore = "requires the DRIP_BACKEND compute device; run explicitly"]
 fn vectorscope_uses_working_rec2020_coordinates() {
-    let image = Rgb {
+    let image = HostImage {
         width: 1,
         height: 1,
         requested_scale: 1,
@@ -147,13 +143,13 @@ pub(crate) fn context() -> PrepareContext {
     PrepareContext { client: Some(evaluator.client().unwrap().clone()), ..Default::default() }
 }
 
-pub(crate) fn device(image: &Rgb, ctx: &PrepareContext) -> crate::node_ui::data::DeviceRgb<Color> {
-    let desc = ImageDesc {
+pub(crate) fn device(image: &HostImage, ctx: &PrepareContext) -> crate::node_ui::data::DeviceRgb {
+    let desc = RgbDesc {
         extent: Extent { width: image.width as u32, height: image.height as u32 },
-        interpretation: drip::node::raw::working_color(),
+        coordinates: Coordinates::Space(REC2020_D65),
     };
     let runtime = RuntimeContext::from_client(ctx.client().unwrap().clone());
-    let pixels = ColorRgb::upload(&desc, &image.pixels, &runtime).unwrap();
+    let pixels = drip::payload::upload::<Rgb>(&desc, &image.pixels, &runtime).unwrap();
     crate::node_ui::data::DeviceRgb { desc, pixels: Arc::new(pixels) }
 }
 
@@ -177,7 +173,7 @@ fn device_reductions_match_reference() {
         let height = pixels.len().div_ceil(width);
         let mut input = pixels.clone();
         input.resize(width * height, [0.18; 3]);
-        let image = Rgb {
+        let image = HostImage {
             width,
             height,
             requested_scale: 1,

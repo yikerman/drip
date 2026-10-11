@@ -1,11 +1,9 @@
 //! Owned common LibRaw fields. Numeric sentinels retain LibRaw's meaning;
 //! absent GPS is explicit, and decoded text is UTF-8. No decoder pointers escape.
-use rkyv::{Archive, Deserialize, Serialize};
-
-#[derive(Debug, Clone, PartialEq, Archive, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Metadata {
-    pub make: Vec<u8>,
-    pub model: Vec<u8>,
+    pub make: String,
+    pub model: String,
     pub iso: f32,
     /// Seconds.
     pub shutter: f32,
@@ -14,14 +12,14 @@ pub struct Metadata {
     pub focal_length: f32,
     pub timestamp: i64,
     /// Camera wall-clock time, without an inferred time zone.
-    pub datetime: Vec<u8>,
+    pub datetime: String,
     /// EXIF 1–8; unspecified orientation becomes identity (1).
     pub orientation: u8,
-    pub artist: Vec<u8>,
-    pub description: Vec<u8>,
+    pub artist: String,
+    pub description: String,
     pub shot_order: u32,
-    pub body_serial: Vec<u8>,
-    pub internal_body_serial: Vec<u8>,
+    pub body_serial: String,
+    pub internal_body_serial: String,
     /// LibRaw drive, focus, metering, AF point, exposure mode/program, stabilization.
     pub shooting_modes: [i32; 7],
     pub sensor: Sensor,
@@ -33,20 +31,20 @@ pub struct Metadata {
 impl Default for Metadata {
     fn default() -> Self {
         Self {
-            make: Vec::new(),
-            model: Vec::new(),
+            make: String::new(),
+            model: String::new(),
             iso: 0.0,
             shutter: 0.0,
             aperture: 0.0,
             focal_length: 0.0,
             timestamp: 0,
-            datetime: Vec::new(),
+            datetime: String::new(),
             orientation: 1,
-            artist: Vec::new(),
-            description: Vec::new(),
+            artist: String::new(),
+            description: String::new(),
             shot_order: 0,
-            body_serial: Vec::new(),
-            internal_body_serial: Vec::new(),
+            body_serial: String::new(),
+            internal_body_serial: String::new(),
             shooting_modes: [0; 7],
             sensor: Sensor::default(),
             calibration: Calibration::default(),
@@ -56,29 +54,7 @@ impl Default for Metadata {
     }
 }
 
-impl Metadata {
-    pub fn text_fields(&self) -> [&[u8]; 15] {
-        [
-            &self.make,
-            &self.model,
-            &self.datetime,
-            &self.artist,
-            &self.description,
-            &self.body_serial,
-            &self.internal_body_serial,
-            &self.lens.make,
-            &self.lens.model,
-            &self.lens.serial,
-            &self.lens.internal_serial,
-            &self.lens.maker_note_model,
-            &self.lens.teleconverter,
-            &self.lens.adapter,
-            &self.lens.attachment,
-        ]
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Default, Archive, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Sensor {
     /// Visible sensor area copied into the decoded pixel buffer.
     pub width: usize,
@@ -94,7 +70,7 @@ pub struct Sensor {
     pub masked_areas: [[i32; 4]; 8],
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Archive, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Calibration {
     /// Local Bayer sites: 0 R, 1 G, 2 B, 3 second G.
     pub cfa: [[u8; 2]; 2],
@@ -122,7 +98,7 @@ pub struct Calibration {
 
 /// Local C shim layout, filled by field name from LibRaw's DNG records.
 #[repr(C)]
-#[derive(Debug, Clone, PartialEq, Default, Archive, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct DngColor {
     pub parsed_fields: u32,
     pub illuminant: u32,
@@ -131,7 +107,7 @@ pub struct DngColor {
     pub forward_matrix: [[f32; 4]; 3],
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Archive, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct BlackPattern {
     pub height: usize,
     pub width: usize,
@@ -147,15 +123,15 @@ impl BlackPattern {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Archive, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Lens {
-    pub make: Vec<u8>,
-    pub model: Vec<u8>,
-    pub serial: Vec<u8>,
-    pub internal_serial: Vec<u8>,
+    pub make: String,
+    pub model: String,
+    pub serial: String,
+    pub internal_serial: String,
     /// Vendor-specific identifier; not globally unique. LibRaw sentinels retained.
     pub id: u64,
-    pub maker_note_model: Vec<u8>,
+    pub maker_note_model: String,
     pub min_focal: f32,
     pub max_focal: f32,
     pub max_aperture_at_min_focal: f32,
@@ -167,15 +143,15 @@ pub struct Lens {
     pub camera_mount: u32,
     pub lens_format: u32,
     pub camera_format: u32,
-    pub teleconverter: Vec<u8>,
+    pub teleconverter: String,
     pub teleconverter_id: u64,
-    pub adapter: Vec<u8>,
+    pub adapter: String,
     pub adapter_id: u64,
-    pub attachment: Vec<u8>,
+    pub attachment: String,
     pub attachment_id: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Default, Archive, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Gps {
     /// Degrees, minutes, seconds; hemisphere comes from the reference byte.
     pub latitude: [f32; 3],

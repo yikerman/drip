@@ -9,8 +9,12 @@ use parse::{Options, Signature};
 
 pub(crate) fn expand(args: TokenStream, function: syn::ItemFn) -> syn::Result<TokenStream> {
     let options = Options::parse(args, function.sig.span())?;
-    let mut signature = Signature::parse(&function.sig)?;
-    signature.label_ports(&options.port_labels)?;
+    let signature = Signature::parse(&function.sig)?;
+    if options.contract.is_none()
+        && let Some(output) = signature.outputs().next()
+    {
+        return Err(syn::Error::new(output.name.span(), "a node with outputs needs a contract"));
+    }
     Ok(generate::node(&function, &options, &signature))
 }
 

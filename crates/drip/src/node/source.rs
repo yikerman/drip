@@ -1,7 +1,7 @@
 //! Immutable, already loaded source values.
 use crate::{
     Result,
-    definition::{Metadata, Node},
+    definition::{Metadata, Node, Outcome},
     graph::Dag,
     payload::Payload,
     ports::*,
@@ -12,16 +12,17 @@ use std::sync::Arc;
 pub fn source<P: Payload>(
     dag: &mut Dag,
     desc: P::Desc,
-    data: impl Into<P::Data>,
+    data: impl Into<P::Host>,
 ) -> Result<Output<P>> {
     let data = data.into();
-    P::validate_cpu(&desc, &data)?;
+    P::validate(&desc)?;
+    P::check(&desc, &data)?;
     let id = dag.add(Arc::new(Source::<P> { desc, data: Arc::new(data) }))?;
     Ok(Output::new(id, 0))
 }
 struct Source<P: Payload> {
     desc: P::Desc,
-    data: Arc<P::Data>,
+    data: Arc<P::Host>,
 }
 impl<P: Payload> Node for Source<P> {
     fn metadata(&self) -> Metadata {
@@ -38,22 +39,17 @@ impl<P: Payload> Node for Source<P> {
         vec![]
     }
     fn outputs(&self) -> Vec<PortSpec> {
-        vec![PortSpec::of::<Cpu<P>>("value")]
+        vec![PortSpec::of::<Cpu<P>, Any>("value")]
     }
-    fn contract(
-        &self,
-        _: &GlobalContext,
-        _: &[Option<Description>],
-    ) -> Result<Vec<Option<Description>>> {
-        Ok(vec![erase::<P>(Some(self.desc.clone()))?])
+    fn contract(&self, _: &GlobalContext, _: &[Option<Description>]) -> Result<Outcome> {
+        Ok(Outcome::Known(vec![Arc::new(self.desc.clone())]))
     }
     fn run(
         &self,
         _: &KernelContext<'_>,
-        _: &[Option<Description>],
-        _: &[Option<Data>],
-        _: &[Option<Description>],
-    ) -> Result<Vec<Option<Data>>> {
-        Ok(vec![Some(self.data.clone())])
+        _: &[Option<(Description, Data)>],
+        _: &[Description],
+    ) -> Result<Vec<Data>> {
+        Ok(vec![self.data.clone()])
     }
 }

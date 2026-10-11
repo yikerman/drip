@@ -10,7 +10,6 @@ use super::{
 fn rejects_invalid_options() {
     for (options, message) in [
         (quote!(contract = c), "missing id"),
-        (quote!(id = "x"), "missing contract"),
         (quote!(id = "x", contract = c, checks = c), "unknown node option"),
         (quote!(id = "x", contract = c, parameters = Params::SPECS), "unknown node option"),
         (quote!(id = "x", id = "y", contract = c), "duplicate node option"),
@@ -28,6 +27,19 @@ fn rejects_invalid_options() {
         let error = expand(options, function).unwrap_err();
         assert_eq!(error.to_string(), message);
     }
+}
+
+#[test]
+fn nodes_with_outputs_need_a_contract() {
+    let function = syn::parse_quote! {
+        fn x(c: &Context, p: &Params, output: Write<Cpu<Image>>) -> Result<()> { Ok(()) }
+    };
+    let error = expand(quote!(id = "x"), function).unwrap_err();
+    assert_eq!(error.to_string(), "a node with outputs needs a contract");
+    let function = syn::parse_quote! {
+        fn x(c: &Context, p: &Params, image: Read<Cpu<Image>>) -> Result<()> { Ok(()) }
+    };
+    generated_module(expand(quote!(id = "x"), function).unwrap());
 }
 
 #[test]
@@ -97,13 +109,19 @@ fn rejects_unsupported_signatures() {
             quote!(
                 fn x(c: &C, p: &P, a: Read<'_>) {}
             ),
-            "expected exactly one concrete port type",
+            "expected <Port> or <Port, Requirement>",
+        ),
+        (
+            quote!(
+                fn x(c: &C, p: &P, a: Read<A, B, C>) {}
+            ),
+            "expected <Port> or <Port, Requirement>",
         ),
         (
             quote!(
                 fn x(c: &C, p: &P, a: Either<A, B>) {}
             ),
-            "expected exactly one concrete port type",
+            "expected Read or Write; wrapper aliases are not resolved",
         ),
         (
             quote!(
@@ -121,25 +139,6 @@ fn rejects_unsupported_signatures() {
     for (declaration, message) in declarations {
         let function = syn::parse2(declaration).unwrap();
         let error = expand(quote!(id = "x", contract = contract), function).unwrap_err();
-        assert_eq!(error.to_string(), message);
-    }
-}
-
-#[test]
-fn rejects_invalid_port_labels() {
-    for (labels, message) in [
-        (quote!(port_labels = []), "expected port_labels(port = \"label\", ...)"),
-        (quote!(port_labels(), port_labels()), "duplicate node option"),
-        (quote!(port_labels(missing = "RGB")), "unknown port name"),
-        (quote!(port_labels(p = "Settings")), "unknown port name"),
-        (quote!(port_labels(image = "RGB", image = "Again")), "duplicate port label"),
-        (quote!(port_labels(image = 3)), "port label must be a string literal"),
-        (quote!(port_labels(image::data = "RGB")), "expected port name"),
-    ] {
-        let function = syn::parse_quote! {
-            fn x(c: &Context, p: &Params, image: Read<Cpu<ColorRgb>>) {}
-        };
-        let error = expand(quote!(id = "x", contract = c, #labels), function).unwrap_err();
         assert_eq!(error.to_string(), message);
     }
 }
@@ -178,10 +177,11 @@ fn accepts_qualified_ports_and_indexes_each_direction_independently() {
     let kernel = kernel_call(run, "mix");
     let arguments: Vec<_> =
         kernel.args.iter().skip(2).map(|arg| quote!(#arg).to_string()).collect();
-    assert_eq!(arguments[0], quote!(output_0.write()).to_string());
-    assert!(arguments[1].contains("Read :: < Cpu < B > > :: bind"));
-    assert_eq!(arguments[2], quote!(output_1.write()).to_string());
-    assert!(arguments[3].contains("Read :: < Device < D > > :: bind"));
+    let write = |slot: TokenStream| quote!(#slot.write::<::drip::ports::Any>()).to_string();
+    assert_eq!(arguments[0], write(quote!(output_0)));
+    assert!(arguments[1].contains("Read :: < Cpu < B > , :: drip :: ports :: Any > :: bind"));
+    assert_eq!(arguments[2], write(quote!(output_1)));
+    assert!(arguments[3].contains("Read :: < Device < D > , :: drip :: ports :: Any > :: bind"));
 }
 
 #[test]
@@ -351,7 +351,12 @@ fn optional_execution_is_nullable_and_contracts_keep_one_description_per_input()
     };
     let ty = &global.ty;
     assert_eq!(quote!(#ty).to_string(), quote!(&::drip::runtime::GlobalContext).to_string());
-    let syn::Stmt::Local(described) = &contract.block.stmts[0] else {
+    // Requirement checks bind each input before the contract call; only a
+    // required input rejects an absent description.
+    let checks: Vec<_> = contract.block.stmts[..2].iter().map(|s| quote!(#s).to_string()).collect();
+    assert!(checks[0].contains(":: drip :: ports :: input") && checks[0].contains("ok_or_else"));
+    assert!(checks[1].contains(":: drip :: ports :: input") && !checks[1].contains("ok_or_else"));
+    let syn::Stmt::Local(described) = &contract.block.stmts[2] else {
         panic!("expected contract call")
     };
     let syn::Expr::Try(described) = described.init.as_ref().unwrap().expr.as_ref() else {
@@ -360,29 +365,20 @@ fn optional_execution_is_nullable_and_contracts_keep_one_description_per_input()
     let syn::Expr::Call(described) = described.expr.as_ref() else {
         panic!("expected contract arguments")
     };
-    assert_eq!(described.args.len(), 4);
-    assert!(
-        matches!(&described.args[0], syn::Expr::Path(global) if global.path.is_ident("global"))
-    );
-    for description in described.args.iter().skip(2) {
-        let syn::Expr::Call(description) = description else {
-            panic!("expected description adapter")
-        };
-        assert!(matches!(description.func.as_ref(), syn::Expr::Path(path)
-            if path.path.segments.last().unwrap().ident == "description"));
-    }
+    let arguments: Vec<_> = described.args.iter().map(|a| quote!(#a).to_string()).collect();
+    assert_eq!(arguments, ["global", "& self . parameters", "image", "metadata"]);
 }
 
 #[test]
-fn payload_labels_preserve_declared_names_and_custom_port_defaults() {
+fn port_specs_carry_requirements_and_default_to_any() {
     let function = syn::parse_quote! {
         fn x(
             context: &Context,
             parameters: &Params,
-            image: Read<Cpu<ColorRgb>>,
-            coefficients: Option<Read<ports::Device<SigmoidCoefficients>>>,
-            custom: Read<CustomPort<ColorRgb>>,
-            output: Write<Cpu<profiles::ColorRgb>>,
+            image: Read<Cpu<Rgb>>,
+            coefficients: Option<Read<ports::Device<Coefficients>>>,
+            working: Read<'_, Device<Rgb>, Rec2020>,
+            output: Write<Cpu<Rgb>, Rec2020>,
         ) {}
     };
     let module = generated_module(expand(quote!(id = "x", contract = c), function).unwrap());
@@ -390,60 +386,18 @@ fn payload_labels_preserve_declared_names_and_custom_port_defaults() {
         (
             "inputs",
             quote!(
-                ::drip::ports::PortSpec::of::<Cpu<ColorRgb>>("image")
-                    .named_payload(::core::stringify!(ColorRgb)),
-                ::drip::ports::PortSpec::of::<ports::Device<SigmoidCoefficients>>("coefficients")
-                    .named_payload(::core::stringify!(SigmoidCoefficients))
-                    .optional(),
-                ::drip::ports::PortSpec::of::<CustomPort<ColorRgb>>("custom")
+                ::drip::ports::PortSpec::of::<Cpu<Rgb>, ::drip::ports::Any>("image"),
+                ::drip::ports::PortSpec::of::<ports::Device<Coefficients>, ::drip::ports::Any>(
+                    "coefficients"
+                )
+                .optional(),
+                ::drip::ports::PortSpec::of::<Device<Rgb>, Rec2020>("working")
             ),
         ),
-        (
-            "outputs",
-            quote!(
-                ::drip::ports::PortSpec::of::<Cpu<profiles::ColorRgb>>("output")
-                    .named_payload(::core::stringify!(profiles::ColorRgb))
-            ),
-        ),
+        ("outputs", quote!(::drip::ports::PortSpec::of::<Cpu<Rgb>, Rec2020>("output"))),
     ] {
         assert_port_specs(&module, method, expected);
     }
-}
-
-#[test]
-fn explicit_labels_override_optional_and_custom_port_payload_names() {
-    let function = syn::parse_quote! {
-        fn x(
-            context: &Context,
-            parameters: &Params,
-            image: Option<Read<Cpu<ColorRgb>>>,
-            output: Write<CustomPort<ColorRgb>>,
-        ) {}
-    };
-    let module = generated_module(
-        expand(
-            quote!(id = "x", contract = c, port_labels(image = "Input RGB", output = "Output RGB")),
-            function,
-        )
-        .unwrap(),
-    );
-    assert_port_specs(
-        &module,
-        "inputs",
-        quote!(
-            ::drip::ports::PortSpec::of::<Cpu<ColorRgb>>("image")
-                .named_payload("Input RGB")
-                .optional()
-        ),
-    );
-    assert_port_specs(
-        &module,
-        "outputs",
-        quote!(
-            ::drip::ports::PortSpec::of::<CustomPort<ColorRgb>>("output")
-                .named_payload("Output RGB")
-        ),
-    );
 }
 
 fn assert_port_specs(module: &syn::ItemMod, method: &str, expected: TokenStream) {

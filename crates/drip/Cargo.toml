@@ -20,7 +20,6 @@ hip = ["cubecl/hip"]
 cubecl = { version = "=0.11.0", default-features = false, features = ["std"] }
 cubecl-environment = { version = "=0.11.0", features = ["shared-bytes"] }
 bytes = "1"
-rkyv = { version = "0.8", features = ["unaligned"] }
 bytemuck = "1"
 pollster = "1.0.1"
 drip-macros = { path = "../drip-macros" }

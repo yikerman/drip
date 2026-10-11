@@ -5,8 +5,12 @@ use drip::{
     Error, Result,
     eval::Evaluator,
     graph::Dag,
-    node::{color, data::ColorRgb, exposure, raw},
-    ports::{Device, NodeId},
+    node::{
+        color,
+        data::{Rec2020, Rgb},
+        exposure,
+    },
+    ports::{Device, NodeId, Requirement},
     runtime::RuntimeContext,
 };
 use egui::Ui;
@@ -48,12 +52,9 @@ impl GuiNode for ExposureGui {
 
 fn meter(evaluator: &Evaluator, dag: &Dag, id: NodeId) -> Result<f32> {
     let output = dag.typed_output(dag.output_port(id, "output")?)?;
-    let image = evaluator.evaluate::<Device<ColorRgb>>(dag, &Default::default(), output)?;
-    if image.desc.interpretation != raw::working_color() {
-        return Err(Error::Contract(
-            "auto exposure requires identity Rec.2020/D65 with relative white 1".into(),
-        ));
-    }
+    let image = evaluator.evaluate::<Device<Rgb>>(dag, &Default::default(), output)?;
+    Rec2020::check(&image.desc)
+        .map_err(|e| Error::Contract(format!("auto exposure requires Rec.2020 / D65: {e}")))?;
     // Like darktable's area exposure mapping [1], compare linear luminance
     // against a target. Here the area is the whole image and the target is
     // exactly Y=0.18, rather than its default L*=50 (Y≈0.1842).
@@ -154,11 +155,11 @@ mod tests {
 
     fn graph(pixels: Vec<[f32; 3]>) -> (Dag, NodeId) {
         let mut dag = Dag::new();
-        let input = node::source::<ColorRgb>(
+        let input = node::source::<Rgb>(
             &mut dag,
-            ImageDesc {
+            RgbDesc {
                 extent: Extent { width: pixels.len() as u32, height: 1 },
-                interpretation: raw::working_color(),
+                coordinates: Coordinates::Space(REC2020_D65),
             },
             pixels,
         )
@@ -220,7 +221,7 @@ mod tests {
             let (dag, id) = graph(pixels);
             let output = dag.typed_output(dag.output_port(id, "output").unwrap()).unwrap();
             let image =
-                evaluator.evaluate::<Device<ColorRgb>>(&dag, &Default::default(), output).unwrap();
+                evaluator.evaluate::<Device<Rgb>>(&dag, &Default::default(), output).unwrap();
             assert_eq!(image.statistics.downloads, 0);
             let actual =
                 mean_luminance(evaluator.client().unwrap(), image.data.argument(), count).unwrap();

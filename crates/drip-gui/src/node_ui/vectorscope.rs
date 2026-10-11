@@ -16,25 +16,21 @@ use drip::{node::data::*, ports::*, runtime::KernelContext};
 use rayon::prelude::*;
 use std::sync::Arc;
 const RADIUS: f32 = 0.5;
-fn vector_contract(
-    _: &drip::runtime::GlobalContext,
+/// Plot linear Rec.2020/D65 RGB chromaticity in CIE 1976 u′v′. Negative channels
+/// are clipped for visualization; black has no chromaticity and is omitted.
+/// Density uses logarithmic counts.
+#[drip::node(id = "view.vectorscope", name = "Vectorscope", category = "View")]
+fn observe(
+    _: &KernelContext<'_>,
     _: &(),
-    image: Option<&ImageDesc<Color>>,
+    image: Read<'_, Device<Rgb>, Rec2020>,
 ) -> drip::Result<()> {
-    super::contracts::working(image)
-}
-
-/// Plot identity-encoded Rec.2020/D65 ColorRgb chromaticity in CIE 1976 u′v′.
-/// Requires relative white 1. Negative channels are clipped for visualization;
-/// black has no chromaticity and is omitted. Density uses logarithmic counts.
-#[drip::node(id="view.vectorscope", name="Vectorscope", category="View", contract=vector_contract)]
-fn observe(_: &KernelContext<'_>, _: &(), image: Read<'_, Device<ColorRgb>>) -> drip::Result<()> {
     let _ = image;
     Ok(())
 }
 pub fn vectorscope(
     _: (),
-    (image,): (&DeviceRgb<Color>,),
+    (image,): (&DeviceRgb,),
     ctx: &PrepareContext,
 ) -> Result<Arc<Scope>, KernelError> {
     let matrix = &color::rgb_to_xyz(REC2020, D65);
@@ -44,7 +40,7 @@ pub fn vectorscope(
         counts,
         ScopeAxes::Vectorscope { primaries, color_space: "Rec.2020" },
         true,
-        super::data::DisplayInterpretation::label(&image.desc.interpretation),
+        image.desc.coordinates.to_string(),
     ))
 }
 
@@ -105,9 +101,8 @@ impl crate::node_ui::GuiNode for VectorscopeGui {
     type Parameters = ();
     type Presentation = Arc<Scope>;
     const ID: &'static str = "view.vectorscope";
-    const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|p, inputs, ctx| {
-        vectorscope(p, (&ctx.device_image::<drip::node::data::Color>(inputs)?,), ctx)
-    });
+    const PREPARE: Option<crate::node_ui::Prepare<Self>> =
+        Some(|p, inputs, ctx| vectorscope(p, (&ctx.device_image(inputs)?,), ctx));
 }
 
 #[cfg(test)]
@@ -117,7 +112,7 @@ mod tests {
     #[test]
     #[ignore = "requires the DRIP_BACKEND compute device; run explicitly"]
     fn device_vectorscope_preserves_neutrals_primaries_and_hdr() {
-        use crate::node_ui::data::Rgb;
+        use crate::node_ui::data::HostImage;
         use crate::node_ui::scopes::tests::{context, device};
         let ctx = context();
         let mut pixels = vec![[0.18; 3]; 40000];
@@ -129,7 +124,7 @@ mod tests {
             [f32::MAX; 3],
             [f32::MIN_POSITIVE; 3],
         ]);
-        let image = Rgb {
+        let image = HostImage {
             width: pixels.len(),
             height: 1,
             requested_scale: 1,
@@ -143,7 +138,7 @@ mod tests {
     #[test]
     #[ignore = "requires the DRIP_BACKEND compute device; run explicitly"]
     fn device_vectorscope_rounding_stays_near_reference() {
-        use crate::node_ui::data::Rgb;
+        use crate::node_ui::data::HostImage;
         use crate::node_ui::scopes::tests::{context, device};
         let ctx = context();
         let mut state = 42u32;
@@ -155,7 +150,7 @@ mod tests {
                 })
             })
             .collect();
-        let image = Rgb {
+        let image = HostImage {
             width: 512,
             height: 512,
             requested_scale: 1,

@@ -1,6 +1,6 @@
 //! Node declarations generated from functions. Contracts remain ordinary Rust.
 use crate::{
-    Result,
+    Error, Result,
     ports::{Data, Description, PortSpec},
     runtime::KernelContext,
 };
@@ -30,19 +30,29 @@ pub trait Node: Send + Sync + 'static {
     fn inputs(&self) -> Vec<PortSpec>;
     fn outputs(&self) -> Vec<PortSpec>;
     /// Pure output description/check using the same global configuration as run.
+    /// Inputs are known descriptions; `None` is an unconnected optional input.
     /// Graph edits use full detail; evaluation repeats this with actual inputs.
     fn contract(
         &self,
         global: &crate::runtime::GlobalContext,
         inputs: &[Option<Description>],
-    ) -> Result<Vec<Option<Description>>>;
+    ) -> Result<Outcome>;
+    /// Produce every output described by the contract.
     fn run(
         &self,
         context: &KernelContext<'_>,
-        input_descs: &[Option<Description>],
-        inputs: &[Option<Data>],
-        output_descs: &[Option<Description>],
-    ) -> Result<Vec<Option<Data>>>;
+        inputs: &[Option<(Description, Data)>],
+        outputs: &[Description],
+    ) -> Result<Vec<Data>>;
+}
+
+/// A node's output descriptions, or why they are not known yet. Only unbound
+/// sources are unknown; their consumers inherit the reason, and evaluation
+/// reports it. A contradiction is an error instead.
+#[derive(Clone)]
+pub enum Outcome {
+    Known(Vec<Description>),
+    Unknown(Error),
 }
 
 pub struct Registration {

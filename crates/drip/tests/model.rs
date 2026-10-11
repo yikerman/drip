@@ -3,59 +3,47 @@ use drip::{
     eval::Evaluator,
     graph::Dag,
     node,
-    node::data::*,
+    node::{color, data::*},
     ports::*,
     runtime::{KernelContext, RuntimeContext},
 };
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
-fn camera() -> Camera {
-    Camera {
-        coordinates: "fixture-camera-response-v1".into(),
-        scale: "black-relative-white-reference".into(),
-    }
+/// A camera whose responses are linear Rec.2020/D65, so its matrix is identity.
+fn metadata(model: &str) -> Arc<drip_raw::Metadata> {
+    let mut m =
+        drip_raw::Metadata { make: "Fixture".into(), model: model.into(), ..Default::default() };
+    let cam_from_xyz =
+        color::to_f32(&color::inverse(&color::rgb_to_xyz(color::REC2020, color::D65)));
+    m.calibration.xyz_to_cam[..3].copy_from_slice(&cam_from_xyz);
+    Arc::new(m)
 }
-fn color() -> Color {
-    Color {
-        space: "rec2020-d65".into(),
-        encoding: Encoding::Identity,
-        scale: "relative-white-1".into(),
-    }
+fn camera(m: &drip_raw::Metadata) -> Response {
+    Response { camera: Camera::of(m), balance: None }
 }
-fn image_desc() -> ImageDesc<Color> {
-    ImageDesc { extent: Extent { width: 2, height: 1 }, interpretation: color() }
+fn image_desc() -> RgbDesc {
+    RgbDesc { extent: Extent { width: 2, height: 1 }, coordinates: Coordinates::Space(REC2020_D65) }
 }
-fn image(dag: &mut Dag) -> Output<ColorRgb> {
-    node::source::<ColorRgb>(dag, image_desc(), vec![[0.1, -0.2, 2.0]; 2]).unwrap()
+fn image(dag: &mut Dag) -> Output<Rgb> {
+    node::source::<Rgb>(dag, image_desc(), vec![[0.1, -0.2, 2.0]; 2]).unwrap()
 }
-
-type CMatrix = Matrix3<Camera, Color>;
-fn identity() -> [[f32; 3]; 3] {
-    [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
-}
-
-fn calibration(dag: &mut Dag, source: Camera) -> Output<CaptureMetadata> {
-    let data = CaptureData {
-        matrix: Some(CameraCalibration { source, target: color(), values: identity() }),
-        ..Default::default()
-    };
-    node::source::<CaptureMetadata>(dag, MetadataDesc::of(&data), data).unwrap()
+fn capture(dag: &mut Dag, m: Arc<drip_raw::Metadata>) -> Output<CaptureMetadata> {
+    node::source::<CaptureMetadata>(dag, m.clone(), m).unwrap()
 }
 
-fn copy_contract(
-    _: &drip::runtime::GlobalContext,
-    _: &(),
-    i: Option<&ImageDesc<Color>>,
-) -> Result<(Option<ImageDesc<Color>>,)> {
-    Ok((i.cloned(),))
+fn copy_contract(_: &drip::runtime::GlobalContext, _: &(), i: &RgbDesc) -> Result<(RgbDesc,)> {
+    Ok((i.clone(),))
 }
 /// CPU identity for checking transport; no color reinterpretation.
-#[node(id="test-cpu-copy", contract=copy_contract, references=[("contract", "https://example.invalid/contract")], port_labels(image = "Input RGB", output = "Output RGB"))]
+#[node(id="test-cpu-copy", contract=copy_contract, references=[("contract", "https://example.invalid/contract")])]
 fn cpu_copy(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<ColorRgb>>,
-    output: Write<'_, Cpu<ColorRgb>>,
+    image: Read<'_, Cpu<Rgb>>,
+    output: Write<'_, Cpu<Rgb>>,
 ) -> Result<()> {
     output.data.copy_from_slice(image.data);
     Ok(())
@@ -64,45 +52,43 @@ fn cpu_copy(
 #[test]
 fn sources_check_actual_storage_at_admission() {
     let mut d = Dag::new();
-    assert!(node::source::<ColorRgb>(&mut d, image_desc(), vec![[0.; 3]]).is_err());
+    assert!(node::source::<Rgb>(&mut d, image_desc(), vec![[0.; 3]]).is_err());
     let mut desc = image_desc();
     desc.extent.width = 0;
-    assert!(node::source::<ColorRgb>(&mut d, desc, vec![]).is_err());
+    assert!(node::source::<Rgb>(&mut d, desc, vec![]).is_err());
 }
 #[test]
 fn mismatches_are_rejected_before_runtime_exists() {
     let mut d = Dag::new();
-    let camera_image = node::source::<CameraRgb>(
+    let a = metadata("A");
+    let camera_image = node::source::<Rgb>(
         &mut d,
-        ImageDesc { extent: image_desc().extent, interpretation: camera() },
+        RgbDesc { extent: image_desc().extent, coordinates: Coordinates::Camera(camera(&a)) },
         vec![[0.5; 3]; 2],
     )
     .unwrap();
-    let mut wrong = camera();
-    wrong.coordinates = "other camera".into();
-    let matrix = calibration(&mut d, wrong);
+    let other = capture(&mut d, metadata("B"));
     let n = node::camera_to_rgb::add(&mut d, ()).unwrap();
     d.connect(camera_image, n.image).unwrap();
-    assert!(
-        d.connect(matrix, n.metadata)
-            .unwrap_err()
-            .to_string()
-            .contains("differs from matrix source")
-    );
-    let valid = calibration(&mut d, camera());
+    let error = d.connect(other, n.metadata).unwrap_err().to_string();
+    assert!(error.contains("differs from the capture metadata"), "{error}");
+    let valid = capture(&mut d, a);
     d.connect(valid, n.metadata).unwrap(); // failed edit left the input free
-    let exposure = node::exposure::add(&mut d, node::Exposure { ev: 0. }).unwrap();
-    assert!(d.connect_ids(camera_image.id(), exposure.image.id()).is_err());
-    d.connect(n.output, exposure.image).unwrap();
+    let sigmoid = node::sigmoid::apply::add(&mut d, Default::default()).unwrap();
+    let error = d.connect_ids(camera_image.id(), sigmoid.image.id()).unwrap_err().to_string();
+    assert!(error.contains("image requires Rec.2020 / D65"), "{error}");
+    d.connect(n.output, sigmoid.image).unwrap();
 }
 #[test]
-fn rejects_encoded_rgb_without_guessing() {
+fn requirements_compare_spaces_exactly_and_parameters_at_admission() {
     let mut d = Dag::new();
     let mut desc = image_desc();
-    desc.interpretation.encoding = Encoding::Srgb;
-    let source = node::source::<ColorRgb>(&mut d, desc, vec![[0.; 3]; 2]).unwrap();
-    let e = node::exposure::add(&mut d, node::Exposure { ev: 0. }).unwrap();
-    assert!(d.connect(source, e.image).is_err());
+    desc.coordinates = Coordinates::Space(RgbSpace { white: [0.3127, 0.33], ..REC2020_D65 });
+    let source = node::source::<Rgb>(&mut d, desc, vec![[0.; 3]; 2]).unwrap();
+    let sigmoid = node::sigmoid::apply::add(&mut d, Default::default()).unwrap();
+    assert!(d.connect(source, sigmoid.image).is_err());
+    let exposure = node::exposure::add(&mut d, node::Exposure { ev: 0. }).unwrap();
+    d.connect(source, exposure.image).unwrap(); // Exposure scales any RGB.
     assert!(node::exposure::add(&mut d, node::Exposure { ev: f32::NAN }).is_err());
 }
 #[test]
@@ -112,10 +98,11 @@ fn typed_macro_supplies_docs_ports_and_discovery() {
     assert_eq!(n.metadata().references.len(), 1);
     assert_eq!(n.inputs()[0].name, "image");
     assert_eq!(n.outputs()[0].name, "output");
-    assert_eq!(n.inputs()[0].payload_name, "Input RGB");
-    assert_eq!(n.outputs()[0].payload_name, "Output RGB");
-    assert!(n.inputs()[0].is::<ColorRgb>());
-    assert!(n.outputs()[0].is::<ColorRgb>());
+    assert_eq!(n.inputs()[0].label(), "RGB");
+    assert!(n.inputs()[0].is::<Rgb>());
+    assert!(n.outputs()[0].is::<Rgb>());
+    let sigmoid = node::sigmoid::apply::definition(Default::default()).unwrap();
+    assert_eq!(sigmoid.inputs()[0].label(), "RGB · Rec.2020 / D65");
     assert!(n.metadata().parameters.is_empty());
     assert!(
         drip::definition::registered("tone.exposure", serde_json::json!({"ev":"bad"})).is_err()
@@ -123,9 +110,9 @@ fn typed_macro_supplies_docs_ports_and_discovery() {
 }
 #[test]
 fn parameter_schema_comes_from_the_function_parameter_type() {
-    let n = relabel::definition(Relabel::default());
+    let n = relabel::definition(Relabel::default()).unwrap();
     let [parameter] = n.metadata().parameters else { panic!("expected one parameter") };
-    assert_eq!(parameter.name, "encoded");
+    assert_eq!(parameter.name, "camera");
     assert_eq!(parameter.kind, drip::param::ParamKind::Bool { default: false });
 }
 #[test]
@@ -134,16 +121,16 @@ fn incomplete_nodes_do_not_make_unrelated_targets_unevaluable() {
     let source = image(&mut d);
     let incomplete = cpu_copy::add(&mut d, ()).unwrap();
     let eval = Evaluator::new(RuntimeContext::host());
-    assert!(eval.evaluate::<Cpu<ColorRgb>>(&d, &Default::default(), source).is_ok());
+    assert!(eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), source).is_ok());
     assert!(matches!(
-        eval.evaluate::<Cpu<ColorRgb>>(&d, &Default::default(), incomplete.output),
+        eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), incomplete.output),
         Err(Error::MissingInput { .. })
     ));
     let downstream = cpu_copy::add(&mut d, ()).unwrap();
     d.connect(incomplete.output, downstream.image).unwrap();
-    assert!(eval.evaluate::<Cpu<ColorRgb>>(&d, &Default::default(), downstream.output).is_err());
+    assert!(eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), downstream.output).is_err());
     d.connect(source, incomplete.image).unwrap();
-    assert!(eval.evaluate::<Cpu<ColorRgb>>(&d, &Default::default(), downstream.output).is_ok());
+    assert!(eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), downstream.output).is_ok());
 }
 #[test]
 fn rejects_cycles_occupancy_foreign_handles_and_wrong_directions() {
@@ -167,7 +154,7 @@ fn rejects_cycles_occupancy_foreign_handles_and_wrong_directions() {
     assert!(d.connect_ids(a.image.id(), b.output.id()).is_err());
     assert_eq!(
         Evaluator::new(RuntimeContext::host())
-            .evaluate::<Cpu<ColorRgb>>(&d, &Default::default(), b.output)
+            .evaluate::<Cpu<Rgb>>(&d, &Default::default(), b.output)
             .unwrap()
             .statistics
             .nodes,
@@ -180,7 +167,7 @@ fn handles_from_aborted_edits_and_removed_nodes_stay_stale() {
     let source = image(&mut d);
     let mut escaped = None;
     let failed: Result<()> = d.edit(|e| {
-        escaped = Some(cpu_copy::Ports::from_node(e.add(cpu_copy::definition(()))));
+        escaped = Some(cpu_copy::Ports::from_node(e.add(cpu_copy::definition(())?)));
         Err(Error::Graph("abort".into()))
     });
     assert!(failed.is_err());
@@ -194,26 +181,27 @@ fn handles_from_aborted_edits_and_removed_nodes_stay_stale() {
 #[derive(Default, serde::Serialize, serde::Deserialize, drip::Parameters)]
 struct Relabel {
     #[param(drip::param::ParamKind::Bool { default: false })]
-    encoded: bool,
+    camera: bool,
 }
 fn relabel_contract(
     _: &drip::runtime::GlobalContext,
     p: &Relabel,
-    i: Option<&ImageDesc<Color>>,
-) -> Result<(Option<ImageDesc<Color>>,)> {
-    let mut output = i.cloned();
-    if let Some(d) = &mut output {
-        d.interpretation.encoding = if p.encoded { Encoding::Srgb } else { Encoding::Identity };
-    }
-    Ok((output,))
+    i: &RgbDesc,
+) -> Result<(RgbDesc,)> {
+    let coordinates = if p.camera {
+        Coordinates::Camera(camera(&metadata("relabel")))
+    } else {
+        Coordinates::Space(REC2020_D65)
+    };
+    Ok((RgbDesc { coordinates, ..i.clone() },))
 }
-/// Explicit test-only assignment of encoding, without numeric conversion.
+/// Explicit test-only assignment of coordinates, without numeric conversion.
 #[node(id="test-relabel",contract=relabel_contract)]
 fn relabel(
     _: &KernelContext<'_>,
     _: &Relabel,
-    image: Read<'_, Cpu<ColorRgb>>,
-    output: Write<'_, Cpu<ColorRgb>>,
+    image: Read<'_, Cpu<Rgb>>,
+    output: Write<'_, Cpu<Rgb>>,
 ) -> Result<()> {
     output.data.copy_from_slice(image.data);
     Ok(())
@@ -222,66 +210,60 @@ fn relabel(
 fn parameter_edits_recheck_downstream_and_batch_edits_commit_together() {
     let mut d = Dag::new();
     let source = image(&mut d);
-    let a = relabel::add(&mut d, Relabel { encoded: false }).unwrap();
-    let b = node::exposure::add(&mut d, node::Exposure { ev: 0. }).unwrap();
+    let a = relabel::add(&mut d, Relabel { camera: false }).unwrap();
+    let b = node::sigmoid::apply::add(&mut d, Default::default()).unwrap();
     d.connect(source, a.image).unwrap();
     d.connect(a.output, b.image).unwrap();
-    assert!(d.replace(a.node, relabel::definition(Relabel { encoded: true })).is_err());
-    assert_eq!(
-        d.description(a.output).unwrap().unwrap().interpretation.encoding,
-        Encoding::Identity
-    );
+    assert!(d.replace(a.node, relabel::definition(Relabel { camera: true }).unwrap()).is_err());
+    let coordinates = |d: &Dag| d.description(a.output).unwrap().unwrap().coordinates.clone();
+    assert_eq!(coordinates(&d), Coordinates::Space(REC2020_D65));
     d.edit(|e| {
-        e.replace(a.node, relabel::definition(Relabel { encoded: true }))?;
+        e.replace(a.node, relabel::definition(Relabel { camera: true })?)?;
         e.disconnect(b.image.id())
     })
     .unwrap();
-    assert_eq!(d.description(a.output).unwrap().unwrap().interpretation.encoding, Encoding::Srgb);
+    assert!(matches!(coordinates(&d), Coordinates::Camera(_)));
 }
 
 static PRODUCED: AtomicUsize = AtomicUsize::new(0);
-type SplitDescriptions = (Option<ImageDesc<Color>>, Option<MatrixDesc<Camera, Color>>);
+const LEVELS: [f32; 4] = [1., 2., 3., 4.];
 fn split_contract(
     _: &drip::runtime::GlobalContext,
     _: &(),
-    i: Option<&ImageDesc<Color>>,
-) -> Result<SplitDescriptions> {
-    Ok((i.cloned(), i.map(|d| MatrixDesc { source: camera(), target: d.interpretation.clone() })))
+    i: &RgbDesc,
+) -> Result<(RgbDesc, BayerLevelsDesc)> {
+    let levels = BayerLevelsDesc { phase: BayerPhase::Rggb, response: camera(&metadata("split")) };
+    Ok((i.clone(), levels))
 }
-/// Produce independent image and matrix ports to exercise multi-output adapters.
+/// Produce independent image and levels ports to exercise multi-output adapters.
 #[node(id="test-split",contract=split_contract)]
 fn split(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<ColorRgb>>,
-    copy: Write<'_, Cpu<ColorRgb>>,
-    matrix: Write<'_, Cpu<CMatrix>>,
+    image: Read<'_, Cpu<Rgb>>,
+    copy: Write<'_, Cpu<Rgb>>,
+    levels: Write<'_, Cpu<BayerLevels>>,
 ) -> Result<()> {
     PRODUCED.fetch_add(1, Ordering::Relaxed);
     copy.data.copy_from_slice(image.data);
-    *matrix.data = identity();
+    *levels.data = LEVELS;
     Ok(())
 }
 fn consume_contract(
     _: &drip::runtime::GlobalContext,
     _: &(),
-    a: Option<&ImageDesc<Color>>,
-    b: Option<&MatrixDesc<Camera, Color>>,
-) -> Result<(Option<ImageDesc<Color>>,)> {
-    if let (Some(a), Some(b)) = (a, b)
-        && a.interpretation != b.target
-    {
-        return Err(Error::Contract("target mismatch".into()));
-    }
-    Ok((if b.is_some() { a.cloned() } else { None },))
+    image: &RgbDesc,
+    _: &BayerLevelsDesc,
+) -> Result<(RgbDesc,)> {
+    Ok((image.clone(),))
 }
 #[node(id="test-consume",contract=consume_contract)]
 fn consume(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<ColorRgb>>,
-    _matrix: Read<'_, Cpu<CMatrix>>,
-    output: Write<'_, Cpu<ColorRgb>>,
+    image: Read<'_, Cpu<Rgb>>,
+    _levels: Read<'_, Cpu<BayerLevels>>,
+    output: Write<'_, Cpu<Rgb>>,
 ) -> Result<()> {
     output.data.copy_from_slice(image.data);
     Ok(())
@@ -295,34 +277,26 @@ fn independent_outputs_share_one_producer_per_evaluation_without_persistent_cach
     let consumer = consume::add(&mut d, ()).unwrap();
     d.connect(source, split.image).unwrap();
     d.connect(split.copy, consumer.image).unwrap();
-    d.connect(split.matrix, consumer._matrix).unwrap();
+    d.connect(split.levels, consumer._levels).unwrap();
     let eval = Evaluator::new(RuntimeContext::host());
     for expected in 1..=2 {
-        let result =
-            eval.evaluate::<Cpu<ColorRgb>>(&d, &Default::default(), consumer.output).unwrap();
+        let result = eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), consumer.output).unwrap();
         assert_eq!(result.statistics.nodes, 3);
         assert_eq!(PRODUCED.load(Ordering::Relaxed), expected);
     }
-    let matrix = eval.evaluate::<Cpu<CMatrix>>(&d, &Default::default(), split.matrix).unwrap();
-    assert_eq!(*matrix.data, identity()); // image output may be unused
+    let levels = eval.evaluate::<Cpu<BayerLevels>>(&d, &Default::default(), split.levels).unwrap();
+    assert_eq!(*levels.data, LEVELS); // image output may be unused
     let native = eval.evaluate_node(&d, &Default::default(), split.node).unwrap();
     assert_eq!(native.outputs.len(), 2);
-    assert_eq!(*native.outputs[1].get::<Cpu<CMatrix>>().unwrap().1, identity());
+    assert_eq!(*native.outputs[1].get::<Cpu<BayerLevels>>().unwrap().1, LEVELS);
 }
 
-fn checked_contract(
-    _: &drip::runtime::GlobalContext,
-    _: &(),
-    i: Option<&ImageDesc<Color>>,
-) -> Result<(Option<ImageDesc<Color>>,)> {
-    Ok((i.cloned(),))
-}
-#[node(id="test-value-check",contract=checked_contract)]
+#[node(id="test-value-check",contract=copy_contract)]
 fn checked(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<ColorRgb>>,
-    output: Write<'_, Cpu<ColorRgb>>,
+    image: Read<'_, Cpu<Rgb>>,
+    output: Write<'_, Cpu<Rgb>>,
 ) -> Result<()> {
     if image.data.iter().any(|p| p[0] == 0.0) {
         return Err(Error::Contract("data-dependent zero divisor".into()));
@@ -333,65 +307,31 @@ fn checked(
 #[test]
 fn data_dependent_checks_remain_at_eval() {
     let mut d = Dag::new();
-    let source = node::source::<ColorRgb>(&mut d, image_desc(), vec![[0.; 3]; 2]).unwrap();
+    let source = node::source::<Rgb>(&mut d, image_desc(), vec![[0.; 3]; 2]).unwrap();
     let checked = checked::add(&mut d, ()).unwrap();
     d.connect(source, checked.image).unwrap();
     let error = Evaluator::new(RuntimeContext::host())
-        .evaluate::<Cpu<ColorRgb>>(&d, &Default::default(), checked.output)
+        .evaluate::<Cpu<Rgb>>(&d, &Default::default(), checked.output)
         .err()
         .unwrap();
     assert!(error.to_string().contains("zero divisor"));
 }
 
 fn device_chain(runtime: RuntimeContext) {
-    let metadata = CaptureData {
-        capture: drip_raw::Metadata {
-            iso: f32::from_bits(0x7fc00012),
-            shutter: -0.0,
-            aperture: 2.8,
-            focal_length: 50.0,
-            timestamp: -1234567,
-            make: "測試".into(),
-            model: "x".into(),
-            datetime: Vec::new(),
-            orientation: 6,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let desc = MetadataDesc::of(&metadata);
-    let device = CaptureMetadata::upload(&desc, &metadata, &runtime).unwrap();
-    let restored = CaptureMetadata::download(&desc, &device, &runtime).unwrap();
-    assert_eq!(restored.capture.iso.to_bits(), metadata.capture.iso.to_bits());
-    assert_eq!(restored.capture.shutter.to_bits(), metadata.capture.shutter.to_bits());
-    assert_eq!(restored.capture.orientation, metadata.capture.orientation);
-    assert_eq!(
-        (
-            restored.capture.make,
-            restored.capture.model,
-            restored.capture.datetime,
-            restored.capture.timestamp
-        ),
-        (
-            metadata.capture.make,
-            metadata.capture.model,
-            metadata.capture.datetime,
-            metadata.capture.timestamp
-        )
-    );
+    let m = metadata("chain");
     let mut d = Dag::new();
     let source = node::source::<Bayer>(
         &mut d,
         BayerDesc {
             extent: Extent { width: 5, height: 3 },
             phase: BayerPhase::Rggb,
-            interpretation: camera(),
+            response: camera(&m),
         },
         vec![1.; 15],
     )
     .unwrap();
-    let matrix = calibration(&mut d, camera());
-    let preview = node::bayer_preview::add(&mut d, ()).unwrap();
+    let matrix = capture(&mut d, m);
+    let preview = node::bayer_2x2::add(&mut d, ()).unwrap();
     let convert = node::camera_to_rgb::add(&mut d, ()).unwrap();
     let exposure = node::exposure::add(&mut d, node::Exposure { ev: 1. }).unwrap();
     let island = cpu_copy::add(&mut d, ()).unwrap();
@@ -403,7 +343,7 @@ fn device_chain(runtime: RuntimeContext) {
     d.connect(exposure.output, island.image).unwrap();
     d.connect(island.output, after.image).unwrap();
     let eval = Evaluator::new(runtime);
-    let result = eval.evaluate::<Cpu<ColorRgb>>(&d, &Default::default(), after.output).unwrap();
+    let result = eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), after.output).unwrap();
     assert_eq!(result.desc.extent, Extent { width: 2, height: 1 });
     for p in result.data.iter() {
         for v in p {
@@ -413,8 +353,7 @@ fn device_chain(runtime: RuntimeContext) {
     assert_eq!(result.statistics.nodes, 7);
     assert_eq!(result.statistics.uploads, 2);
     assert_eq!(result.statistics.downloads, 2);
-    let resident =
-        eval.evaluate::<Device<ColorRgb>>(&d, &Default::default(), exposure.output).unwrap();
+    let resident = eval.evaluate::<Device<Rgb>>(&d, &Default::default(), exposure.output).unwrap();
     assert_eq!(resident.statistics.downloads, 0);
     assert_eq!(resident.statistics.uploads, 1);
 
@@ -429,7 +368,7 @@ fn device_chain(runtime: RuntimeContext) {
         Some(&mut timings),
     );
     let image = values[&observer.node].as_ref().unwrap().get("image").unwrap();
-    assert_eq!(image.get::<Cpu<ColorRgb>>().unwrap().1, result.data.as_ref());
+    assert_eq!(image.get::<Cpu<Rgb>>().unwrap().1, result.data.as_ref());
     assert_eq!(timings.len(), 8);
     assert!(timings.iter().all(|timing| timing.success));
 }
@@ -450,15 +389,8 @@ fn cubecl_cpu_same_kernels() {
     device_chain(RuntimeContext::cpu());
 }
 
-fn sink_contract(
-    _: &drip::runtime::GlobalContext,
-    _: &(),
-    _: Option<&ImageDesc<Color>>,
-) -> Result<()> {
-    Ok(())
-}
-#[node(id = "test-input-only", contract = sink_contract)]
-fn sink(_: &KernelContext<'_>, _: &(), image: Read<'_, Cpu<ColorRgb>>) -> Result<()> {
+#[node(id = "test-input-only")]
+fn sink(_: &KernelContext<'_>, _: &(), image: Read<'_, Cpu<Rgb>>) -> Result<()> {
     if image.data.is_empty() {
         return Err(Error::Contract("empty sink input".into()));
     }
@@ -474,8 +406,9 @@ fn node_targets_include_input_only_nodes() {
     let eval = Evaluator::new(RuntimeContext::host());
     let result = eval.evaluate_node(&d, &Default::default(), outputs.node).unwrap();
     assert_eq!(result.outputs.len(), 1);
-    assert_eq!(result.outputs[0].get::<Cpu<ColorRgb>>().unwrap().1.len(), 2);
-    assert!(result.outputs[0].get::<Cpu<CMatrix>>().is_err());
+    assert_eq!(result.outputs[0].get::<Cpu<Rgb>>().unwrap().1.len(), 2);
+    assert!(result.outputs[0].get::<Cpu<Bayer>>().is_err());
+    assert!(result.outputs[0].get::<Device<Rgb>>().is_err());
     let sink = sink::add(&mut d, ()).unwrap();
     assert!(eval.evaluate_node(&d, &Default::default(), sink.node).is_err());
     d.connect(source, sink.image).unwrap();
@@ -488,8 +421,8 @@ fn node_targets_include_input_only_nodes() {
 fn bad_producer(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<ColorRgb>>,
-    output: Write<'_, Cpu<ColorRgb>>,
+    image: Read<'_, Cpu<Rgb>>,
+    output: Write<'_, Cpu<Rgb>>,
 ) -> Result<()> {
     *output.data = image.data[..1].to_vec().into();
     Ok(())
@@ -501,13 +434,10 @@ fn invalid_storage_cannot_escape_a_node_adapter() {
     let bad = bad_producer::add(&mut d, ()).unwrap();
     d.connect(source, bad.image).unwrap();
     let error = Evaluator::new(RuntimeContext::host())
-        .evaluate::<Cpu<ColorRgb>>(&d, &Default::default(), bad.output)
+        .evaluate::<Cpu<Rgb>>(&d, &Default::default(), bad.output)
         .err()
         .unwrap();
     assert!(error.to_string().contains("extent/storage mismatch"));
-    let mut desc = image_desc();
-    desc.interpretation.space.clear();
-    assert!(node::source::<ColorRgb>(&mut d, desc, vec![[0.0; 3]; 2]).is_err());
 }
 
 static BATCH_PRODUCED: AtomicUsize = AtomicUsize::new(0);
@@ -515,8 +445,8 @@ static BATCH_PRODUCED: AtomicUsize = AtomicUsize::new(0);
 fn batch_producer(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<ColorRgb>>,
-    output: Write<'_, Cpu<ColorRgb>>,
+    image: Read<'_, Cpu<Rgb>>,
+    output: Write<'_, Cpu<Rgb>>,
 ) -> Result<()> {
     BATCH_PRODUCED.fetch_add(1, Ordering::Relaxed);
     output.data.copy_from_slice(image.data);
@@ -533,7 +463,7 @@ fn batch_shares_ancestors_retains_only_observers_and_isolates_failures() {
     let b = sink::add(&mut dag, ()).unwrap();
     dag.connect(producer.output, a.image).unwrap();
     dag.connect(producer.output, b.image).unwrap();
-    let zero = node::source::<ColorRgb>(&mut dag, image_desc(), vec![[0.; 3]; 2]).unwrap();
+    let zero = node::source::<Rgb>(&mut dag, image_desc(), vec![[0.; 3]; 2]).unwrap();
     let failure = checked::add(&mut dag, ()).unwrap();
     dag.connect(zero, failure.image).unwrap();
     let downstream = sink::add(&mut dag, ()).unwrap();
@@ -559,10 +489,8 @@ fn batch_shares_ancestors_retains_only_observers_and_isolates_failures() {
     assert!(!timings.iter().any(|t| t.node == downstream.node || t.node == incomplete.node));
     assert_eq!(BATCH_PRODUCED.load(Ordering::Relaxed), 1);
     assert!(values[&producer.node].as_ref().unwrap().get("image").is_none());
-    let a =
-        values[&a.node].as_ref().unwrap().get("image").unwrap().shared::<Cpu<ColorRgb>>().unwrap();
-    let b =
-        values[&b.node].as_ref().unwrap().get("image").unwrap().shared::<Cpu<ColorRgb>>().unwrap();
+    let a = values[&a.node].as_ref().unwrap().get("image").unwrap().shared::<Cpu<Rgb>>().unwrap();
+    let b = values[&b.node].as_ref().unwrap().get("image").unwrap().shared::<Cpu<Rgb>>().unwrap();
     assert!(std::sync::Arc::ptr_eq(&a, &b));
     for id in [failure.node, downstream.node] {
         assert!(matches!(&values[&id], Err(Error::Node { node, .. }) if *node == failure.node));
@@ -570,12 +498,8 @@ fn batch_shares_ancestors_retains_only_observers_and_isolates_failures() {
     assert!(matches!(&values[&incomplete.node], Err(Error::MissingInput { .. })));
 }
 
-#[node(id="test-optional-input", contract=sink_contract)]
-fn optional_sink(
-    _: &KernelContext<'_>,
-    _: &(),
-    image: Option<Read<'_, Cpu<ColorRgb>>>,
-) -> Result<()> {
+#[node(id = "test-optional-input")]
+fn optional_sink(_: &KernelContext<'_>, _: &(), image: Option<Read<'_, Cpu<Rgb>>>) -> Result<()> {
     if let Some(image) = image {
         assert_eq!(image.data.len(), 2);
     }
@@ -599,37 +523,23 @@ fn optional_input_is_absent_only_when_disconnected() {
     assert!(values[&observer.node].as_ref().unwrap().get("image").is_some());
 }
 
-fn context_contract(
-    global: &drip::runtime::GlobalContext,
-    _: &(),
-) -> Result<(Option<ImageDesc<Color>>,)> {
-    Ok((Some(ImageDesc {
-        extent: Extent { width: global.scale, height: 1 },
-        interpretation: color(),
-    }),))
+fn context_contract(global: &drip::runtime::GlobalContext, _: &()) -> Result<(RgbDesc,)> {
+    Ok((RgbDesc { extent: Extent { width: global.scale, height: 1 }, ..image_desc() },))
 }
 #[node(id="test-global-context",contract=context_contract)]
-fn context_source(
-    context: &KernelContext<'_>,
-    _: &(),
-    output: Write<'_, Cpu<ColorRgb>>,
-) -> Result<()> {
+fn context_source(context: &KernelContext<'_>, _: &(), output: Write<'_, Cpu<Rgb>>) -> Result<()> {
     assert_eq!(output.desc.extent.width, context.global.scale);
     output.data.fill([context.global.scale as f32; 3]);
     Ok(())
 }
-fn fixed_width_contract(
-    _: &drip::runtime::GlobalContext,
-    _: &(),
-    image: Option<&ImageDesc<Color>>,
-) -> Result<()> {
-    if image.is_some_and(|d| d.extent.width != 1) {
+fn fixed_width_contract(_: &drip::runtime::GlobalContext, _: &(), image: &RgbDesc) -> Result<()> {
+    if image.extent.width != 1 {
         return Err(Error::Contract("requires width 1".into()));
     }
     Ok(())
 }
 #[node(id="test-fixed-width",contract=fixed_width_contract)]
-fn fixed_width(_: &KernelContext<'_>, _: &(), _image: Read<'_, Cpu<ColorRgb>>) -> Result<()> {
+fn fixed_width(_: &KernelContext<'_>, _: &(), _image: Read<'_, Cpu<Rgb>>) -> Result<()> {
     Ok(())
 }
 
@@ -644,18 +554,16 @@ fn global_context_describes_and_computes_each_request_without_changing_the_dag()
     dag.connect(source.output, fixed._image).unwrap(); // Full-detail connection is valid.
     let evaluator = Evaluator::new(RuntimeContext::host());
     let global = GlobalContext { scale: 3 };
-    let value = evaluator.evaluate::<Cpu<ColorRgb>>(&dag, &global, copy.output).unwrap();
+    let value = evaluator.evaluate::<Cpu<Rgb>>(&dag, &global, copy.output).unwrap();
     assert_eq!(value.desc.extent.width, 3);
     assert_eq!(&**value.data, &[[3.; 3]; 3]);
     assert_eq!(dag.description(copy.output).unwrap().unwrap().extent.width, 1);
     let batch = evaluator.evaluate_inputs(&dag, &global, &[copy.node, fixed.node]);
     let value = batch[&copy.node].as_ref().unwrap().get("image").unwrap();
-    assert_eq!(value.get::<Cpu<ColorRgb>>().unwrap().0.extent.width, 3);
+    assert_eq!(value.get::<Cpu<Rgb>>().unwrap().0.extent.width, 3);
     assert!(batch[&fixed.node].as_ref().err().unwrap().to_string().contains("requires width 1"));
     assert!(evaluator.evaluate_node(&dag, &Default::default(), fixed.node).is_ok());
     assert!(
-        evaluator
-            .evaluate::<Cpu<ColorRgb>>(&dag, &GlobalContext { scale: 0 }, copy.output)
-            .is_err()
+        evaluator.evaluate::<Cpu<Rgb>>(&dag, &GlobalContext { scale: 0 }, copy.output).is_err()
     );
 }

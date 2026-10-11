@@ -145,9 +145,6 @@ pub fn fitted(ctx: &egui::Context) -> Option<Vec2> {
     ctx.data(|d| d.get_temp(egui::Id::new(FITTED)))
 }
 
-pub mod camera_histogram;
-mod camera_waveform;
-mod contracts;
 pub mod data;
 pub mod histogram;
 pub mod templates;

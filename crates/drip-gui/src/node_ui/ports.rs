@@ -1,4 +1,4 @@
-//! Port text derived from the library's declared concrete payload names.
+//! Port text derived from the library's declared payload names and requirements.
 //! Connection checking stays in the library; this only names its contracts.
 
 use crate::model::{Graph, NodeId};
@@ -58,18 +58,14 @@ pub fn texts(graph: &Graph, id: NodeId) -> Vec<PortText> {
     let inputs = kind.inputs().map(|input| PortText {
         role: if input.optional { PortRole::OptionalInput } else { PortRole::Input },
         port: input.name,
-        label: label(input),
+        label: input.label(),
     });
     let outputs = kind.outputs().map(|output| PortText {
         role: PortRole::Output,
         port: output.name,
-        label: label(output),
+        label: output.label(),
     });
     inputs.chain(outputs).collect()
-}
-
-fn label(spec: &drip::ports::PortSpec) -> String {
-    spec.payload_name.replace("drip::node::data::", "")
 }
 
 #[cfg(test)]
@@ -79,14 +75,11 @@ mod tests {
     #[test]
     fn concrete_outputs_are_known_before_inputs_are_connected() {
         let mut graph = Graph::default();
-        for kind in [
-            crate::model::Registry.get("tone.sigmoid").unwrap(),
-            crate::model::Registry.get("tone.exposure").unwrap(),
-        ] {
-            let id = graph.add_node(kind).unwrap();
+        for (kind, label) in [("tone.sigmoid", "RGB · Rec.2020 / D65"), ("tone.exposure", "RGB")] {
+            let id = graph.add_node(crate::model::Registry.get(kind).unwrap()).unwrap();
             let ports = texts(&graph, id);
-            assert_eq!(ports[0].hover(), "Input · image: requires ColorRgb");
-            assert_eq!(ports.last().unwrap().hover(), "Output: ColorRgb");
+            assert_eq!(ports[0].hover(), format!("Input · image: requires {label}"));
+            assert_eq!(ports.last().unwrap().hover(), format!("Output: {label}"));
         }
     }
 

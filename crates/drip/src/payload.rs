@@ -1,48 +1,57 @@
 //! Logical payload families and their concrete host/device representations.
 use crate::{Result, runtime::RuntimeContext};
-use cubecl::{prelude::BufferArg, server::Handle};
+use cubecl::{bytes::Bytes, prelude::BufferArg, server::Handle};
 use std::{fmt::Debug, marker::PhantomData};
 mod host;
 pub use host::HostBuffer;
 
-/// A logical payload with one concrete host layout and an explicit byte codec.
-/// Numeric buffers keep the same element layout on the device. Nested allocations
-/// use a local packing adapter; allocation and transport remain shared.
+/// A logical payload: one concrete host value and a host description that
+/// contracts read. Descriptions and values are checked where they enter the
+/// graph (producer outputs, loaded sources); internal code trusts them.
 pub trait Payload: Send + Sync + Sized + 'static {
+    /// Port label shared by help and the editor.
+    const NAME: &'static str;
     type Desc: Clone + Debug + Send + Sync + 'static;
-    type Data: Send + Sync + 'static;
-    fn validate_desc(desc: &Self::Desc) -> Result<()>;
-    fn validate_cpu(desc: &Self::Desc, data: &Self::Data) -> Result<()>;
-    fn allocate_cpu(desc: &Self::Desc) -> Self::Data;
-    fn byte_len(desc: &Self::Desc) -> usize;
-    fn encode(desc: &Self::Desc, data: &Self::Data) -> Result<cubecl::bytes::Bytes>;
-    fn decode(desc: &Self::Desc, bytes: cubecl::bytes::Bytes) -> Result<Self::Data>;
-
-    fn upload(
-        desc: &Self::Desc,
-        data: &Self::Data,
-        runtime: &RuntimeContext,
-    ) -> Result<DeviceBuffer<Self>> {
-        Self::validate_cpu(desc, data)?;
-        Ok(DeviceBuffer::new(runtime.client()?.create(Self::encode(desc, data)?)))
-    }
-    fn download(
-        desc: &Self::Desc,
-        data: &DeviceBuffer<Self>,
-        runtime: &RuntimeContext,
-    ) -> Result<Self::Data> {
-        Self::validate_desc(desc)?;
-        let bytes = runtime
-            .client()?
-            .read_one(data.handle.clone())
-            .map_err(|e| crate::Error::Runtime(e.to_string()))?;
-        let data = Self::decode(desc, bytes)?;
-        Self::validate_cpu(desc, &data)?;
-        Ok(data)
-    }
+    type Host: Send + Sync + 'static;
+    fn validate(desc: &Self::Desc) -> Result<()>;
+    /// The value agrees with its (valid) description.
+    fn check(desc: &Self::Desc, host: &Self::Host) -> Result<()>;
+    /// Fresh host output storage for a valid description.
+    fn allocate(desc: &Self::Desc) -> Self::Host;
 }
 
-/// A CubeCL allocation tagged with its logical payload (or scratch marker).
+/// A payload kernels read on the device. Numeric buffers keep their host element
+/// layout; structured payloads stay on the host and do not implement this.
+pub trait DeviceLayout: Payload {
+    fn byte_len(desc: &Self::Desc) -> usize;
+    fn encode(desc: &Self::Desc, host: &Self::Host) -> Result<Bytes>;
+    fn decode(desc: &Self::Desc, bytes: Bytes) -> Result<Self::Host>;
+}
+
+pub fn upload<P: DeviceLayout>(
+    desc: &P::Desc,
+    host: &P::Host,
+    runtime: &RuntimeContext,
+) -> Result<DeviceBuffer<P>> {
+    Ok(DeviceBuffer::new(runtime.client()?.create(P::encode(desc, host)?)))
+}
+
+pub fn download<P: DeviceLayout>(
+    desc: &P::Desc,
+    buffer: &DeviceBuffer<P>,
+    runtime: &RuntimeContext,
+) -> Result<P::Host> {
+    let bytes = runtime
+        .client()?
+        .read_one(buffer.handle.clone())
+        .map_err(|e| crate::Error::Runtime(e.to_string()))?;
+    let host = P::decode(desc, bytes)?;
+    P::check(desc, &host)?;
+    Ok(host)
+}
+
+/// A CubeCL allocation tagged with its logical payload (or `()` for scratch
+/// and per-invocation constants).
 pub struct DeviceBuffer<P> {
     pub(crate) handle: Handle,
     marker: PhantomData<P>,
@@ -52,12 +61,15 @@ impl<P> DeviceBuffer<P> {
         Self { handle, marker: PhantomData }
     }
     pub fn argument(&self) -> BufferArg {
-        // SAFETY: payload codecs and scratch allocators determine the byte layout.
+        // SAFETY: payload layouts and scratch allocators determine the byte layout.
         // Scalar vectorization matches the element slices declared by kernels.
         unsafe { BufferArg::from_raw_parts(self.handle.clone(), 1) }
     }
 }
 
-pub trait Interpretation: Clone + Debug + PartialEq + Send + Sync + 'static {
-    fn validate(&self) -> Result<()>;
+pub(crate) fn decode_array<T: bytemuck::Pod, const N: usize>(bytes: &[u8]) -> Result<[T; N]> {
+    bytemuck::try_cast_slice::<u8, T>(bytes)
+        .map_err(|e| crate::Error::Runtime(format!("invalid coefficient layout: {e}")))?
+        .try_into()
+        .map_err(|_| crate::Error::Runtime("coefficient storage length mismatch".into()))
 }

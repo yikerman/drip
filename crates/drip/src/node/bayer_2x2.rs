@@ -6,38 +6,29 @@ use crate::{
     runtime::{GlobalContext, KernelContext, dispatch_dims},
 };
 pub use compute::{Definition, Ports, add, definition};
-fn bayer_preview_contract(
-    global: &GlobalContext,
-    _: &(),
-    image: Option<&BayerDesc>,
-) -> Result<(Option<ImageDesc<Camera>>,)> {
-    let output = image
-        .map(|d| {
-            let extent = reduce::demosaic_extent(global, &d.extent);
-            if d.extent.width < 2 || d.extent.height < 2 {
-                return Err(Error::Contract("Bayer 2x2 preview needs at least 2x2 samples".into()));
-            }
-            Ok(ImageDesc {
-                extent: Extent { width: extent.width / 2, height: extent.height / 2 },
-                interpretation: d.interpretation.clone(),
-            })
-        })
-        .transpose()?;
-    Ok((output,))
+fn bin2x2_contract(global: &GlobalContext, _: &(), image: &BayerDesc) -> Result<(RgbDesc,)> {
+    if image.extent.width < 2 || image.extent.height < 2 {
+        return Err(Error::Contract("Bayer 2x2 demosaic needs at least 2x2 samples".into()));
+    }
+    let extent = reduce::demosaic_extent(global, &image.extent);
+    Ok((RgbDesc {
+        extent: Extent { width: extent.width / 2, height: extent.height / 2 },
+        coordinates: Coordinates::Camera(image.response.clone()),
+    },))
 }
-/// Demosaic Bayer by averaging each 2×2 cell into CameraRgb, including both green
+/// Demosaic Bayer by averaging each 2×2 cell into camera RGB, including both green
 /// sites. Requires an explicit Bayer phase and drops incomplete edge cells.
 /// Requested preview detail first reduces each CFA phase plane.
-#[crate::node(id = "demosaic.bayer-2x2", name="Bayer 2×2 demosaic", category="Demosaic", contract = bayer_preview_contract)]
+#[crate::node(id = "demosaic.bayer-2x2", name="Bayer 2×2 demosaic", category="Demosaic", contract = bin2x2_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),
     image: Read<'_, Device<Bayer>>,
-    output: Write<'_, Device<CameraRgb>>,
+    output: Write<'_, Device<Rgb>, CameraRgb>,
 ) -> Result<()> {
     let reduced = reduce::for_demosaic(ctx, &image)?;
     let image = match &reduced {
-        Some((desc, data)) => Read { desc, data },
+        Some((desc, data)) => Read::new(desc, data),
         None => image,
     };
 

@@ -1,8 +1,10 @@
 //! Encode an evaluated image. File writes belong to the requesting frontend.
 use crate::{
     Error, Result,
-    node::data::{CaptureData, Color, ColorRgb, ImageDesc, Payload},
+    node::data::{Rec2020, Rgb, RgbDesc},
     node::profile,
+    payload::Payload,
+    ports::Requirement,
 };
 use lcms2::PixelFormat;
 use std::borrow::Cow;
@@ -23,14 +25,14 @@ pub enum Depth {
     F32,
 }
 
-/// Convert identity-encoded Rec.2020 through the requested output profile and
+/// Convert linear Rec.2020/D65 through the requested output profile and
 /// encode TIFF. Floating output retains the profile's floating range; integers clip.
 pub fn tiff(
-    desc: &ImageDesc<Color>,
+    desc: &RgbDesc,
     pixels: &[[f32; 3]],
     output: &profile::Output,
     depth: Depth,
-    metadata: Option<&CaptureData>,
+    metadata: Option<&drip_raw::Metadata>,
 ) -> Result<Vec<u8>> {
     tiff_compressed(
         desc,
@@ -44,21 +46,17 @@ pub fn tiff(
 
 /// The same encoding with an explicit TIFF compression policy.
 pub fn tiff_compressed(
-    desc: &ImageDesc<Color>,
+    desc: &RgbDesc,
     pixels: &[[f32; 3]],
     output: &profile::Output,
     depth: Depth,
-    metadata: Option<&CaptureData>,
+    metadata: Option<&drip_raw::Metadata>,
     compression: Compression,
 ) -> Result<Vec<u8>> {
-    ColorRgb::validate_desc(desc)?;
-    if desc.interpretation != crate::node::raw::working_color()
-        || pixels.len() != desc.extent.pixels()
-    {
-        return Err(Error::Contract(
-            "TIFF export expects relative-white-1, identity Rec.2020/D65 RGB with matching extent"
-                .into(),
-        ));
+    Rgb::validate(desc)?;
+    Rec2020::check(desc)?;
+    if pixels.len() != desc.extent.pixels() {
+        return Err(Error::Contract("TIFF export pixels do not match the image extent".into()));
     }
     let mut bytes = Cursor::new(Vec::new());
     let err = |e: tiff::TiffError| Error::Runtime(e.to_string());
@@ -107,19 +105,19 @@ fn write_image<C: ColorType>(
     tiff: &mut Tiff,
     extent: &crate::node::data::Extent,
     icc: &[u8],
-    metadata: Option<&CaptureData>,
+    metadata: Option<&drip_raw::Metadata>,
     data: &[C::Inner],
 ) -> tiff::TiffResult<()>
 where
     [C::Inner]: TiffValue,
 {
-    let exif = metadata.map(|m| write_exif(tiff, &m.capture)).transpose()?;
+    let exif = metadata.map(|m| write_exif(tiff, m)).transpose()?;
     let mut encoder = tiff.new_image::<C>(extent.width, extent.height)?;
     let ifd = encoder.encoder();
     ifd.write_tag(Tag::IccProfile, Undefined(icc))?;
     if let Some((m, exif)) = metadata.zip(exif) {
-        write_text(ifd, Tag::Make, &m.capture.make)?;
-        write_text(ifd, Tag::Model, &m.capture.model)?;
+        write_text(ifd, Tag::Make, &m.make)?;
+        write_text(ifd, Tag::Model, &m.model)?;
         ifd.write_tag(Tag::ExifDirectory, exif)?;
     }
     encoder.write_data(data)
@@ -158,11 +156,8 @@ fn write_exif(tiff: &mut Tiff, m: &drip_raw::Metadata) -> tiff::TiffResult<u32> 
 fn write_text<W: Write + Seek, K: TiffKind>(
     ifd: &mut DirectoryEncoder<W, K>,
     tag: Tag,
-    text: &[u8],
+    text: &str,
 ) -> tiff::TiffResult<()> {
-    let text = std::str::from_utf8(text).map_err(|e| {
-        tiff::TiffError::IoError(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-    })?;
     if text.is_empty() { Ok(()) } else { ifd.write_tag(tag, text) }
 }
 

@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::node_ui::data::Rgb;
+use crate::node_ui::data::HostImage;
 use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
 use rayon::prelude::*;
 
@@ -20,7 +20,7 @@ pub struct Image {
 }
 
 impl Image {
-    pub fn new(rgb: &Rgb) -> Self {
+    pub fn new(rgb: &HostImage) -> Self {
         let mut texels = vec![0; rgb.pixels.len() * 8];
         texels.par_chunks_exact_mut(8).zip(rgb.pixels.par_iter()).with_min_len(4096).for_each(
             |(texel, &[r, g, b])| {

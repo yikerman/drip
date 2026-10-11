@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::node_ui::data::{PrepareContext, Rgb};
+use crate::node_ui::data::{HostImage, PrepareContext};
 use drip::Error as KernelError;
 use drip::node::profile;
 
@@ -20,7 +20,7 @@ mod view;
 
 pub fn prepare(
     p: Preview,
-    image: &Arc<Rgb>,
+    image: &Arc<HostImage>,
     ctx: &PrepareContext,
 ) -> Result<PreviewImage, KernelError> {
     let input = image;
@@ -36,8 +36,10 @@ pub fn prepare(
     let mut view = match pixels {
         None => PreviewImage::new(image),
         Some(pixels) => {
-            let proof =
-                Arc::new(Rgb { pixels: std::sync::Arc::new(pixels.into()), ..(**input).clone() });
+            let proof = Arc::new(HostImage {
+                pixels: std::sync::Arc::new(pixels.into()),
+                ..(**input).clone()
+            });
             PreviewImage::new(&proof)
         }
     };
@@ -55,11 +57,11 @@ impl super::GuiNode for PreviewGui {
         super::profile::parameter_ui(path)
     }
     const PREPARE: Option<super::Prepare<Self>> =
-        Some(|p, inputs, ctx| prepare(p, &ctx.image::<drip::node::data::Color>(inputs)?, ctx));
+        Some(|p, inputs, ctx| prepare(p, &ctx.image(inputs)?, ctx));
 }
 
 use drip::{
-    node::data::{Color, ColorRgb, ImageDesc},
+    node::data::{Rec2020, Rgb},
     param::ParamKind,
     ports::{Cpu, Read},
     runtime::KernelContext,
@@ -87,19 +89,16 @@ pub struct Preview {
     #[param(Mode::None.schema())]
     pub mode: Mode,
 }
-fn preview_contract(
-    _: &drip::runtime::GlobalContext,
+/// Display linear Rec.2020/D65 RGB. Softproof simulates an output profile; Gamut
+/// check marks out-of-gamut colors in cyan. Each proof mode owns its output
+/// settings. Interpolation selects bilinear or nearest-neighbor display sampling
+/// and does not alter processing pixels.
+#[drip::node(id = "view.preview", name = "Preview", category = "View")]
+fn observe(
+    _: &KernelContext<'_>,
     _: &Preview,
-    image: Option<&ImageDesc<Color>>,
+    image: Read<'_, Cpu<Rgb>, Rec2020>,
 ) -> drip::Result<()> {
-    super::contracts::working(image)
-}
-/// Display identity-encoded Rec.2020/D65 ColorRgb with relative white 1.
-/// Softproof simulates an output profile; Gamut check marks out-of-gamut colors in
-/// cyan. Each proof mode owns its output settings. Interpolation selects bilinear
-/// or nearest-neighbor display sampling and does not alter processing pixels.
-#[drip::node(id="view.preview", name="Preview", category="View", contract=preview_contract)]
-fn observe(_: &KernelContext<'_>, _: &Preview, image: Read<'_, Cpu<ColorRgb>>) -> drip::Result<()> {
     let _ = image;
     Ok(())
 }

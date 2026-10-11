@@ -6,23 +6,11 @@ use crate::{
     runtime::{GlobalContext, KernelContext},
 };
 pub use compute::{Definition, Ports, add, definition};
-fn bayer_contract(
-    _: &GlobalContext,
-    p: &Settings,
-    input: Option<&BayerDesc>,
-) -> Result<(Option<BayerDesc>,)> {
-    if !(1..=256).contains(&p.factor) {
-        return Err(Error::Contract("box factor must be 1..=256".into()));
+fn bayer_contract(_: &GlobalContext, p: &Settings, input: &BayerDesc) -> Result<(BayerDesc,)> {
+    if p.factor > 1 && (input.extent.width < 2 || input.extent.height < 2) {
+        return Err(Error::Contract("Bayer reduction needs all four CFA sites".into()));
     }
-    let output = input
-        .map(|d| {
-            if p.factor > 1 && (d.extent.width < 2 || d.extent.height < 2) {
-                return Err(Error::Contract("Bayer reduction needs all four CFA sites".into()));
-            }
-            Ok(BayerDesc { extent: bayer_extent(&d.extent, p.factor as u32), ..d.clone() })
-        })
-        .transpose()?;
-    Ok((output,))
+    Ok((BayerDesc { extent: bayer_extent(&input.extent, p.factor as u32), ..input.clone() },))
 }
 
 /// Reduce Bayer by averaging each CFA phase plane separately. Output retains the

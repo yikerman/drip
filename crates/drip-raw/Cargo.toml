@@ -16,7 +16,6 @@ links = "raw_r"
 reference = []
 
 [dependencies]
-rkyv = { version = "0.8", features = ["unaligned"] }
 
 [build-dependencies]
 cc = { version = "1.2.64", features = ["parallel"] }

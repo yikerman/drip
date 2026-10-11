@@ -3,15 +3,15 @@
 use super::SIZE;
 use super::{ExposureSettings, Scope, ScopeAxes, scope};
 #[cfg(test)]
-use crate::node_ui::data::Rgb;
-use crate::node_ui::data::{DeviceRgb, DisplayInterpretation, PrepareContext};
+use crate::node_ui::data::HostImage;
+use crate::node_ui::data::{DeviceRgb, PrepareContext};
 use drip::Error as KernelError;
 #[cfg(test)]
 use rayon::prelude::*;
 use std::sync::Arc;
-pub fn waveform<I: DisplayInterpretation>(
+pub fn waveform(
     p: ExposureSettings,
-    (image,): (&DeviceRgb<I>,),
+    (image,): (&DeviceRgb,),
     ctx: &PrepareContext,
 ) -> Result<Arc<Scope>, KernelError> {
     let (min, max) = (p.min_ev as f32, p.max_ev as f32);
@@ -20,12 +20,12 @@ pub fn waveform<I: DisplayInterpretation>(
         counts,
         ScopeAxes::Waveform { min_stop: min, max_stop: max },
         super::logarithmic(p.scale),
-        image.desc.interpretation.label(),
+        image.desc.coordinates.to_string(),
     ))
 }
 
 #[cfg(test)]
-pub(super) fn waveform_counts(image: &Rgb, min: f32, max: f32) -> Vec<[u32; 3]> {
+pub(super) fn waveform_counts(image: &HostImage, min: f32, max: f32) -> Vec<[u32; 3]> {
     let edges: [f32; SIZE] =
         std::array::from_fn(|i| 2f32.powf(min + i as f32 * (max - min) / SIZE as f32));
     // Each worker owns one scope column, avoiding full-grid partial histograms
@@ -55,7 +55,7 @@ mod tests {
     use super::*;
     #[test]
     fn waveform_preserves_columns_channels_and_exposure() {
-        let image = Rgb {
+        let image = HostImage {
             width: 2,
             height: 2,
             requested_scale: 1,

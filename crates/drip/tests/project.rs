@@ -16,7 +16,7 @@ fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     assert_eq!(restored.dag.edges().count(), 1);
     assert_eq!(restored.ui, p.ui);
     assert_eq!(restored.to_json().unwrap(), serialized);
-    let output = restored.dag.typed_output::<ColorRgb>(restored.target.unwrap()).unwrap();
+    let output = restored.dag.typed_output::<Rgb>(restored.target.unwrap()).unwrap();
     // An incomplete image pipeline remains editable after loading.
     assert!(restored.dag.description(output).unwrap().is_none());
     let mut data: serde_json::Value = serde_json::from_str(&serialized).unwrap();
@@ -29,16 +29,13 @@ fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
 }
 #[test]
 fn tiff_profile_extent_and_pixels_survive_encoding() {
-    let desc = ImageDesc {
+    let desc = RgbDesc {
         extent: Extent { width: 2, height: 1 },
-        interpretation: node::raw::working_color(),
+        coordinates: Coordinates::Space(REC2020_D65),
     };
     let profile =
         drip::node::profile::Output::load(&Default::default(), &Default::default()).unwrap();
-    let metadata = CaptureData {
-        capture: drip_raw::Metadata { orientation: 6, ..Default::default() },
-        ..Default::default()
-    };
+    let metadata = drip_raw::Metadata { orientation: 6, ..Default::default() };
     let bytes = drip::node::export::tiff(
         &desc,
         &[[0.; 3], [1.; 3]],
@@ -59,7 +56,7 @@ fn tiff_profile_extent_and_pixels_survive_encoding() {
     assert_eq!(&pixels[..3], &[0, 0, 0]);
     assert!(pixels[3..].iter().all(|&v| v > 65530));
     let mut bad = desc.clone();
-    bad.interpretation.encoding = Encoding::Srgb;
+    bad.coordinates = Coordinates::Space(RgbSpace { white: [0.3127, 0.33], ..REC2020_D65 });
     assert!(
         drip::node::export::tiff(&bad, &[[0.; 3], [1.; 3]], &profile, Default::default(), None)
             .is_err()
@@ -102,9 +99,9 @@ fn missing_raw_preserves_editable_parameters_and_reports_load_error() {
     let text = project.to_json().unwrap();
     let mut restored = Project::from_json(&text).unwrap();
     assert_eq!(restored.to_json().unwrap(), text);
-    let target = restored.dag.typed_output::<ColorRgb>(restored.target.unwrap()).unwrap();
+    let target = restored.dag.typed_output::<Rgb>(restored.target.unwrap()).unwrap();
     let error = Evaluator::new(RuntimeContext::host())
-        .evaluate::<Cpu<ColorRgb>>(&restored.dag, &Default::default(), target)
+        .evaluate::<Cpu<Rgb>>(&restored.dag, &Default::default(), target)
         .err()
         .unwrap();
     assert!(error.to_string().contains("drip-deliberately-missing-raw-source.nef"));

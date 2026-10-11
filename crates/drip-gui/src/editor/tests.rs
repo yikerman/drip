@@ -176,15 +176,18 @@ fn invalid_port_targets_keep_the_pending_connection_and_existing_source() {
     let source = h.state().node;
     let target =
         add_node(&mut h, crate::model::Registry.get("tone.exposure").unwrap(), vec2(400.0, 100.0));
-    let camera =
-        add_node(&mut h, crate::model::Registry.get("demosaic.rcd").unwrap(), vec2(100.0, 300.0));
+    let bayer = add_node(
+        &mut h,
+        crate::model::Registry.get("geometry.reduce-bayer").unwrap(),
+        vec2(100.0, 300.0),
+    );
     h.state_mut().graph.connect(output_port(source), image_port(target)).unwrap();
     let before = h.state().graph.clone();
     click_port(&mut h, target, Direction::Input, Secondary);
     let pending = h.state().editor.wire.clone();
     for (id, direction, error) in [
         (source, Direction::Input, "Choose an output port"),
-        (camera, Direction::Output, "payload mismatch at tone.exposure.image"),
+        (bayer, Direction::Output, "payload mismatch at tone.exposure.image"),
         (target, Direction::Output, "cycle"),
     ] {
         click_port(&mut h, id, direction, Secondary);

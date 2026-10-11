@@ -5,9 +5,9 @@ pub(super) struct Options {
     pub id: syn::Expr,
     pub name: syn::Expr,
     pub category: syn::Expr,
-    pub contract: syn::Expr,
+    /// Required when the node has outputs; checked against the signature.
+    pub contract: Option<syn::Expr>,
     pub references: syn::Expr,
-    pub port_labels: Option<syn::MetaList>,
 }
 
 impl Options {
@@ -19,26 +19,12 @@ impl Options {
         let mut category = None;
         let mut contract = None;
         let mut references = None;
-        let mut port_labels = None;
 
         for entry in entries {
             let name = entry
                 .path()
                 .get_ident()
                 .ok_or_else(|| syn::Error::new(entry.span(), "expected option name"))?;
-            if name == "port_labels" {
-                if port_labels.is_some() {
-                    return Err(syn::Error::new(entry.span(), "duplicate node option"));
-                }
-                let syn::Meta::List(labels) = entry else {
-                    return Err(syn::Error::new(
-                        entry.span(),
-                        "expected port_labels(port = \"label\", ...)",
-                    ));
-                };
-                port_labels = Some(labels);
-                continue;
-            }
             let option = match name.to_string().as_str() {
                 "id" => &mut id,
                 "name" => &mut display_name,
@@ -61,9 +47,8 @@ impl Options {
             name: display_name.unwrap_or_else(|| id.clone()),
             category: category.unwrap_or_else(|| syn::parse_quote!("processing")),
             id,
-            contract: contract.ok_or_else(|| syn::Error::new(span, "missing contract"))?,
+            contract,
             references: references.unwrap_or_else(|| syn::parse_quote!([])),
-            port_labels,
         })
     }
 }
@@ -77,9 +62,10 @@ pub(super) enum Direction {
 pub(super) struct Port {
     pub name: syn::Ident,
     pub ty: syn::Type,
+    /// The port's requirement (input) or guarantee (output); `Any` if omitted.
+    pub requirement: syn::Type,
     pub direction: Direction,
     pub optional: bool,
-    pub label: Option<syn::LitStr>,
     /// Index within this direction, independent of the function argument order.
     pub index: usize,
 }
@@ -127,35 +113,6 @@ impl Signature {
         self.ports.iter().filter(|port| port.direction == Direction::Input)
     }
 
-    pub fn label_ports(&mut self, labels: &Option<syn::MetaList>) -> syn::Result<()> {
-        let Some(labels) = labels else { return Ok(()) };
-        let entries = labels.parse_args_with(
-            syn::punctuated::Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated,
-        )?;
-        for entry in entries {
-            let name = entry
-                .path
-                .get_ident()
-                .ok_or_else(|| syn::Error::new(entry.path.span(), "expected port name"))?;
-            let port = self
-                .ports
-                .iter_mut()
-                .find(|port| port.name == *name)
-                .ok_or_else(|| syn::Error::new(name.span(), "unknown port name"))?;
-            if port.label.is_some() {
-                return Err(syn::Error::new(name.span(), "duplicate port label"));
-            }
-            let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(label), .. }) = entry.value else {
-                return Err(syn::Error::new(
-                    entry.value.span(),
-                    "port label must be a string literal",
-                ));
-            };
-            port.label = Some(label);
-        }
-        Ok(())
-    }
-
     pub fn outputs(&self) -> impl Iterator<Item = &Port> {
         self.ports.iter().filter(|port| port.direction == Direction::Output)
     }
@@ -188,10 +145,13 @@ impl Port {
                 "node is reserved for the generated node handle",
             ));
         }
-        let (mut wrapper, mut ty) = wrapper_type(&argument.ty, argument.span())?;
+        let (mut wrapper, mut types) = wrapper_type(&argument.ty, argument.span())?;
         let optional = wrapper.ident == "Option";
         if optional {
-            (wrapper, ty) = wrapper_type(ty, argument.span())?;
+            let [ty] = types.as_slice() else {
+                return Err(syn::Error::new(argument.span(), "expected Option<Read<..>>"));
+            };
+            (wrapper, types) = wrapper_type(ty, argument.span())?;
         }
         let direction = match wrapper.ident.to_string().as_str() {
             "Read" => Direction::Input,
@@ -206,18 +166,21 @@ impl Port {
         if optional && direction == Direction::Output {
             return Err(syn::Error::new(wrapper.span(), "output Write ports cannot be optional"));
         }
-        Ok(Self {
-            name: name.ident.clone(),
-            ty: ty.clone(),
-            direction,
-            optional,
-            label: None,
-            index: 0,
-        })
+        let (ty, requirement) = match types.as_slice() {
+            [ty] => ((*ty).clone(), syn::parse_quote!(::drip::ports::Any)),
+            [ty, requirement] => ((*ty).clone(), (*requirement).clone()),
+            _ => {
+                return Err(syn::Error::new(
+                    wrapper.span(),
+                    "expected <Port> or <Port, Requirement>",
+                ));
+            }
+        };
+        Ok(Self { name: name.ident.clone(), ty, requirement, direction, optional, index: 0 })
     }
 }
 
-fn wrapper_type(ty: &syn::Type, span: Span) -> syn::Result<(&syn::PathSegment, &syn::Type)> {
+fn wrapper_type(ty: &syn::Type, span: Span) -> syn::Result<(&syn::PathSegment, Vec<&syn::Type>)> {
     let syn::Type::Path(ty) = ty else {
         return Err(syn::Error::new(span, "expected Read<Port> or Write<Port>"));
     };
@@ -226,12 +189,13 @@ fn wrapper_type(ty: &syn::Type, span: Span) -> syn::Result<(&syn::PathSegment, &
         return Err(syn::Error::new(span, "expected a concrete port type"));
     };
     // Explicit view lifetimes are allowed; only type arguments describe the port.
-    let mut types = arguments.args.iter().filter_map(|argument| match argument {
-        syn::GenericArgument::Type(ty) => Some(ty),
-        _ => None,
-    });
-    match (types.next(), types.next()) {
-        (Some(ty), None) => Ok((wrapper, ty)),
-        _ => Err(syn::Error::new(span, "expected exactly one concrete port type")),
-    }
+    let types = arguments
+        .args
+        .iter()
+        .filter_map(|argument| match argument {
+            syn::GenericArgument::Type(ty) => Some(ty),
+            _ => None,
+        })
+        .collect();
+    Ok((wrapper, types))
 }

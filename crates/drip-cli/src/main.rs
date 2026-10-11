@@ -1,5 +1,5 @@
 //! Batch evaluation and TIFF export using the same checked graph as the GUI.
-use drip::{eval::Evaluator, node::data::ColorRgb, ports::Cpu, runtime::RuntimeContext};
+use drip::{eval::Evaluator, node::data::Rgb, ports::Cpu, runtime::RuntimeContext};
 use std::{path::PathBuf, process::ExitCode};
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
@@ -13,14 +13,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         drip::node::templates::raw_to_rgb(&input)?
     };
-    let target = project
-        .dag
-        .typed_output::<ColorRgb>(project.target.ok_or("project has no export target")?)?;
-    let image = Evaluator::new(runtime).evaluate::<Cpu<ColorRgb>>(
-        &project.dag,
-        &Default::default(),
-        target,
-    )?;
+    let target =
+        project.dag.typed_output::<Rgb>(project.target.ok_or("project has no export target")?)?;
+    let image =
+        Evaluator::new(runtime).evaluate::<Cpu<Rgb>>(&project.dag, &Default::default(), target)?;
     let profile = drip::node::profile::Output::load(&Default::default(), &Default::default())?;
     let bytes =
         drip::node::export::tiff(&image.desc, &image.data, &profile, Default::default(), None)?;

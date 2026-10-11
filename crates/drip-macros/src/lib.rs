@@ -11,19 +11,17 @@ mod parameters;
 use documentation::documentation;
 
 /// Declare `fn(context, &parameters, Read<Port>..., Write<Port>...) -> Result<()>`.
-/// `contract` takes `&GlobalContext`, parameters and one Option<&Payload::Desc>
-/// per input, and returns a tuple of Option<Payload::Desc> outputs. Rust checks
-/// that signature. The kernel receives the same global configuration through
-/// its `KernelContext`.
+/// A port may name a requirement, `Read<'_, Device<Rgb>, Rec2020>`, checked on
+/// its description before the contract (inputs) or after it (outputs).
+/// `contract` takes `&GlobalContext`, parameters and one known description per
+/// input (`&Desc`, or `Option<&Desc>` for an optional input, `None` when
+/// unconnected) and returns a tuple of output descriptions. It is required
+/// exactly when the node has outputs. Unknown upstream descriptions skip it.
 /// Rustdoc and `references = [(label, url), ...]` become node help.
 /// Optional `name` and `category` default to the ID and `"processing"`.
 /// The parameter type supplies its schema through `Parameters` (usually derived).
 /// Use `&()` for nodes without parameters.
 /// `Option<Read<Port>>` declares an optional input; output ports remain required.
-/// `port_labels(image = "RGB", output = "RGB")` overrides displayed payload
-/// labels by function argument name. Other labels use the declared payload name
-/// (or Rust's type name for custom port wrappers). Labels do not rename ports
-/// or change type/interpretation checks.
 #[proc_macro_attribute]
 pub fn node(args: TokenStream, item: TokenStream) -> TokenStream {
     node::expand(args.into(), parse_macro_input!(item as syn::ItemFn))
@@ -34,7 +32,9 @@ pub fn node(args: TokenStream, item: TokenStream) -> TokenStream {
 /// Derive editor ranges and documentation from typed parameter fields.
 /// Flattening reuses a shared schema. Serde owns parameter persistence.
 /// Labels default to sentence case; `#[label("Exposure (EV)")]` overrides them.
-#[proc_macro_derive(Parameters, attributes(param, external, label))]
+/// `#[validate(path)]` on the struct names `fn(&Self) -> Result<()>`, checked
+/// when parameters are admitted to a node.
+#[proc_macro_derive(Parameters, attributes(param, external, label, validate))]
 pub fn parameters(input: TokenStream) -> TokenStream {
     parameters::expand(parse_macro_input!(input as syn::DeriveInput))
         .unwrap_or_else(syn::Error::into_compile_error)

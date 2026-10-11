@@ -7,6 +7,7 @@ use crate::{
 };
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
+#[validate(validate)]
 pub struct Settings {
     /// Reduction factor in each dimension. Bayer averages each CFA phase separately.
     #[param(crate::param::ParamKind::Int { min:1, max:256, default:2 })]
@@ -17,21 +18,11 @@ impl Default for Settings {
         Self { factor: 2 }
     }
 }
-fn contract<I: Interpretation>(
-    _: &GlobalContext,
-    p: &Settings,
-    input: Option<&ImageDesc<I>>,
-) -> Result<(Option<ImageDesc<I>>,)> {
+fn validate(p: &Settings) -> Result<()> {
     if !(1..=256).contains(&p.factor) {
         return Err(Error::Contract("box factor must be 1..=256".into()));
     }
-    Ok((input.map(|d| ImageDesc {
-        extent: Extent {
-            width: d.extent.width.div_ceil(p.factor as u32),
-            height: d.extent.height.div_ceil(p.factor as u32),
-        },
-        interpretation: d.interpretation.clone(),
-    }),))
+    Ok(())
 }
 /// Extent of a mosaic after averaging its phase planes independently.
 /// Small mosaics keep at least one complete cell; factor one is an identity.
@@ -67,27 +58,6 @@ pub(super) fn dispatch_bayer(
     Ok(())
 }
 
-fn dispatch_rgb<I: Interpretation>(
-    ctx: &KernelContext<'_>,
-    image: Read<'_, Device<Rgb<I>>>,
-    output: Write<'_, Device<Rgb<I>>>,
-    factor: u32,
-) -> Result<()> {
-    let (count, dim) = crate::runtime::dispatch_dims(output.desc.extent.pixels() * 3);
-    crate::node::shared_kernel::reduce_rgb::launch(
-        ctx.client()?,
-        count,
-        dim,
-        image.data.argument(),
-        output.data.argument(),
-        image.desc.extent.width as usize,
-        image.desc.extent.height as usize,
-        output.desc.extent.width as usize,
-        factor as usize,
-    );
-    Ok(())
-}
-
 /// Demosaic owns the request's reduction. This is local scratch, not a graph
 /// operation or port transfer. The same kernel serves the explicit reducer.
 pub(super) fn for_demosaic(
@@ -112,5 +82,4 @@ pub(super) fn demosaic_extent(global: &GlobalContext, input: &Extent) -> Extent 
 }
 
 pub mod bayer;
-pub mod camera;
-pub mod color;
+pub mod rgb;

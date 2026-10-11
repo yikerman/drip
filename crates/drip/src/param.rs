@@ -128,6 +128,11 @@ impl ParamKind {
 /// ```
 pub trait Parameters: Sized {
     const SPECS: &'static [ParamSpec];
+    /// Logical validity, checked once when parameters are admitted to a node.
+    /// Schema ranges only guide controls. Set with `#[validate(path)]`.
+    fn validate(&self) -> crate::Result<()> {
+        Ok(())
+    }
 }
 impl Parameters for () {
     const SPECS: &'static [ParamSpec] = &[];

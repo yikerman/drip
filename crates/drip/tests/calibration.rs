@@ -1,48 +1,53 @@
 use drip::{eval::Evaluator, graph::Dag, node, node::data::*, ports::*, runtime::RuntimeContext};
+use std::sync::Arc;
 
-fn metadata(phase: BayerPhase) -> CaptureData {
-    CaptureData {
-        bayer: Some(BayerCalibration {
-            phase,
-            source: Camera { coordinates: "sensor".into(), scale: "relative".into() },
-            levels: [0.5, 1., 1.5, 2.],
-            gains: Some(SiteGains {
-                target: Camera { coordinates: "balanced".into(), scale: "relative".into() },
-                values: [2., 3., 4., 5.],
-            }),
-        }),
-        ..Default::default()
-    }
+/// As-shot R, G, B and second-G gains 2, 1, 4, 3; the second green's black is
+/// half the white range, so its clipping level is 0.5 before gains.
+fn metadata(cfa: [[u8; 2]; 2]) -> Arc<drip_raw::Metadata> {
+    let mut m =
+        drip_raw::Metadata { make: "Test".into(), model: "Camera".into(), ..Default::default() };
+    m.calibration.cfa = cfa;
+    m.calibration.maximum = 1000;
+    m.calibration.channel_black = [0, 0, 0, 500];
+    m.calibration.as_shot = [2., 1., 4., 3.];
+    Arc::new(m)
 }
+fn response(m: &drip_raw::Metadata) -> Response {
+    Response { camera: Camera::of(m), balance: None }
+}
+/// Phase, LibRaw CFA, expected site gains and balanced clipping levels.
+type Case = (BayerPhase, [[u8; 2]; 2], [f32; 4], [f32; 4]);
+const CASES: [Case; 4] = [
+    (BayerPhase::Rggb, [[0, 1], [3, 2]], [2., 1., 3., 4.], [2., 1., 1.5, 4.]),
+    (BayerPhase::Grbg, [[1, 0], [2, 3]], [1., 2., 4., 3.], [1., 2., 4., 1.5]),
+    (BayerPhase::Gbrg, [[1, 2], [0, 3]], [1., 4., 2., 3.], [1., 4., 2., 1.5]),
+    (BayerPhase::Bggr, [[2, 1], [3, 0]], [4., 1., 3., 2.], [4., 1., 1.5, 2.]),
+];
 
 fn combined_gains(runtime: RuntimeContext) {
     let eval = Evaluator::new(runtime);
-    for phase in [BayerPhase::Rggb, BayerPhase::Grbg, BayerPhase::Gbrg, BayerPhase::Bggr] {
+    for (phase, cfa, gains, levels) in CASES {
         let mut dag = Dag::new();
-        let data = metadata(phase);
-        let calibration = data.bayer.as_ref().unwrap();
-        let desc = BayerDesc {
-            extent: Extent { width: 3, height: 3 },
-            phase,
-            interpretation: calibration.source.clone(),
-        };
-        let source =
-            node::source::<Bayer>(&mut dag, desc, vec![-1., 0., 0.5, 1., 2., 3., 4., 5., 6.])
-                .unwrap();
-        let metadata =
-            node::source::<CaptureMetadata>(&mut dag, MetadataDesc::of(&data), data).unwrap();
-        let gains = node::bayer_gains::add(&mut dag, ()).unwrap();
-        dag.connect(source, gains.image).unwrap();
-        dag.connect(metadata, gains.metadata).unwrap();
-        let image = eval.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), gains.output).unwrap();
+        let m = metadata(cfa);
+        let desc =
+            BayerDesc { extent: Extent { width: 3, height: 3 }, phase, response: response(&m) };
+        let samples = [-1., 0., 0.5, 1., 2., 3., 4., 5., 6.];
+        let source = node::source::<Bayer>(&mut dag, desc, samples.to_vec()).unwrap();
+        let metadata = node::source::<CaptureMetadata>(&mut dag, m.clone(), m).unwrap();
+        let node = node::bayer_gains::add(&mut dag, ()).unwrap();
+        dag.connect(source, node.image).unwrap();
+        dag.connect(metadata, node.metadata).unwrap();
+        let image = eval.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), node.output).unwrap();
         // Local sites repeat every two columns and rows, including partial cells.
-        assert_eq!(image.data.as_ref().as_ref(), &[-2., 0., 1., 4., 10., 12., 8., 15., 12.]);
-        let levels =
-            eval.evaluate::<Cpu<BayerLevels>>(&dag, &Default::default(), gains.levels).unwrap();
-        assert_eq!(*levels.data, [1., 3., 6., 10.]);
-        assert_eq!(levels.desc.phase, phase);
-        assert_eq!(levels.desc.interpretation, image.desc.interpretation);
-        assert_eq!(image.desc.interpretation.coordinates, "balanced");
+        let expected: Vec<f32> =
+            samples.iter().enumerate().map(|(i, v)| v * gains[i / 3 % 2 * 2 + i % 3 % 2]).collect();
+        assert_eq!(image.data.as_ref().as_ref(), expected.as_slice());
+        let result =
+            eval.evaluate::<Cpu<BayerLevels>>(&dag, &Default::default(), node.levels).unwrap();
+        assert_eq!(*result.data, levels);
+        assert_eq!(result.desc.phase, phase);
+        assert_eq!(result.desc.response, image.desc.response);
+        assert_eq!(image.desc.response.balance, Some([2., 1., 4., 3.]));
         assert_eq!(image.statistics.uploads, 1); // Only the image is a device input.
     }
 }
@@ -60,27 +65,25 @@ fn selected_backend_combines_samples_and_clipping_levels() {
 }
 
 #[test]
-fn contracts_reject_mismatched_sites_and_missing_gains_stay_unevaluable() {
+fn contracts_reject_mismatched_sites_and_missing_gains() {
     let mut dag = Dag::new();
-    let mut data = metadata(BayerPhase::Rggb);
+    let rggb = metadata([[0, 1], [3, 2]]);
     let desc = BayerDesc {
         extent: Extent { width: 1, height: 1 },
         phase: BayerPhase::Grbg,
-        interpretation: data.bayer.as_ref().unwrap().source.clone(),
+        response: response(&rggb),
     };
     let source = node::source::<Bayer>(&mut dag, desc, vec![1.]).unwrap();
     let gains = node::bayer_gains::add(&mut dag, ()).unwrap();
     dag.connect(source, gains.image).unwrap();
-    let wrong =
-        node::source::<CaptureMetadata>(&mut dag, MetadataDesc::of(&data), data.clone()).unwrap();
+    let wrong = node::source::<CaptureMetadata>(&mut dag, rggb.clone(), rggb).unwrap();
     assert!(dag.connect(wrong, gains.metadata).is_err());
-    data.bayer.as_mut().unwrap().phase = BayerPhase::Grbg;
-    data.bayer.as_mut().unwrap().gains = None;
-    let missing = node::source::<CaptureMetadata>(&mut dag, MetadataDesc::of(&data), data).unwrap();
-    dag.connect(missing, gains.metadata).unwrap();
-    assert!(dag.description(gains.output).unwrap().is_none());
-    assert!(dag.description(gains.levels).unwrap().is_none());
+    let mut unbalanced = (*metadata([[1, 0], [2, 3]])).clone();
+    unbalanced.calibration.as_shot = [0.; 4];
+    let unbalanced = Arc::new(unbalanced);
+    let missing =
+        node::source::<CaptureMetadata>(&mut dag, unbalanced.clone(), unbalanced).unwrap();
+    assert!(dag.connect(missing, gains.metadata).is_err());
     let eval = Evaluator::new(RuntimeContext::host());
-    assert!(eval.evaluate::<Cpu<BayerLevels>>(&dag, &Default::default(), gains.levels).is_err());
     assert!(eval.evaluate::<Cpu<CaptureMetadata>>(&dag, &Default::default(), missing).is_ok());
 }

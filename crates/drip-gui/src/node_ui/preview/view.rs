@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use egui::{FontId, Painter, Rect, Ui};
 
-use crate::node_ui::data::Rgb;
+use crate::node_ui::data::HostImage;
 use crate::render::image;
 use crate::render::node_views::{Drawable, ImageCache, IntoDrawable};
 
@@ -13,14 +13,14 @@ use crate::render::node_views::{Drawable, ImageCache, IntoDrawable};
 pub struct PreviewImage {
     /// Bilinear display sampling when true, nearest-neighbor otherwise.
     pub interpolation: bool,
-    data: Arc<Rgb>,
+    data: Arc<HostImage>,
 }
 
 impl PreviewImage {
-    pub fn new(image: &Arc<Rgb>) -> Self {
+    pub fn new(image: &Arc<HostImage>) -> Self {
         Self { data: image.clone(), interpolation: false }
     }
-    pub fn rgb(&self) -> &Arc<Rgb> {
+    pub fn rgb(&self) -> &Arc<HostImage> {
         &self.data
     }
 }

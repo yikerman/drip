@@ -1,14 +1,15 @@
 use crate::{
     Error, Result,
     node::{
+        camera,
         color::{self, Mat3},
         data::*,
-        raw,
     },
     ports::*,
     runtime::{GlobalContext, KernelContext, dispatch_dims},
 };
 pub use compute::{Definition, Ports, add, definition};
+use std::sync::Arc;
 
 #[derive(Clone, Default, crate::Choice)]
 pub enum Illuminant {
@@ -36,6 +37,7 @@ pub struct WhitePoint {
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
+#[validate(validate)]
 pub struct Settings {
     /// Infer the scene white from CaptureMetadata, or supply its chromaticity.
     #[param(Illuminant::AsShot.schema())]
@@ -69,32 +71,15 @@ fn adaptation(source: [f64; 2], target: [f64; 2]) -> Result<Mat3> {
     Ok(color::mul(&color::inverse(&CAT16), &scaled))
 }
 
-fn matrix(p: &Settings, metadata: Option<&CaptureData>) -> Result<[[f32; 3]; 3]> {
-    let rgb_to_xyz = color::rgb_to_xyz(color::REC2020, color::D65);
+/// Working-RGB adaptation from the source white to D65.
+fn matrix(p: &Settings, metadata: Option<&drip_raw::Metadata>) -> Result<[[f32; 3]; 3]> {
     let source = match &p.illuminant {
         Illuminant::Custom(white) => [white.x, white.y],
-        Illuminant::AsShot => {
-            let camera = metadata.and_then(|m| m.matrix.as_ref()).ok_or_else(|| {
-                Error::Contract("as-shot adaptation needs CaptureMetadata's camera matrix".into())
-            })?;
-            if camera.target.space != raw::working_color().space
-                || camera.target.encoding != Encoding::Identity
-            {
-                return Err(Error::Contract(
-                    "as-shot camera matrix must output linear Rec.2020/D65".into(),
-                ));
-            }
-            // As-shot-balanced camera neutral is (1,1,1). The matrix includes
-            // as-shot -> reference gains, so its mapped neutral is the scene white.
-            let white =
-                color::apply(&rgb_to_xyz, color::apply(&color::to_f64(&camera.values), [1.; 3]));
-            let sum: f64 = white.iter().sum();
-            if !white[1].is_finite() || white[1] <= 0.0 || !sum.is_finite() || sum <= 0.0 {
-                return Err(Error::Contract("camera matrix has no usable as-shot white".into()));
-            }
-            [white[0] / sum, white[1] / sum]
-        }
+        Illuminant::AsShot => camera::as_shot_white(metadata.ok_or_else(|| {
+            Error::Contract("as-shot adaptation needs the capture metadata".into())
+        })?)?,
     };
+    let rgb_to_xyz = color::rgb_to_xyz(color::REC2020, color::D65);
     let matrix = color::to_f32(&color::mul(
         &color::inverse(&rgb_to_xyz),
         &color::mul(&adaptation(source, color::D65)?, &rgb_to_xyz),
@@ -105,28 +90,29 @@ fn matrix(p: &Settings, metadata: Option<&CaptureData>) -> Result<[[f32; 3]; 3]>
     Ok(matrix)
 }
 
+fn validate(p: &Settings) -> Result<()> {
+    match p.illuminant {
+        Illuminant::Custom(_) => matrix(p, None).map(drop),
+        Illuminant::AsShot => Ok(()),
+    }
+}
 fn contract(
     _: &GlobalContext,
     p: &Settings,
-    image: Option<&ImageDesc<Color>>,
-    _: Option<&MetadataDesc>,
-) -> Result<(Option<ImageDesc<Color>>,)> {
-    if let Illuminant::Custom(_) = p.illuminant {
-        matrix(p, None)?;
+    image: &RgbDesc,
+    metadata: Option<&Arc<drip_raw::Metadata>>,
+) -> Result<(RgbDesc,)> {
+    // Unconnected metadata is incomplete wiring, reported when evaluating As shot.
+    if let Some(metadata) = metadata {
+        matrix(p, Some(metadata))?;
     }
-    if image.is_some_and(|d| {
-        d.interpretation.space != raw::working_color().space
-            || d.interpretation.encoding != Encoding::Identity
-    }) {
-        return Err(Error::Contract("CAT16 requires identity-encoded Rec.2020/D65 RGB".into()));
-    }
-    Ok((image.cloned(),))
+    Ok((image.clone(),))
 }
 
 /// Adapt a scene illuminant to D65 using full CAT16 chromatic adaptation.
-/// Input/output are identity-encoded Rec.2020/D65 ColorRgb; scale is retained.
-/// As shot maps camera neutral through CaptureMetadata's camera matrix to infer
-/// the source white. Custom white point supplies CIE 1931 xy without metadata.
+/// Input and output are linear Rec.2020/D65 RGB. As shot maps the as-shot camera
+/// neutral through the capture's camera matrix to infer the source white.
+/// Custom white point supplies CIE 1931 xy without metadata.
 /// The RAW template cancels as-shot gains at camera conversion before this node.
 /// Place before rendering; on already-balanced RGB, a custom source white is a
 /// creative reinterpretation. Signed/HDR samples are preserved without clipping.
@@ -136,14 +122,12 @@ fn contract(
 pub fn compute(
     ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Device<ColorRgb>>,
+    image: Read<'_, Device<Rgb>, Rec2020>,
     metadata: Option<Read<'_, Cpu<CaptureMetadata>>>,
-    output: Write<'_, Device<ColorRgb>>,
+    output: Write<'_, Device<Rgb>, Rec2020>,
 ) -> Result<()> {
-    let values = matrix(p, metadata.as_ref().map(|m| m.data))?;
-    let coefficients = DeviceBuffer::<()>::new(
-        ctx.client()?.create(cubecl::bytes::Bytes::from_elems(values.to_vec())),
-    );
+    let values = matrix(p, metadata.as_ref().map(|m| &**m.data))?;
+    let coefficients = ctx.constants(values.as_flattened())?;
     let (count, dim) = dispatch_dims(image.desc.extent.pixels());
     super::shared_kernel::matrix::launch(
         ctx.client()?,
@@ -202,28 +186,25 @@ mod tests {
             assert!(add(&mut Dag::new(), custom(white)).is_err());
         }
         assert!(matrix(&Settings::default(), None).is_err());
-        assert!(matrix(&Settings::default(), Some(&CaptureData::default())).is_err());
-        let p = custom(color::D65);
-        let mut desc = ImageDesc {
+        assert!(matrix(&Settings::default(), Some(&drip_raw::Metadata::default())).is_err());
+        let desc = RgbDesc {
             extent: Extent { width: 1, height: 1 },
-            interpretation: raw::working_color(),
+            coordinates: Coordinates::Space(REC2020_D65),
         };
-        desc.interpretation.scale = "creative-scale".into();
-        assert!(contract(&Default::default(), &p, Some(&desc), None).is_ok());
-        desc.interpretation.encoding = Encoding::Srgb;
-        assert!(contract(&Default::default(), &p, Some(&desc), None).is_err());
-        desc.interpretation.encoding = Encoding::Identity;
-        desc.interpretation.space = "camera-like".into();
-        assert!(contract(&Default::default(), &p, Some(&desc), None).is_err());
+        assert!(contract(&Default::default(), &custom(color::D65), &desc, None).is_ok());
+        let unusable = Arc::new(drip_raw::Metadata::default());
+        assert!(
+            contract(&Default::default(), &Settings::default(), &desc, Some(&unusable)).is_err()
+        );
     }
 
     fn device_reference(runtime: RuntimeContext) {
         let mut dag = Dag::new();
-        let desc = ImageDesc {
+        let desc = RgbDesc {
             extent: Extent { width: 4, height: 1 },
-            interpretation: raw::working_color(),
+            coordinates: Coordinates::Space(REC2020_D65),
         };
-        let input = crate::node::source::<ColorRgb>(
+        let input = crate::node::source::<Rgb>(
             &mut dag,
             desc,
             vec![[0.2, 0.5, 0.8], [-0.1, 0.2, 8.], [0.; 3], [16., -2., 0.5]],
@@ -232,7 +213,7 @@ mod tests {
         let cat = add(&mut dag, custom([0.44757, 0.40745])).unwrap();
         dag.connect(input, cat.image).unwrap();
         let output = Evaluator::new(runtime)
-            .evaluate::<Cpu<ColorRgb>>(&dag, &Default::default(), cat.output)
+            .evaluate::<Cpu<Rgb>>(&dag, &Default::default(), cat.output)
             .unwrap();
         // Colour 0.4.7: RGB_to_XYZ -> CAT16 A-to-D65 -> XYZ_to_RGB, BT.2020.
         let expected = [
@@ -244,7 +225,7 @@ mod tests {
         for (actual, expected) in output.data.iter().flatten().zip(expected.iter().flatten()) {
             assert!((f64::from(*actual) - expected).abs() < 5e-6, "{actual} != {expected}");
         }
-        assert_eq!(output.desc.interpretation, raw::working_color());
+        assert_eq!(output.desc.coordinates, Coordinates::Space(REC2020_D65));
     }
 
     #[cfg(feature = "cpu")]

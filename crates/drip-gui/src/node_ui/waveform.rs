@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
 #[serde(deny_unknown_fields)]
+#[validate(validate)]
 pub struct Settings {
     /// Lower exposure bound in stops relative to sample value 1. Values below it enter the first bin.
     #[param(ParamKind::Int { min: -24, max: -1, default: -12 })]
@@ -31,22 +32,14 @@ impl Settings {
         ExposureSettings { min_ev: self.min_ev, max_ev: self.max_ev, scale: self.scale }
     }
 }
-fn scope_contract(
-    ctx: &drip::runtime::GlobalContext,
-    p: &Settings,
-    image: Option<&ImageDesc<Color>>,
-) -> Result<()> {
-    super::scopes::scope_contract(ctx, &p.exposure_settings(), image)
+fn validate(p: &Settings) -> Result<()> {
+    super::scopes::exposure_range(&p.exposure_settings())
 }
-/// Plot ColorRgb channel exposure against horizontal image position.
-/// Requires identity encoding and applies no color conversion. Exposure is measured
+/// Plot linear RGB channel exposure against horizontal image position, without a
+/// color conversion; camera RGB shows native channels. Exposure is measured
 /// relative to sample value 1; the density scale controls bin brightness.
-#[drip::node(id="view.waveform", name="Waveform", category="View", contract=scope_contract)]
-pub fn observe(
-    _: &KernelContext<'_>,
-    _: &Settings,
-    image: Read<'_, Device<ColorRgb>>,
-) -> Result<()> {
+#[drip::node(id = "view.waveform", name = "Waveform", category = "View")]
+pub fn observe(_: &KernelContext<'_>, _: &Settings, image: Read<'_, Device<Rgb>>) -> Result<()> {
     let _ = image;
     Ok(())
 }
@@ -56,13 +49,8 @@ impl crate::node_ui::GuiNode for WaveformGui {
     type Parameters = Settings;
     type Presentation = Arc<Scope>;
     const ID: &'static str = "view.waveform";
-    const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|p, inputs, ctx| {
-        waveform(
-            p.exposure_settings(),
-            (&ctx.device_image::<drip::node::data::Color>(inputs)?,),
-            ctx,
-        )
-    });
+    const PREPARE: Option<crate::node_ui::Prepare<Self>> =
+        Some(|p, inputs, ctx| waveform(p.exposure_settings(), (&ctx.device_image(inputs)?,), ctx));
 }
 
 #[cfg(test)]
@@ -72,25 +60,21 @@ mod tests {
 
     #[test]
     fn waveform_defaults_and_reset_are_log_but_saved_linear_is_retained() {
-        for kind in ["view.waveform", "view.camera-waveform"] {
-            let definition = Registry.get(kind).unwrap();
-            assert_eq!((definition.defaults)()["scale"], "log");
-            assert_eq!(definition.param("scale").unwrap().kind.default_value(), "log");
-            let mut project = Project::default();
-            let node = project.graph.add_node(definition).unwrap();
-            project.graph.set_param(node, "scale", json!("linear")).unwrap();
-            project.graph.set_param(node, "min_ev", json!(-10)).unwrap();
-            let reopened = Project::from_json(&project.to_json().unwrap(), &Registry).unwrap();
-            let node = reopened.graph.find(definition.name).unwrap();
-            assert_eq!(
-                reopened.graph.node(node).unwrap().params,
-                json!({"min_ev":-10,"max_ev":4,"scale":"linear"})
-            );
-        }
-        for kind in ["view.histogram", "view.camera-histogram"] {
-            let definition = Registry.get(kind).unwrap();
-            assert_eq!((definition.defaults)()["scale"], "linear");
-            assert_eq!(definition.param("scale").unwrap().kind.default_value(), "linear");
-        }
+        let definition = Registry.get("view.waveform").unwrap();
+        assert_eq!((definition.defaults)()["scale"], "log");
+        assert_eq!(definition.param("scale").unwrap().kind.default_value(), "log");
+        let mut project = Project::default();
+        let node = project.graph.add_node(definition).unwrap();
+        project.graph.set_param(node, "scale", json!("linear")).unwrap();
+        project.graph.set_param(node, "min_ev", json!(-10)).unwrap();
+        let reopened = Project::from_json(&project.to_json().unwrap(), &Registry).unwrap();
+        let node = reopened.graph.find(definition.name).unwrap();
+        assert_eq!(
+            reopened.graph.node(node).unwrap().params,
+            json!({"min_ev":-10,"max_ev":4,"scale":"linear"})
+        );
+        let histogram = Registry.get("view.histogram").unwrap();
+        assert_eq!((histogram.defaults)()["scale"], "linear");
+        assert_eq!(histogram.param("scale").unwrap().kind.default_value(), "linear");
     }
 }

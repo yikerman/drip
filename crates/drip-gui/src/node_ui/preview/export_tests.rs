@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::model::{NodeId, Port};
 use drip::{
     eval::Evaluator,
-    node::data::{Color, ColorRgb, Extent, ImageDesc},
+    node::data::{Coordinates, Extent, REC2020_D65, Rgb, RgbDesc},
     ports::{Cpu, Write},
     runtime::{KernelContext, RuntimeContext},
 };
@@ -20,17 +20,14 @@ use tiff::tags::Tag;
 
 const PIXELS: [[f32; 3]; 4] = [[1.0; 3], [0.18; 3], [0.0, 1.0, 0.0], [0.0; 3]];
 
-fn source_contract(
-    _: &drip::runtime::GlobalContext,
-    _: &(),
-) -> drip::Result<(Option<ImageDesc<Color>>,)> {
-    Ok((Some(ImageDesc {
+fn source_contract(_: &drip::runtime::GlobalContext, _: &()) -> drip::Result<(RgbDesc,)> {
+    Ok((RgbDesc {
         extent: Extent { width: 2, height: 2 },
-        interpretation: drip::node::raw::working_color(),
-    }),))
+        coordinates: Coordinates::Space(REC2020_D65),
+    },))
 }
 #[drip::node(id="test.proof-source", name="display", category="test", contract=source_contract)]
-fn display(_: &KernelContext<'_>, _: &(), image: Write<'_, Cpu<ColorRgb>>) -> drip::Result<()> {
+fn display(_: &KernelContext<'_>, _: &(), image: Write<'_, Cpu<Rgb>>) -> drip::Result<()> {
     image.data.copy_from_slice(&PIXELS);
     Ok(())
 }
@@ -163,8 +160,7 @@ fn softproof_matches_bounded_export_across_profiles_and_intents() {
                 let values = inputs.remove(&preview).unwrap().unwrap();
                 let params =
                     serde_json::from_value(project.graph.node(preview).unwrap().params).unwrap();
-                let shown =
-                    super::prepare(params, &ctx.image::<Color>(&values).unwrap(), &ctx).unwrap();
+                let shown = super::prepare(params, &ctx.image(&values).unwrap(), &ctx).unwrap();
                 let values = inputs.remove(&tiff).unwrap().unwrap();
                 let node = project.graph.node(tiff).unwrap();
                 crate::node_ui::binding(node.kind)

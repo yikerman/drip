@@ -1,7 +1,11 @@
 //! Transactional connection checks over small CPU descriptions, never pixels.
-use crate::{Error, Result, definition::Node, payload::Payload, ports::*};
+use crate::{
+    Error, Result,
+    definition::{Node, Outcome},
+    payload::Payload,
+    ports::*,
+};
 use std::{
-    any::TypeId,
     collections::VecDeque,
     sync::{
         Arc,
@@ -14,7 +18,7 @@ pub(crate) struct Entry {
     pub id: NodeId,
     pub node: Arc<dyn Node>,
     pub inputs: Vec<Option<PortId>>,
-    pub descs: Vec<Option<Description>>,
+    pub outcome: Outcome,
 }
 #[derive(Clone)]
 pub struct Dag {
@@ -112,10 +116,13 @@ impl Dag {
     /// its request-specific description in the returned value.
     pub fn description<P: Payload>(&self, output: Output<P>) -> Result<Option<&P::Desc>> {
         let e = self.output(output.id)?;
-        if e.node.outputs()[output.id.index].payload != TypeId::of::<P>() {
+        if !e.node.outputs()[output.id.index].is::<P>() {
             return Err(wrong_handle());
         }
-        Ok(e.descs[output.id.index].as_ref().map(downcast))
+        Ok(match &e.outcome {
+            Outcome::Known(descs) => Some(downcast(&descs[output.id.index])),
+            Outcome::Unknown(_) => None,
+        })
     }
     pub(crate) fn entry(&self, id: NodeId) -> Result<&Entry> {
         if id.graph != self.id {
@@ -157,7 +164,9 @@ impl Dag {
             for (port, from) in e.inputs.iter().enumerate() {
                 let Some(from) = from else { continue };
                 let source = self.output(*from)?;
-                if source.node.outputs()[from.index].payload != e.node.inputs()[port].payload {
+                if source.node.outputs()[from.index].payload_type
+                    != e.node.inputs()[port].payload_type
+                {
                     return Err(Error::Contract(format!(
                         "payload mismatch at {}.{}",
                         e.node.metadata().id,
@@ -191,23 +200,36 @@ impl Dag {
     }
     fn check_contract(&mut self, index: usize) -> Result<()> {
         let e = self.entries[index].as_ref().unwrap();
-        // Templates can be wired before their source assets are supplied.
-        // Every edit rechecks known relationships at full detail. Evaluation
+        // Templates can be wired before their sources are bound or complete.
+        // Every edit rechecks known relationships at full detail; evaluation
         // repeats contracts for its global context before running each node.
-        let descs = e
-            .inputs
-            .iter()
-            .map(|from| match from {
-                None => Ok(None),
-                Some(from) => Ok(self.output(*from)?.descs[from.index].clone()),
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let outputs = e.node.contract(&Default::default(), &descs)?;
-        if outputs.len() != e.node.outputs().len() {
+        let outcome = match self.known_inputs(e) {
+            Ok(descs) => e.node.contract(&Default::default(), &descs)?,
+            Err(reason) => Outcome::Unknown(reason),
+        };
+        if let Outcome::Known(descs) = &outcome
+            && descs.len() != e.node.outputs().len()
+        {
             return Err(Error::Graph("node contract output arity mismatch".into()));
         }
-        self.entries[index].as_mut().unwrap().descs = outputs;
+        self.entries[index].as_mut().unwrap().outcome = outcome;
         Ok(())
+    }
+    /// Input descriptions for a contract (`None` for an unconnected optional
+    /// input), or why a required one is not known. Edges are already validated.
+    fn known_inputs(&self, e: &Entry) -> std::result::Result<Vec<Option<Description>>, Error> {
+        e.inputs
+            .iter()
+            .zip(e.node.inputs())
+            .map(|(from, port)| match from {
+                None if port.optional => Ok(None),
+                None => Err(Error::MissingInput { node: e.node.metadata().id, port: port.name }),
+                Some(from) => match &self.entries[from.node.index].as_ref().unwrap().outcome {
+                    Outcome::Known(outputs) => Ok(Some(outputs[from.index].clone())),
+                    Outcome::Unknown(reason) => Err(reason.clone()),
+                },
+            })
+            .collect()
     }
 }
 
@@ -225,7 +247,7 @@ impl Edit<'_> {
         self.dag.entries.push(Some(Entry {
             id,
             inputs: vec![None; node.inputs().len()],
-            descs: vec![None; node.outputs().len()],
+            outcome: Outcome::Known(Vec::new()),
             node,
         }));
         id
@@ -252,8 +274,8 @@ impl Edit<'_> {
             a.len() == b.len()
                 && a.iter().zip(&b).all(|(a, b)| {
                     a.name == b.name
-                        && a.payload == b.payload
-                        && a.placement == b.placement
+                        && a.payload_type == b.payload_type
+                        && a.placement() == b.placement()
                         && a.optional == b.optional
                 })
         };

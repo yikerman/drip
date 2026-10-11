@@ -4,14 +4,14 @@ use drip::{eval::Evaluator, graph::Dag, node, node::data::*, ports::*, runtime::
 mod rgb_reduction;
 
 fn algorithms(runtime: RuntimeContext) {
-    let descriptor = ImageDesc {
+    let descriptor = RgbDesc {
         extent: Extent { width: 2, height: 1 },
-        interpretation: node::raw::working_color(),
+        coordinates: Coordinates::Space(REC2020_D65),
     };
     let bits = [[0x80000000, 0x7fc01234, 0x7f800000], [1, 0xff800000, 0x3f800000]];
     let pixels: Vec<[f32; 3]> = bits.map(|p| p.map(f32::from_bits)).to_vec();
-    let device = ColorRgb::upload(&descriptor, &pixels.into(), &runtime).unwrap();
-    let restored = ColorRgb::download(&descriptor, &device, &runtime).unwrap();
+    let device = drip::payload::upload::<Rgb>(&descriptor, &pixels.into(), &runtime).unwrap();
+    let restored = drip::payload::download::<Rgb>(&descriptor, &device, &runtime).unwrap();
     assert_eq!(restored.iter().map(|p| p.map(f32::to_bits)).collect::<Vec<_>>(), bits);
 
     let evaluator = Evaluator::new(runtime);
@@ -21,17 +21,16 @@ fn algorithms(runtime: RuntimeContext) {
     bayer_host_island(&evaluator);
     context_driven_demosaic(&evaluator);
     let phases = [BayerPhase::Rggb, BayerPhase::Grbg, BayerPhase::Gbrg, BayerPhase::Bggr];
-    let camera = Camera { coordinates: "reference-camera".into(), scale: "relative".into() };
+    let camera = Response {
+        camera: Camera { make: "reference-camera".into(), model: "relative".into() },
+        balance: None,
+    };
     for (phase_index, phase) in phases.into_iter().enumerate() {
         let (w, h) = (277, 269);
         let mut dag = Dag::new();
         let source = node::source::<Bayer>(
             &mut dag,
-            BayerDesc {
-                extent: Extent { width: w, height: h },
-                phase,
-                interpretation: camera.clone(),
-            },
+            BayerDesc { extent: Extent { width: w, height: h }, phase, response: camera.clone() },
             (0..w * h)
                 .map(|i| ((i * 137 + i / w * 29) % 2048) as f32 / 1024. - 0.03)
                 .collect::<Vec<_>>(),
@@ -39,8 +38,7 @@ fn algorithms(runtime: RuntimeContext) {
         .unwrap();
         let rcd = node::rcd::add(&mut dag, ()).unwrap();
         dag.connect(source, rcd.image).unwrap();
-        let output =
-            evaluator.evaluate::<Cpu<CameraRgb>>(&dag, &Default::default(), rcd.output).unwrap();
+        let output = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), rcd.output).unwrap();
         let mut max_error = 0f32;
         let mut sum = 0.;
         let mut count = 0;
@@ -69,30 +67,29 @@ fn algorithms(runtime: RuntimeContext) {
             BayerDesc {
                 extent: Extent { width: w, height: h },
                 phase: BayerPhase::Rggb,
-                interpretation: camera.clone(),
+                response: camera.clone(),
             },
             vec![0.5; (w * h) as usize],
         )
         .unwrap();
         let n = node::rcd::add(&mut dag, ()).unwrap();
         dag.connect(source, n.image).unwrap();
-        let out =
-            evaluator.evaluate::<Cpu<CameraRgb>>(&dag, &Default::default(), n.output).unwrap();
+        let out = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), n.output).unwrap();
         assert!(out.data.iter().flatten().all(|v| v.is_finite()));
     }
     let mut dag = Dag::new();
-    let source = node::source::<ColorRgb>(
+    let source = node::source::<Rgb>(
         &mut dag,
-        ImageDesc {
+        RgbDesc {
             extent: Extent { width: 5, height: 1 },
-            interpretation: node::raw::working_color(),
+            coordinates: Coordinates::Space(REC2020_D65),
         },
         vec![[0.; 3], [0.18; 3], [1.; 3], [f32::MAX; 3], [-0.2, 0.1, 0.5]],
     )
     .unwrap();
     let n = node::sigmoid::apply::add(&mut dag, Default::default()).unwrap();
     dag.connect(source, n.image).unwrap();
-    let out = evaluator.evaluate::<Cpu<ColorRgb>>(&dag, &Default::default(), n.output).unwrap();
+    let out = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), n.output).unwrap();
     assert!(out.data.iter().flatten().all(|v| v.is_finite()));
     for v in out.data[1] {
         assert!((v - 0.18).abs() < 1e-5);
@@ -120,7 +117,10 @@ fn cpu_algorithms() {
 }
 
 fn bayer_reduction(evaluator: &Evaluator) {
-    let camera = Camera { coordinates: "reduction-test".into(), scale: "white-1".into() };
+    let camera = Response {
+        camera: Camera { make: "reduction-test".into(), model: "white-1".into() },
+        balance: None,
+    };
     for phase in [BayerPhase::Rggb, BayerPhase::Grbg, BayerPhase::Gbrg, BayerPhase::Bggr] {
         for (width, height, factor) in [(8, 12, 2), (7, 9, 2), (3, 3, 256), (3, 3, 1), (1, 3, 1)] {
             let mut dag = Dag::new();
@@ -129,11 +129,7 @@ fn bayer_reduction(evaluator: &Evaluator) {
                 .collect();
             let source = node::source::<Bayer>(
                 &mut dag,
-                BayerDesc {
-                    extent: Extent { width, height },
-                    phase,
-                    interpretation: camera.clone(),
-                },
+                BayerDesc { extent: Extent { width, height }, phase, response: camera.clone() },
                 pixels.clone(),
             )
             .unwrap();
@@ -165,7 +161,7 @@ fn bayer_reduction(evaluator: &Evaluator) {
             BayerDesc {
                 extent: Extent { width: 4, height: 4 },
                 phase: BayerPhase::Rggb,
-                interpretation: camera.clone(),
+                response: camera.clone(),
             },
             pixels,
         )
@@ -186,39 +182,34 @@ fn bayer_reduction(evaluator: &Evaluator) {
 
 fn context_driven_demosaic(evaluator: &Evaluator) {
     use drip::runtime::GlobalContext;
-    let camera = Camera { coordinates: "context-camera".into(), scale: "white-1".into() };
+    let mut metadata =
+        drip_raw::Metadata { make: "context".into(), model: "camera".into(), ..Default::default() };
+    metadata.calibration.xyz_to_cam = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.], [0.; 3]];
+    let metadata = std::sync::Arc::new(metadata);
+    let camera = Response { camera: Camera::of(&metadata), balance: None };
     let mut dag = Dag::new();
     let source = node::source::<Bayer>(
         &mut dag,
         BayerDesc {
             extent: Extent { width: 64, height: 48 },
             phase: BayerPhase::Grbg,
-            interpretation: camera.clone(),
+            response: camera.clone(),
         },
         (0..64 * 48).map(|i| ((i * 31 + i / 64) % 101) as f32 / 100.).collect::<Vec<_>>(),
     )
     .unwrap();
     let demosaic = node::rcd::add(&mut dag, ()).unwrap();
     dag.connect(source, demosaic.image).unwrap();
-    let metadata = CaptureData {
-        matrix: Some(CameraCalibration {
-            source: camera,
-            target: node::raw::working_color(),
-            values: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
-        }),
-        ..Default::default()
-    };
-    let matrix =
-        node::source::<CaptureMetadata>(&mut dag, MetadataDesc::of(&metadata), metadata).unwrap();
+    let matrix = node::source::<CaptureMetadata>(&mut dag, metadata.clone(), metadata).unwrap();
     let convert = node::camera_to_rgb::add(&mut dag, ()).unwrap();
     dag.connect(demosaic.output, convert.image).unwrap();
     dag.connect(matrix, convert.metadata).unwrap();
-    let preview = node::bayer_preview::add(&mut dag, ()).unwrap();
+    let preview = node::bayer_2x2::add(&mut dag, ()).unwrap();
     dag.connect(source, preview.image).unwrap();
     let node_count = dag.nodes().count();
     let edges: Vec<_> = dag.edges().collect();
     let global = GlobalContext { scale: 2 };
-    let image = evaluator.evaluate::<Cpu<ColorRgb>>(&dag, &global, convert.output).unwrap();
+    let image = evaluator.evaluate::<Cpu<Rgb>>(&dag, &global, convert.output).unwrap();
     assert_eq!(image.desc.extent, Extent { width: 32, height: 24 });
     assert_eq!(image.data.len(), 32 * 24);
     assert_eq!(image.statistics.nodes, 4); // No inserted reduction node.
@@ -230,7 +221,7 @@ fn context_driven_demosaic(evaluator: &Evaluator) {
         dag.description(convert.output).unwrap().unwrap().extent,
         Extent { width: 64, height: 48 }
     );
-    let binned = evaluator.evaluate::<Cpu<CameraRgb>>(&dag, &global, preview.output).unwrap();
+    let binned = evaluator.evaluate::<Cpu<Rgb>>(&dag, &global, preview.output).unwrap();
     assert_eq!(binned.desc.extent, Extent { width: 16, height: 12 });
     // An explicit reduction followed by full-detail demosaic is the reference.
     let mut explicit = dag.clone();
@@ -245,49 +236,48 @@ fn context_driven_demosaic(evaluator: &Evaluator) {
             edit.connect(reduced.output, preview.image)
         })
         .unwrap();
-    let expected = evaluator
-        .evaluate::<Cpu<ColorRgb>>(&explicit, &Default::default(), convert.output)
-        .unwrap();
+    let expected =
+        evaluator.evaluate::<Cpu<Rgb>>(&explicit, &Default::default(), convert.output).unwrap();
     for (a, b) in image.data.iter().flatten().zip(expected.data.iter().flatten()) {
         assert!((a - b).abs() < 2e-6);
     }
-    let expected = evaluator
-        .evaluate::<Cpu<CameraRgb>>(&explicit, &Default::default(), preview.output)
-        .unwrap();
+    let expected =
+        evaluator.evaluate::<Cpu<Rgb>>(&explicit, &Default::default(), preview.output).unwrap();
     assert_eq!(*binned.data, *expected.data);
-    let full =
-        evaluator.evaluate::<Cpu<ColorRgb>>(&dag, &Default::default(), convert.output).unwrap();
+    let full = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), convert.output).unwrap();
     assert_eq!(full.desc.extent, Extent { width: 64, height: 48 });
 }
 
 fn resident_highlights(evaluator: &Evaluator) {
-    let camera = Camera { coordinates: "highlight-test".into(), scale: "balanced".into() };
+    let camera = Response {
+        camera: Camera { make: "highlight-test".into(), model: "balanced".into() },
+        balance: None,
+    };
     let mut dag = Dag::new();
     let source = node::source::<Bayer>(
         &mut dag,
         BayerDesc {
             extent: Extent { width: 32, height: 24 },
             phase: BayerPhase::Rggb,
-            interpretation: camera.clone(),
+            response: camera.clone(),
         },
         vec![0.5; 32 * 24],
     )
     .unwrap();
     let levels = node::source::<BayerLevels>(
         &mut dag,
-        BayerLevelDesc { phase: BayerPhase::Rggb, interpretation: camera },
+        BayerLevelsDesc { phase: BayerPhase::Rggb, response: camera },
         [1.; 4],
     )
     .unwrap();
     let before = node::reduce::bayer::add(&mut dag, node::reduce::Settings { factor: 1 }).unwrap();
     let highlights = node::highlights::reconstruct::add(&mut dag, Default::default()).unwrap();
-    let after = node::bayer_preview::add(&mut dag, ()).unwrap();
+    let after = node::bayer_2x2::add(&mut dag, ()).unwrap();
     dag.connect(source, before.image).unwrap();
     dag.connect(before.output, highlights.image).unwrap();
     dag.connect(levels, highlights.levels).unwrap();
     dag.connect(highlights.output, after.image).unwrap();
-    let output =
-        evaluator.evaluate::<Cpu<CameraRgb>>(&dag, &Default::default(), after.output).unwrap();
+    let output = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), after.output).unwrap();
     assert!(output.data.iter().flatten().all(|v| (*v - 0.5).abs() < 1e-6));
     // Highlights must keep the image on the device between its two neighbors.
     assert_eq!(output.statistics.uploads, 1);
@@ -297,9 +287,9 @@ fn resident_highlights(evaluator: &Evaluator) {
 fn bayer_copy_contract(
     _: &drip::runtime::GlobalContext,
     _: &(),
-    image: Option<&BayerDesc>,
-) -> drip::Result<(Option<BayerDesc>,)> {
-    Ok((image.cloned(),))
+    image: &BayerDesc,
+) -> drip::Result<(BayerDesc,)> {
+    Ok((image.clone(),))
 }
 
 #[drip::node(id="test-bayer-cpu-copy", contract=bayer_copy_contract)]
@@ -320,7 +310,10 @@ fn bayer_host_island(evaluator: &Evaluator) {
         BayerDesc {
             extent: Extent { width: 5, height: 3 },
             phase: BayerPhase::Rggb,
-            interpretation: Camera { coordinates: "host-island".into(), scale: "white-1".into() },
+            response: Response {
+                camera: Camera { make: "host-island".into(), model: "white-1".into() },
+                balance: None,
+            },
         },
         (0..15).map(|i| i as f32).collect::<Vec<_>>(),
     )

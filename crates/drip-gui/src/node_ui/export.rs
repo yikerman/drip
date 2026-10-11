@@ -54,23 +54,15 @@ impl Default for CompressionMode {
     }
 }
 
-fn contract(
-    _: &drip::runtime::GlobalContext,
-    _: &Export,
-    image: Option<&ImageDesc<Color>>,
-    _: Option<&MetadataDesc>,
-) -> Result<()> {
-    crate::node_ui::contracts::working(image)
-}
-/// Write identity-encoded Rec.2020/D65 ColorRgb to TIFF through an RGB ICC profile.
+/// Write linear Rec.2020/D65 RGB to TIFF through an RGB ICC profile.
 /// u8/u16 clip to the output range; f32 retains the profile's floating-point range.
-/// Connected CaptureMetadata is copied when present. Export uses full processing
+/// Connected capture metadata is copied when present. Export uses full processing
 /// detail, independently of preview detail. Compression is lossless.
-#[drip::node(id="output.tiff", name="Export TIFF", category="Output", contract=contract)]
+#[drip::node(id = "output.tiff", name = "Export TIFF", category = "Output")]
 fn tiff(
     _: &KernelContext<'_>,
     _: &Export,
-    image: Read<'_, Cpu<ColorRgb>>,
+    image: Read<'_, Cpu<Rgb>, Rec2020>,
     metadata: Option<Read<'_, Cpu<CaptureMetadata>>>,
 ) -> Result<()> {
     let _ = (image, metadata);
@@ -106,10 +98,10 @@ fn export(
     let (desc, pixels) = inputs
         .get("image")
         .ok_or_else(|| Error::Contract("missing export image".into()))?
-        .get::<Cpu<ColorRgb>>()?;
+        .get::<Cpu<Rgb>>()?;
     let metadata = inputs
         .get("metadata")
-        .map(|v| v.get::<Cpu<CaptureMetadata>>().map(|(_, v)| v))
+        .map(|v| v.get::<Cpu<CaptureMetadata>>().map(|(_, v)| &**v))
         .transpose()?;
     let output = profile::Output::load(&p.output, &ctx.resources)?;
     let compression = match p.compression {

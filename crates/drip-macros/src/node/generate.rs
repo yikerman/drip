@@ -26,12 +26,16 @@ pub(super) fn node(
 
             #ports
 
-            pub fn definition(parameters: #parameters) -> ::std::sync::Arc<dyn ::drip::definition::Node> {
-                ::std::sync::Arc::new(Definition { parameters })
+            /// Admit checked parameters as a graph node.
+            pub fn definition(
+                parameters: #parameters,
+            ) -> ::drip::Result<::std::sync::Arc<dyn ::drip::definition::Node>> {
+                ::drip::param::Parameters::validate(&parameters)?;
+                Ok(::std::sync::Arc::new(Definition { parameters }))
             }
 
             pub fn add(dag: &mut ::drip::graph::Dag, parameters: #parameters) -> ::drip::Result<Ports> {
-                dag.add(definition(parameters)).map(Ports::from_node)
+                dag.add(definition(parameters)?).map(Ports::from_node)
             }
 
             #adapter
@@ -40,18 +44,23 @@ pub(super) fn node(
     }
 }
 
+fn payload(port: &Port) -> TokenStream {
+    let ty = &port.ty;
+    quote!(<#ty as ::drip::ports::Port>::Payload)
+}
+
 fn ports(signature: &Signature) -> TokenStream {
     let mut fields = Vec::new();
     let mut handles = Vec::new();
     for port in signature.inputs().chain(signature.outputs()) {
         let name = &port.name;
-        let ty = &port.ty;
         let index = port.index;
+        let payload = payload(port);
         let handle = match port.direction {
             Direction::Input => quote!(::drip::ports::Input),
             Direction::Output => quote!(::drip::ports::Output),
         };
-        fields.push(quote!(pub #name: #handle<<#ty as ::drip::ports::Port>::Payload>));
+        fields.push(quote!(pub #name: #handle<#payload>));
         handles.push(quote!(#name: #handle::new(node, #index)));
     }
     quote! {
@@ -115,86 +124,99 @@ fn adapter(function: &syn::ItemFn, options: &Options, signature: &Signature) -> 
 fn port_spec(port: &Port) -> TokenStream {
     let name = port.name.to_string();
     let ty = &port.ty;
-    let spec = quote!(::drip::ports::PortSpec::of::<#ty>(#name));
-    let spec = match (&port.label, declared_payload(ty)) {
-        (Some(label), _) => quote!(#spec.named_payload(#label)),
-        (None, Some(payload)) => quote!(#spec.named_payload(::core::stringify!(#payload))),
-        (None, None) => spec,
-    };
+    let requirement = &port.requirement;
+    let spec = quote!(::drip::ports::PortSpec::of::<#ty, #requirement>(#name));
     if port.optional { quote!(#spec.optional()) } else { spec }
 }
 
-fn declared_payload(ty: &syn::Type) -> Option<&syn::Type> {
-    let syn::Type::Path(path) = ty else {
-        return None;
-    };
-    let wrapper = path.path.segments.last()?;
-    if wrapper.ident != "Cpu" && wrapper.ident != "Device" {
-        return None;
-    }
-    let syn::PathArguments::AngleBracketed(arguments) = &wrapper.arguments else {
-        return None;
-    };
-    let mut arguments = arguments.args.iter();
-    match (arguments.next(), arguments.next()) {
-        (Some(syn::GenericArgument::Type(payload)), None) => Some(payload),
-        _ => None,
-    }
+/// Generated code still errors rather than panicking if a required input is
+/// absent; the graph and evaluator normally guarantee it.
+fn missing(port: &Port) -> TokenStream {
+    let name = port.name.to_string();
+    quote!(::drip::Error::MissingInput { node: Self::ID, port: #name })
 }
 
 fn contract(options: &Options, signature: &Signature) -> TokenStream {
-    let contract = &options.contract;
-    let mut descriptions = Vec::new();
-    let mut erased = Vec::new();
+    let mut checks = Vec::new();
+    let mut arguments = Vec::new();
     for port in signature.inputs() {
+        let local = &port.name;
+        let name = local.to_string();
         let index = port.index;
         let ty = &port.ty;
-        descriptions.push(quote!(
-            ::drip::ports::description::<<#ty as ::drip::ports::Port>::Payload>(&inputs[#index])
-        ));
+        let requirement = &port.requirement;
+        let check =
+            quote!(::drip::ports::input::<#ty, #requirement>(#name, inputs[#index].as_ref())?);
+        let missing = missing(port);
+        checks.push(if port.optional {
+            quote!(let #local = #check;)
+        } else {
+            quote!(let #local = #check.ok_or_else(|| #missing)?;)
+        });
+        arguments.push(local);
     }
-    for port in signature.outputs() {
+    let outputs = signature.outputs().map(|port| {
+        let name = port.name.to_string();
         let index = syn::Index::from(port.index);
         let ty = &port.ty;
-        erased.push(quote!(
-            ::drip::ports::erase::<<#ty as ::drip::ports::Port>::Payload>(_described.#index)?
-        ));
-    }
+        let requirement = &port.requirement;
+        quote!(::drip::ports::output::<#ty, #requirement>(#name, described.#index)?)
+    });
+    let call = match &options.contract {
+        Some(contract) => {
+            quote!(let described = #contract(global, &self.parameters, #(#arguments),*)?;)
+        }
+        None => quote!(let _ = (global, #(#arguments),*);),
+    };
     quote! {
         fn contract(
             &self,
             global: &::drip::runtime::GlobalContext,
             inputs: &[Option<::drip::ports::Description>],
-        )
-            -> ::drip::Result<Vec<Option<::drip::ports::Description>>>
-        {
-            let _described = #contract(global, &self.parameters, #(#descriptions),*)?;
-            Ok(vec![#(#erased),*])
+        ) -> ::drip::Result<::drip::definition::Outcome> {
+            #(#checks)*
+            #call
+            Ok(::drip::definition::Outcome::Known(vec![#(#outputs),*]))
         }
     }
 }
 
 fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
-    let arguments = signature.ports.iter().map(kernel_argument);
     let mut allocations = Vec::new();
+    let mut arguments = Vec::new();
     let mut results = Vec::new();
-    for port in signature.outputs() {
+    for port in &signature.ports {
         let index = port.index;
         let ty = &port.ty;
-        let local = format_ident!("output_{index}");
-        allocations.push(quote! {
-            let mut #local = ::drip::ports::OutputSlot::<#ty>::allocate(&output_descs[#index], context)?;
-        });
-        results.push(quote!(Some(#local.finish()?)));
+        let requirement = &port.requirement;
+        match port.direction {
+            Direction::Input => {
+                let read =
+                    quote!(::drip::ports::Read::<#ty, #requirement>::bind(inputs[#index].as_ref()));
+                let missing = missing(port);
+                arguments.push(if port.optional {
+                    read
+                } else {
+                    quote!(#read.ok_or_else(|| #missing)?)
+                });
+            }
+            Direction::Output => {
+                let local = format_ident!("output_{index}");
+                allocations.push(quote! {
+                    let mut #local = ::drip::ports::OutputSlot::<#ty>::allocate(&outputs[#index], context)?;
+                });
+                arguments.push(quote!(#local.write::<#requirement>()));
+                results.push(quote!(#local.finish()?));
+            }
+        }
     }
     quote! {
         fn run(
             &self,
             context: &::drip::runtime::KernelContext<'_>,
-            input_descs: &[Option<::drip::ports::Description>],
-            inputs: &[Option<::drip::ports::Data>],
-            output_descs: &[Option<::drip::ports::Description>],
-        ) -> ::drip::Result<Vec<Option<::drip::ports::Data>>> {
+            inputs: &[Option<(::drip::ports::Description, ::drip::ports::Data)>],
+            outputs: &[::drip::ports::Description],
+        ) -> ::drip::Result<Vec<::drip::ports::Data>> {
             #(#allocations)*
             super::#name(context, &self.parameters, #(#arguments),*)?;
             Ok(vec![#(#results),*])
@@ -202,32 +224,13 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
     }
 }
 
-fn kernel_argument(port: &Port) -> TokenStream {
-    let index = port.index;
-    match port.direction {
-        Direction::Input => read_argument(port),
-        Direction::Output => {
-            let local = format_ident!("output_{index}");
-            quote!(#local.write())
-        }
-    }
-}
-
-fn read_argument(port: &Port) -> TokenStream {
-    let index = port.index;
-    let ty = &port.ty;
-    let missing_input = format!("missing required input {}", port.name);
-    let read = quote!(::drip::ports::Read::<#ty>::bind(&input_descs[#index], &inputs[#index])?);
-    if port.optional {
-        read
-    } else {
-        quote!(#read.ok_or_else(|| ::drip::Error::Contract(#missing_input.into()))?)
-    }
-}
-
 fn registration(options: &Options, parameters: &syn::Type) -> TokenStream {
     let id = &options.id;
     quote! {
+        impl Definition {
+            pub const ID: &'static str = #id;
+        }
+
         #[::drip::__private::linkme::distributed_slice(::drip::definition::NODES)]
         #[linkme(crate = ::drip::__private::linkme)]
         static REGISTRATION: ::drip::definition::Registration = ::drip::definition::Registration {
@@ -240,7 +243,7 @@ fn registration(options: &Options, parameters: &syn::Type) -> TokenStream {
                     .map_err(|error| ::drip::Error::Contract(
                         format!("invalid parameters for {}: {error}", #id)
                     ))?;
-                Ok(definition(parameters))
+                definition(parameters)
             },
         };
     }

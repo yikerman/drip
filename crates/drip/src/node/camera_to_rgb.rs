@@ -1,50 +1,39 @@
 use crate::{
     Error, Result,
-    node::data::*,
+    node::{camera, color, data::*},
     ports::*,
     runtime::{GlobalContext, KernelContext, dispatch_dims},
 };
 pub use compute::{Definition, Ports, add, definition};
+use std::sync::Arc;
 fn camera_to_rgb_contract(
     _: &GlobalContext,
     _: &(),
-    image: Option<&ImageDesc<Camera>>,
-    metadata: Option<&MetadataDesc>,
-) -> Result<(Option<ImageDesc<Color>>,)> {
-    let matrix = metadata.and_then(|m| m.matrix.as_ref());
-    if matrix.is_some_and(|m| m.target.encoding != Encoding::Identity) {
-        return Err(Error::Contract("camera matrix output must declare identity encoding".into()));
+    image: &RgbDesc,
+    metadata: &Arc<drip_raw::Metadata>,
+) -> Result<(RgbDesc,)> {
+    let response = image.response()?;
+    if response.camera != Camera::of(metadata) {
+        return Err(Error::Contract("image camera differs from the capture metadata".into()));
     }
-    let (Some(image), Some(matrix)) = (image, matrix) else {
-        return Ok((None,));
-    };
-    if image.interpretation != matrix.source {
-        return Err(Error::Contract(format!(
-            "image domain {:?} differs from matrix source {:?}",
-            image.interpretation, matrix.source
-        )));
-    }
-    Ok((Some(ImageDesc { extent: image.extent.clone(), interpretation: matrix.target.clone() }),))
+    camera::matrix(metadata, response.balance)?;
+    Ok((RgbDesc { extent: image.extent.clone(), coordinates: Coordinates::Space(REC2020_D65) },))
 }
-/// Convert CameraRgb to ColorRgb with the matrix in CaptureMetadata.
-/// The image interpretation must match the matrix source. Output uses the matrix's
-/// target coordinates, without implicit decoding, normalization or clipping.
+/// Convert camera RGB to linear Rec.2020/D65 with the capture's camera matrix.
+/// The image's balance is replaced by D65 reference gains inside the matrix, so
+/// camera neutral under D65 maps to white; scene white balance is a separate
+/// adaptation. No clipping or normalization is applied. The image must come
+/// from the same camera make and model as the metadata.
 #[crate::node(id = "color.camera-to-color-rgb", name="Camera RGB to color RGB", category="Color", contract = camera_to_rgb_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Device<CameraRgb>>,
+    image: Read<'_, Device<Rgb>, CameraRgb>,
     metadata: Read<'_, Cpu<CaptureMetadata>>,
-    output: Write<'_, Device<ColorRgb>>,
+    output: Write<'_, Device<Rgb>, Rec2020>,
 ) -> Result<()> {
-    let matrix = metadata
-        .data
-        .matrix
-        .as_ref()
-        .ok_or_else(|| Error::Contract("metadata has no camera color matrix".into()))?;
-    let coefficients = DeviceBuffer::<()>::new(
-        ctx.client()?.create(cubecl::bytes::Bytes::from_elems(matrix.values.to_vec())),
-    );
+    let matrix = camera::matrix(metadata.data, image.desc.response()?.balance)?;
+    let coefficients = ctx.constants(color::to_f32(&matrix).as_flattened())?;
     let (count, dim) = dispatch_dims(image.desc.extent.pixels());
     super::shared_kernel::matrix::launch(
         ctx.client()?,

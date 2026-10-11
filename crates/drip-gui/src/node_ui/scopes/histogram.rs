@@ -1,8 +1,8 @@
 //! Histogram evaluation and its integer reduction.
 
 use super::ExposureSettings;
+use crate::node_ui::data::DeviceRgb;
 use crate::node_ui::data::PrepareContext;
-use crate::node_ui::data::{DeviceRgb, DisplayInterpretation};
 use drip::Error as KernelError;
 
 #[cfg(test)]
@@ -25,9 +25,9 @@ pub struct Histogram {
 #[cfg(test)]
 const BINS: usize = 256;
 
-pub fn histogram<I: DisplayInterpretation>(
+pub fn histogram(
     p: ExposureSettings,
-    (image,): (&DeviceRgb<I>,),
+    (image,): (&DeviceRgb,),
     ctx: &PrepareContext,
 ) -> Result<Arc<Histogram>, KernelError> {
     let (min, max) = (p.min_ev as f32, p.max_ev as f32);
@@ -38,7 +38,7 @@ pub fn histogram<I: DisplayInterpretation>(
         max_stop: max,
         counts,
         log,
-        color_space: image.desc.interpretation.label(),
+        color_space: image.desc.coordinates.to_string(),
     };
     Ok(Arc::new(histogram))
 }

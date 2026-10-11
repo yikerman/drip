@@ -22,6 +22,7 @@ use crate::{
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
+#[validate(validate)]
 pub struct Settings {
     /// Contrast at the fixed 0.18 grey point.
     #[param(crate::param::ParamKind::Float { min:0.5, max:4.0, default:1.5 })]
@@ -80,24 +81,13 @@ fn prepare_values(p: &Settings) -> [f32; 22] {
     result
 }
 
-fn apply_contract(
-    _: &GlobalContext,
-    p: &Settings,
-    image: Option<&ImageDesc<Color>>,
-) -> Result<(Option<ImageDesc<Color>>,)> {
-    validate(p)?;
-    if image.is_some_and(|d| d.interpretation != super::raw::working_color()) {
-        return Err(Error::Contract(
-            "sigmoid requires identity-encoded Rec.2020/D65 with relative white 1".into(),
-        ));
-    }
-    Ok((image.cloned(),))
+fn apply_contract(_: &GlobalContext, _: &Settings, image: &RgbDesc) -> Result<(RgbDesc,)> {
+    Ok((image.clone(),))
 }
-/// Apply a sigmoid contrast curve and hue correction to identity-encoded
-/// Rec.2020/D65 ColorRgb with relative white 1. Grey is fixed at 0.18; black
-/// stays zero and the curve approaches one. Outputs edited ColorRgb in the same
-/// coordinates. Negative channels use an achromatic projection; this does not
-/// apply sRGB encoding.
+/// Apply a sigmoid contrast curve and hue correction to linear Rec.2020/D65 RGB
+/// with reference white at 1. Grey is fixed at 0.18; black stays zero and the
+/// curve approaches one. Outputs edited RGB in the same coordinates. Negative
+/// channels use an achromatic projection; no output encoding is applied.
 #[crate::node(id="tone.sigmoid",
 name="Sigmoid",
 category="Tone",
@@ -106,13 +96,10 @@ references=[("darktable sigmoid", "https://github.com/darktable-org/darktable/bl
 pub fn apply(
     ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Device<ColorRgb>>,
-    output: Write<'_, Device<ColorRgb>>,
+    image: Read<'_, Device<Rgb>, Rec2020>,
+    output: Write<'_, Device<Rgb>, Rec2020>,
 ) -> Result<()> {
-    // These constants belong to this invocation, not to a graph payload.
-    let coefficients = DeviceBuffer::<()>::new(
-        ctx.client()?.create(cubecl::bytes::Bytes::from_elems(prepare_values(p).to_vec())),
-    );
+    let coefficients = ctx.constants(&prepare_values(p))?;
     let (count, dim) = crate::runtime::dispatch_dims(image.desc.extent.pixels());
     kernel::sigmoid::launch(
         ctx.client()?,

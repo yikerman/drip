@@ -1,6 +1,6 @@
 use super::*;
 use drip::node::color::{self, D65, REC709, REC2020};
-type Rec2020Mat = Arc<Rgb>;
+type Rec2020Mat = Arc<HostImage>;
 
 use crate::model::Project;
 use lcms2::{Intent, PixelFormat, Profile, Transform};
@@ -23,8 +23,8 @@ fn proof(mode: &str, overrides: serde_json::Value) -> serde_json::Value {
     json!({ "mode": {mode: output} })
 }
 
-fn image(pixels: Vec<[f32; 3]>) -> Arc<Rgb> {
-    Arc::new(Rgb {
+fn image(pixels: Vec<[f32; 3]>) -> Arc<HostImage> {
+    Arc::new(HostImage {
         width: pixels.len(),
         height: 1,
         requested_scale: 4,

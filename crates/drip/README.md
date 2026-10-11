@@ -21,10 +21,14 @@ Windowing, the graph editor, worker scheduling and shared rendering machinery
 remain outside. File organization does not justify splitting one algorithm
 into more DAG nodes or changing GUI interaction behavior.
 
-Payloads keep concrete Rust data types and separate interpretation descriptions.
-Device allocation and transport are shared; a payload may supply a small local
-packing adapter for nested allocations. Do not duplicate CPU/GPU schemas or
-flatten unrelated ports merely to make their storage uniform.
+Payloads keep concrete Rust data types and a host description that contracts
+read. A payload implements `DeviceLayout` only when a kernel reads it on the
+device; `Device<P>` ports require it, and structured data stays on the host.
+Nodes flatten the numbers a kernel needs into `KernelContext::constants`.
+Interpretations are typed values in descriptions (camera responses or numeric
+RGB spaces, compared exactly). Ports declare requirements as type arguments,
+`Read<'_, Device<Rgb>, Rec2020>`; the checker, help and editor read the same
+declaration. Do not flatten unrelated ports merely to make storage uniform.
 
 ## Node metadata and parameters
 
@@ -82,23 +86,17 @@ Run the shared algorithm checks on any configured runtime with
 
 ## RAW metadata
 
-RAW exposes `mosaic: Bayer` and `metadata: CaptureMetadata`. The owned metadata
-contains common LibRaw capture settings, lens identifiers, optional GPS, sensor
-geometry, native WB/black/white/color calibration and derived Bayer/matrix
-calibration. Unknown native values retain LibRaw's sentinels. Vendor-specific
-maker-note structures and correction profiles are not included.
+RAW exposes `mosaic: Bayer` and `metadata: CaptureMetadata`. The metadata is
+what LibRaw reported: capture settings, lens identifiers, optional GPS, sensor
+geometry and native WB/black/white/color calibration. Unknown values retain
+LibRaw's sentinels. Vendor-specific maker notes and correction profiles are not
+included. It is a host-only value whose description is the shared value itself.
 
-`Bayer site gains` consumes that metadata and produces both adjusted Bayer and
-matching BayerLevels. Camera conversion, chromatic adaptation and orientation
-read the same metadata. The prepared camera matrix replaces as-shot gains with
-D65 reference gains; its mapped camera neutral supplies CAT16's initial source
-white. As-shot conditioning remains in place through highlights and demosaic.
-Capture facts remain unchanged; processing outputs declare their own coordinates.
-The minimum lens focus distance describes the lens, not this exposure's focus.
-TIFF continues to write the selected EXIF subset and ICC profile.
-
-Metadata uses a validated rkyv archive for explicit device transport; CPU edges
-share the owned value. The archive is internal, not a project file format.
-Projects wired to the former separate RAW calibration ports must be recreated
-with the current template; those ports and the separate clipping-gains node were
-removed.
+Consumers derive what they apply (`node::camera`). `Bayer site gains` derives
+as-shot gains and clipping levels and records the balance in the Bayer response.
+Camera conversion derives its matrix from `xyz_to_cam` and that balance,
+replacing it with D65 reference gains; CAT16 maps the as-shot camera neutral
+through the same matrix for its initial source white. As-shot conditioning
+remains in place through highlights and demosaic. The minimum lens focus
+distance describes the lens, not this exposure's focus. TIFF writes the selected
+EXIF subset and ICC profile.

@@ -1,6 +1,7 @@
 //! Evaluate the requested dependency subgraph. Materializations live for one run.
 use crate::{
     Error, Result,
+    definition::Outcome,
     graph::Dag,
     payload::Payload,
     ports::*,
@@ -141,10 +142,10 @@ impl Evaluator {
         target: Output<P::Payload>,
     ) -> Result<Evaluation<P>> {
         let entry = dag.output(target.id)?;
-        if entry.node.outputs()[target.id.index].payload != std::any::TypeId::of::<P::Payload>() {
+        if !entry.node.outputs()[target.id.index].is::<P::Payload>() {
             return Err(wrong_handle());
         }
-        let spec = PortSpec::of::<P>("result");
+        let spec = PortSpec::of::<P, Any>("result");
         let (mut values, statistics) =
             self.run(dag, global, target.node(), &[(target.id.index, spec)])?;
         let (desc, data) = values.pop().unwrap();
@@ -205,8 +206,9 @@ type DescribedValue = (Description, Data);
 
 /// One logical output and its at-most-one transferred representation.
 struct Value {
-    desc: Option<Description>,
-    placement: Placement,
+    desc: Description,
+    /// The producer's transfers when it is a device port.
+    transfers: Option<Transfers>,
     native: Data,
     transferred: Option<Data>,
 }
@@ -328,23 +330,27 @@ impl<'a, 't> Run<'a, 't> {
         let value = self
             .values
             .get_mut(&from)
-            .ok_or_else(|| Error::Contract("requested source description is unavailable".into()))?;
-        let desc = value
-            .desc
-            .as_ref()
-            .ok_or_else(|| Error::Contract("requested source description is unavailable".into()))?;
-        if spec.placement == value.placement {
-            return Ok((desc.clone(), value.native.clone()));
-        }
-        if value.transferred.is_none() {
-            let data = (spec.transport)(&value.native, value.placement, desc, self.runtime)?;
-            match spec.placement {
-                Placement::Cpu => self.statistics.downloads += 1,
-                Placement::Device => self.statistics.uploads += 1,
+            .ok_or_else(|| Error::Contract("requested source value is unavailable".into()))?;
+        // The device side of the edge supplies the transfer.
+        let transfer = match (value.transfers, spec.transfers) {
+            (None, None) | (Some(_), Some(_)) => {
+                return Ok((value.desc.clone(), value.native.clone()));
             }
-            value.transferred = Some(data);
-        }
-        Ok((desc.clone(), value.transferred.as_ref().unwrap().clone()))
+            (None, Some(consumer)) => consumer.upload,
+            (Some(producer), None) => producer.download,
+        };
+        let data = match &value.transferred {
+            Some(data) => data.clone(),
+            None => {
+                let data = transfer(&value.native, &value.desc, self.runtime)?;
+                match spec.placement() {
+                    Placement::Cpu => self.statistics.downloads += 1,
+                    Placement::Device => self.statistics.uploads += 1,
+                }
+                value.transferred.insert(data).clone()
+            }
+        };
+        Ok((value.desc.clone(), data))
     }
     fn execute(&mut self, e: &crate::graph::Entry) -> Result<()> {
         let start = self.timings.as_ref().map(|_| Instant::now());
@@ -362,50 +368,33 @@ impl<'a, 't> Run<'a, 't> {
     }
 
     fn compute(&mut self, e: &crate::graph::Entry) -> Result<()> {
-        let mut inputs = Vec::new();
-        let mut descs = Vec::new();
-        for (from, spec) in e.inputs.iter().zip(e.node.inputs()) {
-            match from {
-                Some(from) => {
-                    let (desc, data) = self.materialize(*from, &spec)?;
-                    descs.push(Some(desc));
-                    inputs.push(Some(data));
-                }
-                None => {
-                    descs.push(None);
-                    inputs.push(None);
-                }
-            }
-        }
-        let output_descs = e.node.contract(self.global, &descs)?;
+        let inputs = e
+            .inputs
+            .iter()
+            .zip(e.node.inputs())
+            .map(|(from, spec)| from.map(|from| self.materialize(from, &spec)).transpose())
+            .collect::<Result<Vec<_>>>()?;
+        let descs: Vec<_> = inputs.iter().map(|v| v.as_ref().map(|(d, _)| d.clone())).collect();
+        let outputs = match e.node.contract(self.global, &descs)? {
+            Outcome::Known(outputs) => outputs,
+            Outcome::Unknown(reason) => return Err(reason),
+        };
         let specs = e.node.outputs();
-        if output_descs.len() != specs.len() {
+        if outputs.len() != specs.len() {
             return Err(Error::Runtime("node contract output arity mismatch".into()));
         }
         let context = KernelContext { runtime: self.runtime, global: self.global };
-        let result = e.node.run(&context, &descs, &inputs, &output_descs)?;
+        let result = e.node.run(&context, &inputs, &outputs)?;
         if result.len() != specs.len() {
             return Err(Error::Runtime("node result arity mismatch".into()));
         }
         self.statistics.nodes += 1;
-        for (port, (data, spec)) in result.into_iter().zip(specs).enumerate() {
+        for (port, ((data, desc), spec)) in result.into_iter().zip(outputs).zip(specs).enumerate() {
             let id = output_id(e.id, port);
             if self.uses.contains_key(&id) {
-                match data {
-                    Some(data) => {
-                        self.values.insert(
-                            id,
-                            Value {
-                                desc: output_descs[port].clone(),
-                                placement: spec.placement,
-                                native: data,
-                                transferred: None,
-                            },
-                        );
-                    }
-                    None if output_descs[port].is_none() => {}
-                    None => return Err(Error::Runtime("node omitted a described output".into())),
-                }
+                let value =
+                    Value { desc, transfers: spec.transfers, native: data, transferred: None };
+                self.values.insert(id, value);
             }
         }
         Ok(())
@@ -444,9 +433,7 @@ impl OutputValue {
         &self.spec
     }
     pub fn get<P: Port>(&self) -> Result<(&<P::Payload as Payload>::Desc, &P::Storage)> {
-        if self.spec.payload != std::any::TypeId::of::<P::Payload>()
-            || self.spec.placement != P::PLACEMENT
-        {
+        if !self.spec.is::<P::Payload>() || self.spec.placement() != P::PLACEMENT {
             return Err(Error::Contract("output payload or placement mismatch".into()));
         }
         Ok((downcast(&self.desc), downcast(&self.data)))

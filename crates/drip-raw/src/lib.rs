@@ -201,7 +201,7 @@ pub fn decode(path: &Path) -> Result<Raw, Error> {
     let (rows, cols) = (c[4] as usize, c[5] as usize);
     let text = |s: &[c_char]| {
         // SAFETY: the shim NUL-terminates its strings within their arrays.
-        unsafe { CStr::from_ptr(s.as_ptr()) }.to_string_lossy().trim().as_bytes().to_vec()
+        unsafe { CStr::from_ptr(s.as_ptr()) }.to_string_lossy().trim().to_owned()
     };
     Ok(Raw {
         data,

@@ -1,5 +1,5 @@
 //! Device reductions. Only compact integer counts cross back to the GUI.
-use crate::node_ui::data::{DeviceRgb, DisplayInterpretation, PrepareContext};
+use crate::node_ui::data::{DeviceRgb, PrepareContext};
 use cubecl::{bytes::Bytes, prelude::*, server::Handle};
 use drip::{Error, Result};
 
@@ -27,8 +27,8 @@ fn read(client: &Client, handle: Handle) -> Result<Vec<u32>> {
     Ok(bytes.as_chunks::<4>().0.iter().map(|&v| u32::from_ne_bytes(v)).collect())
 }
 
-pub fn exposure<I: DisplayInterpretation>(
-    image: &DeviceRgb<I>,
+pub fn exposure(
+    image: &DeviceRgb,
     ctx: &PrepareContext,
     min: f32,
     max: f32,
@@ -83,8 +83,8 @@ pub fn exposure<I: DisplayInterpretation>(
     Ok(read(client, output)?.as_chunks::<3>().0.to_vec())
 }
 
-pub fn vectorscope<I: DisplayInterpretation>(
-    image: &DeviceRgb<I>,
+pub fn vectorscope(
+    image: &DeviceRgb,
     ctx: &PrepareContext,
     matrix: &drip::node::color::Mat3,
     white: [f32; 2],

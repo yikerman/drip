@@ -13,6 +13,7 @@ mod tests;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
+#[validate(validate)]
 pub struct Settings {
     /// Fraction of each site's clipping level at which reconstruction begins.
     #[param(crate::param::ParamKind::Float { min: 0.5, max: 1.0, default: 0.98 })]
@@ -23,23 +24,24 @@ impl Default for Settings {
         Self { threshold: 0.98 }
     }
 }
-fn contract(
-    _: &GlobalContext,
-    p: &Settings,
-    image: Option<&BayerDesc>,
-    levels: Option<&BayerLevelDesc>,
-) -> Result<(Option<BayerDesc>,)> {
+fn validate(p: &Settings) -> Result<()> {
     if !p.threshold.is_finite() || p.threshold <= 0.0 || p.threshold > 1.0 {
         return Err(Error::Contract("highlight threshold must be in (0,1]".into()));
     }
-    if let (Some(image), Some(levels)) = (image, levels)
-        && (image.phase != levels.phase || image.interpretation != levels.interpretation)
-    {
+    Ok(())
+}
+fn contract(
+    _: &GlobalContext,
+    _: &Settings,
+    image: &BayerDesc,
+    levels: &BayerLevelsDesc,
+) -> Result<(BayerDesc,)> {
+    if image.phase != levels.phase || image.response != levels.response {
         return Err(Error::Contract(
             "highlight levels must describe the Bayer image's phase and coordinates".into(),
         ));
     }
-    Ok((image.cloned(),))
+    Ok((image.clone(),))
 }
 /// Reconstruct clipped Bayer samples with inpaint opposed, assuming balanced
 /// camera channels. BayerLevels supplies clipping levels in matching coordinates;

@@ -2,7 +2,7 @@
 
 use std::{any::Any, sync::Arc};
 
-use crate::node_ui::data::Rgb;
+use crate::node_ui::data::HostImage;
 use egui::{FontId, Painter, Rect, Ui};
 
 use crate::render::image::Image;
@@ -37,10 +37,10 @@ pub trait IntoDrawable {
 /// Packed images by source, so an unchanged image is packed once. The owner
 /// keeps every image until nothing else does, so the last drop happens there.
 #[derive(Default)]
-pub struct ImageCache(Vec<(Arc<Rgb>, Arc<Image>)>);
+pub struct ImageCache(Vec<(Arc<HostImage>, Arc<Image>)>);
 
 impl ImageCache {
-    pub fn image(&mut self, source: &Arc<Rgb>) -> Arc<Image> {
+    pub fn image(&mut self, source: &Arc<HostImage>) -> Arc<Image> {
         if let Some((_, image)) = self.0.iter().find(|(rgb, _)| Arc::ptr_eq(rgb, source)) {
             return image.clone();
         }
@@ -68,11 +68,11 @@ impl IntoDrawable for () {
 mod tests {
     use super::*;
     use crate::node_ui::preview::{ImageView, PreviewImage};
-    type Rec2020Mat = Arc<Rgb>;
+    type Rec2020Mat = Arc<HostImage>;
 
     #[test]
     fn preparation_reuses_images_and_keeps_destruction_on_its_owner() {
-        let source = Arc::new(Rgb {
+        let source = Arc::new(HostImage {
             width: 1,
             height: 1,
             requested_scale: 1,

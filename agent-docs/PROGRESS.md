@@ -4,6 +4,12 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Implemented typed payloads and port requirements: one RGB payload, typed
+  interpretations, requirement type arguments, contracts over known
+  descriptions, admission-time parameter checks, device layouts only for
+  kernel-read payloads, facts-only RAW metadata without rkyv, and merged
+  Camera/Color reduction, histogram and waveform nodes. Workspace tests pass on
+  the GPU including device tests; strict workspace Clippy and formatting pass.
 - Resolved the model review's open questions with the user; decisions are in
   DESIGN under Model refactor. Documentation only; no code changes or tests.
 
