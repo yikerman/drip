@@ -1,7 +1,11 @@
-//! Port text derived from the library's declared payload names and requirements.
-//! Connection checking stays in the library; this only names its contracts.
+//! Port text and colors derived from the library's declared payloads and
+//! requirements. Connection checking stays in the library; this only presents
+//! its contracts.
 
 use crate::model::{Graph, NodeId};
+use drip::node::data::{Bayer, BayerLevels, CaptureMetadata, Rgb};
+use drip::ports::PortSpec;
+use egui::Color32;
 
 #[derive(Clone, Copy)]
 pub enum PortRole {
@@ -26,6 +30,7 @@ pub struct PortText {
     pub port: &'static str,
     /// Accepted input types or the declared output type.
     pub label: String,
+    pub color: Color32,
 }
 
 impl PortText {
@@ -39,11 +44,6 @@ impl PortText {
         }
     }
 
-    pub fn canvas(&self) -> String {
-        let optional = if matches!(self.role, PortRole::OptionalInput) { "?" } else { "" };
-        format!("{}{optional} · {}", self.port, self.label)
-    }
-
     pub fn hover(&self) -> String {
         let requires = match self.role {
             PortRole::Input | PortRole::OptionalInput => "requires ",
@@ -53,20 +53,34 @@ impl PortText {
     }
 }
 
+/// One color per payload, the type ports must share to connect. Requirements
+/// are checked on evaluation and only named in hover text. Tints stay near
+/// neutral so they do not bias color judgment against the grey surround.
+pub fn color(spec: &PortSpec) -> Option<Color32> {
+    [
+        (spec.is::<Rgb>(), Color32::from_rgb(172, 166, 146)),
+        (spec.is::<Bayer>(), Color32::from_rgb(150, 164, 150)),
+        (spec.is::<BayerLevels>(), Color32::from_rgb(148, 156, 170)),
+        (spec.is::<CaptureMetadata>(), Color32::from_rgb(164, 150, 166)),
+    ]
+    .into_iter()
+    .find_map(|(is, color)| is.then_some(color))
+}
+
 /// Inputs then outputs, in the editor's row order. Every output type is known
 /// before evaluation, including on nodes with missing inputs.
 pub fn texts(graph: &Graph, id: NodeId) -> Vec<PortText> {
     let kind = graph.node(id).expect("existing node").kind;
-    let inputs = kind.inputs.iter().map(|input| PortText {
-        role: if input.optional { PortRole::OptionalInput } else { PortRole::Input },
-        port: input.name,
-        label: input.label(),
+    let text = |role, spec: &PortSpec| PortText {
+        role,
+        port: spec.name,
+        label: spec.label(),
+        color: color(spec).unwrap_or(crate::theme::TEXT),
+    };
+    let inputs = kind.inputs.iter().map(|input| {
+        text(if input.optional { PortRole::OptionalInput } else { PortRole::Input }, input)
     });
-    let outputs = kind.outputs.iter().map(|output| PortText {
-        role: PortRole::Output,
-        port: output.name,
-        label: output.label(),
-    });
+    let outputs = kind.outputs.iter().map(|output| text(PortRole::Output, output));
     inputs.chain(outputs).collect()
 }
 
@@ -86,32 +100,11 @@ mod tests {
     }
 
     #[test]
-    fn canvas_contract_rows_fit_default_node_widths() {
-        let ctx = egui::Context::default();
-        ctx.run_ui(Default::default(), |ui| {
-            let mut graph = Graph::default();
-            for kind in crate::model::Registry.kinds() {
-                let id = graph.add_node(kind).unwrap();
-                let width = super::super::of(kind).size(&graph.node(id).unwrap()).x - 16.0;
-                for text in texts(&graph, id).into_iter().map(|t| t.canvas()) {
-                    let galley = ui.fonts_mut(|fonts| {
-                        fonts.layout_job({
-                            let mut job = egui::text::LayoutJob::simple(
-                                text.clone(),
-                                egui::FontId::proportional(crate::theme::SMALL_SIZE),
-                                crate::theme::WEAK,
-                                width,
-                            );
-                            job.wrap.max_rows = 1;
-                            job.wrap.break_anywhere = true;
-                            job
-                        })
-                    });
-                    assert!(galley.size().x <= width, "{}: {text}", kind.id);
-                }
+    fn every_registered_payload_has_a_color() {
+        for kind in crate::model::Registry.kinds() {
+            for spec in kind.inputs.iter().chain(kind.outputs) {
+                assert!(color(spec).is_some(), "{}.{}: {}", kind.id, spec.name, spec.payload);
             }
-        })
-        .textures_delta
-        .clear();
+        }
     }
 }

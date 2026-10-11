@@ -6,7 +6,8 @@
 //! draws each node's frame (header, ports, error) and its kind's GUI the body.
 
 use crate::editing::{Edit, Frame, NodeCx};
-use crate::node_ui::{self, Part, ports::PortText};
+use crate::node_ui::ports::{PortRole, PortText};
+use crate::node_ui::{self, Part};
 use crate::ui_state::{LayoutField, position};
 use crate::widgets::{self, BUTTON};
 use crate::worker::ViewResult;
@@ -444,12 +445,16 @@ fn paint(painter: &Painter, l: &NodeLayout, node: &Node, texts: &[PortText], sel
     let inputs = l.inputs.iter().map(|(_, pos)| (*pos, 8.0, Align2::LEFT_CENTER));
     let outputs = l.outputs.iter().map(|(_, pos)| (*pos, -8.0, Align2::RIGHT_CENTER));
     for ((pos, offset, align), text) in inputs.chain(outputs).zip(texts) {
-        painter.circle_filled(pos, PORT, theme::TEXT);
+        if matches!(text.role, PortRole::OptionalInput) {
+            painter.circle(pos, PORT - 1.0, fill, Stroke::new(2.0, text.color));
+        } else {
+            painter.circle(pos, PORT, text.color, Stroke::new(1.0, theme::TEXT));
+        }
         let mut job = egui::text::LayoutJob::simple(
-            text.canvas(),
+            text.port.into(),
             small.clone(),
             theme::WEAK,
-            l.rect.width() - 16.0,
+            label_width(l.rect.width()),
         );
         job.wrap.max_rows = 1;
         job.wrap.break_anywhere = true;
@@ -462,8 +467,8 @@ fn paint(painter: &Painter, l: &NodeLayout, node: &Node, texts: &[PortText], sel
     }
 }
 
-/// From the top: header, input rows, output rows, an error row if the node
-/// failed, the body its kind's GUI draws.
+/// From the top: header, port rows with inputs left and outputs right, an
+/// error row if the node failed, the body its kind's GUI draws.
 fn layout(id: NodeId, node: &Node, result: Option<&ViewResult>) -> NodeLayout {
     let error = match result {
         Some(Ok(_)) | None => None,
@@ -482,7 +487,7 @@ fn layout(id: NodeId, node: &Node, result: Option<&ViewResult>) -> NodeLayout {
             .outputs
             .iter()
             .enumerate()
-            .map(|(i, p)| (p.name, port(node.kind.inputs.iter().len() + i, size.x)))
+            .map(|(i, p)| (p.name, port(i, size.x)))
             .collect(),
         error: error.map(|e| (pos + vec2(8.0, ports(node) + ROW / 2.0), e)),
         body: Rect::from_min_size(pos + vec2(0.0, body_top), size),
@@ -491,7 +496,12 @@ fn layout(id: NodeId, node: &Node, result: Option<&ViewResult>) -> NodeLayout {
 
 /// The height of a node's header and port rows.
 fn ports(node: &Node) -> f32 {
-    HEADER + ROW * (node.kind.inputs.iter().len() + node.kind.outputs.iter().len()) as f32
+    HEADER + ROW * node.kind.inputs.len().max(node.kind.outputs.len()) as f32
+}
+
+/// Room for one port name: half the node, as an input and an output share a row.
+fn label_width(node_width: f32) -> f32 {
+    node_width / 2.0 - 12.0
 }
 
 /// A node's rectangle in graph units, without an error row.

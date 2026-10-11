@@ -383,7 +383,7 @@ fn wires_leave_panning_and_overlapping_nodes_and_ports_interactive() {
         drag(&mut h, midpoint, Primary, delta);
         assert_eq!(h.state().editor.offset.unwrap(), offset + delta);
         assert_eq!(h.state().graph.source(&image_port(target)), Some(output_port(source)));
-        let position = if over_port { vec2(350.0, 118.0) } else { vec2(330.0, 139.0) };
+        let position = if over_port { vec2(350.0, 109.0) } else { vec2(330.0, 130.0) };
         let overlay =
             add_node(&mut h, crate::model::Registry.get("tone.exposure").unwrap(), position);
         click(&mut h, midpoint + delta, Secondary);
@@ -518,4 +518,24 @@ fn output_port(id: NodeId) -> Port {
 }
 fn snapshot(graph: &Graph) -> String {
     crate::model::Project { graph: graph.clone(), ui: serde_json::Value::Null }.to_json().unwrap()
+}
+
+#[test]
+fn port_names_fit_beside_the_opposite_port() {
+    let ctx = egui::Context::default();
+    ctx.run_ui(Default::default(), |ui| {
+        let mut graph = Graph::default();
+        for kind in Registry.kinds() {
+            let id = graph.add_node(kind).unwrap();
+            let width = node_ui::of(kind).size(&graph.node(id).unwrap()).x;
+            for text in node_ui::ports::texts(&graph, id) {
+                let font = FontId::proportional(theme::SMALL_SIZE);
+                let galley =
+                    ui.fonts_mut(|f| f.layout_no_wrap(text.port.into(), font, theme::WEAK));
+                assert!(galley.size().x <= label_width(width), "{}: {}", kind.id, text.port);
+            }
+        }
+    })
+    .textures_delta
+    .clear();
 }
