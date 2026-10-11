@@ -115,9 +115,9 @@ fn resident_chain(evaluator: &Evaluator) {
         vec![[0.25; 3]; 15],
     )
     .unwrap();
-    let before = node::exposure::add(&mut dag, node::Exposure { ev: 1. }).unwrap();
+    let before = node::exposure::add(&mut dag, node::exposure::Exposure { ev: 1. }).unwrap();
     let reduced = node::reduce::rgb::add(&mut dag, Default::default()).unwrap();
-    let after = node::exposure::add(&mut dag, node::Exposure { ev: -1. }).unwrap();
+    let after = node::exposure::add(&mut dag, node::exposure::Exposure { ev: -1. }).unwrap();
     dag.connect(source, before.image).unwrap();
     dag.connect(before.output, reduced.image).unwrap();
     dag.connect(reduced.output, after.image).unwrap();

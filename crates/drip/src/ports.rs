@@ -29,8 +29,6 @@ pub trait Port: Send + Sync + 'static {
     type Storage: Send + Sync + 'static;
     /// Device ports transfer between placements; host ports never transfer.
     const TRANSFERS: Option<Transfers>;
-    const PLACEMENT: Placement =
-        if Self::TRANSFERS.is_some() { Placement::Device } else { Placement::Cpu };
     fn check(desc: &<Self::Payload as Payload>::Desc, data: &Self::Storage) -> Result<()>;
     fn allocate(
         desc: &<Self::Payload as Payload>::Desc,

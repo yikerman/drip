@@ -141,64 +141,24 @@ impl Evaluator {
         global: &GlobalContext,
         target: Output<P::Payload>,
     ) -> Result<Evaluation<P>> {
-        let entry = dag.output(target.id)?;
-        if !entry.node.kind().outputs[target.id.index].is::<P::Payload>() {
-            return Err(wrong_handle());
+        dag.output_of::<P::Payload>(target.id)?;
+        global.validate()?;
+        let needed = required_nodes(dag, target.node())?;
+        let mut run = Run::new(dag, &self.runtime, global, &needed);
+        run.retain(target.id);
+        for &index in dag.order.iter().filter(|i| needed.contains(i)) {
+            run.execute(dag.entries[index].as_ref().unwrap())?;
         }
-        let spec = PortSpec::of::<P, Any>("result");
-        let (mut values, statistics) =
-            self.run(dag, global, target.node(), &[(target.id.index, spec)])?;
-        let (desc, data) = values.pop().unwrap();
+        let (desc, data) = run.materialize(target.id, &PortSpec::of::<P, Any>("result"))?;
+        // One terminal wait; host consumers have already waited at read boundaries.
+        self.runtime.finish()?;
         Ok(Evaluation {
             desc: downcast::<<P::Payload as Payload>::Desc>(&desc).clone(),
             data: data
                 .downcast()
                 .map_err(|_| Error::Runtime("result representation mismatch".into()))?,
-            statistics,
+            statistics: run.statistics,
         })
-    }
-
-    /// Demand all native outputs of a node, including an input-only node's checks.
-    pub fn evaluate_node(
-        &self,
-        dag: &Dag,
-        global: &GlobalContext,
-        target: NodeId,
-    ) -> Result<NodeEvaluation> {
-        let specs = dag.entry(target)?.node.kind().outputs;
-        let endpoints: Vec<_> = specs.iter().cloned().enumerate().collect();
-        let (values, statistics) = self.run(dag, global, target, &endpoints)?;
-        let outputs = values
-            .into_iter()
-            .zip(specs)
-            .map(|((desc, data), spec)| OutputValue { desc, data, spec: *spec })
-            .collect();
-        Ok(NodeEvaluation { outputs, statistics })
-    }
-
-    fn run(
-        &self,
-        dag: &Dag,
-        global: &GlobalContext,
-        target: NodeId,
-        endpoints: &[(usize, PortSpec)],
-    ) -> Result<(Vec<DescribedValue>, Statistics)> {
-        global.validate()?;
-        let needed = required_nodes(dag, target)?;
-        let mut run = Run::new(dag, &self.runtime, global, &needed);
-        for (index, _) in endpoints {
-            run.retain(output_id(target, *index));
-        }
-        for &index in dag.order.iter().filter(|i| needed.contains(i)) {
-            run.execute(dag.entries[index].as_ref().unwrap())?;
-        }
-        let result = endpoints
-            .iter()
-            .map(|(index, spec)| run.materialize(output_id(target, *index), spec))
-            .collect::<Result<_>>()?;
-        // One terminal wait; host consumers have already waited at read boundaries.
-        self.runtime.finish()?;
-        Ok((result, run.statistics))
     }
 }
 
@@ -407,31 +367,6 @@ impl<'a, 't> Run<'a, 't> {
         if *remaining == 0 {
             self.values.remove(&port);
         }
-    }
-}
-
-pub struct NodeEvaluation {
-    pub outputs: Vec<OutputValue>,
-    pub statistics: Statistics,
-}
-pub struct OutputValue {
-    desc: Description,
-    data: Data,
-    spec: PortSpec,
-}
-impl OutputValue {
-    pub fn shared<P: Port>(&self) -> Result<Arc<P::Storage>> {
-        self.get::<P>()?;
-        self.data.clone().downcast().map_err(|_| Error::Runtime("representation mismatch".into()))
-    }
-    pub fn spec(&self) -> &PortSpec {
-        &self.spec
-    }
-    pub fn get<P: Port>(&self) -> Result<(&<P::Payload as Payload>::Desc, &P::Storage)> {
-        if !self.spec.is::<P::Payload>() || self.spec.placement() != P::PLACEMENT {
-            return Err(Error::Contract("output payload or placement mismatch".into()));
-        }
-        Ok((downcast(&self.desc), downcast(&self.data)))
     }
 }
 

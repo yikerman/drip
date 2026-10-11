@@ -18,5 +18,4 @@ mod shared_kernel;
 pub mod sigmoid;
 pub mod source;
 pub mod templates;
-pub use exposure::Exposure;
 pub use source::source;

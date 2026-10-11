@@ -87,9 +87,9 @@ fn requirements_compare_spaces_exactly_and_parameters_at_admission() {
     let source = node::source::<Rgb>(&mut d, desc, vec![[0.; 3]; 2]).unwrap();
     let sigmoid = node::sigmoid::apply::add(&mut d, Default::default()).unwrap();
     assert!(d.connect(source, sigmoid.image).is_err());
-    let exposure = node::exposure::add(&mut d, node::Exposure { ev: 0. }).unwrap();
+    let exposure = node::exposure::add(&mut d, node::exposure::Exposure { ev: 0. }).unwrap();
     d.connect(source, exposure.image).unwrap(); // Exposure scales any RGB.
-    assert!(node::exposure::add(&mut d, node::Exposure { ev: f32::NAN }).is_err());
+    assert!(node::exposure::add(&mut d, node::exposure::Exposure { ev: f32::NAN }).is_err());
 }
 #[test]
 fn typed_macro_supplies_docs_ports_and_discovery() {
@@ -277,7 +277,7 @@ fn independent_outputs_share_one_producer_per_evaluation_without_persistent_cach
     let consumer = consume::add(&mut d, ()).unwrap();
     d.connect(source, split.image).unwrap();
     d.connect(split.copy, consumer.image).unwrap();
-    d.connect(split.levels, consumer._levels).unwrap();
+    d.connect(split.levels, consumer.levels).unwrap();
     let eval = Evaluator::new(RuntimeContext::host());
     for expected in 1..=2 {
         let result = eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), consumer.output).unwrap();
@@ -286,9 +286,6 @@ fn independent_outputs_share_one_producer_per_evaluation_without_persistent_cach
     }
     let levels = eval.evaluate::<Cpu<BayerLevels>>(&d, &Default::default(), split.levels).unwrap();
     assert_eq!(*levels.data, LEVELS); // image output may be unused
-    let native = eval.evaluate_node(&d, &Default::default(), split.node).unwrap();
-    assert_eq!(native.outputs.len(), 2);
-    assert_eq!(*native.outputs[1].get::<Cpu<BayerLevels>>().unwrap().1, LEVELS);
 }
 
 #[node(id="test-value-check",contract=copy_contract)]
@@ -333,9 +330,9 @@ fn device_chain(runtime: RuntimeContext) {
     let matrix = capture(&mut d, m);
     let preview = node::bayer_2x2::add(&mut d, ()).unwrap();
     let convert = node::camera_to_rgb::add(&mut d, ()).unwrap();
-    let exposure = node::exposure::add(&mut d, node::Exposure { ev: 1. }).unwrap();
+    let exposure = node::exposure::add(&mut d, node::exposure::Exposure { ev: 1. }).unwrap();
     let island = cpu_copy::add(&mut d, ()).unwrap();
-    let after = node::exposure::add(&mut d, node::Exposure { ev: -2. }).unwrap();
+    let after = node::exposure::add(&mut d, node::exposure::Exposure { ev: -2. }).unwrap();
     d.connect(source, preview.image).unwrap();
     d.connect(preview.output, convert.image).unwrap();
     d.connect(matrix, convert.metadata).unwrap();
@@ -404,17 +401,12 @@ fn node_targets_include_input_only_nodes() {
     let outputs = cpu_copy::add(&mut d, ()).unwrap();
     d.connect(source, outputs.image).unwrap();
     let eval = Evaluator::new(RuntimeContext::host());
-    let result = eval.evaluate_node(&d, &Default::default(), outputs.node).unwrap();
-    assert_eq!(result.outputs.len(), 1);
-    assert_eq!(result.outputs[0].get::<Cpu<Rgb>>().unwrap().1.len(), 2);
-    assert!(result.outputs[0].get::<Cpu<Bayer>>().is_err());
-    assert!(result.outputs[0].get::<Device<Rgb>>().is_err());
     let sink = sink::add(&mut d, ()).unwrap();
-    assert!(eval.evaluate_node(&d, &Default::default(), sink.node).is_err());
-    d.connect(source, sink.image).unwrap();
-    let result = eval.evaluate_node(&d, &Default::default(), sink.node).unwrap();
-    assert!(result.outputs.is_empty());
-    assert_eq!(result.statistics.nodes, 2);
+    let demand = |d: &Dag| eval.evaluate_inputs(d, &Default::default(), &[sink.node]);
+    assert!(matches!(demand(&d)[&sink.node], Err(Error::MissingInput { .. })));
+    d.connect(outputs.output, sink.image).unwrap();
+    let inputs = demand(&d).remove(&sink.node).unwrap().unwrap();
+    assert_eq!(inputs.bind::<sink::Definition>().unwrap().image.data.len(), 2);
 }
 
 #[node(id = "test-bad-producer", contract = copy_contract)]
@@ -553,7 +545,7 @@ fn global_context_describes_and_computes_each_request_without_changing_the_dag()
     let copy = cpu_copy::add(&mut dag, ()).unwrap();
     dag.connect(source.output, copy.image).unwrap();
     let fixed = fixed_width::add(&mut dag, ()).unwrap();
-    dag.connect(source.output, fixed._image).unwrap(); // Full-detail connection is valid.
+    dag.connect(source.output, fixed.image).unwrap(); // Full-detail connection is valid.
     let evaluator = Evaluator::new(RuntimeContext::host());
     let global = GlobalContext { scale: 3 };
     let value = evaluator.evaluate::<Cpu<Rgb>>(&dag, &global, copy.output).unwrap();
@@ -564,7 +556,9 @@ fn global_context_describes_and_computes_each_request_without_changing_the_dag()
     let inputs = batch[&copy.node].as_ref().unwrap().bind::<cpu_copy::Definition>().unwrap();
     assert_eq!(inputs.image.desc.extent.width, 3);
     assert!(batch[&fixed.node].as_ref().err().unwrap().to_string().contains("requires width 1"));
-    assert!(evaluator.evaluate_node(&dag, &Default::default(), fixed.node).is_ok());
+    assert!(
+        evaluator.evaluate_inputs(&dag, &Default::default(), &[fixed.node])[&fixed.node].is_ok()
+    );
     assert!(
         evaluator.evaluate::<Cpu<Rgb>>(&dag, &GlobalContext { scale: 0 }, copy.output).is_err()
     );

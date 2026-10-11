@@ -34,11 +34,7 @@ impl Default for Dag {
 impl Dag {
     pub fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
-        #[allow(deprecated)] // Keep compatibility with Rust 1.95.
-        let id = NEXT
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
-            .expect("graph identity exhausted");
-        Self { id, entries: Vec::new(), order: Vec::new() }
+        Self { id: next(&NEXT), entries: Vec::new(), order: Vec::new() }
     }
 
     pub fn nodes(&self) -> impl Iterator<Item = (NodeId, &dyn Node)> {
@@ -108,20 +104,13 @@ impl Dag {
         self.edit(|e| e.remove(id))
     }
     pub fn typed_output<P: Payload>(&self, port: PortId) -> Result<Output<P>> {
-        let e = self.output(port)?;
-        if !e.node.kind().outputs[port.index].is::<P>() {
-            return Err(wrong_handle());
-        }
+        self.output_of::<P>(port)?;
         Ok(Output::new(port.node, port.index))
     }
     /// Full-detail description checked during graph edits. Evaluation reports
     /// its request-specific description in the returned value.
     pub fn description<P: Payload>(&self, output: Output<P>) -> Result<Option<&P::Desc>> {
-        let e = self.output(output.id)?;
-        if !e.node.kind().outputs[output.id.index].is::<P>() {
-            return Err(wrong_handle());
-        }
-        Ok(match &e.outcome {
+        Ok(match &self.output_of::<P>(output.id)?.outcome {
             Outcome::Known(descs) => Some(downcast(&descs[output.id.index])),
             Outcome::Unknown(_) => None,
         })
@@ -139,6 +128,14 @@ impl Dag {
     pub(crate) fn output(&self, id: PortId) -> Result<&Entry> {
         let e = self.entry(id.node)?;
         if id.direction != Direction::Output || id.index >= e.node.kind().outputs.len() {
+            return Err(wrong_handle());
+        }
+        Ok(e)
+    }
+    /// Typed handles are checked too: generated `Ports` accept any node.
+    pub(crate) fn output_of<P: Payload>(&self, id: PortId) -> Result<&Entry> {
+        let e = self.output(id)?;
+        if !e.node.kind().outputs[id.index].is::<P>() {
             return Err(wrong_handle());
         }
         Ok(e)
@@ -241,11 +238,8 @@ pub struct Edit<'a> {
 impl Edit<'_> {
     pub fn add(&mut self, node: Arc<dyn Node>) -> NodeId {
         static NEXT: AtomicU64 = AtomicU64::new(1);
-        #[allow(deprecated)] // Keep compatibility with Rust 1.95.
-        let generation = NEXT
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(1))
-            .expect("node identity exhausted");
-        let id = NodeId { graph: self.dag.id, index: self.dag.entries.len(), generation };
+        let id =
+            NodeId { graph: self.dag.id, index: self.dag.entries.len(), generation: next(&NEXT) };
         self.dag.entries.push(Some(Entry {
             id,
             inputs: vec![None; node.kind().inputs.len()],
@@ -290,4 +284,9 @@ impl Edit<'_> {
         }
         Ok(())
     }
+}
+
+/// A process-unique identity. A u64 counter does not wrap in practice.
+fn next(counter: &AtomicU64) -> u64 {
+    counter.fetch_add(1, Ordering::Relaxed)
 }
