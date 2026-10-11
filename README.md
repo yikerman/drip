@@ -43,15 +43,16 @@ placed wherever you need them in the pipeline.*
 
 ### Experiment with confidence
 
-Branch the pipeline, try another processing order, or inspect an intermediate
-result. Drip checks image types when you connect nodes, then checks color
-spaces and other image-dependent requirements during processing. Incompatible operations
-explain what needs attention; valid combinations leave room for creative choices.
+Branch the pipeline, reorder steps, or leave one out to see what changes. Drip
+connects any matching image types, then checks what each step needs as your
+photo flows through it. A step that cannot work with its input says why, right
+on the canvas; every node's help lists what it expects. Creative choices stay
+open: Exposure works on any RGB, camera colors included.
 
-![RAW processing connections with chromatic adaptation selected and its help and white-balance control visible](fixtures/demos/sane-workflow.png)
+![Exposure and Sigmoid wired straight after demosaic; Sigmoid is marked in red because it requires Rec.2020 / D65 and got camera RGB](fixtures/demos/sane-workflow.png)
 
-*Follow the image from sensor data through demosaic and camera color, with
-white balance and its assumptions open in the inspector.*
+*Skip camera color conversion and Sigmoid explains what it needs: Rec.2020 /
+D65, not camera RGB. Exposure takes the same image without complaint.*
 
 ### Make your next edit feel familiar
 
