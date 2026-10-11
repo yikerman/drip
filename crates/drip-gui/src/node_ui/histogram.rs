@@ -12,9 +12,8 @@ use std::sync::Arc;
 pub fn observe(
     _: &KernelContext<'_>,
     _: &ExposureSettings,
-    image: Read<'_, Device<Rgb>>,
+    _image: Read<'_, Device<Rgb>>,
 ) -> Result<()> {
-    let _ = image;
     Ok(())
 }
 #[drip_macros::gui_node]

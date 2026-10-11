@@ -18,7 +18,7 @@ impl<'n, 'g, 'f, 'a, N: DeserializeOwned> ControlCx<'n, 'g, 'f, 'a, N> {
 
     /// Read after drawing controls so same-frame edits also reach custom plots.
     pub fn parameters(&self) -> N {
-        serde_json::from_value(self.node.node().params).expect("validated node parameters")
+        drip::param::decode(self.node.node().params).expect("validated node parameters")
     }
 
     pub fn schema(&mut self, ui: &mut Ui) {

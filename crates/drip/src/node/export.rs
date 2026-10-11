@@ -79,10 +79,9 @@ pub struct Export {
 pub fn tiff(
     _: &KernelContext<'_>,
     _: &Export,
-    image: Read<'_, Cpu<Rgb>, Rec2020>,
-    metadata: Option<Read<'_, Cpu<CaptureMetadata>>>,
+    _image: Read<'_, Cpu<Rgb>, Rec2020>,
+    _metadata: Option<Read<'_, Cpu<CaptureMetadata>>>,
 ) -> Result<()> {
-    let _ = (image, metadata);
     Ok(())
 }
 fn export(p: &Export, inputs: tiff::Inputs<'_>, resources: &Resources) -> Result<()> {

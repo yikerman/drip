@@ -20,8 +20,7 @@ pub struct Settings {
 /// color conversion; camera RGB shows native channels. Exposure is measured
 /// relative to sample value 1; the density scale controls bin brightness.
 #[drip::node(id = "view.waveform", name = "Waveform", category = "View")]
-pub fn observe(_: &KernelContext<'_>, _: &Settings, image: Read<'_, Device<Rgb>>) -> Result<()> {
-    let _ = image;
+pub fn observe(_: &KernelContext<'_>, _: &Settings, _image: Read<'_, Device<Rgb>>) -> Result<()> {
     Ok(())
 }
 #[drip_macros::gui_node]

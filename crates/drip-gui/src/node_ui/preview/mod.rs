@@ -89,8 +89,7 @@ pub struct Preview {
 fn observe(
     _: &KernelContext<'_>,
     _: &Preview,
-    image: Read<'_, Cpu<Rgb>, Rec2020>,
+    _image: Read<'_, Cpu<Rgb>, Rec2020>,
 ) -> drip::Result<()> {
-    let _ = image;
     Ok(())
 }

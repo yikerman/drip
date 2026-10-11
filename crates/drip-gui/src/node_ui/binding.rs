@@ -7,7 +7,12 @@ use crate::{
     node_ui::data::PrepareContext,
     render::node_views::{Drawable, ImageCache, IntoDrawable},
 };
-use drip::{Result, definition::Typed, eval::InputValues};
+use drip::{
+    Result,
+    definition::Typed,
+    eval::InputValues,
+    param::{decode, encode},
+};
 use egui::Ui;
 use serde_json::Value;
 use std::sync::Arc;
@@ -62,7 +67,7 @@ impl Binding {
             action: match G::ACTION {
                 Some(action) => Some((action.name, |params, inputs, ctx| {
                     let run = G::ACTION.expect("declared action").run;
-                    run(decode(params)?, inputs.bind::<G>()?, ctx)?.map(encode).transpose()
+                    run(decode(params)?, inputs.bind::<G>()?, ctx)?.as_ref().map(encode).transpose()
                 })),
                 None => None,
             },
@@ -102,10 +107,4 @@ impl Binding {
             .ok_or_else(|| drip::Error::Graph("unknown node action".into()))?;
         action(params, inputs, ctx)
     }
-}
-fn encode<P: serde::Serialize>(params: P) -> Result<Value> {
-    serde_json::to_value(params).map_err(|e| drip::Error::Contract(e.to_string()))
-}
-fn decode<P: serde::de::DeserializeOwned>(params: Value) -> Result<P> {
-    serde_json::from_value(params).map_err(|e| drip::Error::Contract(e.to_string()))
 }

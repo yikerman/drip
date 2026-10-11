@@ -106,6 +106,16 @@ impl ParamKind {
     }
 }
 
+/// Typed parameters from their persisted JSON; the type is the schema check.
+pub fn decode<P: serde::de::DeserializeOwned>(json: Json) -> crate::Result<P> {
+    serde_json::from_value(json)
+        .map_err(|e| crate::Error::Contract(format!("invalid parameters: {e}")))
+}
+/// The persisted JSON of typed parameters.
+pub fn encode<P: serde::Serialize>(parameters: &P) -> crate::Result<Json> {
+    serde_json::to_value(parameters).map_err(|e| crate::Error::Graph(e.to_string()))
+}
+
 /// Implemented by the Parameters derive; schemas follow the typed fields.
 /// A schema incompatible with its field is a declaration error:
 ///

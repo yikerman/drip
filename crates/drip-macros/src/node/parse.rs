@@ -71,6 +71,8 @@ pub(super) enum Direction {
 }
 
 pub(super) struct Port {
+    /// The argument name without a leading underscore: `_image` declares port
+    /// `image` on a node that does not read it.
     pub name: syn::Ident,
     pub ty: syn::Type,
     /// The port's requirement (input) or guarantee (output); `Any` if omitted.
@@ -167,7 +169,8 @@ impl Port {
         let syn::Pat::Ident(name) = argument.pat.as_ref() else {
             return Err(syn::Error::new(argument.span(), "ports must be named"));
         };
-        if name.ident == "node" {
+        let name = syn::Ident::new(name.ident.to_string().trim_start_matches('_'), name.span());
+        if name == "node" {
             return Err(syn::Error::new(
                 name.span(),
                 "node is reserved for the generated node handle",
@@ -209,7 +212,7 @@ impl Port {
                 ));
             }
         };
-        Ok(Self { name: name.ident.clone(), ty, requirement, direction, optional, index: 0 })
+        Ok(Self { name, ty, requirement, direction, optional, index: 0 })
     }
 }
 

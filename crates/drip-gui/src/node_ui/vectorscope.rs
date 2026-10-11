@@ -23,9 +23,8 @@ const RADIUS: f32 = 0.5;
 fn observe(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Device<Rgb>, Rec2020>,
+    _image: Read<'_, Device<Rgb>, Rec2020>,
 ) -> drip::Result<()> {
-    let _ = image;
     Ok(())
 }
 pub fn vectorscope(

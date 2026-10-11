@@ -43,6 +43,19 @@ fn nodes_with_outputs_need_a_contract() {
 }
 
 #[test]
+fn an_unread_port_drops_its_underscore() {
+    let function = syn::parse_quote! {
+        fn x(c: &Context, p: &Params, _image: Read<Cpu<Image>>) -> Result<()> { Ok(()) }
+    };
+    let module = generated_module(expand(quote!(id = "x"), function).unwrap());
+    assert_port_specs(
+        &module,
+        "inputs",
+        quote!(::drip::ports::PortSpec::of::<Cpu<Image>, ::drip::ports::Any>("image")),
+    );
+}
+
+#[test]
 fn sources_load_cpu_outputs_at_admission_without_a_contract() {
     let function: syn::ItemFn = syn::parse_quote! {
         fn read(p: &Settings, mosaic: Load<'_, Bayer>, metadata: Load<'_, Facts>) -> Result<()> {

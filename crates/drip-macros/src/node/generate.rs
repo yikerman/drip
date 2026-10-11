@@ -76,8 +76,7 @@ pub(super) fn node(
                 }
 
                 fn parameters(&self) -> ::drip::Result<::drip::__private::serde_json::Value> {
-                    ::drip::__private::serde_json::to_value(&self.parameters)
-                        .map_err(|error| ::drip::Error::Graph(error.to_string()))
+                    ::drip::param::encode(&self.parameters)
                 }
 
                 #contract
@@ -89,13 +88,7 @@ pub(super) fn node(
             static REGISTRATION: ::drip::definition::Registration =
                 ::drip::definition::Registration {
                     kind: &KIND,
-                    build: |json| {
-                        let parameters = ::drip::__private::serde_json::from_value(json)
-                            .map_err(|error| ::drip::Error::Contract(
-                                format!("invalid parameters for {}: {error}", KIND.id)
-                            ))?;
-                        definition(parameters)
-                    },
+                    build: |json| definition(::drip::param::decode(json)?),
                 };
         }
     }
@@ -130,13 +123,8 @@ fn kind(
             quote!(Some(::drip::definition::Action {
                 name: #label,
                 run: |parameters, inputs, resources| {
-                    let parameters: #parameters = ::drip::__private::serde_json::from_value(parameters)
-                        .map_err(|error| ::drip::Error::Contract(error.to_string()))?;
-                    super::#path(
-                        &parameters,
-                        inputs.bind::<Definition>()?,
-                        resources,
-                    )
+                    let parameters: #parameters = ::drip::param::decode(parameters)?;
+                    super::#path(&parameters, inputs.bind::<Definition>()?, resources)
                 },
             }))
         }

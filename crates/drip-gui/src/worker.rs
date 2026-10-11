@@ -940,9 +940,8 @@ mod tests {
         fn write(
             _: &KernelContext<'_>,
             _: &WriteKernel,
-            image: Read<'_, Cpu<Rgb>>,
+            _image: Read<'_, Cpu<Rgb>>,
         ) -> drip::Result<()> {
-            let _ = image;
             Ok(())
         }
         #[drip_macros::gui_node]
