@@ -113,6 +113,11 @@ in [PROGRESS](PROGRESS.md).
   floating-point rounding. The control evaluates synchronously; it introduces
   no worker action or automatic processing mode. The average-grey assumption is
   a content-dependent starting point, not calibrated scene reflectance.
+- **Decided:** Auto exposure requests `Device<ColorRgb>` and reduces mean
+  luminance with a GUI-owned CubeCL kernel, shared across compute backends.
+  Normalize sample contributions before bounded reductions for HDR headroom;
+  read back one f32 rather than the full image. The EV calculation remains on
+  the host, and the button retains its synchronous behavior.
 - **Tentative:** The refreshed ACES comparison leaves one required processing
   feature for the first usable prototype: editable scene-illuminant adaptation.
   Normalization, coupled sample/clipping gains, highlight reconstruction,

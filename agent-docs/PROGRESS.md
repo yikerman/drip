@@ -4,6 +4,11 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
 
+- Moved auto-exposure metering to CubeCL. Evaluation retains device RGB;
+  successive reductions produce one mean-luminance f32 for readback. Added
+  reference checks across partial reduction blocks and large HDR inputs.
+  All four exposure tests pass on CPU and WGPU, including fixed-point and
+  button checks. Strict workspace Clippy, formatting and whitespace checks pass.
 - Added Auto exposure locally in the Exposure parameter panel. It evaluates
   through Exposure at full detail, meters mean linear luminance and edits EV.
   Documented why retaining the current EV reaches the same fixed point as
