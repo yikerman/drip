@@ -4,6 +4,10 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Review findings: actions route by node with one resolved action per kind;
+  one single-parameter merge; one batch evaluation call; auto exposure returns
+  its parameters and shares the scopes' device image; a drop guard reports the
+  worker's end. GPU workspace tests, Clippy and formatting pass.
 - The app replaces its worker with the project instead of resetting it; the
   old thread skips its queue. New/Open wait for running actions, and actions
   for an opening project. GPU workspace tests, Clippy and formatting pass.

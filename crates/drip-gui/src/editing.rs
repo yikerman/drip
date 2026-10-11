@@ -32,7 +32,7 @@ pub struct Report {
     /// An edit the graph refused.
     pub refused: Option<String>,
     /// An action the user asked to run.
-    pub action: Option<(NodeId, &'static str)>,
+    pub action: Option<NodeId>,
     /// A window the user opened or closed.
     pub toggled: Option<Popped>,
     /// Asset-backed parameter edits are admitted on the worker, then checked
@@ -82,11 +82,7 @@ impl<'a> Frame<'a> {
                     graph.disconnect(&input)?;
                 }
                 Edit::Param(id, name, value) => {
-                    let mut params = graph.dag.node(id)?.parameters()?;
-                    let field = params
-                        .get_mut(name)
-                        .ok_or_else(|| GraphError::Graph(format!("unknown parameter {name}")))?;
-                    *field = value;
+                    let params = graph.with_param(id, name, value)?;
                     self.set_parameters(graph, id, params)?;
                 }
                 Edit::Parameters(id, params) => self.set_parameters(graph, id, params)?,
@@ -104,7 +100,7 @@ impl<'a> Frame<'a> {
                 added
             }
             Err(e) => {
-                self.report.refused = Some(refusal(graph, &e));
+                self.report.refused = Some(e.to_string());
                 None
             }
         }
@@ -172,8 +168,9 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
         self.frame.edit(self.graph, Edit::Ui(self.id, field, value));
     }
 
-    pub fn run(&mut self, action: &'static str) {
-        self.frame.report.action = Some((self.id, action));
+    /// Runs the node's action.
+    pub fn run(&mut self) {
+        self.frame.report.action = Some(self.id);
     }
 
     /// Whether actions are disabled while one runs or assets are loading.
@@ -196,9 +193,4 @@ fn set_ui(graph: &mut Graph, id: NodeId, field: LayoutField, value: Vec2) {
     let mut ui = graph.node(id).expect("node exists").ui.clone();
     field.write(&mut ui, value);
     graph.set_ui(id, ui).expect("node exists");
-}
-
-/// Names the refused input using the same concrete contracts as port labels.
-fn refusal(_: &Graph, error: &GraphError) -> String {
-    error.to_string()
 }

@@ -1,14 +1,13 @@
 //! Auto exposure: meter the node's input at full detail, then set its EV.
-use super::{Action, GuiNode, data::argument};
+use super::{
+    Action, GuiNode,
+    data::{DeviceRgb, argument},
+};
 use cubecl::prelude::*;
 use drip::{
     Error, Result,
-    node::{
-        color,
-        data::{Rec2020, Rgb},
-        exposure,
-    },
-    ports::{Device, Read, Requirement},
+    node::{color, data::Rec2020, exposure},
+    ports::Requirement,
 };
 
 #[drip_macros::gui_node]
@@ -17,22 +16,20 @@ impl GuiNode for exposure::Definition {
     // Meter before sigmoid; bright or dark subjects may need a manual adjustment.
     const ACTION: Option<Action<Self>> = Some(Action {
         name: "Auto exposure",
-        run: |_, inputs, ctx| {
-            Ok(Some(exposure::Exposure { ev: ev(&inputs.image, ctx.client()?)? }))
-        },
+        run: |_, inputs, ctx| Ok(Some(meter(&DeviceRgb::new(&inputs.image), ctx.client()?)?)),
     });
 }
 
-/// The EV that brings the whole-image mean luminance of `image` to 18% grey.
-fn ev(image: &Read<'_, Device<Rgb>>, client: &Client) -> Result<f32> {
-    Rec2020::check(image.desc)
+/// Exposure that brings the whole-image mean luminance of `image` to 18% grey.
+fn meter(image: &DeviceRgb, client: &Client) -> Result<exposure::Exposure> {
+    Rec2020::check(&image.desc)
         .map_err(|e| Error::Contract(format!("auto exposure requires {}: {e}", Rec2020::LABEL)))?;
     // Like darktable's area exposure mapping [1], compare linear luminance
     // against a target. Here the area is the whole image and the target is
     // exactly Y=0.18, rather than its default L*=50 (Y≈0.1842).
     // [1] darktable contributors, “exposure,” development user manual.
     // https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/exposure/
-    let mean = mean_luminance(client, image.data.argument(), image.desc.extent.pixels())?;
+    let mean = mean_luminance(client, image.pixels.argument(), image.desc.extent.pixels())?;
     if !mean.is_finite() || mean <= 0.0 {
         return Err(Error::Contract(
             "auto exposure needs a finite, positive mean luminance".into(),
@@ -41,7 +38,7 @@ fn ev(image: &Read<'_, Device<Rgb>>, client: &Client) -> Result<f32> {
     let params = exposure::Exposure { ev: (0.18 / mean).log2() as f32 };
     drip::param::Parameters::validate(&params)
         .map_err(|_| Error::Contract("auto exposure gain is not representable".into()))?;
-    Ok(params.ev)
+    Ok(params)
 }
 
 fn mean_luminance(client: &Client, mut input: BufferArg, pixels: usize) -> Result<f64> {
@@ -113,7 +110,12 @@ pub(crate) mod tests {
     use super::*;
     use crate::node_ui::data::PrepareContext;
     use drip::{
-        definition::Typed, eval::Evaluator, graph::Dag, node, node::data::*, ports::NodeId,
+        definition::Typed,
+        eval::Evaluator,
+        graph::Dag,
+        node,
+        node::data::*,
+        ports::{Device, NodeId},
         runtime::RuntimeContext,
     };
 
@@ -137,7 +139,7 @@ pub(crate) mod tests {
     }
 
     /// Runs the action as the worker does: on the node's inputs at full detail.
-    fn meter(evaluator: &Evaluator, dag: &Dag, id: NodeId) -> Result<f32> {
+    fn metered(evaluator: &Evaluator, dag: &Dag, id: NodeId) -> Result<f32> {
         let inputs =
             evaluator.evaluate_inputs(dag, &Default::default(), &[id]).remove(&id).unwrap()?;
         let ctx =
@@ -153,7 +155,7 @@ pub(crate) mod tests {
         let (mut dag, id) = graph(vec![[0.; 3], [0.045; 3], [0.09; 3]]);
         for start in [-3., 0., 4.] {
             dag.set_parameters(id, serde_json::json!({"ev": start})).unwrap();
-            let ev = meter(&evaluator, &dag, id).unwrap();
+            let ev = metered(&evaluator, &dag, id).unwrap();
             assert!((ev - 2.).abs() < 1e-6, "starting at {start}: {ev}");
         }
     }
@@ -165,11 +167,11 @@ pub(crate) mod tests {
         // Rec.2020 Y coefficients; arithmetic mean, including the negative pixel.
         let mean: f64 = (0.5 * 0.262700212 + 0.1 * 0.677998072 + 8. * 0.059301716 - 0.01) / 4.;
         assert!(
-            (f64::from(meter(&evaluator, &dag, id).unwrap()) - (0.18 / mean).log2()).abs() < 1e-6
+            (f64::from(metered(&evaluator, &dag, id).unwrap()) - (0.18 / mean).log2()).abs() < 1e-6
         );
         for value in [0., -1., f32::NAN, f32::INFINITY] {
             let (dag, id) = graph(vec![[value; 3]]);
-            assert!(meter(&evaluator, &dag, id).is_err(), "{value}");
+            assert!(metered(&evaluator, &dag, id).is_err(), "{value}");
         }
     }
 
@@ -206,7 +208,7 @@ pub(crate) mod tests {
         }
         // A plain f32 sum over this image overflows, while its mean is finite.
         let (dag, id) = graph(vec![[1e35; 3]; 65_537]);
-        let ev = meter(&evaluator, &dag, id).unwrap();
+        let ev = metered(&evaluator, &dag, id).unwrap();
         assert!((f64::from(ev) - (0.18 / f64::from(1e35f32)).log2()).abs() < 1e-5);
     }
 }

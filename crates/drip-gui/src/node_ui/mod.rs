@@ -58,10 +58,11 @@ pub fn binding(kind: &Kind) -> Option<&'static Binding> {
     static CUSTOM: LazyLock<BTreeMap<&'static str, &'static Binding>> = LazyLock::new(|| {
         let mut bindings = BTreeMap::new();
         for binding in BINDINGS {
+            let id = binding.kind().id;
+            assert!(bindings.insert(id, binding).is_none(), "duplicate node UI: {id}");
             assert!(
-                bindings.insert(binding.kind().id, binding).is_none(),
-                "duplicate node UI: {}",
-                binding.kind().id
+                binding.action().is_none() || binding.kind().action.is_none(),
+                "{id} has a frontend and a node action"
             );
         }
         bindings
@@ -69,25 +70,37 @@ pub fn binding(kind: &Kind) -> Option<&'static Binding> {
     CUSTOM.get(kind.id).copied().filter(|binding| std::ptr::eq(binding.kind(), kind))
 }
 
-/// The node's action: a frontend extra, or the action declared with the node.
-pub fn action_name(kind: &'static Kind) -> Option<&'static str> {
-    binding(kind).and_then(Binding::action_name).or(kind.action.map(|action| action.name))
+/// A node kind's action: a frontend extra, or the action declared with the
+/// node. A kind never has both.
+#[derive(Clone, Copy)]
+pub struct NodeAction {
+    pub name: &'static str,
+    run: Run,
 }
-
-/// Runs the node's action; a frontend action may return new node parameters.
-pub fn run_action(
-    name: &str,
-    node: &dyn drip::definition::Node,
-    inputs: &drip::eval::InputValues,
-    ctx: &data::PrepareContext,
-) -> drip::Result<Option<serde_json::Value>> {
-    let kind = node.kind();
-    if let Some(binding) = binding(kind).filter(|b| b.action_name() == Some(name)) {
-        return binding.run_action(name, node, inputs, ctx);
+#[derive(Clone, Copy)]
+enum Run {
+    Frontend(binding::ActionErased),
+    Node(fn(&dyn drip::definition::Node, &drip::eval::InputValues) -> drip::Result<()>),
+}
+pub fn action(kind: &'static Kind) -> Option<NodeAction> {
+    match binding(kind).and_then(Binding::action) {
+        Some((name, run)) => Some(NodeAction { name, run: Run::Frontend(run) }),
+        None => kind.action.map(|a| NodeAction { name: a.name, run: Run::Node(a.run) }),
     }
-    match kind.action {
-        Some(action) if action.name == name => (action.run)(node, inputs).map(|()| None),
-        _ => Err(drip::Error::Graph("unknown node action".into())),
+}
+impl NodeAction {
+    /// Runs on a node of the action's kind; a frontend action may return new
+    /// node parameters.
+    pub fn run(
+        self,
+        node: &dyn drip::definition::Node,
+        inputs: &drip::eval::InputValues,
+        ctx: &data::PrepareContext,
+    ) -> drip::Result<Option<serde_json::Value>> {
+        match self.run {
+            Run::Frontend(run) => run(node, inputs, ctx),
+            Run::Node(run) => run(node, inputs).map(|()| None),
+        }
     }
 }
 

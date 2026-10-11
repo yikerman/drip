@@ -29,11 +29,13 @@ pub struct PortText {
 }
 
 impl PortText {
+    /// The role and port name; a name that only repeats the role is omitted.
     pub fn heading(&self) -> String {
-        if matches!(self.role, PortRole::Output) && self.port == "output" {
-            "Output".into()
+        let role = self.role.label();
+        if self.port.eq_ignore_ascii_case(role) {
+            role.into()
         } else {
-            format!("{} · {}", self.role.label(), self.port)
+            format!("{role} · {}", self.port)
         }
     }
 

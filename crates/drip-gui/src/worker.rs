@@ -9,6 +9,7 @@ use std::thread;
 use std::time::Instant;
 
 use crate::model::{Graph, NodeId};
+use crate::node_ui::NodeAction;
 use drip::Error as NodeError;
 use drip::eval::{Evaluator, InputValues, NodeTiming};
 use drip::runtime::GlobalContext;
@@ -32,9 +33,9 @@ enum Effect {
     /// Report every target's status and prepare the views of those that have
     /// one. A newer generation makes the result stale.
     Preview { generation: u64, targets: Vec<NodeId> },
-    /// Run a node's named action. Actions override the preview's context with
-    /// full detail.
-    Perform { id: NodeId, name: &'static str },
+    /// Run a node's action. Actions override the preview's context with full
+    /// detail.
+    Perform { id: NodeId, action: NodeAction },
 }
 
 enum Command {
@@ -102,6 +103,16 @@ impl Notify {
     }
 }
 
+/// Reports the thread's end, by return or panic, so the UI stops showing
+/// “evaluating…”.
+struct Stopping(Notify);
+
+impl Drop for Stopping {
+    fn drop(&mut self) {
+        self.0.send(Event::Stopped);
+    }
+}
+
 /// UI-side mailbox. At most one preview is sent and one latest request waits.
 pub struct Worker {
     commands: mpsc::Sender<Command>,
@@ -131,11 +142,8 @@ impl Worker {
         thread::Builder::new()
             .name("drip-worker".into())
             .spawn(move || {
-                // A panic must wake the UI too, so it can stop showing “evaluating…”.
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    serve(requests, &stop, &notify)
-                }));
-                notify.send(Event::Stopped);
+                let stopping = Stopping(notify);
+                serve(requests, &stop, &stopping.0);
             })
             .expect("start worker");
         Self {
@@ -217,13 +225,14 @@ impl Worker {
         self.start()
     }
 
-    pub fn action(&self, graph: &Graph, id: NodeId, name: &'static str) -> Result<(), String> {
+    /// Runs `action`, which belongs to node `id`'s kind.
+    pub fn action(&self, graph: &Graph, id: NodeId, action: NodeAction) -> Result<(), String> {
         // A bind cannot update the action's graph snapshot, and an open
         // replaces the project and this worker with it.
         if self.loading() {
             return Err("wait for loading to finish before running an action".into());
         }
-        let effect = Effect::Perform { id, name };
+        let effect = Effect::Perform { id, action };
         self.send(Command::Force(Demand {
             graph: graph.clone(),
             global: Default::default(),
@@ -434,7 +443,7 @@ fn force(
             );
             Event::Evaluated { generation, views, failures }
         }
-        Effect::Perform { id, name } => {
+        Effect::Perform { id, action } => {
             let result = demand
                 .graph
                 .dag
@@ -443,10 +452,10 @@ fn force(
                 .and_then(|node| {
                     let inputs = inputs.remove(&id).expect("demanded node");
                     inputs
-                        .and_then(|inputs| crate::node_ui::run_action(name, node, &inputs, &ctx))
+                        .and_then(|inputs| action.run(node, &inputs, &ctx))
                         .map_err(|e| e.to_string())
                 });
-            log::debug!("action {name} node={id:?} elapsed={:.1?}", start.elapsed());
+            log::debug!("action {} node={id:?} elapsed={:.1?}", action.name, start.elapsed());
             Event::Performed { id, result }
         }
     }
@@ -476,7 +485,7 @@ impl Demand {
     fn log_timings(&self, phase: &str, timings: &[NodeTiming]) {
         let demand = match self.effect {
             Effect::Preview { generation, .. } => format!("preview generation={generation}"),
-            Effect::Perform { name, .. } => format!("action {name}"),
+            Effect::Perform { action, .. } => format!("action {}", action.name),
         };
         for timing in timings {
             log::trace!(
@@ -593,6 +602,10 @@ mod tests {
             assert!(Instant::now() < deadline, "worker timed out");
             thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    fn action(graph: &Graph, id: NodeId) -> NodeAction {
+        crate::node_ui::action(graph.node(id).unwrap().kind).unwrap()
     }
 
     fn pixel(worker: &Worker, id: NodeId) -> [f32; 4] {
@@ -829,7 +842,9 @@ mod tests {
             assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0, 3.0]);
 
             // A dropped worker finishes its current command, then skips its
-            // queue: here an action that would evaluate the source again.
+            // queue: here an export that would evaluate the source again.
+            let tiff = graph.add_node(Registry.get("output.tiff").unwrap()).unwrap();
+            graph.connect(Port(source, "image".into()), Port(tiff, "image".into())).unwrap();
             let (wake, woke) = mpsc::channel();
             let mut old = Worker::new(move || {
                 let _ = wake.send(());
@@ -839,7 +854,7 @@ mod tests {
             entered.recv_timeout(TIMEOUT).unwrap();
             graph.set_param(source, "block", json!(false)).unwrap();
             graph.set_param(source, "value", json!(4)).unwrap();
-            old.action(&graph, preview, "queued").unwrap();
+            old.action(&graph, tiff, action(&graph, tiff)).unwrap();
             drop(old);
             release.send(()).unwrap();
             // It wakes the UI for its preview, then as it stops.
@@ -938,7 +953,7 @@ mod tests {
             wait(&mut worker);
             let before = pixel(&worker, preview);
             std::fs::write(&input, "2").unwrap();
-            worker.action(&graph, export, "write").unwrap();
+            worker.action(&graph, export, action(&graph, export)).unwrap();
             let deadline = Instant::now() + TIMEOUT;
             loop {
                 if worker.poll().into_iter().any(|notice| match notice {
@@ -969,7 +984,7 @@ mod tests {
             worker.request(&graph, 3, vec![preview]).unwrap();
             wait(&mut worker);
             assert!(worker.result(preview).unwrap().is_err());
-            worker.action(&graph, export, "write").unwrap();
+            worker.action(&graph, export, action(&graph, export)).unwrap();
             let deadline = Instant::now() + TIMEOUT;
             loop {
                 if worker.poll().into_iter().any(|notice| match notice {

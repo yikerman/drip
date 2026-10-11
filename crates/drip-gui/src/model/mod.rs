@@ -130,12 +130,17 @@ impl Graph {
         self.dag.edit(|edit| edit.disconnect(input))
     }
     pub fn set_param(&mut self, id: NodeId, name: &str, value: Json) -> Result<()> {
+        let params = self.with_param(id, name, value)?;
+        self.dag.set_parameters(id, params)
+    }
+    /// The node's parameters with one replaced, for admission.
+    pub fn with_param(&self, id: NodeId, name: &str, value: Json) -> Result<Json> {
         let mut params = self.dag.node(id)?.parameters()?;
         let field = params
             .get_mut(name)
             .ok_or_else(|| GraphError::Graph(format!("unknown parameter {name}")))?;
         *field = value;
-        self.dag.set_parameters(id, params)
+        Ok(params)
     }
     pub fn set_name(&mut self, id: NodeId, name: &str) -> Result<()> {
         if name.trim().is_empty() || self.find(name).is_some_and(|other| other != id) {

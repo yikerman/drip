@@ -123,9 +123,9 @@ Resolved with the user on 2026-10-11 after the review against
   node that loads assets.
 - **Decided:** Headless actions are declared with the node,
   `#[node(action = export)]`, as `fn(&Params, Inputs<'_>)` (with `&Loaded`
-  assets before the inputs); the
-  action's label comes from the function name and lives in `Kind`. The GUI runs
-  a `GuiNode` extra action if declared, otherwise the node's action. TIFF export
+  assets before the inputs); the action's label comes from the function name
+  and lives in `Kind`. A kind has at most one action, a `GuiNode` extra or the
+  node's; the app resolves it once and the worker runs it by node. TIFF export
   is such a node in `drip`. The CLI is an empty scaffold until batch work
   starts; projects carry no separate export target.
 - **Decided:** Auto exposure is a GUI action metering the node's input:

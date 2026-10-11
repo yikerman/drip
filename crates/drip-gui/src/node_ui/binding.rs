@@ -41,7 +41,8 @@ pub trait GuiNode: Typed {
 }
 type PrepareErased =
     fn(&dyn Node, &InputValues, &PrepareContext, &mut ImageCache) -> Result<Arc<dyn Drawable>>;
-type ActionErased = fn(&dyn Node, &InputValues, &PrepareContext) -> Result<Option<Value>>;
+pub(super) type ActionErased =
+    fn(&dyn Node, &InputValues, &PrepareContext) -> Result<Option<Value>>;
 pub struct Binding {
     kind: &'static Kind,
     controls: fn(&mut Ui, &mut crate::editing::NodeCx),
@@ -53,13 +54,14 @@ impl Binding {
         Self {
             kind: G::KIND,
             controls: |ui, node| G::controls(ui, &mut ControlCx::new(node)),
-            prepare: if G::PREPARE.is_some() {
-                Some(|node, inputs, ctx, cache| {
+            // Erased extras are function pointers, which cannot capture: each
+            // reads its declaration again.
+            prepare: match G::PREPARE {
+                Some(_) => Some(|node, inputs, ctx, cache| {
                     let prepare = G::PREPARE.expect("declared preparation");
                     Ok(prepare(G::of(node)?, inputs.bind::<G>()?, ctx)?.into_drawable(cache))
-                })
-            } else {
-                None
+                }),
+                None => None,
             },
             action: match G::ACTION {
                 Some(action) => Some((action.name, |node, inputs, ctx| {
@@ -88,20 +90,7 @@ impl Binding {
     ) -> Result<Option<Arc<dyn Drawable>>> {
         self.prepare.map(|prepare| prepare(node, inputs, ctx, cache)).transpose()
     }
-    pub fn action_name(&self) -> Option<&'static str> {
-        self.action.map(|(name, _)| name)
-    }
-    pub fn run_action(
-        &self,
-        name: &str,
-        node: &dyn Node,
-        inputs: &InputValues,
-        ctx: &PrepareContext,
-    ) -> Result<Option<Value>> {
-        let (_, action) = self
-            .action
-            .filter(|(declared, _)| name == *declared)
-            .ok_or_else(|| drip::Error::Graph("unknown node action".into()))?;
-        action(node, inputs, ctx)
+    pub(super) fn action(&self) -> Option<(&'static str, ActionErased)> {
+        self.action
     }
 }

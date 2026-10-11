@@ -198,8 +198,8 @@ impl App {
             log::debug!("graph edit refused: {refused}");
             self.report(Err(refused));
         }
-        if let Some((id, name)) = report.action {
-            self.run_action(id, name);
+        if let Some(id) = report.action {
+            self.run_action(id);
         }
         if let Some(popped) = report.toggled {
             if !self.popped.remove(&popped) {
@@ -467,10 +467,12 @@ impl App {
         self.action.is_some() || self.worker.loading()
     }
 
-    fn run_action(&mut self, id: NodeId, name: &'static str) {
-        match self.worker.action(&self.project.graph, id, name) {
+    fn run_action(&mut self, id: NodeId) {
+        let node = self.project.graph.node(id).expect("action node exists");
+        let action = node_ui::action(node.kind).expect("only nodes with an action offer it");
+        let name = action.name;
+        match self.worker.action(&self.project.graph, id, action) {
             Ok(()) => {
-                let node = self.project.graph.node(id).expect("action node exists");
                 let subject = match node.file(true) {
                     Some(path) => format!("{} → {path}", node.name),
                     None => node.name.clone(),
@@ -608,7 +610,7 @@ mod tests {
             );
             h.run();
             assert!(h.get_by_label("Export").accesskit_node().is_disabled());
-            h.state_mut().run_action(export, "Export");
+            h.state_mut().run_action(export);
             assert!(h.state().action.is_none());
             assert!(h.state().status.as_ref().unwrap().text.contains("wait for loading"));
 
@@ -623,7 +625,7 @@ mod tests {
         let mut app = App::new(None, true, || {});
         let export = app.project.graph.find("Export TIFF").unwrap();
         app.open(fixture_project("opening"));
-        app.run_action(export, "Export");
+        app.run_action(export);
         assert!(app.action.is_none());
         assert!(app.status.as_ref().unwrap().text.contains("wait for loading"));
     }
@@ -670,7 +672,7 @@ mod tests {
         let export = app.project.graph.find("Export TIFF").unwrap();
         app.apply(Report {
             bindings: vec![(exposure, json!({"ev": 2.0}))],
-            action: Some((export, "Export")),
+            action: Some(export),
             ..Default::default()
         });
         assert!(app.action.is_none());
@@ -679,7 +681,7 @@ mod tests {
 
         finish_bindings(&mut app);
         assert_eq!(app.project.graph.node(exposure).unwrap().params["ev"], json!(2.0));
-        app.run_action(export, "Export");
+        app.run_action(export);
         assert!(app.action.as_ref().unwrap().running.contains("Export TIFF"));
     }
 
