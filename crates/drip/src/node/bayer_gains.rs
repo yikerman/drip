@@ -62,12 +62,13 @@ pub fn compute(
 mod kernel {
     // SPDX-License-Identifier: GPL-3.0-or-later
     // Source pins and numerical deviations: THIRD_PARTY.md.
+    use crate::node::shared_kernel::site;
     use cubecl::prelude::*;
     #[cube(launch)]
     pub fn bayer_gains(input: &[f32], gains: &[f32], output: &mut [f32], width: usize) {
         let i = ABSOLUTE_POS;
         if i < input.len() {
-            output[i] = input[i] * gains[((i / width) % 2) * 2 + (i % width) % 2];
+            output[i] = input[i] * gains[site(i / width, i % width)];
         }
     }
 }

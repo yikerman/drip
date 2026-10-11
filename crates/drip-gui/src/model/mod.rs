@@ -1,19 +1,14 @@
 //! Editor state over the checked processing DAG. Parameters and edges live only
 //! in the DAG; labels, template inputs and layout belong to the frontend.
-mod catalog;
 mod project;
-pub use catalog::Registry;
 pub use drip::Error as GraphError;
 pub use drip::definition::Kind;
-pub use drip::ports::NodeId;
-use drip::{Result, definition, graph::Dag};
+pub use drip::ports::{NodeId, PortId as Port};
+use drip::{Result, graph::Dag};
 pub use project::Project;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 use std::collections::{BTreeMap, BTreeSet};
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Port(pub NodeId, pub String);
 
 #[derive(Clone, Default)]
 pub struct Graph {
@@ -51,11 +46,20 @@ impl Graph {
         let mut graph = Self { dag, ..Self::default() };
         let ids: Vec<_> = graph.dag.nodes().map(|(id, _)| id).collect();
         for id in ids {
-            let kind = catalog::get(graph.dag.node(id)?.kind().id)
+            let kind = drip::definition::kind(graph.dag.node(id)?.kind().id)
                 .ok_or_else(|| GraphError::Graph("unregistered editor node".into()))?;
             graph.initialize_state(id, kind);
         }
         Ok(graph)
+    }
+    pub fn kind(&self, id: NodeId) -> Option<&'static Kind> {
+        self.dag.node(id).ok().map(|node| node.kind())
+    }
+    pub fn name(&self, id: NodeId) -> Option<&str> {
+        self.state.get(&id).map(|state| state.name.as_str())
+    }
+    pub fn ui(&self, id: NodeId) -> Option<&Json> {
+        self.state.get(&id).map(|state| &state.ui)
     }
     pub fn node(&self, id: NodeId) -> Option<Node> {
         let node = self.dag.node(id).ok()?;
@@ -76,7 +80,7 @@ impl Graph {
         self.state.iter().find(|(_, s)| s.name == name).map(|(&id, _)| id)
     }
     pub fn add_node(&mut self, kind: &'static Kind) -> Result<NodeId> {
-        let id = self.dag.add(definition::registered(kind.id, (kind.defaults)())?)?;
+        let id = self.dag.add((kind.build)((kind.defaults)())?)?;
         self.initialize_state(id, kind);
         Ok(id)
     }
@@ -108,25 +112,18 @@ impl Graph {
         Ok(())
     }
     pub fn edges(&self) -> impl Iterator<Item = (Port, Port)> + '_ {
-        self.dag.edges().map(|(from, to)| {
-            let a = self.dag.node(from.node()).unwrap().kind().outputs[from.index()].name;
-            let b = self.dag.node(to.node()).unwrap().kind().inputs[to.index()].name;
-            (Port(from.node(), a.into()), Port(to.node(), b.into()))
-        })
+        self.dag.edges()
     }
-    pub fn source(&self, input: &Port) -> Option<Port> {
-        self.edges().find(|(_, to)| to == input).map(|(from, _)| from)
+    pub fn source(&self, input: Port) -> Option<Port> {
+        self.edges().find(|(_, to)| *to == input).map(|(from, _)| from)
     }
     pub fn connect(&mut self, from: Port, to: Port) -> Result<()> {
-        let from = self.dag.output_port(from.0, &from.1)?;
-        let to = self.dag.input_port(to.0, &to.1)?;
         self.dag.edit(|edit| {
             edit.disconnect(to)?;
             edit.connect_ids(from, to)
         })
     }
-    pub fn disconnect(&mut self, input: &Port) -> Result<()> {
-        let input = self.dag.input_port(input.0, &input.1)?;
+    pub fn disconnect(&mut self, input: Port) -> Result<()> {
         self.dag.edit(|edit| edit.disconnect(input))
     }
     pub fn set_param(&mut self, id: NodeId, name: &str, value: Json) -> Result<()> {
@@ -150,8 +147,8 @@ impl Graph {
         Ok(())
     }
     pub fn set_external(&mut self, id: NodeId, name: &str, external: bool) -> Result<()> {
-        let node = self.node(id).ok_or_else(|| GraphError::Graph("unknown node".into()))?;
-        if node.kind.param(name).is_none() {
+        let kind = self.dag.node(id)?.kind();
+        if kind.param(name).is_none() {
             return Err(GraphError::Graph(format!("unknown parameter {name}")));
         }
         let inputs = &mut self.state_mut(id)?.external;
@@ -167,11 +164,11 @@ impl Graph {
         Ok(())
     }
     pub fn inputs(&self) -> impl Iterator<Item = (NodeId, &'static str)> + '_ {
-        self.nodes().flat_map(|(id, n)| {
-            n.kind
+        self.dag.nodes().flat_map(move |(id, node)| {
+            node.kind()
                 .parameters
                 .iter()
-                .filter(move |p| n.external.contains(p.name))
+                .filter(move |p| self.state[&id].external.contains(p.name))
                 .map(move |p| (id, p.name))
         })
     }

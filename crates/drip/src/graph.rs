@@ -51,30 +51,23 @@ impl Dag {
         })
     }
     pub fn input_port(&self, node: NodeId, name: &str) -> Result<PortId> {
-        let index = self
-            .entry(node)?
-            .node
-            .kind()
-            .inputs
-            .iter()
-            .position(|p| p.name == name)
-            .ok_or_else(wrong_handle)?;
-        Ok(PortId { node, index, direction: Direction::Input })
+        self.port(node, name, Direction::Input)
     }
     pub fn output_port(&self, node: NodeId, name: &str) -> Result<PortId> {
-        let index = self
-            .entry(node)?
-            .node
-            .kind()
-            .outputs
-            .iter()
-            .position(|p| p.name == name)
-            .ok_or_else(wrong_handle)?;
-        Ok(PortId { node, index, direction: Direction::Output })
+        self.port(node, name, Direction::Output)
+    }
+    fn port(&self, node: NodeId, name: &str, direction: Direction) -> Result<PortId> {
+        let kind = self.entry(node)?.node.kind();
+        let ports = match direction {
+            Direction::Input => kind.inputs,
+            Direction::Output => kind.outputs,
+        };
+        let index = ports.iter().position(|p| p.name == name).ok_or_else(wrong_handle)?;
+        Ok(PortId { node, index, direction })
     }
     pub fn set_parameters(&mut self, id: NodeId, parameters: serde_json::Value) -> Result<()> {
-        let kind = self.entry(id)?.node.kind().id;
-        self.replace(id, crate::definition::registered(kind, parameters)?)
+        let kind = self.entry(id)?.node.kind();
+        self.replace(id, (kind.build)(parameters)?)
     }
     /// All descriptor-affecting edits either pass together or leave the graph intact.
     pub fn edit<T>(&mut self, f: impl FnOnce(&mut Edit<'_>) -> Result<T>) -> Result<T> {

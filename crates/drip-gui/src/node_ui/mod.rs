@@ -26,30 +26,25 @@ pub const PAD: f32 = 6.0;
 #[linkme::distributed_slice]
 pub(super) static BINDINGS: [Binding];
 
-/// Custom controls coexist with the standard viewer whenever preparation exists.
-pub struct NodeUi {
-    binding: Option<&'static Binding>,
+/// Whether this kind prepares a view alongside its controls.
+pub fn has_view(kind: &Kind) -> bool {
+    binding(kind).is_some_and(Binding::has_preparation)
 }
-impl NodeUi {
-    fn has_view(&self) -> bool {
-        self.binding.is_some_and(Binding::has_preparation)
-    }
 
-    pub fn size(&self, node: &Node) -> Vec2 {
-        if self.has_view() { viewer::size(node) + vec2(0.0, PAD) } else { vec2(WIDTH, PAD) }
-    }
+pub fn size(node: &Node) -> Vec2 {
+    if has_view(node.kind) { viewer::size(node) + vec2(0.0, PAD) } else { vec2(WIDTH, PAD) }
+}
 
-    pub fn body(&self, ui: &mut Ui, node: &mut NodeCx) {
-        if self.has_view() {
-            viewer::body(ui, node);
-        }
+pub fn body(ui: &mut Ui, node: &mut NodeCx) {
+    if has_view(node.kind()) {
+        viewer::body(ui, node);
     }
+}
 
-    pub fn controls(&self, ui: &mut Ui, node: &mut NodeCx) {
-        match self.binding {
-            Some(binding) => binding.controls(ui, node),
-            None => parameters::schema(ui, node),
-        }
+pub fn controls(ui: &mut Ui, node: &mut NodeCx) {
+    match binding(node.kind()) {
+        Some(binding) => binding.controls(ui, node),
+        None => parameters::schema(ui, node),
     }
 }
 
@@ -104,10 +99,6 @@ impl NodeAction {
     }
 }
 
-pub fn of(kind: &Kind) -> NodeUi {
-    NodeUi { binding: binding(kind) }
-}
-
 /// A popped-out window: one part of one node.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Popped {
@@ -133,8 +124,8 @@ impl Part {
 }
 
 impl Popped {
-    pub fn title(self, node: &Node) -> String {
-        format!("{} · {} · Drip", node.name, self.part.name())
+    pub fn title(self, name: &str) -> String {
+        format!("{name} · {} · Drip", self.part.name())
     }
 
     /// The window's size, in points, when its content does not ask for one.

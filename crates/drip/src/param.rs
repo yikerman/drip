@@ -85,25 +85,6 @@ impl ParamKind {
             ParamKind::Path { .. } => Json::Null,
         }
     }
-
-    pub fn accepts(&self, value: &Json) -> bool {
-        match *self {
-            ParamKind::Float { min, max, .. } => {
-                value.as_f64().is_some_and(|v| (min..=max).contains(&v))
-            }
-            ParamKind::Int { min, max, .. } => {
-                value.as_i64().is_some_and(|v| (min..=max).contains(&v))
-            }
-            ParamKind::Bool { .. } => value.is_boolean(),
-            ParamKind::Choice { options, .. } => options.iter().any(|option| {
-                option.selected(value)
-                    && option.parameters.is_none_or(|params| {
-                        params.iter().all(|p| p.kind.accepts(&value[option.name][p.name]))
-                    })
-            }),
-            ParamKind::Path { .. } => value.is_null() || value.is_string(),
-        }
-    }
 }
 
 /// Typed parameters from their persisted JSON; the type is the schema check.

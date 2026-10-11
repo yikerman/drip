@@ -2,13 +2,25 @@
 use crate::{
     Result,
     graph::Dag,
-    node::{self, data::Rgb, raw, sigmoid},
-    ports::Output,
+    node::{self, raw, sigmoid},
 };
 
-/// RAW to TIFF: the editable starting pipeline, wired before its RAW and
-/// output files are chosen, and its rendered output for further consumers.
-pub fn raw_to_tiff() -> Result<(Dag, Output<Rgb>)> {
+/// Handles of the starting pipeline, for frontend layout and further consumers.
+pub struct RawToTiff {
+    pub raw: raw::Ports,
+    pub gains: node::bayer_gains::Ports,
+    pub highlights: node::highlights::reconstruct::Ports,
+    pub demosaic: node::rcd::Ports,
+    pub color: node::camera_to_rgb::Ports,
+    pub adaptation: node::chromatic_adaptation::Ports,
+    pub orientation: node::orientation::Ports,
+    pub exposure: node::exposure::Ports,
+    pub sigmoid: sigmoid::apply::Ports,
+    pub export: node::export::tiff::Ports,
+}
+
+/// RAW to TIFF, wired before its RAW and output files are chosen.
+pub fn raw_to_tiff() -> Result<(Dag, RawToTiff)> {
     let mut dag = Dag::new();
     let raw = raw::add(&mut dag, Default::default())?;
     let (mosaic, metadata) = (raw.mosaic, raw.metadata);
@@ -39,5 +51,19 @@ pub fn raw_to_tiff() -> Result<(Dag, Output<Rgb>)> {
         edit.connect(metadata, export.metadata)?;
         Ok(())
     })?;
-    Ok((dag, sigmoid.output))
+    Ok((
+        dag,
+        RawToTiff {
+            raw,
+            gains,
+            highlights,
+            demosaic,
+            color,
+            adaptation,
+            orientation,
+            exposure,
+            sigmoid,
+            export,
+        },
+    ))
 }

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::model::{NodeId, Port};
+use crate::model::NodeId;
 use drip::{
     definition::Typed,
     eval::Evaluator,
@@ -12,7 +12,6 @@ use drip::{
 };
 
 use crate::model::Project;
-use crate::model::Registry;
 use drip::node::profile;
 use lcms2::{Intent, PixelFormat, Profile, Transform};
 use serde_json::json;
@@ -74,9 +73,16 @@ fn export_depth_survives_reopening_and_encodes_expected_samples() {
     let scratch = Scratch::new("depth");
     let path = scratch.0.join("depth.tif");
     let mut project = Project::default();
-    let source = project.graph.add_node(Registry.get("test.proof-source").unwrap()).unwrap();
-    let export = project.graph.add_node(Registry.get("output.tiff").unwrap()).unwrap();
-    project.graph.connect(Port(source, "image".into()), Port(export, "image".into())).unwrap();
+    let source =
+        project.graph.add_node(drip::definition::kind("test.proof-source").unwrap()).unwrap();
+    let export = project.graph.add_node(drip::definition::kind("output.tiff").unwrap()).unwrap();
+    project
+        .graph
+        .connect(
+            project.graph.dag.output_port(source, "image").unwrap(),
+            project.graph.dag.input_port(export, "image").unwrap(),
+        )
+        .unwrap();
     assert_eq!(project.graph.node(export).unwrap().params["depth"], "u16");
     set(&mut project, export, json!({"path":path}));
     let evaluator = Evaluator::new(RuntimeContext::host());
@@ -87,7 +93,7 @@ fn export_depth_survives_reopening_and_encodes_expected_samples() {
     for depth in ["u8", "u16", "f32"] {
         for compression in [json!("none"), json!({"deflate":{"level":"balanced"}})] {
             set(&mut project, export, json!({"depth":depth,"compression":compression}));
-            let reopened = Project::from_json(&project.to_json().unwrap(), &Registry).unwrap();
+            let reopened = Project::from_json(&project.to_json().unwrap()).unwrap();
             let export = reopened.graph.find("Export TIFF").unwrap();
             assert_eq!(reopened.graph.node(export).unwrap().params["depth"], depth);
             let values = evaluator
@@ -132,11 +138,18 @@ fn softproof_matches_bounded_export_across_profiles_and_intents() {
     let custom = scratch.profile("linear.icc", &profile::rec2020_linear());
     let path = scratch.0.join("proof.tif");
     let mut project = Project::default();
-    let source = project.graph.add_node(Registry.get("test.proof-source").unwrap()).unwrap();
-    let preview = project.graph.add_node(Registry.get("view.preview").unwrap()).unwrap();
-    let tiff = project.graph.add_node(Registry.get("output.tiff").unwrap()).unwrap();
+    let source =
+        project.graph.add_node(drip::definition::kind("test.proof-source").unwrap()).unwrap();
+    let preview = project.graph.add_node(drip::definition::kind("view.preview").unwrap()).unwrap();
+    let tiff = project.graph.add_node(drip::definition::kind("output.tiff").unwrap()).unwrap();
     for node in [preview, tiff] {
-        project.graph.connect(Port(source, "image".into()), Port(node, "image".into())).unwrap();
+        project
+            .graph
+            .connect(
+                project.graph.dag.output_port(source, "image").unwrap(),
+                project.graph.dag.input_port(node, "image").unwrap(),
+            )
+            .unwrap();
     }
     set(&mut project, tiff, json!({ "path": path }));
     let evaluator = Evaluator::new(RuntimeContext::host());

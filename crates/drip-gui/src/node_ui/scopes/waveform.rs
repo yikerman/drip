@@ -108,25 +108,25 @@ mod tests {
 
 #[cfg(test)]
 mod defaults {
-    use crate::model::{Project, Registry};
+    use crate::model::Project;
     use serde_json::json;
 
     #[test]
     fn waveform_defaults_and_reset_are_log_but_saved_linear_is_retained() {
-        let definition = Registry.get("view.waveform").unwrap();
+        let definition = drip::definition::kind("view.waveform").unwrap();
         assert_eq!((definition.defaults)()["scale"], "log");
         assert_eq!(definition.param("scale").unwrap().kind.default_value(), "log");
         let mut project = Project::default();
         let node = project.graph.add_node(definition).unwrap();
         project.graph.set_param(node, "scale", json!("linear")).unwrap();
         project.graph.set_param(node, "min_ev", json!(-10)).unwrap();
-        let reopened = Project::from_json(&project.to_json().unwrap(), &Registry).unwrap();
+        let reopened = Project::from_json(&project.to_json().unwrap()).unwrap();
         let node = reopened.graph.find(definition.name).unwrap();
         assert_eq!(
             reopened.graph.node(node).unwrap().params,
             json!({"min_ev":-10,"max_ev":4,"scale":"linear"})
         );
-        let histogram = Registry.get("view.histogram").unwrap();
+        let histogram = drip::definition::kind("view.histogram").unwrap();
         assert_eq!((histogram.defaults)()["scale"], "linear");
         assert_eq!(histogram.param("scale").unwrap().kind.default_value(), "linear");
     }

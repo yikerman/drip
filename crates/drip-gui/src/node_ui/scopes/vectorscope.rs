@@ -33,7 +33,7 @@ pub fn vectorscope(image: &DeviceRgb, ctx: &PrepareContext) -> Result<Arc<Scope>
     let primaries = color::transpose(*matrix).map(|primary| position(uv(primary)));
     Ok(scope(
         counts,
-        ScopeAxes::Vectorscope { primaries, color_space: "Rec.2020" },
+        ScopeAxes::Vectorscope { primaries },
         true,
         image.desc.coordinates.to_string(),
     ))

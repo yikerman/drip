@@ -289,9 +289,10 @@ impl<'a, 't> Run<'a, 't> {
             Some(data) => data.clone(),
             None => {
                 let data = transfer(&value.native, &value.desc, self.runtime)?;
-                match spec.placement() {
-                    Placement::Cpu => self.statistics.downloads += 1,
-                    Placement::Device => self.statistics.uploads += 1,
+                if spec.transfers.is_some() {
+                    self.statistics.uploads += 1;
+                } else {
+                    self.statistics.downloads += 1;
                 }
                 value.transferred.insert(data).clone()
             }

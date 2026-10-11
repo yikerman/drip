@@ -43,7 +43,6 @@ fn exposure_range(p: &ExposureRange) -> Result<()> {
 /// chromaticity uses the first channel only.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scope {
-    pub size: usize,
     pub counts: Vec<[u32; 3]>,
     pub axes: ScopeAxes,
     pub log: bool,
@@ -59,7 +58,6 @@ pub enum ScopeAxes {
     /// Source primary markers in normalized plot coordinates; D65 is centered.
     Vectorscope {
         primaries: [[f32; 2]; 3],
-        color_space: &'static str,
     },
 }
 
@@ -70,7 +68,7 @@ pub(super) fn scope(
     log: bool,
     color_space: String,
 ) -> Arc<Scope> {
-    Arc::new(Scope { size: SIZE, counts, axes, log, color_space })
+    Arc::new(Scope { counts, axes, log, color_space })
 }
 
 fn logarithmic(scale: Scale) -> bool {

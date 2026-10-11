@@ -15,7 +15,8 @@ pub(super) fn size(node: &Node) -> Vec2 {
 }
 
 pub(super) fn body(ui: &mut Ui, node: &mut NodeCx) {
-    let (body, size) = (ui.max_rect(), size(&node.node()));
+    let (body, size) =
+        (ui.max_rect(), ui_state::view_size(node.graph().ui(node.id()).expect("existing node")));
     let rect = Rect::from_min_size(body.min + vec2(PAD, 0.0), size - vec2(2.0 * PAD, 0.0));
     if node.popped(SHOWN) {
         let layout = egui::Layout::centered_and_justified(egui::Direction::TopDown);

@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use crate::model::NodeId;
 use crate::model::Project;
-use crate::model::Registry;
 use crate::node_ui::templates;
 use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
 
@@ -21,7 +20,6 @@ use crate::{inspector, theme};
 
 pub struct App {
     project: Project,
-    registry: Registry,
     /// Serves the current project only; replaced with it.
     worker: Worker,
     wake: Arc<dyn Fn() + Send + Sync>,
@@ -68,8 +66,7 @@ impl App {
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
         let mut app = App {
             project: templates::raw_to_tiff(),
-            registry: Registry,
-            worker: worker(&wake),
+            worker: Worker::new(wake.clone()),
             wake,
             dirty: true,
             modified: false,
@@ -113,7 +110,7 @@ impl App {
         let graph = &mut self.project.graph;
         Panel::right("inspector").resizable(true).default_size(320.0).show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-                if let Some(id) = self.selected.filter(|id| graph.node(*id).is_some()) {
+                if let Some(id) = self.selected.filter(|id| graph.kind(*id).is_some()) {
                     inspector::selected_node(ui, &mut NodeCx::new(graph, id, &mut frame));
                     ui.separator();
                 }
@@ -121,7 +118,7 @@ impl App {
             });
         });
         CentralPanel::default().show(ui, |ui| {
-            self.editor.show(ui, graph, &self.registry, &mut self.selected, &mut frame);
+            self.editor.show(ui, graph, &mut self.selected, &mut frame);
         });
         let report = frame.report;
         self.apply(report);
@@ -133,7 +130,7 @@ impl App {
         let mut frame = Frame::new(&results, &self.popped, self.actions_disabled());
         let graph = &mut self.project.graph;
         CentralPanel::default().show(ui, |ui| {
-            if graph.node(popped.node).is_some() {
+            if graph.kind(popped.node).is_some() {
                 popped.show(ui, &mut NodeCx::new(graph, popped.node, &mut frame));
             }
         });
@@ -143,8 +140,8 @@ impl App {
 
     pub fn windows(&self) -> Vec<Window> {
         let window = |popped: Popped| {
-            let node = self.project.graph.node(popped.node).expect("popped nodes exist");
-            Window { popped, title: popped.title(&node) }
+            let name = self.project.graph.name(popped.node).expect("popped nodes exist");
+            Window { popped, title: popped.title(name) }
         };
         self.popped.iter().map(|&popped| window(popped)).collect()
     }
@@ -192,7 +189,7 @@ impl App {
                 self.report(Err(error));
             }
         }
-        self.redraw |= report.redraw;
+        self.redraw |= report.changed;
         self.modified |= report.changed;
         self.dirty |= report.edited;
         if let Some(refused) = report.refused {
@@ -209,9 +206,9 @@ impl App {
             self.redraw = true;
         }
         let graph = &self.project.graph;
-        self.popped.retain(|p| graph.node(p.node).is_some());
+        self.popped.retain(|p| graph.kind(p.node).is_some());
         if std::mem::take(&mut self.dirty) {
-            let targets = self.project.graph.nodes().map(|(id, _)| id).collect();
+            let targets = self.project.graph.dag.nodes().map(|(id, _)| id).collect();
             if let Err(error) = self.worker.request(&self.project.graph, self.level, targets) {
                 self.report(Err(error));
             }
@@ -395,7 +392,7 @@ impl App {
         self.popped.clear();
         self.dirty = true;
         // Queued work and late replies belong to the old project.
-        self.worker = worker(&self.wake);
+        self.worker = Worker::new(self.wake.clone());
         Ok(())
     }
 
@@ -493,11 +490,6 @@ impl App {
     }
 }
 
-fn worker(wake: &Arc<dyn Fn() + Send + Sync>) -> Worker {
-    let wake = wake.clone();
-    Worker::new(move || wake())
-}
-
 #[cfg(test)]
 mod tests {
     use drip::{Error as KernelError, runtime::KernelContext};
@@ -509,6 +501,7 @@ mod tests {
     use crate::node_ui::{preview::PreviewImage, scopes::Histogram};
 
     use crate::node_ui::preview::ImageView;
+    use crate::worker::view;
 
     use egui_kittest::Harness;
     use egui_kittest::kittest::{NodeT, Queryable};
@@ -742,34 +735,12 @@ mod tests {
             );
         }
         let id = app.project.graph.find("Preview").unwrap();
-        let image = app
-            .worker
-            .result(id)
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .downcast_ref::<ImageView>()
-            .unwrap()
-            .image
-            .clone();
+        let image = view::<ImageView>(&app.worker, id).image.clone();
         assert_eq!(app.level, DEFAULT_LEVEL);
         assert_eq!(image.width, 3984, "1/2 preview with reduced Bayer input to RCD");
         h.get_by_label("Reload files").click();
         settle(&mut h);
-        let refreshed = &h
-            .state()
-            .worker
-            .result(id)
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .downcast_ref::<ImageView>()
-            .unwrap()
-            .image;
+        let refreshed = &view::<ImageView>(&h.state().worker, id).image;
         assert!(!std::sync::Arc::ptr_eq(&image, refreshed));
         assert_eq!(image.texels, refreshed.texels);
         h.get_by_label("Preview detail").click();
@@ -778,29 +749,10 @@ mod tests {
         settle(&mut h);
         assert_eq!(h.state().level, 2);
         let app = h.state();
-        let image = &app
-            .worker
-            .result(id)
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .downcast_ref::<ImageView>()
-            .unwrap()
-            .image;
+        let image = &view::<ImageView>(&app.worker, id).image;
         assert_eq!(image.width, 1992);
         let histogram = app.project.graph.find("Histogram").unwrap();
-        let histogram = app
-            .worker
-            .result(histogram)
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .downcast_ref::<Histogram>()
-            .unwrap();
+        let histogram = view::<Histogram>(&app.worker, histogram);
         assert_eq!(
             histogram.counts.iter().map(|bin| bin[0] as usize).sum::<usize>(),
             image.width * image.height
@@ -849,7 +801,7 @@ mod tests {
 
         #[test]
         fn evaluation_is_independent_of_node_positions() {
-            let kind = Registry.get("test.offscreen").unwrap();
+            let kind = drip::definition::kind("test.offscreen").unwrap();
 
             let mut project = Project::default();
             let left = project.graph.add_node(kind).unwrap();
@@ -928,23 +880,12 @@ mod tests {
             let (release, resume) = mpsc::channel();
             *GATE.lock().unwrap() = Some((started, resume));
             let mut project = Project::default();
-            let id = project.graph.add_node(Registry.get("test.slow").unwrap()).unwrap();
+            let id = project.graph.add_node(drip::definition::kind("test.slow").unwrap()).unwrap();
             let mut app = App::new(None, true, || {});
             app.set_project(project, None).unwrap();
             let mut h = harness(app);
             settle(&mut h);
-            let before = &h
-                .state()
-                .worker
-                .result(id)
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .downcast_ref::<ImageView>()
-                .unwrap()
-                .image;
+            let before = &view::<ImageView>(&h.state().worker, id).image;
             let before = before.clone();
             set_param(&mut h, id, "block", json!(true));
             h.step();
@@ -952,18 +893,7 @@ mod tests {
             let start = Instant::now();
             h.step();
             assert!(h.query_by_label("Evaluating…").is_some());
-            let shown = &h
-                .state()
-                .worker
-                .result(id)
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .downcast_ref::<ImageView>()
-                .unwrap()
-                .image;
+            let shown = &view::<ImageView>(&h.state().worker, id).image;
             assert!(Arc::ptr_eq(shown, &before));
             h.get_by_label("Preview detail").click();
             h.run();
@@ -1009,8 +939,10 @@ mod tests {
         settle(&mut h);
         assert!(h.state().file.is_none());
         assert_eq!(h.state().title(), "Untitled · Drip");
-        h.state_mut()
-            .edit(crate::editing::Edit::Add(Registry.get("tone.exposure").unwrap(), Vec2::ZERO));
+        h.state_mut().edit(crate::editing::Edit::Add(
+            drip::definition::kind("tone.exposure").unwrap(),
+            Vec2::ZERO,
+        ));
         assert_eq!(h.state().title(), "Untitled * · Drip");
         h.state_mut().file = Some(destination.clone());
         h.run();
@@ -1061,7 +993,8 @@ mod tests {
 
     #[test]
     fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
-        let documentation = Registry.get("tone.sigmoid").unwrap().help.trim().replace('\n', " ");
+        let documentation =
+            drip::definition::kind("tone.sigmoid").unwrap().help.trim().replace('\n', " ");
         let mut app = App::new(None, true, || {});
         let id = app.project.graph.find("Sigmoid").unwrap();
         app.selected = Some(id);
@@ -1134,7 +1067,8 @@ mod tests {
         #[test]
         fn undocumented_nodes_show_generated_port_help() {
             let mut project = Project::default();
-            let id = project.graph.add_node(Registry.get("test.generic").unwrap()).unwrap();
+            let id =
+                project.graph.add_node(drip::definition::kind("test.generic").unwrap()).unwrap();
             let mut app = App::new(None, true, || {});
             app.set_project(project, None).unwrap();
             app.selected = Some(id);
@@ -1162,7 +1096,7 @@ mod tests {
             .collect();
         let viewers: Vec<_> = graph
             .nodes()
-            .filter(|(_, n)| crate::node_ui::binding(n.kind).is_some_and(|b| b.has_preparation()))
+            .filter(|(_, n)| crate::node_ui::has_view(n.kind))
             .map(|(id, _)| id)
             .collect();
         assert_eq!(h.get_all_by_label("⚙").count(), with_params.len());
@@ -1195,9 +1129,10 @@ mod tests {
 
     #[test]
     fn scope_nodes_offer_popouts() {
-        for kind in
-            [Registry.get("view.waveform").unwrap(), Registry.get("view.vectorscope").unwrap()]
-        {
+        for kind in [
+            drip::definition::kind("view.waveform").unwrap(),
+            drip::definition::kind("view.vectorscope").unwrap(),
+        ] {
             let mut project = Project::default();
             let id = project.graph.add_node(kind).unwrap();
             let mut app = App::new(None, true, || {});
@@ -1231,7 +1166,10 @@ mod tests {
         #[test]
         fn declared_gui_view_gets_a_popout_before_preparation_succeeds() {
             let mut project = Project::default();
-            let id = project.graph.add_node(Registry.get("test.declared_view").unwrap()).unwrap();
+            let id = project
+                .graph
+                .add_node(drip::definition::kind("test.declared_view").unwrap())
+                .unwrap();
             let mut app = App::new(None, true, || {});
             app.set_project(project, None).unwrap();
             let mut h = harness(app);
@@ -1282,8 +1220,10 @@ mod tests {
         #[test]
         fn custom_controls_keep_the_generic_view_and_popout() {
             let mut project = Project::default();
-            let id =
-                project.graph.add_node(Registry.get("test.custom_controls_view").unwrap()).unwrap();
+            let id = project
+                .graph
+                .add_node(drip::definition::kind("test.custom_controls_view").unwrap())
+                .unwrap();
             let mut app = App::new(None, true, || {});
             app.set_project(project, None).unwrap();
             app.selected = Some(id);

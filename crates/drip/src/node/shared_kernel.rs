@@ -15,6 +15,10 @@ pub fn matrix(input: &[f32], coeff: &[f32], output: &mut [f32]) {
     }
 }
 #[cube]
+pub fn site(row: usize, col: usize) -> usize {
+    row % 2 * 2 + col % 2
+}
+#[cube]
 pub fn color(row: usize, col: usize, phase: usize) -> usize {
     let ry = (row % 2) ^ (phase / 2);
     let cx = (col % 2) ^ (phase % 2);

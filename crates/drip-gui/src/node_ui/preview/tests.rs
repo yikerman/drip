@@ -211,7 +211,7 @@ fn active_modes_report_missing_profiles() {
 #[test]
 fn proof_settings_round_trip_as_ordinary_node_parameters() {
     let mut project = Project::default();
-    let id = project.graph.add_node(crate::model::Registry.get("view.preview").unwrap()).unwrap();
+    let id = project.graph.add_node(drip::definition::kind("view.preview").unwrap()).unwrap();
     project.graph.set_param(id, "interpolation", json!(true)).unwrap();
     project
         .graph
@@ -228,6 +228,6 @@ fn proof_settings_round_trip_as_ordinary_node_parameters() {
                 .clone(),
         )
         .unwrap();
-    let loaded = Project::from_json(&project.to_json().unwrap(), &crate::model::Registry).unwrap();
+    let loaded = Project::from_json(&project.to_json().unwrap()).unwrap();
     assert_eq!(loaded.to_json().unwrap(), project.to_json().unwrap());
 }

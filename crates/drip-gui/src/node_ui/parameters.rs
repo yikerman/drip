@@ -20,10 +20,10 @@ pub fn heading(ui: &mut Ui, cx: &mut NodeCx) {
     if ui.data_mut(|data| data.remove_temp::<()>(name_id.with("focus"))).is_some() {
         ui.memory_mut(|memory| memory.request_focus(name_id));
     }
-    if let Some(name) = edit_text(ui, name_id, &cx.node().name) {
+    if let Some(name) = edit_text(ui, name_id, cx.graph().name(id).expect("existing node")) {
         cx.set_name(&name);
     }
-    ui.weak(cx.node().kind.id);
+    ui.weak(cx.kind().id);
 }
 
 pub fn focus_name(ctx: &egui::Context, id: crate::model::NodeId) {
@@ -33,8 +33,8 @@ pub fn focus_name(ctx: &egui::Context, id: crate::model::NodeId) {
 }
 
 pub fn controls(ui: &mut Ui, cx: &mut NodeCx) {
-    let kind = cx.node().kind;
-    crate::node_ui::of(kind).controls(ui, cx);
+    let kind = cx.kind();
+    crate::node_ui::controls(ui, cx);
     if let Some(action) = crate::node_ui::action(kind)
         && ui.add_enabled(!cx.actions_disabled(), egui::Button::new(action.name)).clicked()
     {

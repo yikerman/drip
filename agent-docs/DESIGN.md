@@ -247,6 +247,28 @@ Resolved with the user on 2026-10-11 after the review against
 
 ## Performance
 
+- **Requirement:** Apply mechanical simplifications that reduce complexity first;
+  ownership, scheduling and contract changes remain separate work.
+- **Decided:** Kind discovery and admission share the core kind index; GUI
+  bindings remain frontend-owned. The editor uses core port handles internally
+  and names in saved projects. Templates return typed handles for layout.
+  Canvas layout and drawing share a node snapshot per pass. The worker retains
+  packed preview images for disposal, without retaining their source pixels.
+- **Tentative:** Presentation-only edits need current drawing settings or
+  re-preparation of retained results;
+  suppressing evaluation alone leaves worker-prepared settings stale. Preserve
+  evaluation-time contracts and public value-boundary checks when removing
+  repeated adapter checks. Share evaluation machinery without removing typed
+  output evaluation merely because current callers are tests.
+- **Tentative:** Keep preview-level conversion in the frontend: the core accepts
+  integer scales, not only powers of two. Load-time validation alone cannot
+  protect direct evaluation callers while `GlobalContext::scale` is public.
+- **Decided:** Render tests use production packing, upload, binding and pipeline
+  setup; expected color values remain independent of that implementation.
+- **Open:** Retaining a loaded source's device representation would avoid its
+  per-demand upload. Define runtime ownership, replacement/reload lifetime and
+  memory cost before making an exception to per-run materialization. Upload
+  volume alone does not establish the largest remaining latency cost.
 - **Requirement:** No persistent intermediate cache; do not optimize prematurely.
   Tracing adds no synchronization. Benchmark artifacts stay outside Git.
 - **Decided:** Sub-300 ms latency is acceptable without further optimization.

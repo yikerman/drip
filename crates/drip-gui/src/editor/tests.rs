@@ -20,6 +20,16 @@ struct Scene {
 }
 
 impl Scene {
+    fn input(&self, id: NodeId) -> Port {
+        self.graph.dag.input_port(id, "image").unwrap()
+    }
+    fn output(&self, id: NodeId) -> Port {
+        self.graph.dag.output_port(id, "output").unwrap()
+    }
+    fn connect(&mut self, from: NodeId, to: NodeId) {
+        self.graph.connect(self.output(from), self.input(to)).unwrap();
+    }
+
     fn node_point(&self) -> Pos2 {
         let node = self.graph.node(self.node).unwrap();
         self.area.min
@@ -28,7 +38,7 @@ impl Scene {
     }
 
     fn port_point(&self, id: NodeId, direction: Direction) -> Pos2 {
-        let layout = layout(id, &self.graph.node(id).unwrap(), None);
+        let layout = layout(&self.graph, id, self.graph.node(id).unwrap(), None);
         let ports = match direction {
             Direction::Input => layout.inputs,
             Direction::Output => layout.outputs,
@@ -39,7 +49,7 @@ impl Scene {
 
 fn harness(zoom: f32) -> Harness<'static, Scene> {
     let mut graph = Graph::default();
-    let node = graph.add_node(crate::model::Registry.get("tone.exposure").unwrap()).unwrap();
+    let node = graph.add_node(drip::definition::kind("tone.exposure").unwrap()).unwrap();
     graph.set_ui(node, json!({"pos": [100.0, 100.0]})).unwrap();
     let scene = Scene {
         editor: Editor { offset: Some(vec2(20.0, 20.0)), zoom, wire: None },
@@ -69,13 +79,7 @@ fn harness(zoom: f32) -> Harness<'static, Scene> {
                 });
                 egui::CentralPanel::default().show(ui, |ui| {
                     s.area = ui.available_rect_before_wrap();
-                    s.editor.show(
-                        ui,
-                        &mut s.graph,
-                        &crate::model::Registry,
-                        &mut s.selected,
-                        &mut frame,
-                    );
+                    s.editor.show(ui, &mut s.graph, &mut s.selected, &mut frame);
                 });
                 s.edited |= frame.report.edited;
                 if let Some(refused) = frame.report.refused {
@@ -120,10 +124,6 @@ fn add_node(h: &mut Harness<'_, Scene>, kind: &'static crate::model::Kind, pos: 
     id
 }
 
-fn image_port(id: NodeId) -> Port {
-    Port(id, "image".into())
-}
-
 #[test]
 fn ports_connect_in_either_direction_and_preserve_sources_until_commit() {
     for zoom in [0.5, 1.0, 2.0] {
@@ -132,15 +132,15 @@ fn ports_connect_in_either_direction_and_preserve_sources_until_commit() {
             let source = h.state().node;
             let target = add_node(
                 &mut h,
-                crate::model::Registry.get("tone.exposure").unwrap(),
+                drip::definition::kind("tone.exposure").unwrap(),
                 vec2(240.0, 180.0),
             );
             let previous = add_node(
                 &mut h,
-                crate::model::Registry.get("tone.exposure").unwrap(),
+                drip::definition::kind("tone.exposure").unwrap(),
                 vec2(100.0, 240.0),
             );
-            h.state_mut().graph.connect(output_port(previous), image_port(target)).unwrap();
+            h.state_mut().connect(previous, target);
             let before = h.state().graph.clone();
             let (start, end) = if start_at_input {
                 ((target, Direction::Input), (source, Direction::Output))
@@ -153,14 +153,20 @@ fn ports_connect_in_either_direction_and_preserve_sources_until_commit() {
             assert!(!h.state().edited);
             click_port(&mut h, end.0, end.1, Secondary);
             assert!(h.state().editor.wire.is_none());
-            assert_eq!(h.state().graph.source(&image_port(target)), Some(output_port(source)));
+            assert_eq!(
+                h.state().graph.source(h.state().input(target)),
+                Some(h.state().output(source))
+            );
             assert!(h.state().edited);
             assert_eq!(h.state().selected, None);
             assert!(h.query_by_label("Rename").is_none());
 
             click_port(&mut h, source, Direction::Output, Secondary);
             click_port(&mut h, previous, Direction::Input, Secondary);
-            assert_eq!(h.state().graph.source(&image_port(previous)), Some(output_port(source)));
+            assert_eq!(
+                h.state().graph.source(h.state().input(previous)),
+                Some(h.state().output(source))
+            );
             assert_eq!(h.state().graph.edges().count(), 2);
         }
     }
@@ -171,16 +177,16 @@ fn invalid_port_targets_keep_the_pending_connection_and_existing_source() {
     let mut h = harness(1.0);
     let source = h.state().node;
     let target =
-        add_node(&mut h, crate::model::Registry.get("tone.exposure").unwrap(), vec2(400.0, 100.0));
+        add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(400.0, 100.0));
     let bayer = add_node(
         &mut h,
-        crate::model::Registry.get("geometry.reduce-bayer").unwrap(),
+        drip::definition::kind("geometry.reduce-bayer").unwrap(),
         vec2(100.0, 300.0),
     );
-    h.state_mut().graph.connect(output_port(source), image_port(target)).unwrap();
+    h.state_mut().connect(source, target);
     let before = h.state().graph.clone();
     click_port(&mut h, target, Direction::Input, Secondary);
-    let pending = h.state().editor.wire.clone();
+    let pending = h.state().editor.wire;
     for (id, direction, error) in [
         (source, Direction::Input, "Choose an output port"),
         (bayer, Direction::Output, "payload mismatch at tone.exposure.image"),
@@ -201,12 +207,9 @@ fn pending_connections_cancel_without_opening_the_canvas_menu() {
     for direction in [Direction::Input, Direction::Output] {
         let mut h = harness(1.0);
         let source = h.state().node;
-        let target = add_node(
-            &mut h,
-            crate::model::Registry.get("tone.exposure").unwrap(),
-            vec2(400.0, 100.0),
-        );
-        h.state_mut().graph.connect(output_port(source), image_port(target)).unwrap();
+        let target =
+            add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(400.0, 100.0));
+        h.state_mut().connect(source, target);
         let before = h.state().graph.clone();
         let start = if direction == Direction::Input { target } else { source };
         click_port(&mut h, start, direction, Secondary);
@@ -251,14 +254,11 @@ fn port_menus_navigate_to_connected_nodes_without_editing() {
     let mut h = harness(1.0);
     let source = h.state().node;
     let near =
-        add_node(&mut h, crate::model::Registry.get("tone.exposure").unwrap(), vec2(400.0, 100.0));
-    let far = add_node(
-        &mut h,
-        crate::model::Registry.get("tone.exposure").unwrap(),
-        vec2(3000.0, 1000.0),
-    );
+        add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(400.0, 100.0));
+    let far =
+        add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(3000.0, 1000.0));
     for id in [near, far] {
-        h.state_mut().graph.connect(output_port(source), image_port(id)).unwrap();
+        h.state_mut().connect(source, id);
     }
     let before = h.state().graph.clone();
     let offset = h.state().editor.offset;
@@ -311,16 +311,16 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
             let source = h.state().node;
             let target = add_node(
                 &mut h,
-                crate::model::Registry.get("tone.exposure").unwrap(),
+                drip::definition::kind("tone.exposure").unwrap(),
                 vec2(340.0, 118.0),
             );
             let branch = add_node(
                 &mut h,
-                crate::model::Registry.get("tone.exposure").unwrap(),
+                drip::definition::kind("tone.exposure").unwrap(),
                 vec2(340.0, 230.0),
             );
             for id in [target, branch] {
-                h.state_mut().graph.connect(output_port(source), image_port(id)).unwrap();
+                h.state_mut().connect(source, id);
             }
             let start = h.state().port_point(source, Direction::Output);
             let end = h.state().port_point(target, Direction::Input);
@@ -333,8 +333,11 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
             );
             click(&mut h, pointer, Secondary);
             let removed = distance <= WIRE_HIT;
-            assert_eq!(h.state().graph.source(&image_port(target)).is_none(), removed);
-            assert_eq!(h.state().graph.source(&image_port(branch)), Some(output_port(source)));
+            assert_eq!(h.state().graph.source(h.state().input(target)).is_none(), removed);
+            assert_eq!(
+                h.state().graph.source(h.state().input(branch)),
+                Some(h.state().output(source))
+            );
             assert_eq!(h.state().edited, removed);
             assert_eq!(h.query_by_label("Tone ⏵").is_some(), !removed);
         }
@@ -346,13 +349,13 @@ fn crossing_wires_choose_the_nearest_curve() {
     let mut h = harness(1.0);
     let upper = h.state().node;
     let lower =
-        add_node(&mut h, crate::model::Registry.get("tone.exposure").unwrap(), vec2(100.0, 202.0));
+        add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(100.0, 202.0));
     let upper_target =
-        add_node(&mut h, crate::model::Registry.get("tone.exposure").unwrap(), vec2(440.0, 118.0));
+        add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(440.0, 118.0));
     let lower_target =
-        add_node(&mut h, crate::model::Registry.get("tone.exposure").unwrap(), vec2(440.0, 220.0));
-    h.state_mut().graph.connect(output_port(upper), image_port(lower_target)).unwrap();
-    h.state_mut().graph.connect(output_port(lower), image_port(upper_target)).unwrap();
+        add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(440.0, 220.0));
+    h.state_mut().connect(upper, lower_target);
+    h.state_mut().connect(lower, upper_target);
     let curve = bezier(
         h.state().port_point(upper, Direction::Output),
         h.state().port_point(lower_target, Direction::Input),
@@ -360,8 +363,11 @@ fn crossing_wires_choose_the_nearest_curve() {
     );
     let pointer = curve.sample(0.48);
     click(&mut h, pointer, Secondary);
-    assert!(h.state().graph.source(&image_port(lower_target)).is_none());
-    assert_eq!(h.state().graph.source(&image_port(upper_target)), Some(output_port(lower)));
+    assert!(h.state().graph.source(h.state().input(lower_target)).is_none());
+    assert_eq!(
+        h.state().graph.source(h.state().input(upper_target)),
+        Some(h.state().output(lower))
+    );
 }
 
 #[test]
@@ -369,12 +375,9 @@ fn wires_leave_panning_and_overlapping_nodes_and_ports_interactive() {
     for over_port in [false, true] {
         let mut h = harness(1.0);
         let source = h.state().node;
-        let target = add_node(
-            &mut h,
-            crate::model::Registry.get("tone.exposure").unwrap(),
-            vec2(440.0, 118.0),
-        );
-        h.state_mut().graph.connect(output_port(source), image_port(target)).unwrap();
+        let target =
+            add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(440.0, 118.0));
+        h.state_mut().connect(source, target);
         let start = h.state().port_point(source, Direction::Output);
         let end = h.state().port_point(target, Direction::Input);
         let midpoint = start.lerp(end, 0.5);
@@ -382,18 +385,14 @@ fn wires_leave_panning_and_overlapping_nodes_and_ports_interactive() {
         let delta = vec2(30.0, 20.0);
         drag(&mut h, midpoint, Primary, delta);
         assert_eq!(h.state().editor.offset.unwrap(), offset + delta);
-        assert_eq!(h.state().graph.source(&image_port(target)), Some(output_port(source)));
+        assert_eq!(h.state().graph.source(h.state().input(target)), Some(h.state().output(source)));
         let position = if over_port { vec2(350.0, 109.0) } else { vec2(330.0, 130.0) };
-        let overlay =
-            add_node(&mut h, crate::model::Registry.get("tone.exposure").unwrap(), position);
+        let overlay = add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), position);
         click(&mut h, midpoint + delta, Secondary);
-        assert_eq!(h.state().graph.source(&image_port(target)), Some(output_port(source)));
+        assert_eq!(h.state().graph.source(h.state().input(target)), Some(h.state().output(source)));
         assert!(!h.state().edited);
         if over_port {
-            assert_eq!(
-                h.state().editor.wire,
-                Some(Endpoint { port: image_port(overlay), direction: Direction::Input })
-            );
+            assert_eq!(h.state().editor.wire, Some(h.state().input(overlay)));
             assert!(h.query_by_label("Rename").is_none());
         } else {
             assert!(h.query_by_label("Rename").is_some());
@@ -504,7 +503,7 @@ fn click_selection_and_node_menu_actions() {
     let names = ["Exposure", "Sigmoid"];
     let rows: Vec<_> = names.iter().map(|name| h.get_by_label(name).rect().top()).collect();
     assert!(rows.windows(2).all(|rows| rows[0] < rows[1]));
-    h.get_by_label(crate::model::Registry.get("tone.exposure").unwrap().name).click();
+    h.get_by_label(drip::definition::kind("tone.exposure").unwrap().name).click();
     h.run();
     assert_eq!(h.state().graph.nodes().count(), 1);
     let added = h.state().graph.node(h.state().selected.unwrap()).unwrap();
@@ -513,9 +512,6 @@ fn click_selection_and_node_menu_actions() {
     assert!(!egui::Popup::is_any_open(&h.ctx));
 }
 
-fn output_port(id: NodeId) -> Port {
-    Port(id, "output".into())
-}
 fn snapshot(graph: &Graph) -> String {
     crate::model::Project { graph: graph.clone(), ui: serde_json::Value::Null }.to_json().unwrap()
 }
@@ -525,10 +521,10 @@ fn port_names_fit_beside_the_opposite_port() {
     let ctx = egui::Context::default();
     ctx.run_ui(Default::default(), |ui| {
         let mut graph = Graph::default();
-        for kind in Registry.kinds() {
+        for kind in drip::definition::kinds() {
             let id = graph.add_node(kind).unwrap();
-            let width = node_ui::of(kind).size(&graph.node(id).unwrap()).x;
-            for text in node_ui::ports::texts(&graph, id) {
+            let width = node_ui::size(&graph.node(id).unwrap()).x;
+            for text in node_ui::ports::texts(kind) {
                 let font = FontId::proportional(theme::SMALL_SIZE);
                 let galley =
                     ui.fonts_mut(|f| f.layout_no_wrap(text.port.into(), font, theme::WEAK));

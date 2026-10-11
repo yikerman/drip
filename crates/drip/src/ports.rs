@@ -8,11 +8,6 @@ use std::{any::TypeId, marker::PhantomData, sync::Arc};
 
 pub type Description = Arc<dyn std::any::Any + Send + Sync>;
 pub type Data = Arc<dyn std::any::Any + Send + Sync>;
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Placement {
-    Cpu,
-    Device,
-}
 pub struct Cpu<P>(PhantomData<P>);
 pub struct Device<P>(PhantomData<P>);
 
@@ -218,9 +213,6 @@ impl PortSpec {
     pub fn is<P: Payload>(&self) -> bool {
         self.payload_type == TypeId::of::<P>()
     }
-    pub fn placement(&self) -> Placement {
-        if self.transfers.is_some() { Placement::Device } else { Placement::Cpu }
-    }
     /// Payload name and requirement, as help and the editor show a port.
     pub fn label(&self) -> String {
         if self.requirement.is_empty() {
@@ -244,7 +236,7 @@ pub struct PortId {
     pub(crate) direction: Direction,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) enum Direction {
+pub enum Direction {
     Input,
     Output,
 }
@@ -302,6 +294,9 @@ impl NodeId {
     }
 }
 impl PortId {
+    pub fn direction(self) -> Direction {
+        self.direction
+    }
     pub fn node(self) -> NodeId {
         self.node
     }

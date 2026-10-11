@@ -24,17 +24,16 @@ pub fn prepare(
     output: Option<&profile::Output>,
     image: &Arc<HostImage>,
 ) -> Result<PreviewImage, KernelError> {
-    let input = image;
     let output = || output.expect("proof modes load their output");
     let pixels = match p.mode {
         Mode::None => None,
-        Mode::Softproof(_) => Some(softproof(output(), &input.pixels)?),
-        Mode::Gamutcheck(_) => Some(gamutcheck(output(), &input.pixels)?),
+        Mode::Softproof(_) => Some(softproof(output(), &image.pixels)?),
+        Mode::Gamutcheck(_) => Some(gamutcheck(output(), &image.pixels)?),
     };
     let mut view = match pixels {
         None => PreviewImage::new(image),
         Some(pixels) => {
-            let proof = Arc::new(HostImage { pixels: pixels.into(), ..(**input).clone() });
+            let proof = Arc::new(HostImage { pixels: pixels.into(), ..(**image).clone() });
             PreviewImage::new(&proof)
         }
     };

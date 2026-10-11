@@ -12,8 +12,8 @@ use crate::ui_state::{LayoutField, position};
 use crate::widgets::{self, BUTTON};
 use crate::worker::ViewResult;
 
-use crate::model::Registry;
 use crate::model::{Graph, Node, NodeId, Port};
+use drip::ports::Direction;
 use egui::emath::TSTransform;
 use egui::epaint::CubicBezierShape;
 use egui::{
@@ -42,19 +42,7 @@ pub struct Editor {
     offset: Option<Vec2>,
     zoom: f32,
     /// The port awaiting an opposite-direction endpoint on the next right-click.
-    wire: Option<Endpoint>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum Direction {
-    Input,
-    Output,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Endpoint {
-    port: Port,
-    direction: Direction,
+    wire: Option<Port>,
 }
 
 impl Default for Editor {
@@ -66,9 +54,10 @@ impl Default for Editor {
 /// Where a node and its parts are in graph coordinates.
 struct NodeLayout {
     id: NodeId,
+    node: Node,
     rect: Rect,
-    inputs: Vec<(&'static str, Pos2)>,
-    outputs: Vec<(&'static str, Pos2)>,
+    inputs: Vec<(Port, Pos2)>,
+    outputs: Vec<(Port, Pos2)>,
     error: Option<(Pos2, String)>,
     body: Rect,
 }
@@ -81,16 +70,18 @@ struct CanvasLayout {
 
 impl CanvasLayout {
     fn new<'a>(graph: &Graph, results: &dyn Fn(NodeId) -> Option<&'a ViewResult>) -> Self {
-        Self { nodes: graph.nodes().map(|(id, node)| layout(id, &node, results(id))).collect() }
+        Self {
+            nodes: graph.nodes().map(|(id, node)| layout(graph, id, node, results(id))).collect(),
+        }
     }
 
-    fn port_position(&self, port: &Port, direction: Direction) -> Option<Pos2> {
-        let node = self.nodes.iter().find(|l| l.id == port.0)?;
-        let ports = match direction {
+    fn port_position(&self, port: Port) -> Option<Pos2> {
+        let node = self.nodes.iter().find(|l| l.id == port.node())?;
+        let ports = match port.direction() {
             Direction::Input => &node.inputs,
             Direction::Output => &node.outputs,
         };
-        ports.iter().find(|(name, _)| *name == port.1).map(|(_, pos)| *pos)
+        ports.get(port.index()).map(|(_, pos)| *pos)
     }
 
     fn node_rect(&self, id: NodeId) -> Option<Rect> {
@@ -103,7 +94,6 @@ impl Editor {
         &mut self,
         ui: &mut Ui,
         graph: &mut Graph,
-        registry: &Registry,
         selected: &mut Option<NodeId>,
         frame: &mut Frame,
     ) {
@@ -154,7 +144,7 @@ impl Editor {
             frame.edit(graph, Edit::Disconnect(input));
         } else {
             egui::Popup::context_menu(&background).show(|ui| {
-                if let Some(kind) = node_menu::show(ui, registry) {
+                if let Some(kind) = node_menu::show(ui) {
                     let pointer = ui
                         .ctx()
                         .pointer_interact_pos()
@@ -173,15 +163,13 @@ impl Editor {
             *selected = None;
         }
 
-        if self.wire.as_ref().is_some_and(|from| graph.node(from.port.0).is_none()) {
+        if self.wire.as_ref().is_some_and(|from| graph.kind(from.node()).is_none()) {
             self.wire = None;
         }
         if let Some(from) = &self.wire {
             let pointer = ui.ctx().pointer_latest_pos().map(|p| to_global.inverse() * p);
-            let output = from.direction == Direction::Output;
-            if let (Some(start), Some(end)) =
-                (layout.port_position(&from.port, from.direction), pointer)
-            {
+            let output = from.direction() == Direction::Output;
+            if let (Some(start), Some(end)) = (layout.port_position(*from), pointer) {
                 let (start, end) = if output { (start, end) } else { (end, start) };
                 painter.add(bezier(start, end, wire));
             }
@@ -206,7 +194,7 @@ impl Editor {
         }
         self.pan(&body);
         if body.dragged_by(PointerButton::Secondary) {
-            let pos = position(&graph.node(l.id).expect("laid out").ui, l.id) + body.drag_delta();
+            let pos = position(graph.ui(l.id).expect("laid out"), l.id) + body.drag_delta();
             frame.edit(graph, Edit::Ui(l.id, LayoutField::Position, pos));
         }
         let mut remove = false;
@@ -228,30 +216,27 @@ impl Editor {
             }
             return None;
         }
-        let node = graph.node(l.id).expect("laid out from the graph");
+        let node = &l.node;
         ui.interact(
             Rect::from_min_size(l.rect.min, vec2(l.rect.width(), HEADER)),
             ui.id().with((l.id, "title")),
             Sense::hover(),
         )
         .tip(&node.name);
-        let (kind, kind_params) = (node_ui::of(node.kind), node.kind.parameters);
-        let texts = node_ui::ports::texts(graph, l.id);
-        paint(&painter, l, &node, &texts, *selected == Some(l.id));
-        let inputs = l.inputs.iter().map(|&(name, pos)| (Direction::Input, name, pos));
-        let outputs = l.outputs.iter().map(|&(name, pos)| (Direction::Output, name, pos));
-        for ((direction, name, pos), text) in inputs.chain(outputs).zip(&texts) {
-            let endpoint = Endpoint { port: Port(l.id, name.into()), direction };
+        let kind_params = node.kind.parameters;
+        let texts = node_ui::ports::texts(node.kind);
+        paint(&painter, l, node, &texts, *selected == Some(l.id));
+        for (&(endpoint, pos), text) in l.inputs.iter().chain(&l.outputs).zip(&texts) {
             let response = ui
-                .interact(hit(pos), ui.id().with((l.id, name, direction)), Sense::click_and_drag())
+                .interact(hit(pos), ui.id().with(endpoint), Sense::click_and_drag())
                 .tip(text.hover());
             self.pan(&response);
             if response.secondary_clicked() {
                 egui::Popup::close_all(ui.ctx());
-                self.connect(endpoint.clone(), graph, frame);
+                self.connect(endpoint, graph, frame);
             }
             egui::Popup::menu(&response).show(|ui| {
-                if let Some(id) = peer_menu(ui, graph, &endpoint) {
+                if let Some(id) = peer_menu(ui, graph, endpoint) {
                     navigate = Some(id);
                 }
             });
@@ -271,7 +256,7 @@ impl Editor {
             );
             widgets::pop_out(ui, button, &mut cx, Part::Parameters);
         }
-        kind.body(&mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body)), &mut cx);
+        node_ui::body(&mut ui.new_child(UiBuilder::new().id_salt(l.id).max_rect(l.body)), &mut cx);
         if body.hovered() {
             painter.rect_stroke(
                 l.rect,
@@ -291,24 +276,24 @@ impl Editor {
         }
     }
 
-    fn connect(&mut self, target: Endpoint, graph: &mut Graph, frame: &mut Frame) {
-        let Some(from) = &self.wire else {
+    fn connect(&mut self, target: Port, graph: &mut Graph, frame: &mut Frame) {
+        let Some(from) = self.wire else {
             self.wire = Some(target);
             return;
         };
-        if from.direction == target.direction {
-            frame.report.refused = Some(match from.direction {
+        if from.direction() == target.direction() {
+            frame.report.refused = Some(match from.direction() {
                 Direction::Input => "Choose an output port".into(),
                 Direction::Output => "Choose an input port".into(),
             });
             return;
         }
-        let (output, input) = match from.direction {
-            Direction::Output => (&from.port, &target.port),
-            Direction::Input => (&target.port, &from.port),
+        let (output, input) = match from.direction() {
+            Direction::Output => (from, target),
+            Direction::Input => (target, from),
         };
-        frame.edit(graph, Edit::Connect(output.clone(), input.clone()));
-        if graph.source(input).as_ref() == Some(output) {
+        frame.edit(graph, Edit::Connect(output, input));
+        if graph.source(input) == Some(output) {
             self.wire = None;
         }
     }
@@ -373,14 +358,7 @@ fn draw_wires(
     let wires: Vec<_> = graph
         .edges()
         .filter_map(|(output, input)| {
-            Some((
-                input.clone(),
-                bezier(
-                    layout.port_position(&output, Direction::Output)?,
-                    layout.port_position(&input, Direction::Input)?,
-                    wire,
-                ),
-            ))
+            Some((input, bezier(layout.port_position(output)?, layout.port_position(input)?, wire)))
         })
         .collect();
     let hovered_wire = pointer.and_then(|pointer| {
@@ -392,7 +370,7 @@ fn draw_wires(
             .min_by(|(_, a), (_, b)| a.total_cmp(b))
             .map(|(i, _)| i)
     });
-    let disconnect = hovered_wire.map(|i| wires[i].0.clone());
+    let disconnect = hovered_wire.map(|i| wires[i].0);
     for (i, (_, mut curve)) in wires.into_iter().enumerate() {
         if hovered_wire == Some(i) {
             curve.stroke.width += 2.0 * point;
@@ -403,23 +381,28 @@ fn draw_wires(
     disconnect
 }
 
-fn peer_menu(ui: &mut Ui, graph: &Graph, endpoint: &Endpoint) -> Option<NodeId> {
+fn peer_menu(ui: &mut Ui, graph: &Graph, endpoint: Port) -> Option<NodeId> {
     let mut navigate = None;
-    let peers = graph.edges().filter_map(|(output, input)| match endpoint.direction {
-        Direction::Input => (input == endpoint.port).then_some(output),
-        Direction::Output => (output == endpoint.port).then_some(input),
+    let peers = graph.edges().filter_map(|(output, input)| match endpoint.direction() {
+        Direction::Input => (input == endpoint).then_some(output),
+        Direction::Output => (output == endpoint).then_some(input),
     });
     let mut empty = true;
     for peer in peers {
         empty = false;
-        let node = graph.node(peer.0).expect("connected node");
-        if ui.button(format!("{} · {}", node.name, peer.1)).clicked() {
-            navigate = Some(peer.0);
+        let name = graph.name(peer.node()).expect("connected node");
+        let kind = graph.kind(peer.node()).expect("connected node");
+        let ports = match peer.direction() {
+            Direction::Input => kind.inputs,
+            Direction::Output => kind.outputs,
+        };
+        if ui.button(format!("{name} · {}", ports[peer.index()].name)).clicked() {
+            navigate = Some(peer.node());
             ui.close();
         }
     }
     if empty {
-        let text = match endpoint.direction {
+        let text = match endpoint.direction() {
             Direction::Input => "No source",
             Direction::Output => "No destinations",
         };
@@ -469,28 +452,37 @@ fn paint(painter: &Painter, l: &NodeLayout, node: &Node, texts: &[PortText], sel
 
 /// From the top: header, port rows with inputs left and outputs right, an
 /// error row if the node failed, the body its kind's GUI draws.
-fn layout(id: NodeId, node: &Node, result: Option<&ViewResult>) -> NodeLayout {
+fn layout(graph: &Graph, id: NodeId, node: Node, result: Option<&ViewResult>) -> NodeLayout {
     let error = match result {
         Some(Ok(_)) | None => None,
         Some(Err(e)) => Some(e.to_string()),
     };
-    let size = node_ui::of(node.kind).size(node);
-    let body_top = ports(node) + if error.is_some() { ROW } else { 0.0 };
+    let size = node_ui::size(&node);
+    let body_top = ports(&node) + if error.is_some() { ROW } else { 0.0 };
     let pos = position(&node.ui, id).to_pos2();
     let port = |i: usize, x: f32| pos + vec2(x, HEADER + ROW * (i as f32 + 0.5));
     NodeLayout {
         id,
         rect: Rect::from_min_size(pos, vec2(size.x, body_top + size.y)),
-        inputs: node.kind.inputs.iter().enumerate().map(|(i, p)| (p.name, port(i, 0.0))).collect(),
+        inputs: node
+            .kind
+            .inputs
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (graph.dag.input_port(id, p.name).expect("declared input"), port(i, 0.0)))
+            .collect(),
         outputs: node
             .kind
             .outputs
             .iter()
             .enumerate()
-            .map(|(i, p)| (p.name, port(i, size.x)))
+            .map(|(i, p)| {
+                (graph.dag.output_port(id, p.name).expect("declared output"), port(i, size.x))
+            })
             .collect(),
-        error: error.map(|e| (pos + vec2(8.0, ports(node) + ROW / 2.0), e)),
+        error: error.map(|e| (pos + vec2(8.0, ports(&node) + ROW / 2.0), e)),
         body: Rect::from_min_size(pos + vec2(0.0, body_top), size),
+        node,
     }
 }
 
@@ -506,7 +498,7 @@ fn label_width(node_width: f32) -> f32 {
 
 /// A node's rectangle in graph units, without an error row.
 fn bounds(id: NodeId, node: &Node) -> Rect {
-    let size = node_ui::of(node.kind).size(node);
+    let size = node_ui::size(node);
     Rect::from_min_size(position(&node.ui, id).to_pos2(), vec2(size.x, ports(node) + size.y))
 }
 

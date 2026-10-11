@@ -1,4 +1,9 @@
 use super::{CANVAS, compositor, presentation::Output};
+use crate::{
+    node_ui::data::HostImage,
+    render::{image, pipeline},
+};
+use std::sync::Arc;
 use wgpu::{SurfaceCapabilities, SurfaceColorSpace as Space, SurfaceColorSpaces as Spaces};
 
 fn capabilities(formats: &[(wgpu::TextureFormat, Spaces)]) -> SurfaceCapabilities {
@@ -101,55 +106,20 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
         [-0.01; 3],
     ];
     let width = rgb.len() as u32;
-    let source = texture(&device, width, CANVAS);
-    let bytes: Vec<u8> = rgb
-        .iter()
-        .flat_map(|&[r, g, b]| [r, g, b, 1.0])
-        .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
-        .collect();
-    queue.write_texture(
-        source.as_image_copy(),
-        &bytes,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(width * 8),
-            rows_per_image: None,
-        },
-        source.size(),
-    );
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("preview"),
-        source: wgpu::ShaderSource::Wgsl(crate::render::image::SHADER.into()),
-    });
-    let pipeline = create_pipeline(&device, &shader, "fs", CANVAS);
-    let source_view = source.create_view(&Default::default());
-    let sampler = device.create_sampler(&Default::default());
-    let rect = device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: 16,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    queue.write_buffer(&rect, 0, &[-1.0f32, 1.0, 1.0, -1.0].map(f32::to_ne_bytes).concat());
-    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &pipeline.get_bind_group_layout(0),
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&source_view),
-            },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
-            wgpu::BindGroupEntry { binding: 2, resource: rect.as_entire_binding() },
-        ],
-    });
+    let source = Arc::new(image::Image::new(&HostImage {
+        width: rgb.len(),
+        height: 1,
+        requested_scale: 1,
+        color_space: "Rec.2020 / D65".into(),
+        pixels: rgb.to_vec().into(),
+    }));
+    let preview_pipeline = pipeline(&device, "preview", image::SHADER, "fs", CANVAS);
+    let shown =
+        image::upload(&device, &queue, &preview_pipeline, &image::samplers(&device), &source);
+    queue.write_buffer(&shown.rect, 0, &[-1.0f32, 1.0, 1.0, -1.0].map(f32::to_ne_bytes).concat());
     let canvas = texture(&device, width, CANVAS);
-    draw(&device, &queue, &pipeline, &group, &canvas, 6);
+    draw(&device, &queue, &preview_pipeline, &shown.groups[0], &canvas, 6);
     let canvas_view = canvas.create_view(&Default::default());
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("presentation"),
-        source: wgpu::ShaderSource::Wgsl(compositor::SHADER.into()),
-    });
     let source_profile = profile::rec2020_linear();
     let destination_profile = profile::ProfileSource::Srgb.built_in().unwrap();
     let convert = Transform::new(
@@ -173,15 +143,9 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
         Output { format: wgpu::TextureFormat::Rgba8Unorm, color_space: Space::Srgb },
         Output { format: wgpu::TextureFormat::Rgba8UnormSrgb, color_space: Space::Srgb },
     ] {
-        let pipeline = create_pipeline(&device, &shader, output.fragment(), output.format);
-        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &pipeline.get_bind_group_layout(0),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&canvas_view),
-            }],
-        });
+        let pipeline =
+            pipeline(&device, "composite", compositor::SHADER, output.fragment(), output.format);
+        let group = compositor::Compositor::composite_group(&device, &pipeline, &canvas_view);
         let target = texture(&device, width, output.format);
         draw(&device, &queue, &pipeline, &group, &target, 3);
         let bytes = read(&device, &queue, &target);
@@ -234,14 +198,16 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
     gui.push(blended);
     gui.push([1.5; 3]);
     let canvas = texture(&device, gui.len() as u32, CANVAS);
-    let bytes: Vec<u8> = gui
-        .iter()
-        .flat_map(|&[r, g, b]| [r, g, b, 1.0])
-        .flat_map(|v| half::f16::from_f32(v).to_ne_bytes())
-        .collect();
+    let packed = image::Image::new(&HostImage {
+        width: gui.len(),
+        height: 1,
+        requested_scale: 1,
+        color_space: "sRGB".into(),
+        pixels: gui.clone().into(),
+    });
     queue.write_texture(
         canvas.as_image_copy(),
-        &bytes,
+        &packed.texels,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
             bytes_per_row: Some(gui.len() as u32 * 8),
@@ -249,16 +215,9 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
         },
         canvas.size(),
     );
-    let pipeline = create_pipeline(&device, &shader, "linear", CANVAS);
+    let pipeline = pipeline(&device, "composite", compositor::SHADER, "linear", CANVAS);
     let canvas_view = canvas.create_view(&Default::default());
-    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: None,
-        layout: &pipeline.get_bind_group_layout(0),
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: wgpu::BindingResource::TextureView(&canvas_view),
-        }],
-    });
+    let group = compositor::Compositor::composite_group(&device, &pipeline, &canvas_view);
     let target = texture(&device, gui.len() as u32, CANVAS);
     draw(&device, &queue, &pipeline, &group, &target, 3);
     let bytes = read(&device, &queue, &target);
@@ -289,35 +248,6 @@ fn texture(device: &wgpu::Device, width: u32, format: wgpu::TextureFormat) -> wg
             | wgpu::TextureUsages::COPY_SRC
             | wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
-    })
-}
-
-fn create_pipeline(
-    device: &wgpu::Device,
-    shader: &wgpu::ShaderModule,
-    fragment: &str,
-    format: wgpu::TextureFormat,
-) -> wgpu::RenderPipeline {
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: None,
-        layout: None,
-        vertex: wgpu::VertexState {
-            module: shader,
-            entry_point: Some("vs"),
-            buffers: &[],
-            compilation_options: Default::default(),
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: shader,
-            entry_point: Some(fragment),
-            targets: &[Some(format.into())],
-            compilation_options: Default::default(),
-        }),
-        primitive: Default::default(),
-        depth_stencil: None,
-        multisample: Default::default(),
-        multiview_mask: None,
-        cache: None,
     })
 }
 

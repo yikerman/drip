@@ -1,5 +1,5 @@
 //! Frontend labels and layout are serialized through the core's opaque UI state.
-use super::{Graph, Registry, State};
+use super::{Graph, State};
 use drip::Result;
 use serde_json::Value;
 
@@ -36,14 +36,12 @@ impl Project {
         }
         project.to_json()
     }
-    pub fn from_json(text: &str, registry: &Registry) -> Result<Self> {
+    pub fn from_json(text: &str) -> Result<Self> {
         let core = drip::project::Project::from_json(text)?;
         let mut graph = Graph { dag: core.dag, ..Default::default() };
         let mut missing = Vec::new();
         for (id, node) in graph.dag.nodes() {
-            let kind = registry
-                .get(node.kind().id)
-                .ok_or_else(|| drip::Error::Graph("unknown editor node".into()))?;
+            let kind = node.kind();
             let state: State = match core.node_ui.get(&id).filter(|v| !v.is_null()) {
                 Some(value) => serde_json::from_value(value.clone())
                     .map_err(|e| drip::Error::Graph(e.to_string()))?,
@@ -78,10 +76,11 @@ mod tests {
         let b = drip::node::exposure::add(&mut core.dag, Default::default()).unwrap();
         core.node_ui
             .insert(b.node, serde_json::json!({"name":"Exposure", "external":[], "ui":null}));
-        let mut project = Project::from_json(&core.to_json().unwrap(), &Registry).unwrap();
+        let mut project = Project::from_json(&core.to_json().unwrap()).unwrap();
         let names: Vec<_> = project.graph.nodes().map(|(_, node)| node.name).collect();
         assert_eq!(names, ["Exposure 2", "Exposure"]);
-        let added = project.graph.add_node(Registry.get("tone.exposure").unwrap()).unwrap();
+        let added =
+            project.graph.add_node(drip::definition::kind("tone.exposure").unwrap()).unwrap();
         assert_eq!(project.graph.node(added).unwrap().name, "Exposure 3");
     }
 }

@@ -98,8 +98,9 @@ impl KernelContext<'_> {
         Ok(crate::payload::DeviceBuffer::new(self.client()?.create(bytes)))
     }
 
-    /// Algorithm-local scratch allocated by the runtime. It has no port meaning.
-    pub fn scratch_f32(&self, elements: usize) -> Result<crate::payload::DeviceBuffer<()>> {
+    /// Algorithm-local scratch for 32-bit scalars (f32 or u32), with no port
+    /// meaning. Kernels must initialize each element before reading it.
+    pub fn scratch_32(&self, elements: usize) -> Result<crate::payload::DeviceBuffer<()>> {
         let bytes = elements
             .checked_mul(4)
             .filter(|&n| n > 0)

@@ -8,7 +8,7 @@ use crate::node_ui::{help, parameters};
 
 pub fn selected_node(ui: &mut Ui, cx: &mut NodeCx) {
     parameters::heading(ui, cx);
-    help::show(ui, cx.graph(), cx.id());
+    help::show(ui, cx.kind());
     parameters::controls(ui, cx);
 }
 

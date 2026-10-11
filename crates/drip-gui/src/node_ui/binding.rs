@@ -5,7 +5,7 @@ use super::ControlCx;
 use crate::{
     model::Kind,
     node_ui::data::PrepareContext,
-    render::node_views::{Drawable, ImageCache, IntoDrawable},
+    render::node_views::{Drawable, Images, IntoDrawable},
 };
 use drip::{
     Result,
@@ -40,7 +40,7 @@ pub trait GuiNode: Typed {
     }
 }
 type PrepareErased =
-    fn(&dyn Node, &InputValues, &PrepareContext, &mut ImageCache) -> Result<Arc<dyn Drawable>>;
+    fn(&dyn Node, &InputValues, &PrepareContext, &mut Images) -> Result<Arc<dyn Drawable>>;
 pub(super) type ActionErased =
     fn(&dyn Node, &InputValues, &PrepareContext) -> Result<Option<Value>>;
 pub struct Binding {
@@ -57,9 +57,9 @@ impl Binding {
             // Erased extras are function pointers, which cannot capture: each
             // reads its declaration again.
             prepare: match G::PREPARE {
-                Some(_) => Some(|node, inputs, ctx, cache| {
+                Some(_) => Some(|node, inputs, ctx, images| {
                     let prepare = G::PREPARE.expect("declared preparation");
-                    Ok(prepare(G::of(node)?, inputs.bind::<G>()?, ctx)?.into_drawable(cache))
+                    Ok(prepare(G::of(node)?, inputs.bind::<G>()?, ctx)?.into_drawable(images))
                 }),
                 None => None,
             },
@@ -86,9 +86,9 @@ impl Binding {
         node: &dyn Node,
         inputs: &InputValues,
         ctx: &PrepareContext,
-        cache: &mut ImageCache,
+        images: &mut Images,
     ) -> Result<Option<Arc<dyn Drawable>>> {
-        self.prepare.map(|prepare| prepare(node, inputs, ctx, cache)).transpose()
+        self.prepare.map(|prepare| prepare(node, inputs, ctx, images)).transpose()
     }
     pub(super) fn action(&self) -> Option<(&'static str, ActionErased)> {
         self.action

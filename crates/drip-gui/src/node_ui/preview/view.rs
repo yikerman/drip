@@ -6,7 +6,7 @@ use egui::{FontId, Painter, Rect, Ui};
 
 use crate::node_ui::data::HostImage;
 use crate::render::image;
-use crate::render::node_views::{Drawable, ImageCache, IntoDrawable};
+use crate::render::node_views::{Drawable, Images, IntoDrawable};
 
 /// Shared linear Rec.2020 pixels for frontend presentation.
 #[derive(Debug, Clone, PartialEq)]
@@ -26,8 +26,8 @@ impl PreviewImage {
 }
 
 impl IntoDrawable for PreviewImage {
-    fn into_drawable(self, cache: &mut ImageCache) -> Arc<dyn Drawable> {
-        Arc::new(ImageView { image: cache.image(self.rgb()), interpolation: self.interpolation })
+    fn into_drawable(self, images: &mut Images) -> Arc<dyn Drawable> {
+        Arc::new(ImageView { image: images.pack(self.rgb()), interpolation: self.interpolation })
     }
 }
 

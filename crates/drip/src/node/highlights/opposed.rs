@@ -15,33 +15,23 @@
 
 use crate::{
     Result,
-    node::data::{Bayer, DeviceBuffer},
+    node::{
+        data::{Bayer, DeviceBuffer},
+        shared_kernel::site,
+    },
     ports::{Device, Read},
     runtime::{KernelContext, dispatch_dims},
 };
-use cubecl::{prelude::*, server::Handle};
+use cubecl::prelude::*;
 
-// Masks are three channel bits; counts are integers even above 2^24 samples.
-struct U32Buffer(Handle);
-impl U32Buffer {
-    fn allocate(ctx: &KernelContext<'_>, elements: usize) -> Result<Self> {
-        Ok(Self(ctx.client()?.empty(elements * 4)))
-    }
-    fn argument(&self) -> BufferArg {
-        // SAFETY: this private scratch holds contiguous scalar u32 words.
-        unsafe { BufferArg::from_raw_parts(self.0.clone(), 1) }
-    }
-}
 struct Partial {
     sums: DeviceBuffer<()>,
-    counts: U32Buffer,
+    // Counts stay exact above 2^24 samples; kernels interpret these words as u32.
+    counts: DeviceBuffer<()>,
 }
 impl Partial {
     fn allocate(ctx: &KernelContext<'_>, groups: usize) -> Result<Self> {
-        Ok(Self {
-            sums: ctx.scratch_f32(groups * 3)?,
-            counts: U32Buffer::allocate(ctx, groups * 3)?,
-        })
+        Ok(Self { sums: ctx.scratch_32(groups * 3)?, counts: ctx.scratch_32(groups * 3)? })
     }
 }
 
@@ -54,8 +44,9 @@ pub(super) fn process(
     let (w, h) = (image.desc.extent.width as usize, image.desc.extent.height as usize);
     let phase = image.desc.phase as usize;
     let (mw, mh) = (w.div_ceil(3), h.div_ceil(3));
-    let mask = U32Buffer::allocate(ctx, mw * mh)?;
-    let near = U32Buffer::allocate(ctx, mw * mh)?;
+    // Masks hold three channel bits per u32 word.
+    let mask = ctx.scratch_32(mw * mh)?;
+    let near = ctx.scratch_32(mw * mh)?;
     let client = ctx.client()?;
     let (count, dim) = dispatch_dims(mw * mh);
     clipped_cells::launch(
@@ -134,10 +125,6 @@ pub(super) fn process(
     Ok(())
 }
 
-#[cube]
-fn site(row: usize, col: usize) -> usize {
-    row % 2 * 2 + col % 2
-}
 #[cube]
 fn clip(position: usize, c0: f32, c1: f32, c2: f32, c3: f32) -> f32 {
     if position == 0 {

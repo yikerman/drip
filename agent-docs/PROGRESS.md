@@ -4,6 +4,34 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Separated the mechanical refactor from pending editor error-label, color and
+  elision changes. The refactor-only snapshot passes all 14 editor interaction
+  tests on CPU; the behavior changes and their test remain in the working tree.
+- Mechanical simplifications: one core kind index and direct admission, core
+  port handles in the GUI, typed template handles, shared canvas snapshots and
+  cheap kind/name/layout reads. Removed redundant report/scope state, the GUI
+  kind registry and view wrapper, the extra wake-callback allocation, retained
+  preview source pixels, `Placement`, unused schema validation and integer
+  scratch wrappers. Shared Bayer indexing and production rendering setup with
+  tests. CPU workspace tests pass (159 passed, 16 device tests ignored), as do
+  three doctests, strict workspace Clippy and formatting. All 16 device tests
+  pass on WGPU with one test thread. A parallel GUI device-test process exited
+  with SIGSEGV before reporting results; its cause remains unisolated. Tests
+  cover the combined tree before the user's remaining editor edits.
+- Reviewed the 21 proposed simplifications against current code and design.
+  Confirmed redundant report state, template label coupling, retained preview
+  source pixels, repeated GUI snapshots and kernel/render duplication. Checked
+  pinned winit/ecolor sources. Main corrections: GUI bindings are a separate
+  registry; presentation flags alone leave stale prepared settings; auto
+  exposure has a stricter requirement than Exposure; public export and
+  evaluation boundaries still need checks. No implementation or benchmark run;
+  recommendations remain tentative. Existing GUI edits were left untouched.
+- Rechecked the simplification details: winit 0.30.13 returns an empty title
+  on X11, which DESIGN excludes; Wayland retains its title. Worker events and
+  notices differ for evaluation and shutdown. Core scales accept every integer
+  from 1 to 256, while GUI levels select powers of two. Display tests use shipped
+  shaders but duplicate packing and pipeline/binding setup. No tests or benchmarks
+  run for this source review; concurrent tooltip edits were left untouched.
 - Refreshed the README from the user-facing `37b13bf` revisions: CubeCL,
   flexible views, color management and pipeline checks, with brief canvas
   gestures and current build instructions. All five user-supplied Sony demos

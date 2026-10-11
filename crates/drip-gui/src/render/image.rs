@@ -46,48 +46,19 @@ struct Previews {
 
 /// One preview's texture and placement. Holding the image keeps identity
 /// comparisons by pointer sound.
-struct Shown {
+pub(super) struct Shown {
     image: Arc<Image>,
-    groups: [wgpu::BindGroup; 2],
-    rect: wgpu::Buffer,
+    pub(super) groups: [wgpu::BindGroup; 2],
+    pub(super) rect: wgpu::Buffer,
 }
 
 pub(crate) const SHADER: &str =
     concat!(include_str!("shaders/color.wgsl"), include_str!("shaders/preview.wgsl"),);
 
 pub fn install(device: &wgpu::Device, renderer: &mut egui_wgpu::Renderer) {
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("preview"),
-        source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-    });
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("preview"),
-        layout: None,
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs"),
-            buffers: &[],
-            compilation_options: Default::default(),
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs"),
-            targets: &[Some(wgpu::TextureFormat::Rgba16Float.into())],
-            compilation_options: Default::default(),
-        }),
-        primitive: Default::default(),
-        depth_stencil: None,
-        multisample: Default::default(),
-        multiview_mask: None,
-        cache: None,
-    });
-    let samplers = [wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear].map(|filter| {
-        device.create_sampler(&wgpu::SamplerDescriptor {
-            mag_filter: filter,
-            min_filter: filter,
-            ..Default::default()
-        })
-    });
+    let pipeline =
+        super::pipeline(device, "preview", SHADER, "fs", wgpu::TextureFormat::Rgba16Float);
+    let samplers = samplers(device);
     let previews = Previews {
         pipeline,
         samplers,
@@ -142,7 +113,7 @@ impl CallbackTrait for Paint {
         previews.screen = screen.size_in_pixels;
         previews.used.insert(self.id);
         if !previews.shown.get(&self.id).is_some_and(|s| Arc::ptr_eq(&s.image, &self.image)) {
-            let shown = upload(device, queue, previews, &self.image);
+            let shown = upload(device, queue, &previews.pipeline, &previews.samplers, &self.image);
             previews.shown.insert(self.id, shown);
         }
         // The rect in normalized device coordinates, y up.
@@ -181,10 +152,11 @@ impl CallbackTrait for Paint {
     }
 }
 
-fn upload(
+pub(super) fn upload(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    previews: &Previews,
+    pipeline: &wgpu::RenderPipeline,
+    samplers: &[wgpu::Sampler; 2],
     image: &Arc<Image>,
 ) -> Shown {
     let size = wgpu::Extent3d {
@@ -219,10 +191,10 @@ fn upload(
         mapped_at_creation: false,
     });
     let view = texture.create_view(&Default::default());
-    let groups = previews.samplers.each_ref().map(|sampler| {
+    let groups = samplers.each_ref().map(|sampler| {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("preview"),
-            layout: &previews.pipeline.get_bind_group_layout(0),
+            layout: &pipeline.get_bind_group_layout(0),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -237,4 +209,14 @@ fn upload(
         })
     });
     Shown { image: image.clone(), groups, rect }
+}
+
+pub(super) fn samplers(device: &wgpu::Device) -> [wgpu::Sampler; 2] {
+    [wgpu::FilterMode::Nearest, wgpu::FilterMode::Linear].map(|filter| {
+        device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: filter,
+            min_filter: filter,
+            ..Default::default()
+        })
+    })
 }

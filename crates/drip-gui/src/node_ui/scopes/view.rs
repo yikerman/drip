@@ -6,12 +6,12 @@ use drip::node::color::{self, D65, REC709};
 use egui::{Align2, FontId, Painter, Rect, Stroke};
 
 use super::vectorscope::vectorscope_xyz;
-use super::{Histogram, Scope, ScopeAxes};
-use crate::render::node_views::{Drawable, ImageCache, IntoDrawable};
+use super::{Histogram, SIZE, Scope, ScopeAxes};
+use crate::render::node_views::{Drawable, Images, IntoDrawable};
 use crate::theme;
 
 impl IntoDrawable for Arc<Histogram> {
-    fn into_drawable(self, _: &mut ImageCache) -> Arc<dyn Drawable> {
+    fn into_drawable(self, _: &mut Images) -> Arc<dyn Drawable> {
         self
     }
 }
@@ -28,7 +28,7 @@ struct ScopeView {
 }
 
 impl IntoDrawable for Arc<Scope> {
-    fn into_drawable(self, _: &mut ImageCache) -> Arc<dyn Drawable> {
+    fn into_drawable(self, _: &mut Images) -> Arc<dyn Drawable> {
         let mesh = scope_mesh(&self);
         Arc::new(ScopeView { scope: self, mesh })
     }
@@ -109,7 +109,7 @@ fn scope_mesh(scope: &Scope) -> egui::Mesh {
     let density = normalized_counts(&scope.counts, scope.log);
     let xyz_to_srgb = color::inverse(&color::rgb_to_xyz(REC709, D65));
     let mut mesh = egui::Mesh::default();
-    let size = scope.size as f32;
+    let size = SIZE as f32;
     for (i, count) in scope.counts.iter().enumerate() {
         if *count == [0; 3] {
             continue;
@@ -117,11 +117,11 @@ fn scope_mesh(scope: &Scope) -> egui::Mesh {
         let color = match scope.axes {
             ScopeAxes::Waveform { .. } => channel_color(count.map(&density)),
             ScopeAxes::Vectorscope { .. } => {
-                let center = [(i % scope.size) as f32 + 0.5, (i / scope.size) as f32 + 0.5];
+                let center = [(i % SIZE) as f32 + 0.5, (i / SIZE) as f32 + 0.5];
                 vectorscope_color(center.map(|v| v / size), density(count[0]), &xyz_to_srgb)
             }
         };
-        let min = egui::pos2((i % scope.size) as f32 / size, (i / scope.size) as f32 / size);
+        let min = egui::pos2((i % SIZE) as f32 / size, (i / SIZE) as f32 / size);
         mesh.add_colored_rect(Rect::from_min_size(min, egui::vec2(1.0 / size, 1.0 / size)), color);
     }
     mesh
@@ -134,13 +134,8 @@ fn vectorscope_color(position: [f32; 2], density: f32, xyz_to_srgb: &color::Mat3
     let rgb = color::apply(xyz_to_srgb, vectorscope_xyz(position)).map(|v| v.max(0.0));
     let peak = rgb.into_iter().fold(0.0, f64::max);
     let encoded = rgb.map(|v| {
-        let linear = v / peak;
-        let srgb = if linear <= 0.0031308 {
-            12.92 * linear
-        } else {
-            1.055 * linear.powf(1.0 / 2.4) - 0.055
-        };
-        (255.0 * srgb * f64::from(density)).round() as u8
+        let srgb = egui::ecolor::gamma_from_linear((v / peak) as f32);
+        (255.0 * srgb * density).round() as u8
     });
     egui::Color32::from_rgb(encoded[0], encoded[1], encoded[2])
 }
@@ -174,7 +169,7 @@ fn draw_scope(painter: &Painter, rect: Rect, scope: &Scope, mesh: &egui::Mesh, f
             plot.label(rect.left_bottom(), Align2::LEFT_BOTTOM, &format!("{min_stop} EV"));
             plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, "Image position →");
         }
-        ScopeAxes::Vectorscope { primaries, color_space } => {
+        ScopeAxes::Vectorscope { primaries } => {
             painter.hline(rect.x_range(), rect.center().y, Stroke::new(0.5, theme::LIGHTER));
             painter.vline(rect.center().x, rect.y_range(), Stroke::new(0.5, theme::LIGHTER));
             let points = primaries.into_iter().chain([primaries[0]]).map(at).collect();
@@ -184,7 +179,7 @@ fn draw_scope(painter: &Painter, rect: Rect, scope: &Scope, mesh: &egui::Mesh, f
                 plot.label(at(point) + egui::vec2(4.0, 0.0), Align2::LEFT_CENTER, name);
             }
             plot.label(rect.left_top(), Align2::LEFT_TOP, "u′v′ · D65");
-            plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, color_space);
+            plot.label(rect.right_bottom(), Align2::RIGHT_BOTTOM, &scope.color_space);
         }
     }
 }

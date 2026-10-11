@@ -25,11 +25,9 @@ fn choices_share_schema_json_and_typed_reads() {
     assert_eq!(spec.kind.default_value(), json!("second_mode"));
     for (text, expected) in [("first", Mode::First), ("second_mode", Mode::Second)] {
         let values: Settings = serde_json::from_value(json!({"mode": text})).unwrap();
-        assert!(spec.kind.accepts(&json!(text)));
         assert_eq!(values.mode, expected);
         assert_eq!(serde_json::to_value(expected).unwrap(), json!(text));
     }
-    assert!(!spec.kind.accepts(&json!("third")));
     assert!(serde_json::from_value::<Mode>(json!("third")).is_err());
     assert!(serde_json::from_value::<Mode>(json!(0)).is_err());
 }
@@ -55,7 +53,6 @@ fn enum_payloads_use_serde_tagging_and_generated_defaults() {
     let schema = Nested::Configured(Options { enabled: true }).schema();
     let value = schema.default_value();
     assert_eq!(value, json!({"configured": {"enabled": true}}));
-    assert!(schema.accepts(&value));
     let typed: Nested = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(typed, Nested::Configured(Options { enabled: true }));
     assert_eq!(serde_json::to_value(typed).unwrap(), value);

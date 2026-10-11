@@ -27,8 +27,6 @@ pub struct Report {
     pub changed: bool,
     /// Whether processing inputs or connections changed.
     pub edited: bool,
-    /// Whether shared presentation changed, including noncomputational edits.
-    pub redraw: bool,
     /// An edit the graph refused.
     pub refused: Option<String>,
     /// An action the user asked to run.
@@ -79,7 +77,7 @@ impl<'a> Frame<'a> {
                 }
                 Edit::Connect(output, input) => graph.connect(output, input)?,
                 Edit::Disconnect(input) => {
-                    graph.disconnect(&input)?;
+                    graph.disconnect(input)?;
                 }
                 Edit::Param(id, name, value) => {
                     let params = graph.with_param(id, name, value)?;
@@ -95,7 +93,6 @@ impl<'a> Frame<'a> {
         match result {
             Ok(added) => {
                 self.report.changed = true;
-                self.report.redraw = true;
                 self.report.edited |= evaluate;
                 added
             }
@@ -146,6 +143,10 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
         self.graph.node(self.id).expect("GUIs are shown for existing nodes")
     }
 
+    pub fn kind(&self) -> &'static Kind {
+        self.graph.kind(self.id).expect("GUIs are shown for existing nodes")
+    }
+
     /// The view of the node's latest result, if it has one.
     pub fn view(&self) -> Option<&'a dyn Drawable> {
         (self.frame.results)(self.id)?.as_ref().ok()?.as_deref()
@@ -190,7 +191,7 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
 }
 
 fn set_ui(graph: &mut Graph, id: NodeId, field: LayoutField, value: Vec2) {
-    let mut ui = graph.node(id).expect("node exists").ui.clone();
+    let mut ui = graph.ui(id).expect("node exists").clone();
     field.write(&mut ui, value);
     graph.set_ui(id, ui).expect("node exists");
 }

@@ -1,8 +1,8 @@
 use super::{histogram::histogram, vectorscope::vectorscope, waveform::waveform};
 use std::sync::Arc;
 
-use super::ScopeAxes;
-use crate::model::{Graph, Registry};
+use super::{SIZE, ScopeAxes};
+use crate::model::Graph;
 use crate::node_ui::data::{HostImage, PrepareContext};
 use crate::node_ui::scopes::{ExposureRange, Scale, histogram::Settings};
 use drip::{eval::Evaluator, graph::Dag, node::data::*, runtime::RuntimeContext};
@@ -85,7 +85,7 @@ fn histogram_bins_by_stops() {
         pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]].into(),
     };
     let mut graph = Graph::default();
-    let id = graph.add_node(Registry.get("view.histogram").unwrap()).unwrap();
+    let id = graph.add_node(drip::definition::kind("view.histogram").unwrap()).unwrap();
     let context = context();
     let prepare = |graph: &Graph| {
         let p: Settings = serde_json::from_value(graph.node(id).unwrap().params).unwrap();
@@ -121,10 +121,8 @@ fn vectorscope_uses_working_rec2020_coordinates() {
     };
     let context = context();
     let scope = vectorscope(&device(&image, &context), &context).unwrap();
-    let ScopeAxes::Vectorscope { primaries, color_space } = scope.axes else {
-        panic!("chromaticity")
-    };
-    assert_eq!(color_space, "Rec.2020");
+    let ScopeAxes::Vectorscope { primaries } = scope.axes else { panic!("chromaticity") };
+    assert_eq!(scope.color_space, "Rec.2020 / D65");
     // Independently derive CIE u'v' for Rec.2020 red (x=.708, y=.292), relative to D65.
     let expected: [f64; 2] = [
         0.5 + 4.0 * 0.708 / (-2.0 * 0.708 + 12.0 * 0.292 + 3.0) - 0.1978300066,
@@ -133,8 +131,8 @@ fn vectorscope_uses_working_rec2020_coordinates() {
     for (actual, expected) in primaries[0].into_iter().zip(expected) {
         assert!((f64::from(actual) - expected).abs() < 1e-6);
     }
-    let [x, y] = expected.map(|v| (v * scope.size as f64) as usize);
-    assert_eq!(scope.counts[y * scope.size + x][0], 1);
+    let [x, y] = expected.map(|v| (v * SIZE as f64) as usize);
+    assert_eq!(scope.counts[y * SIZE + x][0], 1);
     assert_eq!(scope.counts.iter().map(|count| count[0]).sum::<u32>(), 1);
 }
 

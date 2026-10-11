@@ -13,31 +13,8 @@ pub(super) struct Compositor {
 
 impl Compositor {
     pub fn new(device: &wgpu::Device, output: Output, config: &wgpu::SurfaceConfiguration) -> Self {
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("presentation"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-        });
-        let composite = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("composite"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs"),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some(output.fragment()),
-                targets: &[Some(output.format.into())],
-                compilation_options: Default::default(),
-            }),
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let composite =
+            crate::render::pipeline(device, "composite", SHADER, output.fragment(), output.format);
         let canvas = Self::canvas(device, config);
         let composite_group = Self::composite_group(device, &composite, &canvas);
         Self { canvas, composite, composite_group }
@@ -63,7 +40,7 @@ impl Compositor {
             .create_view(&Default::default())
     }
 
-    fn composite_group(
+    pub(super) fn composite_group(
         device: &wgpu::Device,
         pipeline: &wgpu::RenderPipeline,
         canvas: &wgpu::TextureView,

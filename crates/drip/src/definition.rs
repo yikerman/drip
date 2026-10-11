@@ -6,7 +6,11 @@ use crate::{
     ports::{Data, Description, PortSpec},
     runtime::KernelContext,
 };
-use std::{any::Any, sync::Arc};
+use std::{
+    any::Any,
+    collections::BTreeMap,
+    sync::{Arc, LazyLock},
+};
 
 /// Everything about a node kind that does not depend on its parameters. One
 /// static per kind; graph checks, help and editors read the same declaration.
@@ -22,6 +26,8 @@ pub struct Kind {
     /// Admitting parameters loads files (a source's outputs or `#[node(assets)]`),
     /// so frontends should do it away from their UI thread.
     pub loads_assets: bool,
+    /// Admit persisted parameters using this kind's typed definition.
+    pub build: fn(serde_json::Value) -> Result<Arc<dyn Node>>,
     pub inputs: &'static [PortSpec],
     pub outputs: &'static [PortSpec],
     /// An effect run on evaluated inputs, such as writing a file. Any frontend,
@@ -94,18 +100,23 @@ pub enum Outcome {
     Unknown(Error),
 }
 
-pub struct Registration {
-    pub kind: &'static Kind,
-    pub build: fn(serde_json::Value) -> Result<Arc<dyn Node>>,
-}
 #[linkme::distributed_slice]
-pub static NODES: [Registration];
+pub static NODES: [&'static Kind];
 
-pub fn registered(id: &str, parameters: serde_json::Value) -> Result<Arc<dyn Node>> {
-    let mut matches = NODES.iter().filter(|n| n.kind.id == id);
-    let entry = matches.next().ok_or_else(|| Error::Graph(format!("unknown node {id}")))?;
-    if matches.next().is_some() {
-        return Err(Error::Graph(format!("duplicate node id {id}")));
+static KINDS: LazyLock<BTreeMap<&'static str, &'static Kind>> = LazyLock::new(|| {
+    let mut kinds = BTreeMap::new();
+    for &kind in NODES {
+        assert!(kinds.insert(kind.id, kind).is_none(), "duplicate node ID {}", kind.id);
     }
-    (entry.build)(parameters)
+    kinds
+});
+pub fn kind(id: &str) -> Option<&'static Kind> {
+    KINDS.get(id).copied()
+}
+pub fn kinds() -> impl Iterator<Item = &'static Kind> {
+    KINDS.values().copied()
+}
+pub fn registered(id: &str, parameters: serde_json::Value) -> Result<Arc<dyn Node>> {
+    let kind = kind(id).ok_or_else(|| Error::Graph(format!("unknown node {id}")))?;
+    (kind.build)(parameters)
 }

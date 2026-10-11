@@ -107,11 +107,7 @@ pub(super) fn node(
 
             #[::drip::__private::linkme::distributed_slice(::drip::definition::NODES)]
             #[linkme(crate = ::drip::__private::linkme)]
-            static REGISTRATION: ::drip::definition::Registration =
-                ::drip::definition::Registration {
-                    kind: &KIND,
-                    build: |json| definition(::drip::param::decode(json)?),
-                };
+            static REGISTRATION: &'static ::drip::definition::Kind = &KIND;
         }
     }
 }
@@ -164,6 +160,7 @@ fn kind(
                 <#parameters as ::std::default::Default>::default()
             ).expect("node parameter defaults serialize"),
             loads_assets: #loads_assets,
+            build: |json| definition(::drip::param::decode(json)?),
             inputs: &[#(#inputs),*],
             outputs: &[#(#outputs),*],
             action: #action,

@@ -2,7 +2,7 @@
 //! requirements. Connection checking stays in the library; this only presents
 //! its contracts.
 
-use crate::model::{Graph, NodeId};
+use crate::model::Kind;
 use drip::node::data::{Bayer, BayerLevels, CaptureMetadata, Rgb};
 use drip::ports::PortSpec;
 use egui::Color32;
@@ -69,8 +69,7 @@ pub fn color(spec: &PortSpec) -> Option<Color32> {
 
 /// Inputs then outputs, in the editor's row order. Every output type is known
 /// before evaluation, including on nodes with missing inputs.
-pub fn texts(graph: &Graph, id: NodeId) -> Vec<PortText> {
-    let kind = graph.node(id).expect("existing node").kind;
+pub fn texts(kind: &Kind) -> Vec<PortText> {
     let text = |role, spec: &PortSpec| PortText {
         role,
         port: spec.name,
@@ -87,13 +86,14 @@ pub fn texts(graph: &Graph, id: NodeId) -> Vec<PortText> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Graph;
 
     #[test]
     fn concrete_outputs_are_known_before_inputs_are_connected() {
         let mut graph = Graph::default();
         for (kind, label) in [("tone.sigmoid", "RGB · Rec.2020 / D65"), ("tone.exposure", "RGB")] {
-            let id = graph.add_node(crate::model::Registry.get(kind).unwrap()).unwrap();
-            let ports = texts(&graph, id);
+            let id = graph.add_node(drip::definition::kind(kind).unwrap()).unwrap();
+            let ports = texts(graph.kind(id).unwrap());
             assert_eq!(ports[0].hover(), format!("Input · image: requires {label}"));
             assert_eq!(ports.last().unwrap().hover(), format!("Output: {label}"));
         }
@@ -101,7 +101,7 @@ mod tests {
 
     #[test]
     fn every_registered_payload_has_a_color() {
-        for kind in crate::model::Registry.kinds() {
+        for kind in drip::definition::kinds() {
             for spec in kind.inputs.iter().chain(kind.outputs) {
                 assert!(color(spec).is_some(), "{}.{}: {}", kind.id, spec.name, spec.payload);
             }
