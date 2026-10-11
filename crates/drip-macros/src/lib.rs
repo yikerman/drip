@@ -16,7 +16,7 @@ use documentation::documentation;
 /// `contract` takes `&GlobalContext`, parameters and one known description per
 /// input (`&Desc`, or `Option<&Desc>` for an optional input, `None` when
 /// unconnected) and returns a tuple of output descriptions. It is required
-/// exactly when the node has outputs. Unknown upstream descriptions skip it.
+/// exactly when the node has outputs. Evaluation calls it before running the node.
 /// Rustdoc and `references = [(label, url), ...]` become node help.
 /// Optional `name` and `category` default to the ID and `"processing"`.
 /// The parameter type supplies its schema through `Parameters` (usually derived).

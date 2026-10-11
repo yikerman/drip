@@ -1,10 +1,6 @@
-//! Transactional connection checks over small CPU descriptions, never pixels.
-use crate::{
-    Error, Result,
-    definition::{Node, Outcome},
-    payload::Payload,
-    ports::*,
-};
+//! Transactional graph edits checked on ports alone: payloads, occupancy and
+//! cycles. Contracts depend on loaded data, so only evaluation runs them.
+use crate::{Error, Result, definition::Node, payload::Payload, ports::*};
 use std::{
     collections::VecDeque,
     sync::{
@@ -18,7 +14,6 @@ pub(crate) struct Entry {
     pub id: NodeId,
     pub node: Arc<dyn Node>,
     pub inputs: Vec<Option<PortId>>,
-    pub outcome: Outcome,
 }
 #[derive(Clone)]
 pub struct Dag {
@@ -69,12 +64,12 @@ impl Dag {
         let kind = self.entry(id)?.node.kind();
         self.replace(id, (kind.build)(parameters)?)
     }
-    /// All descriptor-affecting edits either pass together or leave the graph intact.
+    /// Edits either pass together or leave the graph intact.
     pub fn edit<T>(&mut self, f: impl FnOnce(&mut Edit<'_>) -> Result<T>) -> Result<T> {
         let mut draft =
             Self { id: self.id, entries: self.entries.clone(), order: self.order.clone() };
         let result = f(&mut Edit { dag: &mut draft })?;
-        draft.validate()?;
+        draft.order = draft.topological_order()?;
         *self = draft;
         Ok(result)
     }
@@ -99,14 +94,6 @@ impl Dag {
     pub fn typed_output<P: Payload>(&self, port: PortId) -> Result<Output<P>> {
         self.output_of::<P>(port)?;
         Ok(Output::new(port.node, port.index))
-    }
-    /// Full-detail description checked during graph edits. Evaluation reports
-    /// its request-specific description in the returned value.
-    pub fn description<P: Payload>(&self, output: Output<P>) -> Result<Option<&P::Desc>> {
-        Ok(match &self.output_of::<P>(output.id)?.outcome {
-            Outcome::Known(descs) => Some(downcast(&descs[output.id.index])),
-            Outcome::Unknown(_) => None,
-        })
     }
     pub(crate) fn entry(&self, id: NodeId) -> Result<&Entry> {
         if id.graph != self.id {
@@ -139,14 +126,6 @@ impl Dag {
             return Err(wrong_handle());
         }
         Ok(e)
-    }
-    fn validate(&mut self) -> Result<()> {
-        let order = self.topological_order()?;
-        for &index in &order {
-            self.check_contract(index)?;
-        }
-        self.order = order;
-        Ok(())
     }
     fn topological_order(&self) -> Result<Vec<usize>> {
         let mut degrees = vec![0usize; self.entries.len()];
@@ -190,39 +169,6 @@ impl Dag {
         }
         Ok(order)
     }
-    fn check_contract(&mut self, index: usize) -> Result<()> {
-        let e = self.entries[index].as_ref().unwrap();
-        // Templates can be wired before their sources are bound or complete.
-        // Every edit rechecks known relationships at full detail; evaluation
-        // repeats contracts for its global context before running each node.
-        let outcome = match self.known_inputs(e) {
-            Ok(descs) => e.node.contract(&Default::default(), &descs)?,
-            Err(reason) => Outcome::Unknown(reason),
-        };
-        if let Outcome::Known(descs) = &outcome
-            && descs.len() != e.node.kind().outputs.len()
-        {
-            return Err(Error::Graph("node contract output arity mismatch".into()));
-        }
-        self.entries[index].as_mut().unwrap().outcome = outcome;
-        Ok(())
-    }
-    /// Input descriptions for a contract (`None` for an unconnected optional
-    /// input), or why a required one is not known. Edges are already validated.
-    fn known_inputs(&self, e: &Entry) -> std::result::Result<Vec<Option<Description>>, Error> {
-        e.inputs
-            .iter()
-            .zip(e.node.kind().inputs)
-            .map(|(from, port)| match from {
-                None if port.optional => Ok(None),
-                None => Err(Error::MissingInput { node: e.node.kind().id, port: port.name }),
-                Some(from) => match &self.entries[from.node.index].as_ref().unwrap().outcome {
-                    Outcome::Known(outputs) => Ok(Some(outputs[from.index].clone())),
-                    Outcome::Unknown(reason) => Err(reason.clone()),
-                },
-            })
-            .collect()
-    }
 }
 
 pub struct Edit<'a> {
@@ -236,7 +182,6 @@ impl Edit<'_> {
         self.dag.entries.push(Some(Entry {
             id,
             inputs: vec![None; node.kind().inputs.len()],
-            outcome: Outcome::Known(Vec::new()),
             node,
         }));
         id

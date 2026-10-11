@@ -59,13 +59,12 @@ pub trait Node: Any + Send + Sync {
     fn kind(&self) -> &'static Kind;
     fn parameters(&self) -> Result<serde_json::Value>;
     /// Pure output description/check using the same global configuration as run.
-    /// Inputs are known descriptions; `None` is an unconnected optional input.
-    /// Graph edits use full detail; evaluation repeats this with actual inputs.
+    /// Inputs are the evaluated descriptions; `None` is an unconnected optional input.
     fn contract(
         &self,
         global: &crate::runtime::GlobalContext,
         inputs: &[Option<Description>],
-    ) -> Result<Outcome>;
+    ) -> Result<Vec<Description>>;
     /// Produce every output described by the contract.
     fn run(
         &self,
@@ -89,15 +88,6 @@ pub trait Typed: Node + Sized {
             .downcast_ref()
             .ok_or_else(|| Error::Graph(format!("node is not {}", Self::KIND.id)))
     }
-}
-
-/// A node's output descriptions, or why they are not known yet. Only unbound
-/// sources are unknown; their consumers inherit the reason, and evaluation
-/// reports it. A contradiction is an error instead.
-#[derive(Clone)]
-pub enum Outcome {
-    Known(Vec<Description>),
-    Unknown(Error),
 }
 
 #[linkme::distributed_slice]

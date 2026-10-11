@@ -18,8 +18,10 @@ fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     let (first, _) = restored.dag.nodes().next().unwrap();
     let output = restored.dag.output_port(first, "output").unwrap();
     let output = restored.dag.typed_output::<Rgb>(output).unwrap();
-    // An incomplete image pipeline remains editable after loading.
-    assert!(restored.dag.description(output).unwrap().is_none());
+    // An incomplete image pipeline loads; evaluation reports what is missing.
+    let eval = Evaluator::new(RuntimeContext::host());
+    let error = eval.evaluate::<Cpu<Rgb>>(&restored.dag, &Default::default(), output).err();
+    assert!(matches!(error, Some(drip::Error::MissingInput { port: "image", .. })));
     let mut data: serde_json::Value = serde_json::from_str(&serialized).unwrap();
     data["nodes"][0]["parameters"]["contrast"] = json!(-1.);
     assert!(Project::from_json(&data.to_string()).is_err());
@@ -130,4 +132,27 @@ fn bound_raw_snapshot_survives_file_removal_until_explicit_rebind() {
     assert!(evaluator.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), output).is_err());
     dag.set_parameters(source, json!({"path":fixture})).unwrap();
     assert!(evaluator.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), output).is_ok());
+}
+
+#[test]
+fn edits_and_project_open_do_not_depend_on_loaded_sources() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/raw/pixls/nikon-d70s.nef");
+    let raw = json!({"path":fixture});
+    for load_first in [false, true] {
+        let (mut dag, t) = node::templates::raw_to_tiff().unwrap();
+        if load_first {
+            dag.set_parameters(t.raw.node, raw.clone()).unwrap();
+        }
+        // Skipping color conversion leaves Sigmoid, after Orientation and
+        // Exposure, with camera RGB; only its evaluation reports that.
+        dag.edit(|e| {
+            e.disconnect(t.orientation.image.id())?;
+            e.connect(t.demosaic.output, t.orientation.image)
+        })
+        .unwrap();
+        dag.set_parameters(t.raw.node, raw.clone()).unwrap();
+        let project = Project { dag, ..Default::default() };
+        Project::from_json(&project.to_json().unwrap()).unwrap();
+    }
 }

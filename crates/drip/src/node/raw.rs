@@ -1,4 +1,4 @@
-//! Load a Bayer RAW once at admission; a load error stays the reason its outputs are unknown.
+//! Load a Bayer RAW once at admission; evaluation reports a load error.
 use crate::{
     Error, Result,
     node::{camera, data::*},
@@ -99,14 +99,18 @@ mod tests {
     }
 
     #[test]
-    fn missing_or_unreadable_files_stay_editable_with_unknown_outputs() {
+    fn missing_or_unreadable_files_stay_editable_and_fail_evaluation() {
+        use crate::{eval::Evaluator, ports::Cpu, runtime::RuntimeContext};
         let mut dag = crate::graph::Dag::new();
         let unset = add(&mut dag, Settings::default()).unwrap();
         let missing = Settings { path: Some("/nonexistent/drip.nef".into()) };
         let missing = add(&mut dag, missing).unwrap();
-        for ports in [unset, missing] {
-            assert!(dag.description(ports.mosaic).unwrap().is_none());
+        let eval = Evaluator::new(RuntimeContext::host());
+        for (ports, reason) in [(unset, "select a RAW"), (missing, "/nonexistent/drip.nef")] {
             assert!(dag.node(ports.node).unwrap().parameters().is_ok());
+            let error =
+                eval.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), ports.mosaic).err().unwrap();
+            assert!(error.to_string().contains(reason), "{error}");
         }
     }
 

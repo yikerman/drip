@@ -45,8 +45,8 @@ Resolved with the user on 2026-10-11 after the review against
   Rec.709 is a different space. Camera/Color duplicate nodes merge.
 - **Decided:** Interpretation requirements are declared on ports; the checker,
   help and canvas labels read the same declaration.
-- **Decided:** Known input that cannot satisfy a node is a contract error with
-  its own message; only unbound sources leave descriptions unknown.
+- **Decided:** Input that cannot satisfy a node is a contract error with its
+  own message, reported on that node when it is evaluated.
 - **Decided:** RAW outputs `mosaic` and facts-only metadata. Bayer site gains
   derive gains from as-shot WB; Camera RGB conversion derives its matrix from
   `xyz_to_cam` and the balance in the image interpretation; CAT16 derives the
@@ -104,14 +104,20 @@ Resolved with the user on 2026-10-11 after the review against
 
 ### Nodes and contracts
 
-- **Decided:** Contracts receive only known descriptions: `&Desc` for
+- **Decided:** Contracts receive evaluated descriptions: `&Desc` for
   required inputs, `Option<&Desc>` for optional ones (`None` = unconnected).
-  If a connected input is unknown, the adapter skips the contract and the node
-  is unknown, carrying the source's reason, which evaluation reports. Requirement
-  checks run before the contract in the same generated path, at edit and at
-  evaluation. A contract is required only when the node has outputs. An
-  unconnected optional input is incomplete wiring, not a contradiction: a node
-  that needs it in some mode (CAT16 As shot) reports its absence at evaluation.
+  Requirement checks run before the contract in the same generated path. A
+  contract is required only when the node has outputs. An unconnected optional
+  input is incomplete wiring, not a contradiction: a node that needs it in some
+  mode (CAT16 As shot) reports its absence at evaluation.
+- **Decided:** Each check depends only on what its event supplies. A graph
+  edit checks ports: payload types, occupancy and cycles. Admission checks the
+  parameters (`#[validate]`) and loads files, storing a load failure. Contracts,
+  requirements and load failures are checked when evaluation forces the node,
+  and are reported on it; a branch nothing evaluates reports nothing. Edits
+  checked contracts on loaded descriptions until 2026-10-11, so the same
+  connection, parameter change, RAW selection or project open was accepted or
+  refused depending on whether a RAW was loaded.
 - **Decided:** Parameter validity is checked once at admission
   (`#[validate(fn)]` on the parameter struct), not in contracts. Schema ranges
   guide controls only.
@@ -119,7 +125,7 @@ Resolved with the user on 2026-10-11 after the review against
   `fn(&KernelContext, &Params, Read..., Write...) -> Result<()>`, with an empty
   body for views/actions. Sources: `fn(&Params, Load<'_, P>...) -> Result<()>`,
   run once at admission; `Load::set(desc, host)` validates at the boundary, and
-  a failure is stored as the node's unknown reason. Loading stays separate
+  a failure is stored for evaluation to report. Loading stays separate
   from computation. Admission no longer canonicalizes the RAW path; the stored
   path is the one supplied.
 - **Decided:** Other files a node names (output ICC profiles in Export TIFF and

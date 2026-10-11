@@ -1,4 +1,4 @@
-//! Checked starting graphs. Loading is explicit and precedes connection checks.
+//! Starting graphs, wired before their files are chosen.
 use crate::{
     Result,
     graph::Dag,

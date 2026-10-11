@@ -217,10 +217,6 @@ fn context_driven_demosaic(evaluator: &Evaluator) {
     assert_eq!(image.statistics.downloads, 1);
     assert_eq!(dag.nodes().count(), node_count);
     assert_eq!(dag.edges().collect::<Vec<_>>(), edges);
-    assert_eq!(
-        dag.description(convert.output).unwrap().unwrap().extent,
-        Extent { width: 64, height: 48 }
-    );
     let binned = evaluator.evaluate::<Cpu<Rgb>>(&dag, &global, preview.output).unwrap();
     assert_eq!(binned.desc.extent, Extent { width: 16, height: 12 });
     // An explicit reduction followed by full-detail demosaic is the reference.

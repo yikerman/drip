@@ -4,6 +4,14 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Graph edits no longer run contracts. Connecting Demosaic to Orientation in
+  the template was accepted without a RAW and refused with one, and selecting a
+  RAW into that wiring was refused with an unattributed Sigmoid requirement
+  error. Edits now check ports only; contracts run during evaluation, which
+  names the failing node. `Outcome` and `Dag::description` are removed. A
+  regression test wires and selects the RAW in both orders and reopens the
+  project. CPU workspace tests, including 90 GUI tests, and strict workspace
+  Clippy pass.
 - CI run 38164895447 passed Linux and Windows but macOS timed out waiting for
   a dropped worker's preview completion. That wait, introduced in `31f2c18`,
   allowed five seconds despite sharing the CPU compute client with full-RAW

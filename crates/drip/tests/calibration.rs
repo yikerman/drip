@@ -66,24 +66,19 @@ fn selected_backend_combines_samples_and_clipping_levels() {
 
 #[test]
 fn contracts_reject_mismatched_sites_and_missing_gains() {
-    let mut dag = Dag::new();
-    let rggb = metadata([[0, 1], [3, 2]]);
-    let desc = BayerDesc {
-        extent: Extent { width: 1, height: 1 },
-        phase: BayerPhase::Grbg,
-        response: response(&rggb),
+    let gains = node::bayer_gains::definition(()).unwrap();
+    let check = |m: Arc<drip_raw::Metadata>| {
+        let desc = BayerDesc {
+            extent: Extent { width: 1, height: 1 },
+            phase: BayerPhase::Grbg,
+            response: response(&m),
+        };
+        let inputs: [Option<Description>; 2] = [Some(Arc::new(desc)), Some(Arc::new(m))];
+        gains.contract(&Default::default(), &inputs)
     };
-    let source = node::source::<Bayer>(&mut dag, desc, vec![1.]).unwrap();
-    let gains = node::bayer_gains::add(&mut dag, ()).unwrap();
-    dag.connect(source, gains.image).unwrap();
-    let wrong = node::source::<CaptureMetadata>(&mut dag, rggb.clone(), rggb).unwrap();
-    assert!(dag.connect(wrong, gains.metadata).is_err());
+    assert!(check(metadata([[1, 0], [2, 3]])).is_ok());
+    assert!(check(metadata([[0, 1], [3, 2]])).is_err());
     let mut unbalanced = (*metadata([[1, 0], [2, 3]])).clone();
     unbalanced.calibration.as_shot = [0.; 4];
-    let unbalanced = Arc::new(unbalanced);
-    let missing =
-        node::source::<CaptureMetadata>(&mut dag, unbalanced.clone(), unbalanced).unwrap();
-    assert!(dag.connect(missing, gains.metadata).is_err());
-    let eval = Evaluator::new(RuntimeContext::host());
-    assert!(eval.evaluate::<Cpu<CaptureMetadata>>(&dag, &Default::default(), missing).is_ok());
+    assert!(check(Arc::new(unbalanced)).is_err());
 }

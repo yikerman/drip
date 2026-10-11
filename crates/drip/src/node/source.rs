@@ -1,7 +1,7 @@
 //! Immutable, already loaded source values.
 use crate::{
     Result,
-    definition::{Kind, Node, Outcome},
+    definition::{Kind, Node},
     graph::Dag,
     payload::Payload,
     ports::*,
@@ -47,8 +47,8 @@ impl<P: Payload> Node for Source<P> {
     fn parameters(&self) -> Result<serde_json::Value> {
         Err(crate::Error::Graph("this bound value has no persistent source definition".into()))
     }
-    fn contract(&self, _: &GlobalContext, _: &[Option<Description>]) -> Result<Outcome> {
-        Ok(Outcome::Known(vec![Arc::new(self.desc.clone())]))
+    fn contract(&self, _: &GlobalContext, _: &[Option<Description>]) -> Result<Vec<Description>> {
+        Ok(vec![Arc::new(self.desc.clone())])
     }
     fn run(
         &self,

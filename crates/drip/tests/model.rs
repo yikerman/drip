@@ -33,6 +33,13 @@ fn image(dag: &mut Dag) -> Output<Rgb> {
 fn capture(dag: &mut Dag, m: Arc<drip_raw::Metadata>) -> Output<CaptureMetadata> {
     node::source::<CaptureMetadata>(dag, m.clone(), m).unwrap()
 }
+/// A node's contract on input descriptions, as evaluation checks it.
+fn contract(d: &Dag, id: NodeId, inputs: &[Option<Description>]) -> Result<Vec<Description>> {
+    d.node(id)?.contract(&Default::default(), inputs)
+}
+fn described<T: Send + Sync + 'static>(desc: T) -> Option<Description> {
+    Some(Arc::new(desc))
+}
 
 fn copy_contract(_: &drip::runtime::GlobalContext, _: &(), i: &RgbDesc) -> Result<(RgbDesc,)> {
     Ok((i.clone(),))
@@ -58,37 +65,35 @@ fn sources_check_actual_storage_at_admission() {
     assert!(node::source::<Rgb>(&mut d, desc, vec![]).is_err());
 }
 #[test]
-fn mismatches_are_rejected_before_runtime_exists() {
+fn connections_check_payloads_and_contracts_check_interpretations() {
     let mut d = Dag::new();
     let a = metadata("A");
-    let camera_image = node::source::<Rgb>(
-        &mut d,
-        RgbDesc { extent: image_desc().extent, coordinates: Coordinates::Camera(camera(&a)) },
-        vec![[0.5; 3]; 2],
-    )
-    .unwrap();
+    let desc =
+        RgbDesc { extent: image_desc().extent, coordinates: Coordinates::Camera(camera(&a)) };
+    let camera_image = node::source::<Rgb>(&mut d, desc.clone(), vec![[0.5; 3]; 2]).unwrap();
     let other = capture(&mut d, metadata("B"));
     let n = node::camera_to_rgb::add(&mut d, ()).unwrap();
-    d.connect(camera_image, n.image).unwrap();
-    let error = d.connect(other, n.metadata).unwrap_err().to_string();
-    assert!(error.contains("differs from the capture metadata"), "{error}");
-    let valid = capture(&mut d, a);
-    d.connect(valid, n.metadata).unwrap(); // failed edit left the input free
     let sigmoid = node::sigmoid::apply::add(&mut d, Default::default()).unwrap();
-    let error = d.connect_ids(camera_image.id(), sigmoid.image.id()).unwrap_err().to_string();
+    // Whether a source is loaded does not change which connections are accepted.
+    d.connect(camera_image, n.image).unwrap();
+    d.connect(other, n.metadata).unwrap();
+    d.connect(camera_image, sigmoid.image).unwrap();
+    let error = contract(&d, n.node, &[described(desc.clone()), described(metadata("B"))]);
+    assert!(error.err().unwrap().to_string().contains("differs from the capture metadata"));
+    assert!(contract(&d, n.node, &[described(desc.clone()), described(a)]).is_ok());
+    let error = contract(&d, sigmoid.node, &[described(desc)]).err().unwrap().to_string();
     assert!(error.contains("image requires Rec.2020 / D65"), "{error}");
-    d.connect(n.output, sigmoid.image).unwrap();
 }
 #[test]
 fn requirements_compare_spaces_exactly_and_parameters_at_admission() {
     let mut d = Dag::new();
-    let mut desc = image_desc();
-    desc.coordinates = Coordinates::Space(RgbSpace { white: [0.3127, 0.33], ..REC2020_D65 });
-    let source = node::source::<Rgb>(&mut d, desc, vec![[0.; 3]; 2]).unwrap();
     let sigmoid = node::sigmoid::apply::add(&mut d, Default::default()).unwrap();
-    assert!(d.connect(source, sigmoid.image).is_err());
     let exposure = node::exposure::add(&mut d, node::exposure::Exposure { ev: 0. }).unwrap();
-    d.connect(source, exposure.image).unwrap(); // Exposure scales any RGB.
+    let mut desc = image_desc();
+    assert!(contract(&d, sigmoid.node, &[described(desc.clone())]).is_ok());
+    desc.coordinates = Coordinates::Space(RgbSpace { white: [0.3127, 0.33], ..REC2020_D65 });
+    assert!(contract(&d, sigmoid.node, &[described(desc.clone())]).is_err());
+    assert!(contract(&d, exposure.node, &[described(desc)]).is_ok()); // Exposure scales any RGB.
     assert!(node::exposure::add(&mut d, node::exposure::Exposure { ev: f32::NAN }).is_err());
 }
 #[test]
@@ -207,21 +212,26 @@ fn relabel(
     Ok(())
 }
 #[test]
-fn parameter_edits_recheck_downstream_and_batch_edits_commit_together() {
+fn parameter_edits_ignore_downstream_and_batch_edits_commit_together() {
     let mut d = Dag::new();
     let source = image(&mut d);
     let a = relabel::add(&mut d, Relabel { camera: false }).unwrap();
     let b = node::sigmoid::apply::add(&mut d, Default::default()).unwrap();
     d.connect(source, a.image).unwrap();
     d.connect(a.output, b.image).unwrap();
-    assert!(d.replace(a.node, relabel::definition(Relabel { camera: true }).unwrap()).is_err());
-    let coordinates = |d: &Dag| d.description(a.output).unwrap().unwrap().coordinates.clone();
+    let eval = Evaluator::new(RuntimeContext::host());
+    let coordinates = |d: &Dag| {
+        eval.evaluate::<Cpu<Rgb>>(d, &Default::default(), a.output).unwrap().desc.coordinates
+    };
+    let relabeled = || relabel::definition(Relabel { camera: true });
+    let occupied = d.edit(|e| {
+        e.replace(a.node, relabeled()?)?;
+        e.connect(source, a.image)
+    });
+    assert!(occupied.is_err());
     assert_eq!(coordinates(&d), Coordinates::Space(REC2020_D65));
-    d.edit(|e| {
-        e.replace(a.node, relabel::definition(Relabel { camera: true })?)?;
-        e.disconnect(b.image.id())
-    })
-    .unwrap();
+    // Sigmoid now receives camera RGB; it reports that when evaluated.
+    d.replace(a.node, relabeled().unwrap()).unwrap();
     assert!(matches!(coordinates(&d), Coordinates::Camera(_)));
 }
 
@@ -545,13 +555,14 @@ fn global_context_describes_and_computes_each_request_without_changing_the_dag()
     let copy = cpu_copy::add(&mut dag, ()).unwrap();
     dag.connect(source.output, copy.image).unwrap();
     let fixed = fixed_width::add(&mut dag, ()).unwrap();
-    dag.connect(source.output, fixed.image).unwrap(); // Full-detail connection is valid.
+    dag.connect(source.output, fixed.image).unwrap();
     let evaluator = Evaluator::new(RuntimeContext::host());
     let global = GlobalContext { scale: 3 };
     let value = evaluator.evaluate::<Cpu<Rgb>>(&dag, &global, copy.output).unwrap();
     assert_eq!(value.desc.extent.width, 3);
     assert_eq!(&**value.data, &[[3.; 3]; 3]);
-    assert_eq!(dag.description(copy.output).unwrap().unwrap().extent.width, 1);
+    let full = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), copy.output).unwrap();
+    assert_eq!(full.desc.extent.width, 1);
     let batch = evaluator.evaluate_inputs(&dag, &global, &[copy.node, fixed.node]);
     let inputs = batch[&copy.node].as_ref().unwrap().bind::<cpu_copy::Definition>().unwrap();
     assert_eq!(inputs.image.desc.extent.width, 3);

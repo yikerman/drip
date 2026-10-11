@@ -1,7 +1,7 @@
 //! Evaluate the requested dependency subgraph. Materializations live for one run.
 use crate::{
     Error, Result,
-    definition::{Kind, Outcome, Typed},
+    definition::{Kind, Typed},
     graph::Dag,
     payload::Payload,
     ports::*,
@@ -322,10 +322,7 @@ impl<'a, 't> Run<'a, 't> {
             .map(|(from, spec)| from.map(|from| self.materialize(from, spec)).transpose())
             .collect::<Result<Vec<_>>>()?;
         let descs: Vec<_> = inputs.iter().map(|v| v.as_ref().map(|(d, _)| d.clone())).collect();
-        let outputs = match e.node.contract(self.global, &descs)? {
-            Outcome::Known(outputs) => outputs,
-            Outcome::Unknown(reason) => return Err(reason),
-        };
+        let outputs = e.node.contract(self.global, &descs)?;
         let specs = e.node.kind().outputs;
         if outputs.len() != specs.len() {
             return Err(Error::Runtime("node contract output arity mismatch".into()));

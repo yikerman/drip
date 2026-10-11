@@ -50,8 +50,8 @@ File extensions are file-format facts in the schema; the GUI derives its
 dialogs from them. Scope annotations belong to `drip-gui`. The library owns
 processing values and their interpretations. Sources use the same `#[node]`
 declaration with `Load` ports, `fn(&Settings, Load<'_, P>...)`: they load once
-when parameters are admitted and publish shared values; a load failure is the
-reason their outputs are unknown.
+when parameters are admitted and publish shared values; evaluation reports a
+load failure.
 
 ## Compute backends
 

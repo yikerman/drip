@@ -284,10 +284,10 @@ fn contract(options: &Options, signature: &Signature) -> TokenStream {
             &self,
             global: &::drip::runtime::GlobalContext,
             inputs: &[Option<::drip::ports::Description>],
-        ) -> ::drip::Result<::drip::definition::Outcome> {
+        ) -> ::drip::Result<Vec<::drip::ports::Description>> {
             #(#checks)*
             #call
-            Ok(::drip::definition::Outcome::Known(vec![#(#outputs),*]))
+            Ok(vec![#(#outputs),*])
         }
     }
 }
@@ -328,8 +328,8 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
     }
 }
 
-/// Run a source once at admission. A failure is kept as the reason its outputs
-/// are unknown, so the node stays editable and persistable.
+/// Run a source once at admission. A failure is kept for evaluation to report,
+/// so the node stays editable and persistable.
 fn load(name: &syn::Ident, signature: &Signature) -> TokenStream {
     let slots: Vec<_> =
         signature.outputs().map(|port| format_ident!("slot_{}", port.index)).collect();
@@ -365,13 +365,9 @@ fn loaded_contract() -> TokenStream {
             &self,
             _: &::drip::runtime::GlobalContext,
             _: &[Option<::drip::ports::Description>],
-        ) -> ::drip::Result<::drip::definition::Outcome> {
-            Ok(match &self.loaded {
-                Ok(values) => ::drip::definition::Outcome::Known(
-                    values.iter().map(|(desc, _)| desc.clone()).collect(),
-                ),
-                Err(reason) => ::drip::definition::Outcome::Unknown(reason.clone()),
-            })
+        ) -> ::drip::Result<Vec<::drip::ports::Description>> {
+            let values = self.loaded.as_ref().map_err(Clone::clone)?;
+            Ok(values.iter().map(|(desc, _)| desc.clone()).collect())
         }
     }
 }
