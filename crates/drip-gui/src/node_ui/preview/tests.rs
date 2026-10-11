@@ -127,7 +127,7 @@ fn proofing_is_identical_across_worker_counts_and_chunk_boundaries() {
 fn gamut_warnings_agree_with_lcms_round_trips_away_from_the_boundary() {
     use lcms2::CIELabExt;
     let lab = Profile::new_lab4_context(lcms2::GlobalContext::new(), lcms2::CIExyY::d50()).unwrap();
-    let target = profile::ProfileSource::Srgb.built_in().unwrap();
+    let target = profile::Output::load(&Default::default()).unwrap().profile();
     let working = profile::rec2020_linear();
     let to_lab = Transform::new(
         &working,

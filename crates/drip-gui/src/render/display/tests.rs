@@ -124,7 +124,7 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
     draw(&device, &queue, &preview_pipeline, &shown.groups[0], &canvas, 6);
     let canvas_view = canvas.create_view(&Default::default());
     let source_profile = profile::rec2020_linear();
-    let destination_profile = profile::ProfileSource::Srgb.built_in().unwrap();
+    let destination_profile = profile::Output::load(&Default::default()).unwrap().profile();
     let convert = Transform::new(
         &source_profile,
         PixelFormat::RGB_FLT,

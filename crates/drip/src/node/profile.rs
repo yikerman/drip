@@ -75,22 +75,7 @@ pub struct Output {
 impl Output {
     /// Builds a built-in profile or reads and checks a profile file.
     pub fn load(p: &Settings) -> Result<Self, Error> {
-        let icc = match p.profile.built_in() {
-            None => {
-                let ProfileSource::File(source) = &p.profile else {
-                    unreachable!("built-in profile")
-                };
-                let file = source
-                    .path
-                    .as_deref()
-                    .ok_or(Error::Contract("no output profile file chosen".into()))?;
-                let in_file = |e: String| Error::Runtime(format!("{}: {e}", file.display()));
-                let icc = std::fs::read(file).map_err(|e| in_file(e.to_string()))?;
-                output_profile(&icc).map_err(in_file)?;
-                icc
-            }
-            Some(profile) => profile.icc().map_err(|e| e.to_string())?,
-        };
+        let icc = p.profile.icc()?;
         let intent = match p.intent {
             RenderingIntent::Perceptual => Intent::Perceptual,
             RenderingIntent::Relative => Intent::RelativeColorimetric,
@@ -151,13 +136,23 @@ pub fn convert_in_place<T: Send>(pixels: &mut [T], convert: impl Fn(&mut [T]) + 
 }
 
 impl ProfileSource {
-    /// Construct a built-in profile, or request external ICC bytes for `File`.
-    pub fn built_in(&self) -> Option<Profile> {
+    /// ICC bytes of a built-in profile, or of the chosen file once checked.
+    fn icc(&self) -> Result<Vec<u8>, Error> {
+        let built_in = |profile: Profile| profile.icc().map_err(|e| e.to_string().into());
         match self {
-            Self::Srgb => Some(rgb("sRGB", REC709, srgb_curve())),
-            Self::DisplayP3 => Some(rgb("Display P3", P3, srgb_curve())),
-            Self::Rec2020 => Some(rgb("Rec.2020", REC2020, rec2020_curve())),
-            Self::File(_) => None,
+            Self::Srgb => built_in(rgb("sRGB", REC709, srgb_curve())),
+            Self::DisplayP3 => built_in(rgb("Display P3", P3, srgb_curve())),
+            Self::Rec2020 => built_in(rgb("Rec.2020", REC2020, rec2020_curve())),
+            Self::File(source) => {
+                let file = source
+                    .path
+                    .as_deref()
+                    .ok_or(Error::Contract("no output profile file chosen".into()))?;
+                let in_file = |e: String| Error::Runtime(format!("{}: {e}", file.display()));
+                let icc = std::fs::read(file).map_err(|e| in_file(e.to_string()))?;
+                output_profile(&icc).map_err(in_file)?;
+                Ok(icc)
+            }
         }
     }
 }

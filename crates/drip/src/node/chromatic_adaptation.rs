@@ -102,10 +102,7 @@ fn contract(
     image: &RgbDesc,
     metadata: Option<&Arc<drip_raw::Metadata>>,
 ) -> Result<(RgbDesc,)> {
-    // Unconnected metadata is incomplete wiring, reported when evaluating As shot.
-    if let Some(metadata) = metadata {
-        matrix(p, Some(metadata))?;
-    }
+    matrix(p, metadata.map(|m| &**m))?;
     Ok((image.clone(),))
 }
 
