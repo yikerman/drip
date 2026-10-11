@@ -7,10 +7,9 @@ use egui::Ui;
 
 pub fn show(ui: &mut Ui, graph: &Graph, id: NodeId) {
     let kind = graph.node(id).expect("selected node exists").kind;
-    if !kind.documentation.is_empty() {
+    if !kind.help.is_empty() {
         // Rustdoc source wraps are soft breaks; blank lines separate paragraphs.
-        let text =
-            kind.documentation.split("\n\n").map(|p| p.replace('\n', " ")).collect::<Vec<_>>();
+        let text = kind.help.split("\n\n").map(|p| p.replace('\n', " ")).collect::<Vec<_>>();
         ui.label(text.join("\n\n"));
     }
     egui::Grid::new(("node help", id)).num_columns(2).show(ui, |ui| {

@@ -1,9 +1,9 @@
 //! Node selection, independent of graph edits and canvas coordinates.
 
-use crate::model::{NodeKind, Registry};
+use crate::model::{Kind, Registry};
 use egui::Ui;
 
-pub(super) fn show(ui: &mut Ui, registry: &Registry) -> Option<&'static NodeKind> {
+pub(super) fn show(ui: &mut Ui, registry: &Registry) -> Option<&'static Kind> {
     let mut kinds: Vec<_> = registry.kinds().collect();
     kinds.sort_by_key(|kind| (kind.category, kind.name, kind.id));
     let mut selected = None;

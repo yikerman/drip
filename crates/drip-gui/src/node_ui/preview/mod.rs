@@ -36,10 +36,7 @@ pub fn prepare(
     let mut view = match pixels {
         None => PreviewImage::new(image),
         Some(pixels) => {
-            let proof = Arc::new(HostImage {
-                pixels: std::sync::Arc::new(pixels.into()),
-                ..(**input).clone()
-            });
+            let proof = Arc::new(HostImage { pixels: pixels.into(), ..(**input).clone() });
             PreviewImage::new(&proof)
         }
     };
@@ -47,17 +44,16 @@ pub fn prepare(
     Ok(view)
 }
 
-struct PreviewGui;
 #[drip_macros::gui_node]
-impl super::GuiNode for PreviewGui {
-    type Parameters = Preview;
+impl super::GuiNode for observe::Definition {
     type Presentation = PreviewImage;
-    const ID: &'static str = "view.preview";
     fn parameter_ui(_: &Preview, path: &str) -> super::ParameterUi {
         super::profile::parameter_ui(path)
     }
-    const PREPARE: Option<super::Prepare<Self>> =
-        Some(|p, inputs, ctx| prepare(p, &ctx.image(inputs)?, ctx));
+    const PREPARE: Option<super::Prepare<Self>> = Some(|p, inputs, ctx| {
+        let image = Arc::new(HostImage::new(&inputs.image, ctx.requested_scale()));
+        prepare(p, &image, ctx)
+    });
 }
 
 use drip::{

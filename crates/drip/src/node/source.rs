@@ -1,7 +1,7 @@
 //! Immutable, already loaded source values.
 use crate::{
     Result,
-    definition::{Metadata, Node, Outcome},
+    definition::{Kind, Node, Outcome},
     graph::Dag,
     payload::Payload,
     ports::*,
@@ -24,26 +24,26 @@ struct Source<P: Payload> {
     desc: P::Desc,
     data: Arc<P::Host>,
 }
+impl<P: Payload> Source<P> {
+    const KIND: Kind = Kind {
+        id: "bound-source",
+        name: "Bound source",
+        category: "Input",
+        help: "Immutable, validated source value.",
+        references: &[],
+        parameters: &[],
+        defaults: || serde_json::Value::Null,
+        loads_assets: false,
+        inputs: &[],
+        outputs: &[PortSpec::of::<Cpu<P>, Any>("value")],
+    };
+}
 impl<P: Payload> Node for Source<P> {
-    fn metadata(&self) -> Metadata {
-        Metadata {
-            id: "bound-source",
-            name: "Bound source",
-            category: "Input",
-            help: "Immutable, validated source value.",
-            references: &[],
-            parameters: &[],
-            loads_assets: false,
-        }
+    fn kind(&self) -> &'static Kind {
+        &Self::KIND
     }
     fn parameters(&self) -> Result<serde_json::Value> {
         Err(crate::Error::Graph("this bound value has no persistent source definition".into()))
-    }
-    fn inputs(&self) -> Vec<PortSpec> {
-        vec![]
-    }
-    fn outputs(&self) -> Vec<PortSpec> {
-        vec![PortSpec::of::<Cpu<P>, Any>("value")]
     }
     fn contract(&self, _: &GlobalContext, _: &[Option<Description>]) -> Result<Outcome> {
         Ok(Outcome::Known(vec![Arc::new(self.desc.clone())]))

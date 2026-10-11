@@ -332,21 +332,13 @@ fn bayer_host_island(evaluator: &Evaluator) {
     assert!(result.data.iter().enumerate().all(|(i, &v)| v == i as f32));
 
     let inputs = evaluator.evaluate_inputs(&dag, &Default::default(), &[island.node, sibling.node]);
-    let a = inputs[&island.node]
-        .as_ref()
-        .unwrap()
-        .get("image")
-        .unwrap()
-        .shared::<Cpu<Bayer>>()
-        .unwrap();
-    let b = inputs[&sibling.node]
-        .as_ref()
-        .unwrap()
-        .get("image")
-        .unwrap()
-        .shared::<Cpu<Bayer>>()
-        .unwrap();
-    assert!(std::sync::Arc::ptr_eq(&a, &b));
+    // Clones share storage, so both consumers see the same host allocation.
+    let image = |id| {
+        let inputs = inputs[id].as_ref().unwrap();
+        inputs.bind::<bayer_cpu_copy::Definition>().unwrap().image.data.clone()
+    };
+    let (a, b) = (image(&island.node), image(&sibling.node));
+    assert_eq!(a.as_ptr(), b.as_ptr());
     drop(inputs);
     drop(dag);
     assert!(b.iter().enumerate().all(|(i, &v)| v == i as f32));

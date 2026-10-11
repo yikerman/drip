@@ -1,6 +1,6 @@
 use drip::{
     Error, Result,
-    eval::Evaluator,
+    eval::{Evaluator, InputValues},
     graph::Dag,
     node,
     node::{color, data::*},
@@ -94,16 +94,16 @@ fn requirements_compare_spaces_exactly_and_parameters_at_admission() {
 #[test]
 fn typed_macro_supplies_docs_ports_and_discovery() {
     let n = drip::definition::registered("test-cpu-copy", serde_json::Value::Null).unwrap();
-    assert!(n.metadata().help.contains("CPU identity"));
-    assert_eq!(n.metadata().references.len(), 1);
-    assert_eq!(n.inputs()[0].name, "image");
-    assert_eq!(n.outputs()[0].name, "output");
-    assert_eq!(n.inputs()[0].label(), "RGB");
-    assert!(n.inputs()[0].is::<Rgb>());
-    assert!(n.outputs()[0].is::<Rgb>());
+    assert!(n.kind().help.contains("CPU identity"));
+    assert_eq!(n.kind().references.len(), 1);
+    assert_eq!(n.kind().inputs[0].name, "image");
+    assert_eq!(n.kind().outputs[0].name, "output");
+    assert_eq!(n.kind().inputs[0].label(), "RGB");
+    assert!(n.kind().inputs[0].is::<Rgb>());
+    assert!(n.kind().outputs[0].is::<Rgb>());
     let sigmoid = node::sigmoid::apply::definition(Default::default()).unwrap();
-    assert_eq!(sigmoid.inputs()[0].label(), "RGB · Rec.2020 / D65");
-    assert!(n.metadata().parameters.is_empty());
+    assert_eq!(sigmoid.kind().inputs[0].label(), "RGB · Rec.2020 / D65");
+    assert!(n.kind().parameters.is_empty());
     assert!(
         drip::definition::registered("tone.exposure", serde_json::json!({"ev":"bad"})).is_err()
     );
@@ -111,7 +111,7 @@ fn typed_macro_supplies_docs_ports_and_discovery() {
 #[test]
 fn parameter_schema_comes_from_the_function_parameter_type() {
     let n = relabel::definition(Relabel::default()).unwrap();
-    let [parameter] = n.metadata().parameters else { panic!("expected one parameter") };
+    let [parameter] = n.kind().parameters else { panic!("expected one parameter") };
     assert_eq!(parameter.name, "camera");
     assert_eq!(parameter.kind, drip::param::ParamKind::Bool { default: false });
 }
@@ -367,8 +367,8 @@ fn device_chain(runtime: RuntimeContext) {
         &[observer.node],
         Some(&mut timings),
     );
-    let image = values[&observer.node].as_ref().unwrap().get("image").unwrap();
-    assert_eq!(image.get::<Cpu<Rgb>>().unwrap().1, result.data.as_ref());
+    let inputs = values[&observer.node].as_ref().unwrap().bind::<sink::Definition>().unwrap();
+    assert_eq!(inputs.image.data, result.data.as_ref());
     assert_eq!(timings.len(), 8);
     assert!(timings.iter().all(|timing| timing.success));
 }
@@ -488,10 +488,10 @@ fn batch_shares_ancestors_retains_only_observers_and_isolates_failures() {
     assert_eq!(failed, [(failure.node, "test-value-check")]);
     assert!(!timings.iter().any(|t| t.node == downstream.node || t.node == incomplete.node));
     assert_eq!(BATCH_PRODUCED.load(Ordering::Relaxed), 1);
-    assert!(values[&producer.node].as_ref().unwrap().get("image").is_none());
-    let a = values[&a.node].as_ref().unwrap().get("image").unwrap().shared::<Cpu<Rgb>>().unwrap();
-    let b = values[&b.node].as_ref().unwrap().get("image").unwrap().shared::<Cpu<Rgb>>().unwrap();
-    assert!(std::sync::Arc::ptr_eq(&a, &b));
+    let retained = values[&producer.node].as_ref().unwrap();
+    assert!(retained.bind::<batch_producer::Definition>().is_err());
+    let image = |id| values[id].as_ref().unwrap().bind::<sink::Definition>().unwrap().image.data;
+    assert!(std::ptr::eq(image(&a.node), image(&b.node)));
     for id in [failure.node, downstream.node] {
         assert!(matches!(&values[&id], Err(Error::Node { node, .. }) if *node == failure.node));
     }
@@ -511,7 +511,9 @@ fn optional_input_is_absent_only_when_disconnected() {
     let observer = optional_sink::add(&mut dag, ()).unwrap();
     let eval = Evaluator::new(RuntimeContext::host());
     let values = eval.evaluate_inputs(&dag, &Default::default(), &[observer.node]);
-    assert!(values[&observer.node].as_ref().unwrap().get("image").is_none());
+    let bind =
+        |values: &InputValues| values.bind::<optional_sink::Definition>().unwrap().image.is_some();
+    assert!(!bind(values[&observer.node].as_ref().unwrap()));
     let missing = cpu_copy::add(&mut dag, ()).unwrap();
     dag.connect(missing.output, observer.image).unwrap();
     assert!(
@@ -520,7 +522,7 @@ fn optional_input_is_absent_only_when_disconnected() {
     let source = image(&mut dag);
     dag.connect(source, missing.image).unwrap();
     let values = eval.evaluate_inputs(&dag, &Default::default(), &[observer.node]);
-    assert!(values[&observer.node].as_ref().unwrap().get("image").is_some());
+    assert!(bind(values[&observer.node].as_ref().unwrap()));
 }
 
 fn context_contract(global: &drip::runtime::GlobalContext, _: &()) -> Result<(RgbDesc,)> {
@@ -559,8 +561,8 @@ fn global_context_describes_and_computes_each_request_without_changing_the_dag()
     assert_eq!(&**value.data, &[[3.; 3]; 3]);
     assert_eq!(dag.description(copy.output).unwrap().unwrap().extent.width, 1);
     let batch = evaluator.evaluate_inputs(&dag, &global, &[copy.node, fixed.node]);
-    let value = batch[&copy.node].as_ref().unwrap().get("image").unwrap();
-    assert_eq!(value.get::<Cpu<Rgb>>().unwrap().0.extent.width, 3);
+    let inputs = batch[&copy.node].as_ref().unwrap().bind::<cpu_copy::Definition>().unwrap();
+    assert_eq!(inputs.image.desc.extent.width, 3);
     assert!(batch[&fixed.node].as_ref().err().unwrap().to_string().contains("requires width 1"));
     assert!(evaluator.evaluate_node(&dag, &Default::default(), fixed.node).is_ok());
     assert!(

@@ -1,26 +1,29 @@
-//! Optional typed controls, preparation and actions over declared node inputs.
+//! Frontend extras bound to a declared node type: custom controls, a prepared
+//! view, an action and parameter hints. Kind, parameters and typed inputs come
+//! from the node's own declaration.
 use super::{ControlCx, ParameterUi};
 use crate::{
-    model::NodeKind,
+    model::Kind,
     node_ui::data::PrepareContext,
     render::node_views::{Drawable, ImageCache, IntoDrawable},
 };
-use drip::{Result, eval::InputValues};
+use drip::{Result, definition::Typed, eval::InputValues};
 use egui::Ui;
-use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::sync::Arc;
 
-pub type Prepare<G> = fn(
-    <G as GuiNode>::Parameters,
-    &InputValues,
+type Parameters<G> = <G as Typed>::Parameters;
+type Inputs<'a, G> = <G as Typed>::Inputs<'a>;
+pub type Prepare<G> = for<'a> fn(
+    Parameters<G>,
+    Inputs<'a, G>,
     &PrepareContext,
 ) -> Result<<G as GuiNode>::Presentation>;
-pub type Action<G> = fn(<G as GuiNode>::Parameters, &InputValues, &PrepareContext) -> Result<()>;
-pub trait GuiNode: Sized + 'static {
-    type Parameters: DeserializeOwned;
+pub type Action<G> = for<'a> fn(Parameters<G>, Inputs<'a, G>, &PrepareContext) -> Result<()>;
+
+/// Implemented on a node's generated `Definition` with `#[gui_node]`.
+pub trait GuiNode: Typed {
     type Presentation: IntoDrawable;
-    const ID: &'static str;
     const PREPARE: Option<Prepare<Self>> = None;
     const ACTION: Option<Action<Self>> = None;
     const ACTION_NAME: &'static str = "Export";
@@ -35,7 +38,7 @@ type PrepareErased =
     fn(Value, &InputValues, &PrepareContext, &mut ImageCache) -> Result<Arc<dyn Drawable>>;
 type ActionErased = fn(Value, &InputValues, &PrepareContext) -> Result<()>;
 pub struct Binding {
-    id: &'static str,
+    kind: &'static Kind,
     controls: fn(&mut Ui, &mut crate::editing::NodeCx),
     prepare: Option<PrepareErased>,
     action: Option<ActionErased>,
@@ -45,20 +48,19 @@ pub struct Binding {
 impl Binding {
     pub const fn new<G: GuiNode>() -> Self {
         Self {
-            id: G::ID,
+            kind: G::KIND,
             controls: |ui, node| G::controls(ui, &mut ControlCx::new(node)),
             prepare: if G::PREPARE.is_some() {
                 Some(|params, inputs, ctx, cache| {
-                    let params = decode(params)?;
-                    Ok(G::PREPARE.expect("declared preparation")(params, inputs, ctx)?
-                        .into_drawable(cache))
+                    let prepare = G::PREPARE.expect("declared preparation");
+                    Ok(prepare(decode(params)?, inputs.bind::<G>()?, ctx)?.into_drawable(cache))
                 })
             } else {
                 None
             },
             action: if G::ACTION.is_some() {
                 Some(|params, inputs, ctx| {
-                    G::ACTION.expect("declared action")(decode(params)?, inputs, ctx)
+                    G::ACTION.expect("declared action")(decode(params)?, inputs.bind::<G>()?, ctx)
                 })
             } else {
                 None
@@ -69,8 +71,8 @@ impl Binding {
             },
         }
     }
-    pub fn kind(&self) -> &'static NodeKind {
-        crate::model::Registry.get(self.id).expect("GUI binds a registered node")
+    pub fn kind(&self) -> &'static Kind {
+        self.kind
     }
     pub fn parameter_ui(&self, params: Value, name: &str) -> ParameterUi {
         (self.parameter_ui)(params, name)
@@ -107,6 +109,6 @@ impl Binding {
         action(params, inputs, ctx)
     }
 }
-fn decode<P: DeserializeOwned>(params: Value) -> Result<P> {
+fn decode<P: serde::de::DeserializeOwned>(params: Value) -> Result<P> {
     serde_json::from_value(params).map_err(|e| drip::Error::Contract(e.to_string()))
 }

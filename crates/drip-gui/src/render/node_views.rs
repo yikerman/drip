@@ -77,7 +77,7 @@ mod tests {
             height: 1,
             requested_scale: 1,
             color_space: "Rec.2020 / D65".into(),
-            pixels: std::sync::Arc::new(vec![[-1.0, 0.5, 2.0]].into()),
+            pixels: vec![[-1.0, 0.5, 2.0]].into(),
         });
         let raw = Arc::downgrade(&source);
         let mut value = PreviewImage::new(&Rec2020Mat::from(source));

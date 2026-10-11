@@ -46,7 +46,7 @@ impl Project {
                 self.dag.output(p)?;
             }
             let n = self.dag.node(p.node())?;
-            let specs = if input { n.inputs() } else { n.outputs() };
+            let specs = if input { n.kind().inputs } else { n.kind().outputs };
             let spec = specs
                 .get(p.index())
                 .ok_or_else(|| Error::Graph("invalid saved endpoint".into()))?;
@@ -58,7 +58,7 @@ impl Project {
                 .iter()
                 .map(|(id, n)| {
                     Ok(Record {
-                        kind: n.metadata().id.into(),
+                        kind: n.kind().id.into(),
                         parameters: n.parameters()?,
                         ui: self.node_ui.get(id).cloned().unwrap_or(Value::Null),
                     })

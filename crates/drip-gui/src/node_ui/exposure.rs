@@ -15,12 +15,9 @@ use drip::{
 };
 use egui::Ui;
 
-struct ExposureGui;
 #[drip_macros::gui_node]
-impl GuiNode for ExposureGui {
-    type Parameters = exposure::Exposure;
+impl GuiNode for exposure::Definition {
     type Presentation = ();
-    const ID: &'static str = "tone.exposure";
 
     fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Parameters>) {
         node.schema(ui);

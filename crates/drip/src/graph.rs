@@ -58,7 +58,8 @@ impl Dag {
         let index = self
             .entry(node)?
             .node
-            .inputs()
+            .kind()
+            .inputs
             .iter()
             .position(|p| p.name == name)
             .ok_or_else(wrong_handle)?;
@@ -68,14 +69,15 @@ impl Dag {
         let index = self
             .entry(node)?
             .node
-            .outputs()
+            .kind()
+            .outputs
             .iter()
             .position(|p| p.name == name)
             .ok_or_else(wrong_handle)?;
         Ok(PortId { node, index, direction: Direction::Output })
     }
     pub fn set_parameters(&mut self, id: NodeId, parameters: serde_json::Value) -> Result<()> {
-        let kind = self.entry(id)?.node.metadata().id;
+        let kind = self.entry(id)?.node.kind().id;
         self.replace(id, crate::definition::registered(kind, parameters)?)
     }
     /// All descriptor-affecting edits either pass together or leave the graph intact.
@@ -107,7 +109,7 @@ impl Dag {
     }
     pub fn typed_output<P: Payload>(&self, port: PortId) -> Result<Output<P>> {
         let e = self.output(port)?;
-        if !e.node.outputs()[port.index].is::<P>() {
+        if !e.node.kind().outputs[port.index].is::<P>() {
             return Err(wrong_handle());
         }
         Ok(Output::new(port.node, port.index))
@@ -116,7 +118,7 @@ impl Dag {
     /// its request-specific description in the returned value.
     pub fn description<P: Payload>(&self, output: Output<P>) -> Result<Option<&P::Desc>> {
         let e = self.output(output.id)?;
-        if !e.node.outputs()[output.id.index].is::<P>() {
+        if !e.node.kind().outputs[output.id.index].is::<P>() {
             return Err(wrong_handle());
         }
         Ok(match &e.outcome {
@@ -136,7 +138,7 @@ impl Dag {
     }
     pub(crate) fn output(&self, id: PortId) -> Result<&Entry> {
         let e = self.entry(id.node)?;
-        if id.direction != Direction::Output || id.index >= e.node.outputs().len() {
+        if id.direction != Direction::Output || id.index >= e.node.kind().outputs.len() {
             return Err(wrong_handle());
         }
         Ok(e)
@@ -164,13 +166,13 @@ impl Dag {
             for (port, from) in e.inputs.iter().enumerate() {
                 let Some(from) = from else { continue };
                 let source = self.output(*from)?;
-                if source.node.outputs()[from.index].payload_type
-                    != e.node.inputs()[port].payload_type
+                if source.node.kind().outputs[from.index].payload_type
+                    != e.node.kind().inputs[port].payload_type
                 {
                     return Err(Error::Contract(format!(
                         "payload mismatch at {}.{}",
-                        e.node.metadata().id,
-                        e.node.inputs()[port].name
+                        e.node.kind().id,
+                        e.node.kind().inputs[port].name
                     )));
                 }
                 degrees[index] += 1;
@@ -208,7 +210,7 @@ impl Dag {
             Err(reason) => Outcome::Unknown(reason),
         };
         if let Outcome::Known(descs) = &outcome
-            && descs.len() != e.node.outputs().len()
+            && descs.len() != e.node.kind().outputs.len()
         {
             return Err(Error::Graph("node contract output arity mismatch".into()));
         }
@@ -220,10 +222,10 @@ impl Dag {
     fn known_inputs(&self, e: &Entry) -> std::result::Result<Vec<Option<Description>>, Error> {
         e.inputs
             .iter()
-            .zip(e.node.inputs())
+            .zip(e.node.kind().inputs)
             .map(|(from, port)| match from {
                 None if port.optional => Ok(None),
-                None => Err(Error::MissingInput { node: e.node.metadata().id, port: port.name }),
+                None => Err(Error::MissingInput { node: e.node.kind().id, port: port.name }),
                 Some(from) => match &self.entries[from.node.index].as_ref().unwrap().outcome {
                     Outcome::Known(outputs) => Ok(Some(outputs[from.index].clone())),
                     Outcome::Unknown(reason) => Err(reason.clone()),
@@ -246,7 +248,7 @@ impl Edit<'_> {
         let id = NodeId { graph: self.dag.id, index: self.dag.entries.len(), generation };
         self.dag.entries.push(Some(Entry {
             id,
-            inputs: vec![None; node.inputs().len()],
+            inputs: vec![None; node.kind().inputs.len()],
             outcome: Outcome::Known(Vec::new()),
             node,
         }));
@@ -269,20 +271,8 @@ impl Edit<'_> {
         Ok(())
     }
     pub fn replace(&mut self, id: NodeId, node: Arc<dyn Node>) -> Result<()> {
-        let old = self.dag.entry(id)?;
-        let same_ports = |a: Vec<PortSpec>, b: Vec<PortSpec>| {
-            a.len() == b.len()
-                && a.iter().zip(&b).all(|(a, b)| {
-                    a.name == b.name
-                        && a.payload_type == b.payload_type
-                        && a.placement() == b.placement()
-                        && a.optional == b.optional
-                })
-        };
-        if old.node.metadata().id != node.metadata().id
-            || !same_ports(old.node.inputs(), node.inputs())
-            || !same_ports(old.node.outputs(), node.outputs())
-        {
+        // One static kind per node type, so equal kinds have equal ports.
+        if !std::ptr::eq(self.dag.entry(id)?.node.kind(), node.kind()) {
             return Err(Error::Graph("replacement must preserve node kind and port schema".into()));
         }
         self.dag.entries[id.index].as_mut().unwrap().node = node;

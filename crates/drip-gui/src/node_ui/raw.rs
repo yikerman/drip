@@ -1,12 +1,9 @@
 //! Native file selection for the RAW source.
 use super::{FileUi, GuiNode, ParameterUi};
 
-struct RawGui;
 #[drip_macros::gui_node]
-impl GuiNode for RawGui {
-    type Parameters = drip::node::raw::Settings;
+impl GuiNode for drip::node::raw::Definition {
     type Presentation = ();
-    const ID: &'static str = "input.bayer-raw";
 
     fn parameter_ui(_: &Self::Parameters, path: &str) -> ParameterUi {
         ParameterUi {

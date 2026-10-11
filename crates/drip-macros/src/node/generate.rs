@@ -10,16 +10,27 @@ pub(super) fn node(
 ) -> TokenStream {
     let name = &function.sig.ident;
     let visibility = &function.vis;
+    // Items are visible where the node function is: a private node's module
+    // exposes them to its parent only, so private parameter types stay private.
+    let vis = match visibility {
+        syn::Visibility::Inherited => quote!(pub(super)),
+        _ => quote!(pub),
+    };
     let parameters = &signature.parameters;
-    let ports = ports(signature);
-    let adapter = adapter(function, options, signature);
-    let registration = registration(options, parameters);
+    let kind = kind(function, options, signature, &vis);
+    let ports = ports(signature, &vis);
+    let inputs = inputs(signature, &vis);
+    let (contract, run) = if signature.source {
+        (loaded_contract(), loaded_run())
+    } else {
+        (contract(options, signature), run(name, signature))
+    };
     let (definition, admission) = if signature.source {
         let load = load(name, signature);
         (
             quote! {
-                pub struct Definition {
-                    pub parameters: #parameters,
+                #vis struct Definition {
+                    #vis parameters: #parameters,
                     loaded: ::drip::Result<Vec<(::drip::ports::Description, ::drip::ports::Data)>>,
                 }
                 #load
@@ -29,8 +40,8 @@ pub(super) fn node(
     } else {
         (
             quote! {
-                pub struct Definition {
-                    pub parameters: #parameters,
+                #vis struct Definition {
+                    #vis parameters: #parameters,
                 }
             },
             quote!(Definition { parameters }),
@@ -43,22 +54,49 @@ pub(super) fn node(
             use super::*;
 
             #definition
+            #kind
             #ports
+            #inputs
 
             /// Admit checked parameters as a graph node.
-            pub fn definition(
+            #vis fn definition(
                 parameters: #parameters,
             ) -> ::drip::Result<::std::sync::Arc<dyn ::drip::definition::Node>> {
                 ::drip::param::Parameters::validate(&parameters)?;
                 Ok(::std::sync::Arc::new(#admission))
             }
 
-            pub fn add(dag: &mut ::drip::graph::Dag, parameters: #parameters) -> ::drip::Result<Ports> {
+            #vis fn add(dag: &mut ::drip::graph::Dag, parameters: #parameters) -> ::drip::Result<Ports> {
                 dag.add(definition(parameters)?).map(Ports::from_node)
             }
 
-            #adapter
-            #registration
+            impl ::drip::definition::Node for Definition {
+                fn kind(&self) -> &'static ::drip::definition::Kind {
+                    &KIND
+                }
+
+                fn parameters(&self) -> ::drip::Result<::drip::__private::serde_json::Value> {
+                    ::drip::__private::serde_json::to_value(&self.parameters)
+                        .map_err(|error| ::drip::Error::Graph(error.to_string()))
+                }
+
+                #contract
+                #run
+            }
+
+            #[::drip::__private::linkme::distributed_slice(::drip::definition::NODES)]
+            #[linkme(crate = ::drip::__private::linkme)]
+            static REGISTRATION: ::drip::definition::Registration =
+                ::drip::definition::Registration {
+                    kind: &KIND,
+                    build: |json| {
+                        let parameters = ::drip::__private::serde_json::from_value(json)
+                            .map_err(|error| ::drip::Error::Contract(
+                                format!("invalid parameters for {}: {error}", KIND.id)
+                            ))?;
+                        definition(parameters)
+                    },
+                };
         }
     }
 }
@@ -68,80 +106,37 @@ fn payload(port: &Port) -> TokenStream {
     quote!(<#ty as ::drip::ports::Port>::Payload)
 }
 
-fn ports(signature: &Signature) -> TokenStream {
-    let mut fields = Vec::new();
-    let mut handles = Vec::new();
-    for port in signature.inputs().chain(signature.outputs()) {
-        let name = &port.name;
-        let index = port.index;
-        let payload = payload(port);
-        let handle = match port.direction {
-            Direction::Input => quote!(::drip::ports::Input),
-            Direction::Output => quote!(::drip::ports::Output),
-        };
-        fields.push(quote!(pub #name: #handle<#payload>));
-        handles.push(quote!(#name: #handle::new(node, #index)));
-    }
-    quote! {
-        pub struct Ports {
-            pub node: ::drip::ports::NodeId,
-            #(#fields,)*
-        }
-
-        impl Ports {
-            pub fn from_node(node: ::drip::ports::NodeId) -> Self {
-                Self { node, #(#handles,)* }
-            }
-        }
-    }
-}
-
-fn adapter(function: &syn::ItemFn, options: &Options, signature: &Signature) -> TokenStream {
+/// The static description: metadata, schema, defaults and port declarations.
+fn kind(
+    function: &syn::ItemFn,
+    options: &Options,
+    signature: &Signature,
+    vis: &TokenStream,
+) -> TokenStream {
     let id = &options.id;
     let name = &options.name;
     let category = &options.category;
     let help = crate::documentation(&function.attrs);
     let references = &options.references;
     let parameters = &signature.parameters;
+    let loads_assets = signature.source;
     let inputs = signature.inputs().map(port_spec);
     let outputs = signature.outputs().map(port_spec);
-    let (contract, run) = if signature.source {
-        (loaded_contract(), loaded_run())
-    } else {
-        (contract(options, signature), run(&function.sig.ident, signature))
-    };
-    let loads_assets = signature.source;
-
     quote! {
-        impl ::drip::definition::Node for Definition {
-            fn metadata(&self) -> ::drip::definition::Metadata {
-                ::drip::definition::Metadata {
-                    id: #id,
-                    name: #name,
-                    category: #category,
-                    help: #help,
-                    references: &#references,
-                    parameters: <#parameters as ::drip::param::Parameters>::SPECS,
-                    loads_assets: #loads_assets,
-                }
-            }
-
-            fn parameters(&self) -> ::drip::Result<::drip::__private::serde_json::Value> {
-                ::drip::__private::serde_json::to_value(&self.parameters)
-                    .map_err(|error| ::drip::Error::Graph(error.to_string()))
-            }
-
-            fn inputs(&self) -> Vec<::drip::ports::PortSpec> {
-                vec![#(#inputs),*]
-            }
-
-            fn outputs(&self) -> Vec<::drip::ports::PortSpec> {
-                vec![#(#outputs),*]
-            }
-
-            #contract
-            #run
-        }
+        #vis static KIND: ::drip::definition::Kind = ::drip::definition::Kind {
+            id: #id,
+            name: #name,
+            category: #category,
+            help: #help,
+            references: &#references,
+            parameters: <#parameters as ::drip::param::Parameters>::SPECS,
+            defaults: || ::drip::__private::serde_json::to_value(
+                <#parameters as ::std::default::Default>::default()
+            ).expect("node parameter defaults serialize"),
+            loads_assets: #loads_assets,
+            inputs: &[#(#inputs),*],
+            outputs: &[#(#outputs),*],
+        };
     }
 }
 
@@ -153,11 +148,74 @@ fn port_spec(port: &Port) -> TokenStream {
     if port.optional { quote!(#spec.optional()) } else { spec }
 }
 
-/// Generated code still errors rather than panicking if a required input is
-/// absent; the graph and evaluator normally guarantee it.
-fn missing(port: &Port) -> TokenStream {
-    let name = port.name.to_string();
-    quote!(::drip::Error::MissingInput { node: Self::ID, port: #name })
+fn ports(signature: &Signature, vis: &TokenStream) -> TokenStream {
+    let mut fields = Vec::new();
+    let mut handles = Vec::new();
+    for port in signature.inputs().chain(signature.outputs()) {
+        let name = &port.name;
+        let index = port.index;
+        let payload = payload(port);
+        let handle = match port.direction {
+            Direction::Input => quote!(::drip::ports::Input),
+            Direction::Output => quote!(::drip::ports::Output),
+        };
+        fields.push(quote!(#vis #name: #handle<#payload>));
+        handles.push(quote!(#name: #handle::new(node, #index)));
+    }
+    quote! {
+        #vis struct Ports {
+            #vis node: ::drip::ports::NodeId,
+            #(#fields,)*
+        }
+
+        impl Ports {
+            #vis fn from_node(node: ::drip::ports::NodeId) -> Self {
+                Self { node, #(#handles,)* }
+            }
+        }
+    }
+}
+
+/// Typed input views, bound once for both the kernel and frontend extras.
+fn inputs(signature: &Signature, vis: &TokenStream) -> TokenStream {
+    let parameters = &signature.parameters;
+    let mut fields = Vec::new();
+    let mut binds = Vec::new();
+    for port in signature.inputs() {
+        let name = &port.name;
+        let index = port.index;
+        let ty = &port.ty;
+        let requirement = &port.requirement;
+        let read = quote!(::drip::ports::Read<'a, #ty, #requirement>);
+        let bind = quote!(::drip::ports::Read::bind(inputs[#index].as_ref()));
+        if port.optional {
+            fields.push(quote!(#vis #name: Option<#read>));
+            binds.push(quote!(#name: #bind));
+        } else {
+            let port_name = name.to_string();
+            fields.push(quote!(#vis #name: #read));
+            binds.push(quote! {
+                #name: #bind.ok_or(::drip::Error::MissingInput { node: KIND.id, port: #port_name })?
+            });
+        }
+    }
+    quote! {
+        #vis struct Inputs<'a> {
+            #(#fields,)*
+            _lifetime: ::std::marker::PhantomData<&'a ()>,
+        }
+
+        impl ::drip::definition::Typed for Definition {
+            const KIND: &'static ::drip::definition::Kind = &KIND;
+            type Parameters = #parameters;
+            type Inputs<'a> = Inputs<'a>;
+            fn bind(
+                inputs: &[Option<(::drip::ports::Description, ::drip::ports::Data)>],
+            ) -> ::drip::Result<Inputs<'_>> {
+                Ok(Inputs { #(#binds,)* _lifetime: ::std::marker::PhantomData })
+            }
+        }
+    }
 }
 
 fn contract(options: &Options, signature: &Signature) -> TokenStream {
@@ -171,11 +229,12 @@ fn contract(options: &Options, signature: &Signature) -> TokenStream {
         let requirement = &port.requirement;
         let check =
             quote!(::drip::ports::input::<#ty, #requirement>(#name, inputs[#index].as_ref())?);
-        let missing = missing(port);
         checks.push(if port.optional {
             quote!(let #local = #check;)
         } else {
-            quote!(let #local = #check.ok_or_else(|| #missing)?;)
+            quote! {
+                let #local = #check.ok_or(::drip::Error::MissingInput { node: KIND.id, port: #name })?;
+            }
         });
         arguments.push(local);
     }
@@ -210,27 +269,19 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
     let mut arguments = Vec::new();
     let mut results = Vec::new();
     for port in &signature.ports {
-        let index = port.index;
-        let ty = &port.ty;
-        let requirement = &port.requirement;
+        let local = &port.name;
         match port.direction {
-            Direction::Input => {
-                let read =
-                    quote!(::drip::ports::Read::<#ty, #requirement>::bind(inputs[#index].as_ref()));
-                let missing = missing(port);
-                arguments.push(if port.optional {
-                    read
-                } else {
-                    quote!(#read.ok_or_else(|| #missing)?)
-                });
-            }
+            Direction::Input => arguments.push(quote!(inputs.#local)),
             Direction::Output => {
-                let local = format_ident!("output_{index}");
+                let index = port.index;
+                let ty = &port.ty;
+                let requirement = &port.requirement;
+                let slot = format_ident!("output_{index}");
                 allocations.push(quote! {
-                    let mut #local = ::drip::ports::OutputSlot::<#ty>::allocate(&outputs[#index], context)?;
+                    let mut #slot = ::drip::ports::OutputSlot::<#ty>::allocate(&outputs[#index], context)?;
                 });
-                arguments.push(quote!(#local.write::<#requirement>()));
-                results.push(quote!(#local.finish()?));
+                arguments.push(quote!(#slot.write::<#requirement>()));
+                results.push(quote!(#slot.finish()?));
             }
         }
     }
@@ -241,6 +292,7 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
             inputs: &[Option<(::drip::ports::Description, ::drip::ports::Data)>],
             outputs: &[::drip::ports::Description],
         ) -> ::drip::Result<Vec<::drip::ports::Data>> {
+            let inputs = <Definition as ::drip::definition::Typed>::bind(inputs)?;
             #(#allocations)*
             super::#name(context, &self.parameters, #(#arguments),*)?;
             Ok(vec![#(#results),*])
@@ -307,30 +359,5 @@ fn loaded_run() -> TokenStream {
             let values = self.loaded.as_ref().map_err(Clone::clone)?;
             Ok(values.iter().map(|(_, data)| data.clone()).collect())
         }
-    }
-}
-
-fn registration(options: &Options, parameters: &syn::Type) -> TokenStream {
-    let id = &options.id;
-    quote! {
-        impl Definition {
-            pub const ID: &'static str = #id;
-        }
-
-        #[::drip::__private::linkme::distributed_slice(::drip::definition::NODES)]
-        #[linkme(crate = ::drip::__private::linkme)]
-        static REGISTRATION: ::drip::definition::Registration = ::drip::definition::Registration {
-            id: #id,
-            defaults: || ::drip::__private::serde_json::to_value(
-                <#parameters as ::std::default::Default>::default()
-            ).expect("node parameter defaults serialize"),
-            build: |json| {
-                let parameters = ::drip::__private::serde_json::from_value(json)
-                    .map_err(|error| ::drip::Error::Contract(
-                        format!("invalid parameters for {}: {error}", #id)
-                    ))?;
-                definition(parameters)
-            },
-        };
     }
 }

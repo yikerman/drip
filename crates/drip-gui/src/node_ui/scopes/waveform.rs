@@ -60,9 +60,7 @@ mod tests {
             height: 2,
             requested_scale: 1,
             color_space: "Rec.2020 / D65".into(),
-            pixels: std::sync::Arc::new(
-                vec![[1.0, 0.0, 16.0], [0.5; 3], [1.0, -1.0, 32.0], [0.5; 3]].into(),
-            ),
+            pixels: vec![[1.0, 0.0, 16.0], [0.5; 3], [1.0, -1.0, 32.0], [0.5; 3]].into(),
         };
         let counts = waveform_counts(&image, -12.0, 4.0);
         assert_eq!(counts.iter().flatten().sum::<u32>(), 12);

@@ -95,14 +95,11 @@ fn vector_counts(pixels: &[[f32; 3]], matrix: &color::Mat3) -> Vec<[u32; 3]> {
         )
 }
 
-struct VectorscopeGui;
 #[drip_macros::gui_node]
-impl crate::node_ui::GuiNode for VectorscopeGui {
-    type Parameters = ();
+impl crate::node_ui::GuiNode for observe::Definition {
     type Presentation = Arc<Scope>;
-    const ID: &'static str = "view.vectorscope";
     const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-        Some(|p, inputs, ctx| vectorscope(p, (&ctx.device_image(inputs)?,), ctx));
+        Some(|p, inputs, ctx| vectorscope(p, (&DeviceRgb::new(&inputs.image),), ctx));
 }
 
 #[cfg(test)]
@@ -129,7 +126,7 @@ mod tests {
             height: 1,
             requested_scale: 1,
             color_space: "Rec.2020 / D65".into(),
-            pixels: Arc::new(pixels.into()),
+            pixels: pixels.into(),
         };
         let counts = vectorscope((), (&device(&image, &ctx),), &ctx).unwrap().counts.clone();
         let expected = vector_counts(&image.pixels, &color::rgb_to_xyz(REC2020, D65));
@@ -155,7 +152,7 @@ mod tests {
             height: 512,
             requested_scale: 1,
             color_space: "Rec.2020 / D65".into(),
-            pixels: Arc::new(pixels.into()),
+            pixels: pixels.into(),
         };
         let counts = vectorscope((), (&device(&image, &ctx),), &ctx).unwrap().counts.clone();
         let expected = vector_counts(&image.pixels, &color::rgb_to_xyz(REC2020, D65));

@@ -2,8 +2,9 @@
 //! in the DAG; labels, template inputs and layout belong to the frontend.
 mod catalog;
 mod project;
-pub use catalog::{NodeKind, Registry};
+pub use catalog::Registry;
 pub use drip::Error as GraphError;
+pub use drip::definition::Kind;
 pub use drip::ports::NodeId;
 use drip::{Result, definition, graph::Dag};
 pub use project::Project;
@@ -28,7 +29,7 @@ struct State {
 /// A short-lived view, assembled from the DAG rather than a second parameter store.
 pub struct Node {
     pub name: String,
-    pub kind: &'static NodeKind,
+    pub kind: &'static Kind,
     pub params: Json,
     pub external: BTreeSet<String>,
     pub ui: Json,
@@ -38,7 +39,7 @@ impl Graph {
         let mut graph = Self { dag, ..Self::default() };
         let ids: Vec<_> = graph.dag.nodes().map(|(id, _)| id).collect();
         for id in ids {
-            let kind = catalog::get(graph.dag.node(id)?.metadata().id)
+            let kind = catalog::get(graph.dag.node(id)?.kind().id)
                 .ok_or_else(|| GraphError::Graph("unregistered editor node".into()))?;
             graph.initialize_state(id, kind);
         }
@@ -46,7 +47,7 @@ impl Graph {
     }
     pub fn node(&self, id: NodeId) -> Option<Node> {
         let node = self.dag.node(id).ok()?;
-        let kind = catalog::get(node.metadata().id)?;
+        let kind = node.kind();
         let state = self.state.get(&id);
         Some(Node {
             name: state.map(|s| s.name.clone()).unwrap_or_else(|| kind.name.into()),
@@ -62,12 +63,12 @@ impl Graph {
     pub fn find(&self, name: &str) -> Option<NodeId> {
         self.state.iter().find(|(_, s)| s.name == name).map(|(&id, _)| id)
     }
-    pub fn add_node(&mut self, kind: &'static NodeKind) -> Result<NodeId> {
+    pub fn add_node(&mut self, kind: &'static Kind) -> Result<NodeId> {
         let id = self.dag.add(definition::registered(kind.id, (kind.defaults)())?)?;
         self.initialize_state(id, kind);
         Ok(id)
     }
-    fn initialize_state(&mut self, id: NodeId, kind: &NodeKind) {
+    fn initialize_state(&mut self, id: NodeId, kind: &Kind) {
         let mut name = kind.name.to_owned();
         let mut suffix = 2;
         while self.state.values().any(|s| s.name == name) {
@@ -79,7 +80,7 @@ impl Graph {
             State {
                 name,
                 external: kind
-                    .params
+                    .parameters
                     .iter()
                     .filter(|p| p.external)
                     .map(|p| p.name.into())
@@ -96,8 +97,8 @@ impl Graph {
     }
     pub fn edges(&self) -> impl Iterator<Item = (Port, Port)> + '_ {
         self.dag.edges().map(|(from, to)| {
-            let a = self.dag.node(from.node()).unwrap().outputs()[from.index()].name;
-            let b = self.dag.node(to.node()).unwrap().inputs()[to.index()].name;
+            let a = self.dag.node(from.node()).unwrap().kind().outputs[from.index()].name;
+            let b = self.dag.node(to.node()).unwrap().kind().inputs[to.index()].name;
             (Port(from.node(), a.into()), Port(to.node(), b.into()))
         })
     }
@@ -151,7 +152,7 @@ impl Graph {
     pub fn inputs(&self) -> impl Iterator<Item = (NodeId, &'static str)> + '_ {
         self.nodes().flat_map(|(id, n)| {
             n.kind
-                .params
+                .parameters
                 .iter()
                 .filter(move |p| n.external.contains(p.name))
                 .map(move |p| (id, p.name))

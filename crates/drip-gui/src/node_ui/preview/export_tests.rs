@@ -160,7 +160,12 @@ fn softproof_matches_bounded_export_across_profiles_and_intents() {
                 let values = inputs.remove(&preview).unwrap().unwrap();
                 let params =
                     serde_json::from_value(project.graph.node(preview).unwrap().params).unwrap();
-                let shown = super::prepare(params, &ctx.image(&values).unwrap(), &ctx).unwrap();
+                let bound = values.bind::<super::observe::Definition>().unwrap();
+                let image = std::sync::Arc::new(crate::node_ui::data::HostImage::new(
+                    &bound.image,
+                    ctx.requested_scale(),
+                ));
+                let shown = super::prepare(params, &image, &ctx).unwrap();
                 let values = inputs.remove(&tiff).unwrap().unwrap();
                 let node = project.graph.node(tiff).unwrap();
                 crate::node_ui::binding(node.kind)

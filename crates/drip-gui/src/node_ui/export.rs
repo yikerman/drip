@@ -68,12 +68,9 @@ fn tiff(
     let _ = (image, metadata);
     Ok(())
 }
-struct ExportGui;
 #[drip_macros::gui_node]
-impl super::GuiNode for ExportGui {
-    type Parameters = Export;
+impl super::GuiNode for tiff::Definition {
     type Presentation = ();
-    const ID: &'static str = "output.tiff";
     const ACTION: Option<super::binding::Action<Self>> = Some(export);
     fn parameter_ui(_: &Export, path: &str) -> super::ParameterUi {
         if path == "path" {
@@ -91,18 +88,12 @@ impl super::GuiNode for ExportGui {
 }
 fn export(
     p: Export,
-    inputs: &drip::eval::InputValues,
+    inputs: tiff::Inputs<'_>,
     ctx: &crate::node_ui::data::PrepareContext,
 ) -> Result<()> {
     let path = p.path.ok_or_else(|| Error::Contract("no output file chosen".into()))?;
-    let (desc, pixels) = inputs
-        .get("image")
-        .ok_or_else(|| Error::Contract("missing export image".into()))?
-        .get::<Cpu<Rgb>>()?;
-    let metadata = inputs
-        .get("metadata")
-        .map(|v| v.get::<Cpu<CaptureMetadata>>().map(|(_, v)| &**v))
-        .transpose()?;
+    let (desc, pixels) = (inputs.image.desc, inputs.image.data);
+    let metadata = inputs.metadata.map(|m| &**m.data);
     let output = profile::Output::load(&p.output, &ctx.resources)?;
     let compression = match p.compression {
         CompressionMode::None => Compression::Uncompressed,

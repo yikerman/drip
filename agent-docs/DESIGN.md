@@ -106,13 +106,17 @@ Resolved with the user on 2026-10-11 after the review against
   the label comes from the function name. GUI-only actions (auto exposure)
   are `GuiNode` extras. Auto exposure meters the node's input:
   `ev = log2(0.18 / mean(input))`, which needs no current EV.
-- **Tentative:** Each node kind has one generated `static Kind` (ID, labels,
-  category, help, references, parameter schema, port specs, binds-assets flag);
-  `Node` returns it instead of allocating port vectors per call. The GUI catalog
-  uses `Kind` directly. `loads_assets` and the default `parameters()` go.
-- **Tentative:** `#[node]` also generates `Inputs<'a>` (typed `Read` fields with
-  their `bind`) and a `Typed` impl (`ID`, `Parameters`, `Inputs`). The kernel
-  adapter and GUI preparation bind inputs through the same generated function.
+- **Decided:** Each node kind has one generated `static Kind` (ID, labels,
+  category, help, references, parameter schema and defaults, port specs,
+  loads-assets flag); `Node::kind` returns it. The GUI catalog uses `Kind`
+  directly. Replacement compares kinds by identity. Generated items follow the
+  node function's visibility.
+- **Decided:** `#[node]` also generates `Inputs<'a>` (typed `Read` fields) and a
+  `Typed` impl (`KIND`, `Parameters`, `Inputs`, `bind`). The kernel adapter and
+  frontend extras bind through the same function; `InputValues::bind::<N>()`
+  checks the node kind and that inputs were retained. Name-based lookups are
+  removed. Host and device buffers clone as shared immutable storage, so views
+  retain pixels without extra `Arc`s.
 
 ### Parameters and GUI
 
@@ -121,9 +125,10 @@ Resolved with the user on 2026-10-11 after the review against
   `#[param(flatten)]`. The typed default is the source: the derive generates
   `Default` and builds the schema from field types through `ParameterField`,
   replacing `ParamKind` literals and the const field/schema assertions.
-- **Tentative:** `#[gui_node] impl GuiNode for histogram::Definition`: optional
-  `VIEW` and `ACTION` receive `&Params` and typed `Inputs`; controls default to
-  the schema. `PrepareContext` carries the `GlobalContext`, not a separate level.
+- **Decided:** `#[gui_node] impl GuiNode for histogram::observe::Definition`:
+  optional `PREPARE` and `ACTION` receive the parameters and typed `Inputs`;
+  controls default to the schema. Registrations live in anonymous scopes.
+- **Tentative:** `PrepareContext` carries the `GlobalContext`, not a separate level.
 
 ## Processing
 

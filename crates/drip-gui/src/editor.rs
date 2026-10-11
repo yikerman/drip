@@ -234,7 +234,7 @@ impl Editor {
             Sense::hover(),
         )
         .on_hover_text(&node.name);
-        let (kind, kind_params) = (node_ui::of(node.kind), node.kind.params);
+        let (kind, kind_params) = (node_ui::of(node.kind), node.kind.parameters);
         let texts = node_ui::ports::texts(graph, l.id);
         paint(&painter, l, &node, &texts, *selected == Some(l.id));
         let inputs = l.inputs.iter().map(|&(name, pos)| (Direction::Input, name, pos));
@@ -435,7 +435,7 @@ fn paint(painter: &Painter, l: &NodeLayout, node: &Node, texts: &[PortText], sel
     painter.rect_filled(l.rect, 0.0, fill);
     let title = l.rect.min + vec2(8.0, HEADER / 2.0);
     let title_width =
-        l.rect.width() - 16.0 - if node.kind.params.is_empty() { 0.0 } else { HEADER };
+        l.rect.width() - 16.0 - if node.kind.parameters.is_empty() { 0.0 } else { HEADER };
     let mut job = egui::text::LayoutJob::simple(node.name.clone(), font, theme::TEXT, title_width);
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;
@@ -476,12 +476,13 @@ fn layout(id: NodeId, node: &Node, result: Option<&ViewResult>) -> NodeLayout {
     NodeLayout {
         id,
         rect: Rect::from_min_size(pos, vec2(size.x, body_top + size.y)),
-        inputs: node.kind.inputs().enumerate().map(|(i, p)| (p.name, port(i, 0.0))).collect(),
+        inputs: node.kind.inputs.iter().enumerate().map(|(i, p)| (p.name, port(i, 0.0))).collect(),
         outputs: node
             .kind
-            .outputs()
+            .outputs
+            .iter()
             .enumerate()
-            .map(|(i, p)| (p.name, port(node.kind.inputs().len() + i, size.x)))
+            .map(|(i, p)| (p.name, port(node.kind.inputs.iter().len() + i, size.x)))
             .collect(),
         error: error.map(|e| (pos + vec2(8.0, ports(node) + ROW / 2.0), e)),
         body: Rect::from_min_size(pos + vec2(0.0, body_top), size),
@@ -490,7 +491,7 @@ fn layout(id: NodeId, node: &Node, result: Option<&ViewResult>) -> NodeLayout {
 
 /// The height of a node's header and port rows.
 fn ports(node: &Node) -> f32 {
-    HEADER + ROW * (node.kind.inputs().len() + node.kind.outputs().len()) as f32
+    HEADER + ROW * (node.kind.inputs.iter().len() + node.kind.outputs.iter().len()) as f32
 }
 
 /// A node's rectangle in graph units, without an error row.

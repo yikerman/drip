@@ -29,7 +29,7 @@ fn image(pixels: Vec<[f32; 3]>) -> Arc<HostImage> {
         height: 1,
         requested_scale: 4,
         color_space: "Rec.2020 / D65".into(),
-        pixels: std::sync::Arc::new(pixels.into()),
+        pixels: pixels.into(),
     })
 }
 

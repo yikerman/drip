@@ -191,7 +191,7 @@ pub fn downcast<T: std::any::Any>(value: &Arc<dyn std::any::Any + Send + Sync>) 
     value.downcast_ref().expect("typed node adapter invariant")
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct PortSpec {
     pub name: &'static str,
     /// The payload's declared name.
@@ -203,7 +203,7 @@ pub struct PortSpec {
     pub(crate) transfers: Option<Transfers>,
 }
 impl PortSpec {
-    pub fn of<P: Port, R: Requirement<P::Payload>>(name: &'static str) -> Self {
+    pub const fn of<P: Port, R: Requirement<P::Payload>>(name: &'static str) -> Self {
         Self {
             name,
             payload: P::Payload::NAME,
@@ -213,7 +213,7 @@ impl PortSpec {
             transfers: P::TRANSFERS,
         }
     }
-    pub fn optional(mut self) -> Self {
+    pub const fn optional(mut self) -> Self {
         self.optional = true;
         self
     }

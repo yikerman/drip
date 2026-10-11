@@ -19,7 +19,7 @@ mod raw;
 mod sigmoid;
 mod viewer;
 use crate::editing::NodeCx;
-use crate::model::NodeKind;
+use crate::model::Kind;
 use crate::model::{Node, NodeId};
 use egui::{Rect, Ui, Vec2, vec2};
 
@@ -58,7 +58,7 @@ impl NodeUi {
     }
 }
 
-pub fn binding(kind: &NodeKind) -> Option<&'static Binding> {
+pub fn binding(kind: &Kind) -> Option<&'static Binding> {
     use std::{collections::BTreeMap, sync::LazyLock};
     static CUSTOM: LazyLock<BTreeMap<&'static str, &'static Binding>> = LazyLock::new(|| {
         let mut bindings = BTreeMap::new();
@@ -74,7 +74,7 @@ pub fn binding(kind: &NodeKind) -> Option<&'static Binding> {
     CUSTOM.get(kind.id).copied().filter(|binding| std::ptr::eq(binding.kind(), kind))
 }
 
-pub fn of(kind: &NodeKind) -> NodeUi {
+pub fn of(kind: &Kind) -> NodeUi {
     NodeUi { binding: binding(kind) }
 }
 

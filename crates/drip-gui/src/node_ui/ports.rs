@@ -55,12 +55,12 @@ impl PortText {
 /// before evaluation, including on nodes with missing inputs.
 pub fn texts(graph: &Graph, id: NodeId) -> Vec<PortText> {
     let kind = graph.node(id).expect("existing node").kind;
-    let inputs = kind.inputs().map(|input| PortText {
+    let inputs = kind.inputs.iter().map(|input| PortText {
         role: if input.optional { PortRole::OptionalInput } else { PortRole::Input },
         port: input.name,
         label: input.label(),
     });
-    let outputs = kind.outputs().map(|output| PortText {
+    let outputs = kind.outputs.iter().map(|output| PortText {
         role: PortRole::Output,
         port: output.name,
         label: output.label(),

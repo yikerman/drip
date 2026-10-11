@@ -153,7 +153,7 @@ impl Worker {
         id: NodeId,
         params: serde_json::Value,
     ) -> Result<(), String> {
-        let kind = graph.dag.node(id).map_err(|e| e.to_string())?.metadata().id;
+        let kind = graph.dag.node(id).map_err(|e| e.to_string())?.kind().id;
         self.job_ticket += 1;
         self.send(Command::Bind { ticket: self.job_ticket, id, kind, params })?;
         self.bindings.insert(id, self.job_ticket);
@@ -545,7 +545,7 @@ mod tests {
     use drip::ports::Read;
 
     use super::*;
-    use crate::model::NodeKind;
+    use crate::model::Kind;
     use crate::model::Port;
     use serde_json::json;
     use std::sync::Mutex;
@@ -569,7 +569,7 @@ mod tests {
         assert_eq!(failures[&id].error, error);
     }
 
-    fn graph(source: &'static NodeKind) -> (Graph, NodeId, NodeId, NodeId) {
+    fn graph(source: &'static Kind) -> (Graph, NodeId, NodeId, NodeId) {
         let mut graph = Graph::default();
         let source = graph.add_node(source).unwrap();
         let preview = graph.add_node(Registry.get("view.preview").unwrap()).unwrap();
@@ -927,16 +927,13 @@ mod tests {
             let _ = image;
             Ok(())
         }
-        struct Writer;
         #[drip_macros::gui_node]
-        impl crate::node_ui::GuiNode for Writer {
-            type Parameters = WriteKernel;
+        impl crate::node_ui::GuiNode for write::Definition {
             type Presentation = ();
-            const ID: &'static str = "test.write";
             const ACTION_NAME: &'static str = "write";
             const ACTION: Option<crate::node_ui::Action<Self>> = Some(|p, inputs, ctx| {
                 assert_eq!(ctx.level, 0);
-                let (_, image) = inputs.get("image").unwrap().get::<Cpu<Rgb>>()?;
+                let image = inputs.image.data;
                 std::fs::write(p.path.as_ref().unwrap(), format!("{:?}", image[0]))
                     .map_err(|e| KernelError::Runtime(e.to_string()))
             });
@@ -1042,19 +1039,15 @@ mod tests {
         fn probe(_: &KernelContext<'_>, _: &Settings) -> drip::Result<()> {
             Ok(())
         }
-
-        struct ProbeGui;
-        impl crate::node_ui::GuiNode for ProbeGui {
-            type Parameters = Settings;
+        impl crate::node_ui::GuiNode for probe::Definition {
             type Presentation = ();
-            const ID: &'static str = "test.preparation_cache";
             const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|settings, _, _| {
                 CALLS.fetch_add(1, Ordering::Relaxed);
                 if settings.fail { Err("preparation failed".into()) } else { Ok(()) }
             });
         }
         #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
-        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<ProbeGui>();
+        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<probe::Definition>();
     }
 
     #[test]

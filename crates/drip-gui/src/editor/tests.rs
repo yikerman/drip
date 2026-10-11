@@ -112,11 +112,7 @@ fn click_port(h: &mut Harness<'_, Scene>, id: NodeId, direction: Direction, butt
     click(h, pos, button);
 }
 
-fn add_node(
-    h: &mut Harness<'_, Scene>,
-    kind: &'static crate::model::NodeKind,
-    pos: Vec2,
-) -> NodeId {
+fn add_node(h: &mut Harness<'_, Scene>, kind: &'static crate::model::Kind, pos: Vec2) -> NodeId {
     let graph = &mut h.state_mut().graph;
     let id = graph.add_node(kind).unwrap();
     graph.set_ui(id, json!({"pos": [pos.x, pos.y]})).unwrap();

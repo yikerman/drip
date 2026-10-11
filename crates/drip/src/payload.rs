@@ -51,10 +51,15 @@ pub fn download<P: DeviceLayout>(
 }
 
 /// A CubeCL allocation tagged with its logical payload (or `()` for scratch
-/// and per-invocation constants).
+/// and per-invocation constants). Clones retain the same allocation.
 pub struct DeviceBuffer<P> {
     pub(crate) handle: Handle,
     marker: PhantomData<P>,
+}
+impl<P> Clone for DeviceBuffer<P> {
+    fn clone(&self) -> Self {
+        Self::new(self.handle.clone())
+    }
 }
 impl<P> DeviceBuffer<P> {
     pub(crate) fn new(handle: Handle) -> Self {

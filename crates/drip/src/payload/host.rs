@@ -8,13 +8,18 @@ use std::{
     sync::Arc,
 };
 
-/// Contiguous resident host elements. Inputs share storage through the evaluator;
+/// Contiguous resident host elements. Clones share the same immutable storage;
 /// freshly allocated outputs have exclusive mutable access.
 pub struct HostBuffer<T> {
     bytes: Arc<Bytes>,
     element: PhantomData<T>,
 }
 
+impl<T> Clone for HostBuffer<T> {
+    fn clone(&self) -> Self {
+        Self { bytes: self.bytes.clone(), element: PhantomData }
+    }
+}
 impl<T: Pod + std::fmt::Debug> std::fmt::Debug for HostBuffer<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.deref().fmt(f)

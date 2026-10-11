@@ -1,3 +1,4 @@
+use super::data::DeviceRgb;
 use super::scopes::histogram::histogram;
 use super::scopes::{ExposureSettings, Histogram};
 use drip::{Result, node::data::*, ports::*, runtime::KernelContext};
@@ -16,12 +17,9 @@ pub fn observe(
     let _ = image;
     Ok(())
 }
-struct HistogramGui;
 #[drip_macros::gui_node]
-impl crate::node_ui::GuiNode for HistogramGui {
-    type Parameters = ExposureSettings;
+impl crate::node_ui::GuiNode for observe::Definition {
     type Presentation = Arc<Histogram>;
-    const ID: &'static str = "view.histogram";
     const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-        Some(|p, inputs, ctx| histogram(p, (&ctx.device_image(inputs)?,), ctx));
+        Some(|p, inputs, ctx| histogram(p, (&DeviceRgb::new(&inputs.image),), ctx));
 }

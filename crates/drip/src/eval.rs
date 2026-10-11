@@ -1,7 +1,7 @@
 //! Evaluate the requested dependency subgraph. Materializations live for one run.
 use crate::{
     Error, Result,
-    definition::Outcome,
+    definition::{Kind, Outcome, Typed},
     graph::Dag,
     payload::Payload,
     ports::*,
@@ -142,7 +142,7 @@ impl Evaluator {
         target: Output<P::Payload>,
     ) -> Result<Evaluation<P>> {
         let entry = dag.output(target.id)?;
-        if !entry.node.outputs()[target.id.index].is::<P::Payload>() {
+        if !entry.node.kind().outputs[target.id.index].is::<P::Payload>() {
             return Err(wrong_handle());
         }
         let spec = PortSpec::of::<P, Any>("result");
@@ -165,13 +165,13 @@ impl Evaluator {
         global: &GlobalContext,
         target: NodeId,
     ) -> Result<NodeEvaluation> {
-        let specs = dag.entry(target)?.node.outputs();
+        let specs = dag.entry(target)?.node.kind().outputs;
         let endpoints: Vec<_> = specs.iter().cloned().enumerate().collect();
         let (values, statistics) = self.run(dag, global, target, &endpoints)?;
         let outputs = values
             .into_iter()
             .zip(specs)
-            .map(|((desc, data), spec)| OutputValue { desc, data, spec })
+            .map(|((desc, data), spec)| OutputValue { desc, data, spec: *spec })
             .collect();
         Ok(NodeEvaluation { outputs, statistics })
     }
@@ -223,12 +223,12 @@ fn required_nodes(dag: &Dag, target: NodeId) -> Result<HashSet<usize>> {
             continue;
         }
         let e = dag.entry(id)?;
-        for (from, port) in e.inputs.iter().zip(e.node.inputs()) {
+        for (from, port) in e.inputs.iter().zip(e.node.kind().inputs) {
             if from.is_none() && port.optional {
                 continue;
             }
             let from =
-                from.ok_or(Error::MissingInput { node: e.node.metadata().id, port: port.name })?;
+                from.ok_or(Error::MissingInput { node: e.node.kind().id, port: port.name })?;
             stack.push(from.node);
         }
     }
@@ -285,7 +285,7 @@ impl<'a, 't> Run<'a, 't> {
             } else {
                 self.execute(entry).map_err(|source| Error::Node {
                     node: entry.id,
-                    kind: entry.node.metadata().id,
+                    kind: entry.node.kind().id,
                     source: Box::new(source),
                 })
             };
@@ -305,18 +305,13 @@ impl<'a, 't> Run<'a, 't> {
         let result = if let Some(error) = failures.get(&id) {
             Err(error.clone())
         } else {
+            let kind = self.dag.entry(id)?.node.kind();
             request
                 .inputs
                 .iter()
-                .map(|(from, spec)| {
-                    from.map(|from| {
-                        let (desc, data) = self.materialize(from, spec)?;
-                        Ok(OutputValue { desc, data, spec: spec.clone() })
-                    })
-                    .transpose()
-                })
+                .map(|(from, spec)| from.map(|from| self.materialize(from, spec)).transpose())
                 .collect::<Result<Vec<_>>>()
-                .map(InputValues)
+                .map(|values| InputValues { kind, values })
         };
         for (from, _) in request.inputs {
             if let Some(from) = from {
@@ -359,7 +354,7 @@ impl<'a, 't> Run<'a, 't> {
         if let (Some(start), Some(timings)) = (start, self.timings.as_mut()) {
             timings.push(NodeTiming {
                 node: e.id,
-                kind: e.node.metadata().id,
+                kind: e.node.kind().id,
                 host_elapsed: start.elapsed(),
                 success: result.is_ok(),
             });
@@ -371,15 +366,15 @@ impl<'a, 't> Run<'a, 't> {
         let inputs = e
             .inputs
             .iter()
-            .zip(e.node.inputs())
-            .map(|(from, spec)| from.map(|from| self.materialize(from, &spec)).transpose())
+            .zip(e.node.kind().inputs)
+            .map(|(from, spec)| from.map(|from| self.materialize(from, spec)).transpose())
             .collect::<Result<Vec<_>>>()?;
         let descs: Vec<_> = inputs.iter().map(|v| v.as_ref().map(|(d, _)| d.clone())).collect();
         let outputs = match e.node.contract(self.global, &descs)? {
             Outcome::Known(outputs) => outputs,
             Outcome::Unknown(reason) => return Err(reason),
         };
-        let specs = e.node.outputs();
+        let specs = e.node.kind().outputs;
         if outputs.len() != specs.len() {
             return Err(Error::Runtime("node contract output arity mismatch".into()));
         }
@@ -440,10 +435,26 @@ impl OutputValue {
     }
 }
 
-pub struct InputValues(Vec<Option<OutputValue>>);
+/// A node's evaluated inputs, in its input order and declared placements.
+pub struct InputValues {
+    kind: &'static Kind,
+    values: Vec<Option<DescribedValue>>,
+}
 impl InputValues {
-    pub fn get(&self, name: &str) -> Option<&OutputValue> {
-        self.0.iter().flatten().find(|v| v.spec.name == name)
+    /// Typed views as declared by node type `N`; these must be `N`'s inputs.
+    pub fn bind<N: Typed>(&self) -> Result<N::Inputs<'_>> {
+        if !std::ptr::eq(self.kind, N::KIND) {
+            return Err(Error::Contract(format!(
+                "inputs of {} cannot bind as {}",
+                self.kind.id,
+                N::KIND.id
+            )));
+        }
+        // Status-only batch targets do not retain their inputs.
+        if self.values.len() != N::KIND.inputs.len() {
+            return Err(Error::Contract(format!("inputs of {} were not retained", N::KIND.id)));
+        }
+        N::bind(&self.values)
     }
 }
 struct InputRequest {
@@ -452,7 +463,8 @@ struct InputRequest {
 }
 fn input_request(dag: &Dag, id: NodeId) -> Result<InputRequest> {
     let entry = dag.entry(id)?;
-    let inputs: Vec<_> = entry.inputs.iter().copied().zip(entry.node.inputs()).collect();
+    let inputs: Vec<_> =
+        entry.inputs.iter().copied().zip(entry.node.kind().inputs.iter().copied()).collect();
     let needed = required_nodes(dag, id)?;
     Ok(InputRequest { inputs, needed })
 }

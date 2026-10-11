@@ -429,8 +429,7 @@ impl App {
         self.dirty = true;
         let result = (|| {
             self.worker.invalidate()?;
-            for (id, node) in
-                self.project.graph.dag.nodes().filter(|(_, n)| n.metadata().loads_assets)
+            for (id, node) in self.project.graph.dag.nodes().filter(|(_, n)| n.kind().loads_assets)
             {
                 self.worker.bind(
                     &self.project.graph,
@@ -451,7 +450,7 @@ impl App {
         match self.worker.action(&self.project.graph, id, name) {
             Ok(()) => {
                 let node = self.project.graph.node(id).expect("action node exists");
-                let destination = node.kind.params.iter().find_map(|p| {
+                let destination = node.kind.parameters.iter().find_map(|p| {
                     matches!(p.kind, drip::param::ParamKind::Path { output: true })
                         .then(|| node.params[p.name].as_str())
                         .flatten()
@@ -839,11 +838,8 @@ mod tests {
         fn slow(_: &KernelContext<'_>, _: &SlowKernel) -> drip::Result<()> {
             Ok(())
         }
-        struct SlowGui;
-        impl crate::node_ui::GuiNode for SlowGui {
-            type Parameters = SlowKernel;
+        impl crate::node_ui::GuiNode for slow::Definition {
             type Presentation = PreviewImage;
-            const ID: &'static str = "test.slow";
             const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|p, _, _| {
                 if p.block {
                     let gate = GATE.lock().unwrap();
@@ -856,12 +852,13 @@ mod tests {
                     height: 1,
                     requested_scale: 1,
                     color_space: "Rec.2020 / D65".into(),
-                    pixels: std::sync::Arc::new(vec![[0.5; 3]].into()),
+                    pixels: vec![[0.5; 3]].into(),
                 })))
             });
         }
         #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
-        static SLOW_UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<SlowGui>();
+        static SLOW_UI: crate::node_ui::Binding =
+            crate::node_ui::Binding::new::<slow::Definition>();
 
         #[test]
         fn evaluating_message_keeps_the_ui_and_previous_preview_available() {
@@ -1004,8 +1001,7 @@ mod tests {
 
     #[test]
     fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
-        let documentation =
-            Registry.get("tone.sigmoid").unwrap().documentation.trim().replace('\n', " ");
+        let documentation = Registry.get("tone.sigmoid").unwrap().help.trim().replace('\n', " ");
         let mut app = App::new(None, true, || {});
         let id = app.project.graph.find("Sigmoid").unwrap();
         app.selected = Some(id);
@@ -1099,8 +1095,11 @@ mod tests {
         h.run();
         let graph = &h.state().project.graph;
         let histogram = graph.find("Histogram").unwrap();
-        let with_params: Vec<_> =
-            graph.nodes().filter(|(_, n)| !n.kind.params.is_empty()).map(|(id, _)| id).collect();
+        let with_params: Vec<_> = graph
+            .nodes()
+            .filter(|(_, n)| !n.kind.parameters.is_empty())
+            .map(|(id, _)| id)
+            .collect();
         let viewers: Vec<_> = graph
             .nodes()
             .filter(|(_, n)| crate::node_ui::binding(n.kind).is_some_and(|b| b.has_preparation()))
@@ -1161,16 +1160,13 @@ mod tests {
         fn view(_: &KernelContext<'_>, _: &()) -> drip::Result<()> {
             Ok(())
         }
-        struct TestGui;
-        impl crate::node_ui::GuiNode for TestGui {
-            type Parameters = ();
+        impl crate::node_ui::GuiNode for view::Definition {
             type Presentation = PreviewImage;
-            const ID: &'static str = "test.declared_view";
             const PREPARE: Option<crate::node_ui::Prepare<Self>> =
                 Some(|_, _, _| Err(KernelError::Contract("no view yet".into())));
         }
         #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
-        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<TestGui>();
+        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<view::Definition>();
 
         #[test]
         fn declared_gui_view_gets_a_popout_before_preparation_succeeds() {
@@ -1209,11 +1205,8 @@ mod tests {
             ui.label("Custom view controls");
             ui.label(format!("Typed enabled: {}", cx.parameters().enabled));
         }
-        struct TestGui;
-        impl crate::node_ui::GuiNode for TestGui {
-            type Parameters = Settings;
+        impl crate::node_ui::GuiNode for view::Definition {
             type Presentation = PreviewImage;
-            const ID: &'static str = "test.custom_controls_view";
             const PREPARE: Option<crate::node_ui::Prepare<Self>> =
                 Some(|_, _, _| Err(KernelError::Contract("no view yet".into())));
             fn controls(
@@ -1224,7 +1217,7 @@ mod tests {
             }
         }
         #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
-        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<TestGui>();
+        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<view::Definition>();
 
         #[test]
         fn custom_controls_keep_the_generic_view_and_popout() {

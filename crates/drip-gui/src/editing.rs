@@ -1,6 +1,6 @@
 //! Applies frontend graph edits and owns their redraw/evaluation effects.
 
-use crate::model::NodeKind;
+use crate::model::Kind;
 use crate::model::{Graph, GraphError, Node, NodeId, Port};
 use crate::node_ui::{Part, Popped};
 use crate::render::node_views::Drawable;
@@ -43,7 +43,7 @@ pub struct Report {
 /// All frontend graph mutations pass through `Frame::edit`, which owns their
 /// redraw and evaluation effects. Windows read the same graph after each edit.
 pub enum Edit<'a> {
-    Add(&'static NodeKind, Vec2),
+    Add(&'static Kind, Vec2),
     Remove(NodeId),
     Connect(Port, Port),
     Disconnect(Port),
@@ -81,7 +81,7 @@ impl<'a> Frame<'a> {
                 }
                 Edit::Param(id, name, value) => {
                     let node = graph.dag.node(id)?;
-                    if node.metadata().loads_assets {
+                    if node.kind().loads_assets {
                         let mut params = node.parameters()?;
                         let field = params.get_mut(name).ok_or_else(|| {
                             GraphError::Graph(format!("unknown parameter {name}"))

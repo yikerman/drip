@@ -46,7 +46,7 @@ pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
     let node = cx.node();
     let (id, kind) = (cx.id(), node.kind);
     egui::Grid::new(("params", id)).num_columns(2).show(ui, |ui| {
-        for spec in kind.params {
+        for spec in kind.parameters {
             let external = node.external.contains(spec.name);
             let text =
                 if external { format!("{} (template)", spec.label) } else { spec.label.into() };

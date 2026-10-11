@@ -17,9 +17,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
         height: 2,
         requested_scale: 1,
         color_space: "Rec.2020 / D65".into(),
-        pixels: std::sync::Arc::new(
-            vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36], [1.0, 0.5, 2.0], [0.25; 3]].into(),
-        ),
+        pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36], [1.0, 0.5, 2.0], [0.25; 3]].into(),
     });
     let mut dag = Dag::new();
     let extent = Extent { width: 2, height: 2 };
@@ -52,8 +50,12 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
         &targets,
     );
     let ctx = context();
-    let a = ctx.device_image(values[&targets[0]].as_ref().unwrap()).unwrap();
-    let b = ctx.device_image(values[&targets[1]].as_ref().unwrap()).unwrap();
+    let device = |id| {
+        let inputs = values[id].as_ref().unwrap();
+        let inputs = inputs.bind::<crate::node_ui::histogram::observe::Definition>().unwrap();
+        crate::node_ui::data::DeviceRgb::new(&inputs.image)
+    };
+    let (a, b) = (device(&targets[0]), device(&targets[1]));
     fn prepare(
         image: &crate::node_ui::data::DeviceRgb,
         ctx: &PrepareContext,
@@ -82,7 +84,7 @@ fn histogram_bins_by_stops() {
         height: 1,
         requested_scale: 1,
         color_space: "Rec.2020 / D65".into(),
-        pixels: std::sync::Arc::new(vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]].into()),
+        pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]].into(),
     };
     let mut graph = Graph::default();
     let id = graph.add_node(Registry.get("view.histogram").unwrap()).unwrap();
@@ -117,7 +119,7 @@ fn vectorscope_uses_working_rec2020_coordinates() {
         height: 1,
         requested_scale: 1,
         color_space: "Rec.2020 / D65".into(),
-        pixels: std::sync::Arc::new(vec![[1.0, 0.0, 0.0]].into()),
+        pixels: vec![[1.0, 0.0, 0.0]].into(),
     };
     let context = context();
     let scope = vectorscope((), (&device(&image, &context),), &context).unwrap();
@@ -150,7 +152,7 @@ pub(crate) fn device(image: &HostImage, ctx: &PrepareContext) -> crate::node_ui:
     };
     let runtime = RuntimeContext::from_client(ctx.client().unwrap().clone());
     let pixels = drip::payload::upload::<Rgb>(&desc, &image.pixels, &runtime).unwrap();
-    crate::node_ui::data::DeviceRgb { desc, pixels: Arc::new(pixels) }
+    crate::node_ui::data::DeviceRgb { desc, pixels }
 }
 
 #[test]
@@ -178,7 +180,7 @@ fn device_reductions_match_reference() {
             height,
             requested_scale: 1,
             color_space: "Rec.2020 / D65".into(),
-            pixels: Arc::new(input.into()),
+            pixels: input.into(),
         };
         let gpu = device(&image, &ctx);
         assert_eq!(

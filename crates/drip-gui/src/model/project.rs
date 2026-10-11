@@ -54,7 +54,7 @@ impl Project {
         let mut missing = Vec::new();
         for (id, node) in graph.dag.nodes() {
             let kind = registry
-                .get(node.metadata().id)
+                .get(node.kind().id)
                 .ok_or_else(|| drip::Error::Graph("unknown editor node".into()))?;
             let state: State = match core.node_ui.get(&id).filter(|v| !v.is_null()) {
                 Some(value) => serde_json::from_value(value.clone())

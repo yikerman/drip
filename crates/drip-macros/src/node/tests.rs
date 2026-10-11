@@ -216,9 +216,13 @@ fn accepts_qualified_ports_and_indexes_each_direction_independently() {
         kernel.args.iter().skip(2).map(|arg| quote!(#arg).to_string()).collect();
     let write = |slot: TokenStream| quote!(#slot.write::<::drip::ports::Any>()).to_string();
     assert_eq!(arguments[0], write(quote!(output_0)));
-    assert!(arguments[1].contains("Read :: < Cpu < B > , :: drip :: ports :: Any > :: bind"));
+    assert_eq!(arguments[1], quote!(inputs.input).to_string());
     assert_eq!(arguments[2], write(quote!(output_1)));
-    assert!(arguments[3].contains("Read :: < Device < D > , :: drip :: ports :: Any > :: bind"));
+    assert_eq!(arguments[3], quote!(inputs.other).to_string());
+    let inputs = generated_struct(&module, "Inputs");
+    let fields: Vec<_> =
+        inputs.fields.iter().map(|f| f.ident.as_ref().unwrap().to_string()).collect();
+    assert_eq!(fields, ["input", "other", "_lifetime"]);
 }
 
 #[test]
@@ -243,7 +247,7 @@ fn preserves_public_bindings_and_metadata() {
     assert_eq!(module.ident, "source");
     assert!(matches!(module.vis, syn::Visibility::Public(_)));
     let items = &module.content.as_ref().unwrap().1;
-    for expected in ["Definition", "Ports"] {
+    for expected in ["Definition", "Ports", "Inputs"] {
         assert!(items.iter().any(|item| matches!(item, syn::Item::Struct(item)
             if item.ident == expected && matches!(item.vis, syn::Visibility::Public(_)))));
     }
@@ -251,24 +255,14 @@ fn preserves_public_bindings_and_metadata() {
         assert!(items.iter().any(|item| matches!(item, syn::Item::Fn(item)
             if item.sig.ident == expected && matches!(item.vis, syn::Visibility::Public(_)))));
     }
-    assert!(items.iter().any(|item| matches!(item, syn::Item::Static(item)
-        if item.ident == "REGISTRATION")));
-    for method in ["metadata", "parameters", "inputs", "outputs", "contract", "run"] {
+    for expected in ["REGISTRATION", "KIND"] {
+        assert!(items.iter().any(|item| matches!(item, syn::Item::Static(item)
+            if item.ident == expected)));
+    }
+    for method in ["kind", "parameters", "contract", "run", "bind"] {
         generated_method(&module, method);
     }
-    let metadata = generated_method(&module, "metadata");
-    let syn::Stmt::Expr(syn::Expr::Struct(value), _) = &metadata.block.stmts[0] else {
-        panic!("expected metadata value")
-    };
-    let help = value
-        .fields
-        .iter()
-        .find(|field| matches!(&field.member, syn::Member::Named(name) if name == "help"))
-        .unwrap();
-    let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(help), .. }) = &help.expr else {
-        panic!("expected Rustdoc help")
-    };
-    assert_eq!(help.value(), "First line.\nSecond line.");
+    assert_eq!(literal(&module, "help"), "First line.\nSecond line.");
 }
 
 #[test]
@@ -300,23 +294,10 @@ fn supplies_default_and_explicit_display_metadata() {
             fn raw(context: &Context, parameters: &Params) {}
         );
         let module = generated_module(expand(options, function).unwrap());
-        let metadata = generated_method(&module, "metadata");
-        let syn::Stmt::Expr(syn::Expr::Struct(value), _) = &metadata.block.stmts[0] else {
-            panic!("expected metadata value")
-        };
         for (name, expected) in
             [("id", "raw"), ("name", expected_name), ("category", expected_category)]
         {
-            let field = value
-                .fields
-                .iter()
-                .find(|field| matches!(&field.member, syn::Member::Named(ident) if ident == name))
-                .unwrap();
-            let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(actual), .. }) = &field.expr
-            else {
-                panic!("expected literal display metadata")
-            };
-            assert_eq!(actual.value(), expected);
+            assert_eq!(literal(&module, name), expected);
         }
     }
 }
@@ -350,13 +331,7 @@ fn optional_inputs_keep_their_port_type_and_direction_index() {
         ]
     );
     let module = generated_module(expand(quote!(id = "mix", contract = c), function).unwrap());
-    let inputs = generated_method(&module, "inputs");
-    let syn::Stmt::Expr(syn::Expr::Macro(inputs), _) = &inputs.block.stmts[0] else {
-        panic!("expected input specs")
-    };
-    let specs = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated;
-    let specs = syn::parse::Parser::parse2(specs, inputs.mac.tokens.clone()).unwrap();
-    let optional: Vec<_> = specs
+    let optional: Vec<_> = port_specs(&module, "inputs")
         .iter()
         .map(|spec| matches!(spec, syn::Expr::MethodCall(spec) if spec.method == "optional"))
         .collect();
@@ -372,14 +347,14 @@ fn optional_execution_is_nullable_and_contracts_keep_one_description_per_input()
     let run = generated_method(&module, "run");
     let call = kernel_call(run, "x");
     assert!(matches!(&call.args[0], syn::Expr::Path(context) if context.path.is_ident("context")));
-    let required = &call.args[2];
-    let optional = &call.args[3];
-    let required = quote!(#required).to_string();
-    let optional = quote!(#optional).to_string();
-    assert!(required.contains(":: bind"));
-    assert!(required.contains("ok_or_else"), "required input must reject absent data");
-    assert!(optional.contains(":: bind"));
-    assert!(!optional.contains("ok_or_else"), "optional input preserves None");
+    let arguments: Vec<_> = call.args.iter().skip(2).map(|a| quote!(#a).to_string()).collect();
+    assert_eq!(arguments, [quote!(inputs.image).to_string(), quote!(inputs.metadata).to_string()]);
+    // Binding rejects an absent required input and preserves an optional None.
+    let bind = generated_method(&module, "bind");
+    let bind = quote!(#bind).to_string();
+    let (image, metadata) = bind.split_once("metadata :").unwrap();
+    assert!(image.contains(":: bind") && image.contains("ok_or"), "{image}");
+    assert!(metadata.contains(":: bind") && !metadata.contains("ok_or"), "{metadata}");
 
     let contract = generated_method(&module, "contract");
     assert_eq!(contract.sig.inputs.len(), 3);
@@ -391,8 +366,8 @@ fn optional_execution_is_nullable_and_contracts_keep_one_description_per_input()
     // Requirement checks bind each input before the contract call; only a
     // required input rejects an absent description.
     let checks: Vec<_> = contract.block.stmts[..2].iter().map(|s| quote!(#s).to_string()).collect();
-    assert!(checks[0].contains(":: drip :: ports :: input") && checks[0].contains("ok_or_else"));
-    assert!(checks[1].contains(":: drip :: ports :: input") && !checks[1].contains("ok_or_else"));
+    assert!(checks[0].contains(":: drip :: ports :: input") && checks[0].contains("ok_or"));
+    assert!(checks[1].contains(":: drip :: ports :: input") && !checks[1].contains("ok_or"));
     let syn::Stmt::Local(described) = &contract.block.stmts[2] else {
         panic!("expected contract call")
     };
@@ -437,17 +412,49 @@ fn port_specs_carry_requirements_and_default_to_any() {
     }
 }
 
-fn assert_port_specs(module: &syn::ItemMod, method: &str, expected: TokenStream) {
-    let method = generated_method(module, method);
-    let syn::Stmt::Expr(syn::Expr::Macro(specs), _) = &method.block.stmts[0] else {
-        panic!("expected generated port specs")
+/// A field of the generated static `KIND`.
+fn kind_field<'a>(module: &'a syn::ItemMod, name: &str) -> &'a syn::Expr {
+    let kind = module
+        .content
+        .as_ref()
+        .unwrap()
+        .1
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Static(item) if item.ident == "KIND" => Some(item),
+            _ => None,
+        })
+        .expect("generated KIND");
+    let syn::Expr::Struct(value) = kind.expr.as_ref() else { panic!("expected a Kind value") };
+    &value
+        .fields
+        .iter()
+        .find(|field| matches!(&field.member, syn::Member::Named(member) if member == name))
+        .unwrap_or_else(|| panic!("missing KIND field {name}"))
+        .expr
+}
+
+fn literal(module: &syn::ItemMod, name: &str) -> String {
+    let syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(value), .. }) = kind_field(module, name)
+    else {
+        panic!("expected a literal {name}")
     };
-    let render = |tokens| {
-        let parser = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated;
-        let expressions = syn::parse::Parser::parse2(parser, tokens).unwrap();
-        expressions.iter().map(|expr| quote!(#expr).to_string()).collect::<Vec<_>>()
-    };
-    assert_eq!(render(specs.mac.tokens.clone()), render(expected));
+    value.value()
+}
+
+/// The port specs in `KIND.inputs` or `KIND.outputs`.
+fn port_specs(module: &syn::ItemMod, field: &str) -> Vec<syn::Expr> {
+    let syn::Expr::Reference(specs) = kind_field(module, field) else { panic!("expected &[..]") };
+    let syn::Expr::Array(specs) = specs.expr.as_ref() else { panic!("expected an array") };
+    specs.elems.iter().cloned().collect()
+}
+
+fn assert_port_specs(module: &syn::ItemMod, field: &str, expected: TokenStream) {
+    let parser = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated;
+    let expected = syn::parse::Parser::parse2(parser, expected).unwrap();
+    let render =
+        |exprs: Vec<syn::Expr>| exprs.iter().map(|e| quote!(#e).to_string()).collect::<Vec<_>>();
+    assert_eq!(render(port_specs(module, field)), render(expected.into_iter().collect()));
 }
 
 fn kernel_call<'a>(run: &'a syn::ImplItemFn, name: &str) -> &'a syn::ExprCall {
@@ -467,6 +474,20 @@ fn kernel_call<'a>(run: &'a syn::ImplItemFn, name: &str) -> &'a syn::ExprCall {
             (path.path.segments.last()?.ident == name).then_some(call)
         })
         .unwrap_or_else(|| panic!("missing kernel call {name}"))
+}
+
+fn generated_struct<'a>(module: &'a syn::ItemMod, name: &str) -> &'a syn::ItemStruct {
+    module
+        .content
+        .as_ref()
+        .unwrap()
+        .1
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Struct(item) if item.ident == name => Some(item),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("missing generated struct {name}"))
 }
 
 fn generated_module(tokens: TokenStream) -> syn::ItemMod {

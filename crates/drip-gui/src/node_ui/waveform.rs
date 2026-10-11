@@ -43,14 +43,12 @@ pub fn observe(_: &KernelContext<'_>, _: &Settings, image: Read<'_, Device<Rgb>>
     let _ = image;
     Ok(())
 }
-struct WaveformGui;
 #[drip_macros::gui_node]
-impl crate::node_ui::GuiNode for WaveformGui {
-    type Parameters = Settings;
+impl crate::node_ui::GuiNode for observe::Definition {
     type Presentation = Arc<Scope>;
-    const ID: &'static str = "view.waveform";
-    const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-        Some(|p, inputs, ctx| waveform(p.exposure_settings(), (&ctx.device_image(inputs)?,), ctx));
+    const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|p, inputs, ctx| {
+        waveform(p.exposure_settings(), (&super::data::DeviceRgb::new(&inputs.image),), ctx)
+    });
 }
 
 #[cfg(test)]

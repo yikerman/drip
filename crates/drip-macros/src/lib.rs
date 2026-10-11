@@ -54,8 +54,9 @@ pub fn choice(input: TokenStream) -> TokenStream {
         .into()
 }
 
-/// Discover a concrete GUI implementation beside its `GuiNode` impl.
-/// Runtime adapters belong to drip-gui; this emits only the local binding entry.
+/// Register a `GuiNode` implemented on a node's generated `Definition`, which
+/// supplies its kind, parameters and typed inputs. Runtime adapters belong to
+/// drip-gui; this emits only the local binding entry.
 #[proc_macro_attribute]
 pub fn gui_node(args: TokenStream, input: TokenStream) -> TokenStream {
     gui_node::expand(args.into(), input.into())

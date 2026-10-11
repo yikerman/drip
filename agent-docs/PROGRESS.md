@@ -10,6 +10,9 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
   kernel-read payloads, facts-only RAW metadata without rkyv, and merged
   Camera/Color reduction, histogram and waveform nodes. Workspace tests pass on
   the GPU including device tests; strict workspace Clippy and formatting pass.
+- Static node kinds, generated typed inputs and GUI bindings on node types.
+  Workspace tests pass on the GPU including device tests; Clippy and
+  formatting pass.
 - Generated RAW as a `Load` source; `Node` lost `loads_assets` and its failing
   default `parameters()`. Same GPU test, Clippy and formatting checks pass.
 - Resolved the model review's open questions with the user; decisions are in
