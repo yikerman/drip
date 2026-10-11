@@ -18,6 +18,9 @@ in [PROGRESS](PROGRESS.md).
   transfers and allocations. Earlier Rayon comparisons are historical evidence,
   not the current backend policy.
 - **Decided:** Prototype project formats have no migration guarantee.
+- **Decided:** “Scientific” for the first usable prototype means sound,
+  documented image processing, not calibrated radiometry or ACES conformance.
+  Quantitative sensor/chart calibration is outside this milestone.
 - **Decided:** Inspector help treats Rustdoc source wraps as spaces and retains
   paragraph breaks, so prose wraps to the sidebar width. Node metadata retains
   the source line breaks; reflow belongs to presentation.
@@ -118,14 +121,24 @@ in [PROGRESS](PROGRESS.md).
   Normalize sample contributions before bounded reductions for HDR headroom;
   read back one f32 rather than the full image. The EV calculation remains on
   the host, and the button retains its synchronous behavior.
-- **Tentative:** The refreshed ACES comparison identified editable scene-illuminant
-  adaptation as the remaining required processing feature; CAT16 now implements it.
+- **Tentative:** The post-CAT16 ACES review finds no further missing processing
+  stage blocking the agreed Bayer/SDR prototype [1], [3], [7]. CAT16 completes
+  the previously missing editable scene-illuminant adaptation.
   Normalization, coupled sample/clipping gains, highlight reconstruction,
   demosaic, camera conversion, orientation, exposure, sigmoid and ICC TIFF output
-  are implemented, including device mean-to-18% auto exposure. Orientation and
-  auto exposure and chromatic adaptation still need the user's interactive acceptance;
-  distribution still needs clean-desktop checks for each advertised platform.
+  are implemented, including device mean-to-18% auto exposure. The user's Vulkan
+  GUI run demonstrates successful evaluation; saved-edit and full-detail export
+  acceptance remain distinct checks. Distribution still needs clean-desktop
+  checks for each advertised platform.
   This assessment uses the agreed supported-Bayer/SDR scope, not ACES conformance.
+- **Decided:** Treat camera calibration accuracy, manual illuminant estimation,
+  and saturation reconstruction as stated model limitations. A matrix plus CAT
+  does not validate a camera profile; mean-to-18% metering does not establish the
+  ACES exposure convention [7]. Signed/HDR coordinates are valid before rendering
+  [3]. Sigmoid is a rendering operation even though its output remains identity
+  encoded; LittleCMS handles output conversion. ACES's target-aware rendering
+  and source gamut compression are references, not new prototype requirements
+  [1], [2]. Use saturated-light examples to assess artifacts before adding models.
 - **Decided:** Initial WB offers an as-shot starting point and manual source xy
   before sigmoid. Temperature/tint and neutral sampling remain follow-ups. Check consistent sample
   and clipping coordinates, persisted controls and matching preview/export.

@@ -4,6 +4,14 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
 
+- Rechecked official ACES input-transform, exposure-scaling, ACEScg, output-transform,
+  display-encoding and source-gamut guidance after CAT16 landed. User clarified
+  that “scientific” means sound processing. No additional processing-stage blocker
+  found for the agreed Bayer/SDR scope. Inspected RAW normalization, gain/matrix/CAT
+  placement, sigmoid, ICC export and existing proof/export checks. Remaining release
+  evidence is saved-edit/full-detail export acceptance and clean-desktop delivery;
+  camera accuracy and absolute exposure calibration remain stated limitations.
+  Documentation review only; no processing changes or new tests.
 - User ran the release GUI with Vulkan on an RTX 3080. The supplied log shows
   successful CAT16 evaluation and previews after RAW selection, with a clean
   exit. Final visible previews took about 75 ms; node timings measure host

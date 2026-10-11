@@ -4,12 +4,12 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 
 | Work | Status | Remaining scope |
 |------|--------|-----------------|
-| Packaged proof of concept | Next | Verify installation, launch and RAW-to-TIFF use on clean desktops; record supported environments and known limitations. |
+| Packaged proof of concept | Next | No additional processing stage identified in the post-CAT16 review. Verify saved edits and full-detail RAW-to-TIFF use, plus installation/launch on clean desktops; record supported environments and known limitations. |
 | Portable artifacts | Next | Add Linux `.tar.xz`/Flatpak and macOS `.app` bundles. Choose Linux minimum systems, macOS deployment target and Windows runtime packaging; audit runtime-loaded dependencies. Preserve executable permissions, bundle submodule sources, and include build provenance/notices. |
 | Build portability | Open | Verify Rust 1.95 and full native Windows/macOS builds and staging. |
 | Display portability | Open | Verify Windows/macOS tagging, reference white, monitor/profile transitions and Advanced Color on/off; legacy Windows needs ICC output. Exercise NVIDIA, other compositors and HDR white. |
 | Image/color validation | Follow-up | Review detail, highlights and color against measured targets; measure the display path with SpyderX. Not a proof-of-concept gate. |
-| Scene-illuminant white balance | Integration test pending | CAT16, metadata-derived As shot, custom source xy and RAW/template integration are implemented. User should verify real-photo WB, saved overrides and preview/export agreement. |
+| Scene-illuminant white balance | Integration checks remaining | CAT16, metadata-derived As shot, custom source xy and RAW/template integration are implemented; user Vulkan GUI logs show successful evaluation. Confirm saved overrides and full-detail preview/export agreement. |
 | White-balance controls | Follow-up | Add temperature/tint and neutral sampling when needed; initial controls accept source xy. |
 | Partial chromatic adaptation | Deferred | Define whether the aim is manual mood preservation or observer-appearance prediction before adding adaptation-degree controls. Compare generalized/two-step CAT16 and WGM against photographic examples; initial WB uses full adaptation. |
 | Exposure normalization | Deferred | Manual exposure and whole-image mean-to-18% metering are available. Neither calibrates an 18% scene reflector; automatic baseline handling and cross-camera exposure matching need a defined convention and validation. |
