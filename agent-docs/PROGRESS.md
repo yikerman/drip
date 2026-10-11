@@ -4,6 +4,11 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- GUI previews force only nodes with a view; a failed ancestor shows its own
+  error and views name it, while unforced nodes show nothing. Batch evaluation
+  retains every target's inputs, removing observers and the not-retained bind
+  error. Workspace tests, including 86 GUI tests, and strict workspace Clippy
+  pass.
 - Files are read when a node is first forced and cached in the node, error
   included, instead of at admission. The GUI loading queue, pending bindings,
   "Reload files", `Kind::loads_assets` and the wait-for-loading action guard

@@ -69,6 +69,12 @@ Resolved with the user on 2026-10-11 after the review against
   already-evaluated graphs, so reuse would need the excluded cache. A GUI action
   may return new node parameters, applied as an ordinary edit; auto exposure
   always applies its EV. This supersedes synchronous evaluation.
+- **Decided:** Only views and actions force evaluation, as `main` forces
+  thunks. A GUI preview targets the nodes with a view; their ancestors run as
+  needed, and a failed ancestor shows its own error while each view names it.
+  Other nodes show no status: Export is forced by its action. Until 2026-10-11
+  every node was a status-only target, so branches no view or action used were
+  evaluated and reported; `evaluate_batch` no longer has separate observers.
 - **Decided:** A worker serves one project. New and Open replace it: the old
   threads finish their current commands, skip their queues, and replies have no
   receiver, so reused node IDs cannot pick up old results. Project changes are

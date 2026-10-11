@@ -59,11 +59,10 @@ impl Evaluator {
         global: &GlobalContext,
         targets: &[NodeId],
     ) -> BTreeMap<NodeId, Result<InputValues>> {
-        self.evaluate_batch(dag, global, targets, targets, None)
+        self.evaluate_batch(dag, global, targets, None)
     }
 
-    /// Evaluate node status, retaining inputs only for the named observers.
-    /// Status-only targets do not keep their intermediate buffers alive.
+    /// `evaluate_inputs`, recording host timings.
     ///
     /// `timings` receives host timings for attempted nodes in execution order.
     /// Shared ancestors appear once; nodes skipped after upstream failure do not.
@@ -74,27 +73,13 @@ impl Evaluator {
         dag: &Dag,
         global: &GlobalContext,
         targets: &[NodeId],
-        observers: &[NodeId],
         timings: Option<&mut Vec<NodeTiming>>,
     ) -> BTreeMap<NodeId, Result<InputValues>> {
         if let Err(error) = global.validate() {
-            return targets.iter().chain(observers).map(|&id| (id, Err(error.clone()))).collect();
+            return targets.iter().map(|&id| (id, Err(error.clone()))).collect();
         }
-        let requests: BTreeMap<_, _> = targets
-            .iter()
-            .chain(observers)
-            .map(|&id| {
-                (
-                    id,
-                    input_request(dag, id).map(|mut request| {
-                        if !observers.contains(&id) {
-                            request.inputs.clear();
-                        }
-                        request
-                    }),
-                )
-            })
-            .collect();
+        let requests: BTreeMap<_, _> =
+            targets.iter().map(|&id| (id, input_request(dag, id))).collect();
         let needed: HashSet<_> = requests
             .values()
             .filter_map(|r| r.as_ref().ok())
@@ -366,10 +351,6 @@ impl InputValues {
                 self.kind.id,
                 N::KIND.id
             )));
-        }
-        // Status-only batch targets do not retain their inputs.
-        if self.values.len() != N::KIND.inputs.len() {
-            return Err(Error::Contract(format!("inputs of {} were not retained", N::KIND.id)));
         }
         N::bind(&self.values)
     }

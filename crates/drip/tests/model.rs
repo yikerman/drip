@@ -367,13 +367,7 @@ fn device_chain(runtime: RuntimeContext) {
     let observer = sink::add(&mut d, ()).unwrap();
     d.connect(after.output, observer.image).unwrap();
     let mut timings = Vec::new();
-    let values = eval.evaluate_batch(
-        &d,
-        &Default::default(),
-        &[observer.node],
-        &[observer.node],
-        Some(&mut timings),
-    );
+    let values = eval.evaluate_batch(&d, &Default::default(), &[observer.node], Some(&mut timings));
     let inputs = values[&observer.node].as_ref().unwrap().bind::<sink::Definition>().unwrap();
     assert_eq!(inputs.image.data, result.data.as_ref());
     assert_eq!(timings.len(), 8);
@@ -460,7 +454,7 @@ fn batch_producer(
 }
 
 #[test]
-fn batch_shares_ancestors_retains_only_observers_and_isolates_failures() {
+fn batch_shares_ancestors_and_isolates_failures() {
     let mut dag = Dag::new();
     let source = image(&mut dag);
     let producer = batch_producer::add(&mut dag, ()).unwrap();
@@ -481,7 +475,6 @@ fn batch_shares_ancestors_retains_only_observers_and_isolates_failures() {
         &dag,
         &Default::default(),
         &targets,
-        &[a.node, b.node],
         Some(&mut timings),
     );
     assert_eq!(timings.len(), 7); // Shared nodes once; nodes after a failure skipped.
@@ -494,8 +487,7 @@ fn batch_shares_ancestors_retains_only_observers_and_isolates_failures() {
     assert_eq!(failed, [(incomplete.node, "test-input-only"), (failure.node, "test-value-check")]);
     assert!(!timings.iter().any(|t| t.node == downstream.node));
     assert_eq!(BATCH_PRODUCED.load(Ordering::Relaxed), 1);
-    let retained = values[&producer.node].as_ref().unwrap();
-    assert!(retained.bind::<batch_producer::Definition>().is_err());
+    assert!(values[&producer.node].as_ref().unwrap().bind::<batch_producer::Definition>().is_ok());
     let image = |id| values[id].as_ref().unwrap().bind::<sink::Definition>().unwrap().image.data;
     assert!(std::ptr::eq(image(&a.node), image(&b.node)));
     for id in [failure.node, downstream.node] {

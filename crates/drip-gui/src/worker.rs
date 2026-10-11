@@ -31,8 +31,7 @@ struct Demand {
 }
 
 enum Effect {
-    /// Report every target's status and prepare the views of those that have
-    /// one. A newer generation makes the result stale.
+    /// Prepare the targets' views. A newer generation makes the result stale.
     Preview { generation: u64, targets: Vec<NodeId> },
     /// Run a node's action. Actions override the preview's context with full
     /// detail.
@@ -324,13 +323,12 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
         global: demand.global,
         client: evaluator.ok().and_then(|e| e.client().ok()).cloned(),
     };
-    let (targets, observers) = demand.nodes();
+    let targets = demand.targets();
     let mut inputs = match evaluator {
         Ok(evaluator) => evaluator.evaluate_batch(
             &demand.graph.dag,
             &demand.global,
             &targets,
-            &observers,
             trace.then_some(&mut timings),
         ),
         Err(error) => targets.iter().map(|&id| (id, Err(error.clone()))).collect(),
@@ -340,7 +338,7 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
         Effect::Preview { generation, .. } => {
             let mut timings = Vec::new();
             let mut failures = BTreeMap::new();
-            let views = targets
+            let mut views: Snapshot = targets
                 .iter()
                 .filter_map(|&id| {
                     let node = demand.graph.dag.node(id).ok()?;
@@ -368,6 +366,10 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
                     Some((id, result))
                 })
                 .collect();
+            // A failed ancestor shows its own error; nodes nothing forced show none.
+            for (&id, failure) in &failures {
+                views.entry(id).or_insert_with(|| Err(failure.error.clone()));
+            }
             demand.log_timings("prepare", &timings);
             log::debug!(
                 "preview generation={generation} scale={} elapsed={:.1?} failures={}",
@@ -396,18 +398,11 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
 }
 
 impl Demand {
-    /// The nodes to evaluate, and those whose inputs the effect consumes.
-    fn nodes(&self) -> (Vec<NodeId>, Vec<NodeId>) {
+    /// The nodes the effect forces and whose inputs it consumes.
+    fn targets(&self) -> Vec<NodeId> {
         match &self.effect {
-            Effect::Preview { targets, .. } => {
-                let viewers = targets
-                    .iter()
-                    .copied()
-                    .filter(|&id| self.graph.kind(id).is_some_and(crate::node_ui::has_view))
-                    .collect();
-                (targets.clone(), viewers)
-            }
-            Effect::Perform { id, .. } => (vec![*id], vec![*id]),
+            Effect::Preview { targets, .. } => targets.clone(),
+            Effect::Perform { id, .. } => vec![*id],
         }
     }
 
@@ -661,6 +656,12 @@ mod tests {
                     Notice::Evaluated(Err(error)) if error.starts_with("diagnostics: ")
                         && !error.contains("upstream"))));
                 }
+            }
+            // Views name the failed source, which no view forces directly but
+            // which still shows its own error.
+            for id in [source, preview, histogram] {
+                assert!(matches!(worker.result(id),
+                    Some(Err(NodeError::Node { node, .. })) if *node == source));
             }
             worker = Worker::new(Arc::new(|| {}));
             worker.request(&graph, 1, vec![preview]).unwrap();

@@ -203,7 +203,13 @@ impl App {
         let graph = &self.project.graph;
         self.popped.retain(|p| graph.kind(p.node).is_some());
         if std::mem::take(&mut self.dirty) {
-            let targets = self.project.graph.dag.nodes().map(|(id, _)| id).collect();
+            // Only views force evaluation, like `main` forcing thunks.
+            let targets = graph
+                .dag
+                .nodes()
+                .filter(|(_, node)| node_ui::has_view(node.kind()))
+                .map(|(id, _)| id)
+                .collect();
             if let Err(error) = self.worker.request(&self.project.graph, self.level, targets) {
                 self.report(Err(error));
             }
@@ -657,7 +663,7 @@ mod tests {
         std::fs::remove_file(file).unwrap();
     }
 
-    mod evaluation_is_independent_of_node_positions_fixture {
+    mod only_views_force_evaluation_fixture {
         use super::*;
 
         use std::sync::Arc;
@@ -676,7 +682,7 @@ mod tests {
         }
 
         #[test]
-        fn evaluation_is_independent_of_node_positions() {
+        fn only_views_force_evaluation() {
             let kind = drip::definition::kind("test.offscreen").unwrap();
 
             let mut project = Project::default();
@@ -693,17 +699,12 @@ mod tests {
             app.set_project(project, None).unwrap();
             let mut h = harness(app);
             settle(&mut h);
-            assert_eq!(CALLS.load(Ordering::SeqCst), 2);
-            assert!(h.state().worker.result(left).unwrap().is_ok());
-            assert!(h.state().worker.result(right).unwrap().is_ok());
-
             set_param(&mut h, left, "value", json!(true));
             settle(&mut h);
-            assert_eq!(
-                CALLS.load(Ordering::SeqCst),
-                4,
-                "each request evaluates both demanded nodes"
-            );
+            // Nodes without a view are thunks nothing forces, wherever they are.
+            assert_eq!(CALLS.load(Ordering::SeqCst), 0);
+            assert!(h.state().worker.result(left).is_none());
+            assert!(h.state().worker.result(right).is_none());
             let before = completions.load(Ordering::SeqCst);
             h.state_mut().project.graph.set_ui(left, json!({"pos": [0, 0]})).unwrap();
             settle(&mut h);
