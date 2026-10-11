@@ -58,8 +58,37 @@ struct NodeLayout {
     rect: Rect,
     inputs: Vec<(Port, Pos2)>,
     outputs: Vec<(Port, Pos2)>,
-    error: Option<(Pos2, String)>,
+    error: Option<(Pos2, ErrorRow)>,
     body: Rect,
+}
+
+/// A failed node shows its own error. Nodes downstream only name it, as its
+/// message repeated on every dependent node is noise.
+struct ErrorRow {
+    text: String,
+    color: egui::Color32,
+    hover: String,
+}
+
+impl ErrorRow {
+    fn new(graph: &Graph, id: NodeId, error: &drip::Error) -> Self {
+        let own = |error: &dyn std::fmt::Display| {
+            let text = error.to_string();
+            Self { hover: text.clone(), text, color: theme::ERROR }
+        };
+        match error {
+            drip::Error::Node { node, kind, source } if *node != id => {
+                let name = graph.name(*node).unwrap_or(kind);
+                Self {
+                    text: format!("{name} failed"),
+                    color: theme::WEAK,
+                    hover: format!("{name}: {source}"),
+                }
+            }
+            drip::Error::Node { source, .. } => own(source),
+            error => own(error),
+        }
+    }
 }
 
 /// Geometry snapshot shared by drawing and interaction for one frame.
@@ -70,9 +99,11 @@ struct CanvasLayout {
 
 impl CanvasLayout {
     fn new<'a>(graph: &Graph, results: &dyn Fn(NodeId) -> Option<&'a ViewResult>) -> Self {
-        Self {
-            nodes: graph.nodes().map(|(id, node)| layout(graph, id, node, results(id))).collect(),
-        }
+        let nodes = graph.nodes().map(|(id, node)| {
+            let error = results(id).and_then(|result| result.as_ref().err());
+            layout(graph, id, node, error.map(|error| ErrorRow::new(graph, id, error)))
+        });
+        Self { nodes: nodes.collect() }
     }
 
     fn port_position(&self, port: Port) -> Option<Pos2> {
@@ -246,7 +277,7 @@ impl Editor {
                 pos2(l.rect.min.x, at.y - ROW / 2.0),
                 vec2(l.rect.width(), ROW),
             );
-            ui.interact(row, ui.id().with((l.id, "error")), Sense::hover()).tip(error);
+            ui.interact(row, ui.id().with((l.id, "error")), Sense::hover()).tip(&error.hover);
         }
         let mut cx = NodeCx::new(graph, l.id, frame);
         if !kind_params.is_empty() {
@@ -420,10 +451,7 @@ fn paint(painter: &Painter, l: &NodeLayout, node: &Node, texts: &[PortText], sel
     let title = l.rect.min + vec2(8.0, HEADER / 2.0);
     let title_width =
         l.rect.width() - 16.0 - if node.kind.parameters.is_empty() { 0.0 } else { HEADER };
-    let mut job = egui::text::LayoutJob::simple(node.name.clone(), font, theme::TEXT, title_width);
-    job.wrap.max_rows = 1;
-    job.wrap.break_anywhere = true;
-    let galley = painter.layout_job(job);
+    let galley = line(painter, node.name.clone(), font, theme::TEXT, title_width);
     painter.galley(title - vec2(0.0, galley.size().y / 2.0), galley, theme::TEXT);
     let inputs = l.inputs.iter().map(|(_, pos)| (*pos, 8.0, Align2::LEFT_CENTER));
     let outputs = l.outputs.iter().map(|(_, pos)| (*pos, -8.0, Align2::RIGHT_CENTER));
@@ -433,30 +461,34 @@ fn paint(painter: &Painter, l: &NodeLayout, node: &Node, texts: &[PortText], sel
         } else {
             painter.circle(pos, PORT, text.color, Stroke::new(1.0, theme::TEXT));
         }
-        let mut job = egui::text::LayoutJob::simple(
-            text.port.into(),
-            small.clone(),
-            theme::WEAK,
-            label_width(l.rect.width()),
-        );
-        job.wrap.max_rows = 1;
-        job.wrap.break_anywhere = true;
-        let galley = painter.layout_job(job);
+        let width = label_width(l.rect.width());
+        let galley = line(painter, text.port.into(), small.clone(), theme::WEAK, width);
         let rect = align.anchor_size(pos + vec2(offset, 0.0), galley.size());
         painter.galley(rect.min, galley, theme::WEAK);
     }
     if let Some((at, error)) = &l.error {
-        painter.text(*at, Align2::LEFT_CENTER, elide(error, 26), small, theme::ERROR);
+        let galley = line(painter, error.text.clone(), small, error.color, l.rect.width() - 16.0);
+        painter.galley(*at - vec2(0.0, galley.size().y / 2.0), galley, error.color);
     }
+}
+
+/// One line of text, elided to `width`.
+fn line(
+    painter: &Painter,
+    text: String,
+    font: FontId,
+    color: egui::Color32,
+    width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple(text, font, color, width);
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    painter.layout_job(job)
 }
 
 /// From the top: header, port rows with inputs left and outputs right, an
 /// error row if the node failed, the body its kind's GUI draws.
-fn layout(graph: &Graph, id: NodeId, node: Node, result: Option<&ViewResult>) -> NodeLayout {
-    let error = match result {
-        Some(Ok(_)) | None => None,
-        Some(Err(e)) => Some(e.to_string()),
-    };
+fn layout(graph: &Graph, id: NodeId, node: Node, error: Option<ErrorRow>) -> NodeLayout {
     let size = node_ui::size(&node);
     let body_top = ports(&node) + if error.is_some() { ROW } else { 0.0 };
     let pos = position(&node.ui, id).to_pos2();
@@ -541,14 +573,6 @@ fn wire_distance(curve: &CubicBezierShape, pointer: Pos2, point: f32) -> f32 {
             pointer.distance(segment[0] + direction * along)
         })
         .fold(f32::INFINITY, f32::min)
-}
-
-fn elide(text: &str, chars: usize) -> String {
-    if text.chars().count() <= chars {
-        text.into()
-    } else {
-        text.chars().take(chars - 1).chain(['…']).collect()
-    }
 }
 
 #[cfg(test)]

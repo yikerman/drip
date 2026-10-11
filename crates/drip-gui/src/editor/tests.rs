@@ -535,3 +535,18 @@ fn port_names_fit_beside_the_opposite_port() {
     .textures_delta
     .clear();
 }
+
+#[test]
+fn downstream_error_rows_name_the_failed_node() {
+    let mut graph = Graph::default();
+    let raw = graph.add_node(drip::definition::kind("tone.exposure").unwrap()).unwrap();
+    let below = graph.add_node(drip::definition::kind("tone.exposure").unwrap()).unwrap();
+    graph.set_name(raw, "RAW").unwrap();
+    let source = Box::new(drip::Error::Runtime("select a RAW".into()));
+    let error = drip::Error::Node { node: raw, kind: "input.bayer-raw", source };
+    let own = ErrorRow::new(&graph, raw, &error);
+    assert_eq!((own.text.as_str(), own.color), ("select a RAW", theme::ERROR));
+    let downstream = ErrorRow::new(&graph, below, &error);
+    assert_eq!((downstream.text.as_str(), downstream.color), ("RAW failed", theme::WEAK));
+    assert_eq!(downstream.hover, "RAW: select a RAW");
+}
