@@ -8,7 +8,6 @@ fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     let first = node::sigmoid::apply::add(&mut p.dag, Default::default()).unwrap();
     let apply = node::sigmoid::apply::add(&mut p.dag, Default::default()).unwrap();
     p.dag.connect(first.output, apply.image).unwrap();
-    p.target = Some(first.output.id());
     p.ui = json!({"retained":true});
     p.node_ui.insert(apply.node, json!({"pos":[12,34]}));
     let serialized = p.to_json().unwrap();
@@ -16,7 +15,9 @@ fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     assert_eq!(restored.dag.edges().count(), 1);
     assert_eq!(restored.ui, p.ui);
     assert_eq!(restored.to_json().unwrap(), serialized);
-    let output = restored.dag.typed_output::<Rgb>(restored.target.unwrap()).unwrap();
+    let (first, _) = restored.dag.nodes().next().unwrap();
+    let output = restored.dag.output_port(first, "output").unwrap();
+    let output = restored.dag.typed_output::<Rgb>(output).unwrap();
     // An incomplete image pipeline remains editable after loading.
     assert!(restored.dag.description(output).unwrap().is_none());
     let mut data: serde_json::Value = serde_json::from_str(&serialized).unwrap();
@@ -62,42 +63,18 @@ fn tiff_profile_extent_and_pixels_survive_encoding() {
 }
 
 #[test]
-fn headless_target_load_ignores_frontend_nodes_but_validates_demanded_graph() {
-    let mut p = Project::default();
-    let first = node::sigmoid::apply::add(&mut p.dag, Default::default()).unwrap();
-    p.target = Some(first.output.id());
-    let mut document: serde_json::Value = serde_json::from_str(&p.to_json().unwrap()).unwrap();
-    document["nodes"].as_array_mut().unwrap().push(json!({
-        "kind": "unregistered.frontend", "parameters": null, "ui": null
-    }));
-    document["edges"] = json!([[{"node":0,"port":"output"}, {"node":1,"port":"input"}]]);
-    assert!(Project::from_json(&document.to_string()).is_err());
-    let loaded = Project::target_from_json(&document.to_string()).unwrap();
-    assert_eq!(loaded.dag.nodes().count(), 1);
-    assert!(loaded.dag.edges().next().is_none());
-    let mut invalid = document.clone();
-    invalid["target"]["node"] = json!(1);
-    assert!(Project::target_from_json(&invalid.to_string()).is_err());
-    invalid = document.clone();
-    invalid["nodes"][0]["parameters"]["contrast"] = json!(-1.);
-    assert!(Project::target_from_json(&invalid.to_string()).is_err());
-    invalid = document.clone();
-    invalid["target"]["node"] = json!(99);
-    assert!(Project::target_from_json(&invalid.to_string()).is_err());
-    invalid = document;
-    invalid["edges"] = json!([[{"node":0,"port":"output"}, {"node":0,"port":"invalid"}]]);
-    assert!(Project::target_from_json(&invalid.to_string()).is_err());
-}
-
-#[test]
 fn missing_raw_preserves_editable_parameters_and_reports_load_error() {
     let path = std::path::Path::new("/tmp/drip-deliberately-missing-raw-source.nef");
     assert!(!path.exists());
-    let project = drip::node::templates::raw_to_rgb(path).unwrap();
-    let text = project.to_json().unwrap();
+    let (mut dag, _) = drip::node::templates::raw_pipeline().unwrap();
+    let raw = dag.nodes().find(|(_, n)| n.kind().id == "input.bayer-raw").unwrap().0;
+    dag.set_parameters(raw, json!({ "path": path })).unwrap();
+    let text = Project { dag, ..Default::default() }.to_json().unwrap();
     let mut restored = Project::from_json(&text).unwrap();
     assert_eq!(restored.to_json().unwrap(), text);
-    let target = restored.dag.typed_output::<Rgb>(restored.target.unwrap()).unwrap();
+    let sigmoid = restored.dag.nodes().find(|(_, n)| n.kind().id == "tone.sigmoid").unwrap().0;
+    let target = restored.dag.output_port(sigmoid, "output").unwrap();
+    let target = restored.dag.typed_output::<Rgb>(target).unwrap();
     let error = Evaluator::new(RuntimeContext::host())
         .evaluate::<Cpu<Rgb>>(&restored.dag, &Default::default(), target)
         .err()

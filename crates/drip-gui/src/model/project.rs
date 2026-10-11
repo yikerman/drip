@@ -28,18 +28,6 @@ impl Project {
             ui: self.ui.clone(),
             ..Default::default()
         };
-        // A single explicit export image is an unambiguous batch target.
-        // Multiple exports remain a frontend choice rather than an inferred one.
-        let targets: Vec<_> = self
-            .graph
-            .nodes()
-            .filter(|(_, n)| n.kind.id == "output.tiff")
-            .filter_map(|(id, _)| self.graph.source(&super::Port(id, "image".into())))
-            .map(|p| self.graph.dag.output_port(p.0, &p.1))
-            .collect::<Result<_>>()?;
-        if let [target] = targets.as_slice() {
-            project.target = Some(*target);
-        }
         for (id, state) in &self.graph.state {
             project.node_ui.insert(
                 *id,

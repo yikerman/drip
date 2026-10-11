@@ -227,27 +227,14 @@ Bayer phase planes internally before interpolation, after upstream sensor
 corrections. Every contract and node receives the same context; no hidden nodes
 or temporary graph rewrites are involved. Export requests full detail.
 
-
-For headless TIFF export:
-
-```sh
-cargo run --release -p drip-cli -- photo.nef output.tiff
-cargo run --release -p drip-cli -- project.drip output.tiff
-```
-
-The CLI uses default output-profile settings and 16-bit TIFF. A GUI project
-needs one connected export image to supply an unambiguous batch target;
-frontend view nodes outside that target's dependencies are not loaded.
-
-`DRIP_BACKEND` selects computation for both frontends, including GUI previews
-and exports. Without an override it prefers native Metal on macOS when built
-with `drip/metal-native`, or Vulkan on Linux with `drip/vulkan`; otherwise it uses
+`DRIP_BACKEND` selects computation, including GUI previews and exports. Without
+an override it prefers native Metal on macOS when built with
+`drip/metal-native`, or Vulkan on Linux with `drip/vulkan`; otherwise it uses
 `wgpu`. An ordinary default-feature Cargo build still uses wgpu. To run the same
 kernels on CPU:
 
 ```sh
 DRIP_BACKEND=cpu cargo run --release -p drip-gui --features drip/cpu -- project.drip
-DRIP_BACKEND=cpu cargo run --release -p drip-cli --features drip/cpu -- photo.nef output.tiff
 ```
 
 `DRIP_BACKEND=cuda` requires `--features drip/cuda`. Unknown values or backends

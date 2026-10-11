@@ -91,7 +91,7 @@ fn export(p: &Export, inputs: tiff::Inputs<'_>, resources: &Resources) -> Result
 }
 
 /// Encode and write the file named by the settings.
-pub fn write(
+fn write(
     p: &Export,
     desc: &RgbDesc,
     pixels: &[[f32; 3]],

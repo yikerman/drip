@@ -4,6 +4,10 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Returned `drip-cli` to its scaffold and removed it from distribution builds.
+  Projects lose the export target only it read; files that still carry it
+  are rejected. The library template returns its rendered output instead. GPU workspace tests,
+  Clippy and formatting pass.
 - Model refactor cleanups: per-kind parameter widgets, coordinate labels from
   requirement labels, worker naming and the README's macro section. GPU
   workspace tests, Clippy and formatting pass.

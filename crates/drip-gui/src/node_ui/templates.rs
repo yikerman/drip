@@ -3,9 +3,9 @@ use crate::model::{Graph, Port, Project, Registry};
 use serde_json::json;
 
 pub fn raw_to_tiff() -> Project {
-    let pipeline = drip::node::templates::raw_pipeline(None).expect("valid built-in pipeline");
-    let target = pipeline.target.expect("pipeline output");
-    let mut graph = Graph::from_dag(pipeline.dag).expect("registered built-in nodes");
+    let (dag, output) = drip::node::templates::raw_pipeline().expect("valid built-in pipeline");
+    let target = output.id();
+    let mut graph = Graph::from_dag(dag).expect("registered built-in nodes");
     // Align views on the top edge, stack histogram/waveform in one column,
     // and stagger processing through Orientation to separate metadata branches.
     // Exposure/Sigmoid align with Orientation; RAW and TIFF sit below the chain.

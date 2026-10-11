@@ -52,8 +52,6 @@ fn dist(target: Option<&str>) -> Result<()> {
         "--bins",
         "--package",
         "drip-gui",
-        "--package",
-        "drip-cli",
         "--message-format=json-render-diagnostics",
         "--target",
         &target,

@@ -1889,9 +1889,6 @@ dependencies = [
 [[package]]
 name = "drip-cli"
 version = "0.1.0-dev"
-dependencies = [
- "drip",
-]
 
 [[package]]
 name = "drip-gui"

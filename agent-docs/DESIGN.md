@@ -111,7 +111,8 @@ Resolved with the user on 2026-10-11 after the review against
   `#[node(action = export)]`, as `fn(&Params, Inputs<'_>, &Resources)`; the
   action's label comes from the function name and lives in `Kind`. The GUI runs
   a `GuiNode` extra action if declared, otherwise the node's action. TIFF export
-  is such a node in `drip`; its `write` also serves the CLI.
+  is such a node in `drip`. The CLI is an empty scaffold until batch work
+  starts; projects carry no separate export target.
 - **Decided:** Auto exposure is a GUI action metering the node's input:
   `ev = log2(0.18 / mean(input))`, which needs no current EV.
 - **Decided:** Each node kind has one generated `static Kind` (ID, labels,
