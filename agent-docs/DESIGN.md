@@ -265,6 +265,11 @@ Resolved with the user on 2026-10-11 after the review against
   protect direct evaluation callers while `GlobalContext::scale` is public.
 - **Decided:** Render tests use production packing, upload, binding and pipeline
   setup; expected color values remain independent of that implementation.
+- **Decided:** The GPU display test initializes the selected compute runtime
+  before its independent wgpu instance. CubeCL serializes compute startup;
+  this prevents concurrent first Vulkan calls that crash the NVIDIA ICD while
+  allowing parallel tests. The display test therefore also requires the
+  selected `DRIP_BACKEND` to be available.
 - **Open:** Retaining a loaded source's device representation would avoid its
   per-demand upload. Define runtime ownership, replacement/reload lifetime and
   memory cost before making an exception to per-run materialization. Upload

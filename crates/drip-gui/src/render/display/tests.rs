@@ -76,11 +76,14 @@ fn select_supported_format_and_encoding_together() {
 // This checks the real preview + composite shaders, including FP16 storage.
 // It intentionally fails if no adapter is available when explicitly invoked.
 #[test]
-#[ignore = "requires a GPU adapter; run with --ignored"]
+#[ignore = "requires a GPU adapter and the DRIP_BACKEND compute device; run with --ignored"]
 fn gpu_preview_and_output_match_colorimetric_reference() {
     use drip::{node::color, node::profile};
     use lcms2::{Intent, PixelFormat, Transform};
 
+    // CubeCL serializes compute initialization. Finish it before creating our
+    // independent instance: concurrent first Vulkan calls crash NVIDIA's ICD.
+    let _runtime = drip::runtime::RuntimeContext::from_env().unwrap();
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
     eprintln!("display shader test: {:?}", adapter.get_info());

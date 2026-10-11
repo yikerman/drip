@@ -4,6 +4,21 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Fixed parallel GPU-test startup by initializing the selected compute runtime
+  before the display test's independent wgpu instance. CubeCL's existing startup
+  serialization prevents concurrent first Vulkan calls. All seven GUI device
+  tests pass in parallel on WGPU, including five fresh-process reruns, and on
+  CPU. Strict GUI Clippy and workspace formatting pass. Application and editor
+  behavior are unchanged.
+- Isolated the parallel GUI device-test SIGSEGV to concurrent Vulkan extension
+  enumeration during display/CubeCL startup. A standalone two-thread C probe
+  crashes in 5/5 runs with only the NVIDIA ICD and passes 5/5 with lavapipe;
+  disabling Mesa device selection does not prevent the crash. The core shows
+  a null call inside `loader_icd_scan` while another thread initializes NVIDIA.
+  Commit `4e44ccd` added compute scopes to the ignored GUI tests, which previously
+  contained only the display test. This identifies the concurrency trigger by
+  source history, not a bisected driver regression. Serial device tests pass;
+  the recent refactor leaves the failing instance initialization unchanged.
 - Separated the mechanical refactor from pending editor error-label, color and
   elision changes. The refactor-only snapshot passes all 14 editor interaction
   tests on CPU; the behavior changes and their test remain in the working tree.
@@ -16,7 +31,7 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
   tests. CPU workspace tests pass (159 passed, 16 device tests ignored), as do
   three doctests, strict workspace Clippy and formatting. All 16 device tests
   pass on WGPU with one test thread. A parallel GUI device-test process exited
-  with SIGSEGV before reporting results; its cause remains unisolated. Tests
+  with SIGSEGV before reporting results; see the startup investigation above. Tests
   cover the combined tree before the user's remaining editor edits.
 - Reviewed the 21 proposed simplifications against current code and design.
   Confirmed redundant report state, template label coupling, retained preview

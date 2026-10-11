@@ -23,7 +23,6 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | RAW metadata extraction | Open | Canon EOS D30 (#1307): unusable as-shot WB. Samsung GX-1L (#8115): unusable WB and zero camera matrix. Excluded from the active corpus; IDs refer to raw.pixls.us. |
 | DNG matrix extraction | Open | Sigma fp 8-bit (#7280) and 14-bit (#7273): nonzero ColorMatrix1/2, but LibRaw returns zero `cam_xyz` after unpack. Excluded from the active corpus. |
 | Panic-time native teardown | Open | Investigate NVIDIA/Wayland segmentation fault during unwind after the fixed image-view panic. |
-| Parallel device tests | Open | The GUI ignored-test process exited with SIGSEGV under WGPU on 2026-10-11 before reporting individual results. All 16 workspace device tests pass serially; isolate the native failure before attributing it to runtime startup or teardown. |
 | Worker startup failures | Open | Report thread-creation failures in `Worker::new` without losing the worker. |
 | Sensor calibration | Open | Expose sample conventions and sensor coordinates before dark/flat correction; see [DESIGN](DESIGN.md). |
 | Processing extensions | Deferred | Masks, pixel math, filtering, lens correction, gain fields, registration and multi-frame denoise/HDR/super-resolution/stitching. Add payloads with consumers. |
