@@ -20,7 +20,9 @@ Status: **Requirement** is stated by the user; **Decided** is agreed;
   sensor/chart calibration is outside this milestone.
 - **Requirement:** Correct display color on Wayland, macOS and Windows. Linux is
   the primary development platform; X11 is unsupported.
-- **Decided:** Prototype project formats have no migration guarantee.
+- **Decided:** Prototype project formats have no migration guarantee. The
+  format version is the `drip` crate's major version; other versions are
+  rejected.
 
 ## Model refactor
 

@@ -4,6 +4,8 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Project format version now follows the `drip` major version (currently 0).
+  GPU workspace tests, Clippy and formatting pass.
 - Returned `drip-cli` to its scaffold and removed it from distribution builds.
   Projects lose the export target only it read; files that still carry it
   are rejected. The library template returns its rendered output instead. GPU workspace tests,

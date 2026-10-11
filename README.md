@@ -217,7 +217,8 @@ You can also open a saved project from the command line:
 cargo run --release -p drip-gui -- project.drip
 ```
 
-Saved projects use format version 2 and repeat connection checks when opened.
+Saved projects carry the `drip` crate's major version as their format
+version and repeat connection checks when opened.
 Node IDs use `category.operation`; this revision also nests variant-specific
 parameters in their enum values. Older IDs and parameter layouts are rejected
 without migration or modification. RAW files are bound as

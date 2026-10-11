@@ -26,7 +26,12 @@ fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     data = serde_json::from_str(&serialized).unwrap();
     data["edges"][0][0]["port"] = json!("missing");
     assert!(Project::from_json(&data.to_string()).is_err());
-    assert!(Project::from_json("{\"version\":1}").is_err());
+    data = serde_json::from_str(&serialized).unwrap();
+    let major: u64 = env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap();
+    assert_eq!(data["version"], major);
+    data["version"] = json!(major + 1);
+    let error = Project::from_json(&data.to_string()).err().unwrap().to_string();
+    assert!(error.contains("not migrated"), "{error}");
 }
 #[test]
 fn tiff_profile_extent_and_pixels_survive_encoding() {

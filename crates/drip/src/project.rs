@@ -15,6 +15,13 @@ pub struct Project {
     pub ui: Value,
     pub node_ui: BTreeMap<NodeId, Value>,
 }
+/// The project format follows the crate's major version: a format change is a
+/// breaking change. Other versions are rejected without migration.
+const VERSION: u32 = match u32::from_str_radix(env!("CARGO_PKG_VERSION_MAJOR"), 10) {
+    Ok(version) => version,
+    Err(_) => panic!("numeric crate major version"),
+};
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Document {
@@ -51,7 +58,7 @@ impl Project {
             Ok(Endpoint { node: ids[&p.node()], port: spec.name.into() })
         };
         let document = Document {
-            version: 2,
+            version: VERSION,
             nodes: nodes
                 .iter()
                 .map(|(id, n)| {
@@ -76,10 +83,11 @@ impl Project {
     }
 
     fn load(document: Document) -> Result<Self> {
-        if document.version != 2 {
-            return Err(Error::Graph(
-                "unsupported project version; legacy projects require migration".into(),
-            ));
+        if document.version != VERSION {
+            return Err(Error::Graph(format!(
+                "project version {} is not {VERSION}; projects are not migrated",
+                document.version
+            )));
         }
         let mut project = Self { ui: document.ui, ..Self::default() };
         let mut ids = Vec::new();
