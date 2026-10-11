@@ -4,6 +4,9 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Bindings and project open moved to their own loading thread per project:
+  marking Preview and Export as asset loaders had queued their plain edits
+  behind evaluations. GPU workspace tests, Clippy and formatting pass.
 - Review findings: actions route by node with one resolved action per kind;
   one single-parameter merge; one batch evaluation call; auto exposure returns
   its parameters and shares the scopes' device image; a drop guard reports the

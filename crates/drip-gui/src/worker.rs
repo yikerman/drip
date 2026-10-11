@@ -1,6 +1,7 @@
-//! One sequential queue: previews, asset bindings, project loading and node
-//! actions run in order on one worker with one evaluator. A worker serves one
-//! project; the app replaces it, discarding queued work and late replies.
+//! Two sequential queues per project. Evaluation runs previews and node actions
+//! in order with one evaluator; loading admits nodes and opens projects, so an
+//! edit that reads files never waits behind an evaluation. The app replaces the
+//! worker with its project, discarding queued work and late replies.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -41,6 +42,9 @@ enum Effect {
 enum Command {
     Force(Demand),
     Collect,
+}
+
+enum Load {
     Bind { ticket: u64, id: NodeId, kind: &'static str, params: Json },
     Open { ticket: u64, file: std::path::PathBuf },
 }
@@ -103,8 +107,8 @@ impl Notify {
     }
 }
 
-/// Reports the thread's end, by return or panic, so the UI stops showing
-/// “evaluating…”.
+/// Reports a thread's end, by return or panic, so the UI stops showing
+/// “evaluating…” or “loading…”.
 struct Stopping(Notify);
 
 impl Drop for Stopping {
@@ -116,7 +120,8 @@ impl Drop for Stopping {
 /// UI-side mailbox. At most one preview is sent and one latest request waits.
 pub struct Worker {
     commands: mpsc::Sender<Command>,
-    /// Set when dropped: the thread skips queued commands after its current one.
+    loads: mpsc::Sender<Load>,
+    /// Set when dropped: each thread skips queued commands after its current one.
     stopped: Arc<AtomicBool>,
     events: mpsc::Receiver<Event>,
     generation: u64,
@@ -134,20 +139,40 @@ pub struct Worker {
 
 impl Worker {
     pub fn new(wake: impl Fn() + Send + Sync + 'static) -> Self {
-        let (commands, requests) = mpsc::channel();
         let (events, replies) = mpsc::channel();
         let notify = Notify { events, wake: Arc::new(wake) };
         let stopped = Arc::new(AtomicBool::new(false));
-        let stop = stopped.clone();
-        thread::Builder::new()
-            .name("drip-worker".into())
-            .spawn(move || {
-                let stopping = Stopping(notify);
-                serve(requests, &stop, &stopping.0);
+        let mut evaluator = None;
+        let mut images = ImageCache::default();
+        let commands =
+            serve("drip-worker", &stopped, &notify, move |command, notify| match command {
+                Command::Force(demand) => {
+                    let evaluator = evaluator.get_or_insert_with(|| {
+                        drip::runtime::RuntimeContext::from_env().map(Evaluator::new)
+                    });
+                    notify.send(force(&demand, evaluator.as_ref(), &mut images));
+                }
+                Command::Collect => images.collect(),
+            });
+        let loads = serve("drip-loader", &stopped, &notify, |load, notify| {
+            notify.send(match load {
+                Load::Bind { ticket, id, kind, params } => {
+                    Event::Bound { ticket, id, result: drip::definition::registered(kind, params) }
+                }
+                Load::Open { ticket, file } => {
+                    let result = std::fs::read_to_string(&file)
+                        .map_err(|e| e.to_string())
+                        .and_then(|text| {
+                            crate::model::Project::from_json(&text, &crate::model::Registry)
+                                .map_err(|e| e.to_string())
+                        });
+                    Event::Opened { ticket, file, result }
+                }
             })
-            .expect("start worker");
+        });
         Self {
             commands,
+            loads,
             stopped,
             events: replies,
             generation: 0,
@@ -190,13 +215,13 @@ impl Worker {
     ) -> Result<(), String> {
         let kind = graph.dag.node(id).map_err(|e| e.to_string())?.kind().id;
         self.job_ticket += 1;
-        self.send(Command::Bind { ticket: self.job_ticket, id, kind, params })?;
+        self.send(&self.loads, Load::Bind { ticket: self.job_ticket, id, kind, params })?;
         self.bindings.insert(id, self.job_ticket);
         Ok(())
     }
     pub fn open(&mut self, file: std::path::PathBuf) -> Result<(), String> {
         self.job_ticket += 1;
-        self.send(Command::Open { ticket: self.job_ticket, file })?;
+        self.send(&self.loads, Load::Open { ticket: self.job_ticket, file })?;
         self.opening = Some(self.job_ticket);
         Ok(())
     }
@@ -233,11 +258,8 @@ impl Worker {
             return Err("wait for loading to finish before running an action".into());
         }
         let effect = Effect::Perform { id, action };
-        self.send(Command::Force(Demand {
-            graph: graph.clone(),
-            global: Default::default(),
-            effect,
-        }))
+        let demand = Demand { graph: graph.clone(), global: Default::default(), effect };
+        self.send(&self.commands, Command::Force(demand))
     }
 
     pub fn poll(&mut self) -> Vec<Notice> {
@@ -306,7 +328,7 @@ impl Worker {
     /// worker holds every prepared allocation until it has no other owners.
     pub fn after_frame(&mut self) {
         if std::mem::take(&mut self.collect) {
-            let _ = self.send(Command::Collect);
+            let _ = self.send(&self.commands, Command::Collect);
         }
     }
 
@@ -323,17 +345,17 @@ impl Worker {
         if !self.in_flight
             && let Some(request) = self.pending.take()
         {
-            self.send(Command::Force(request))?;
+            self.send(&self.commands, Command::Force(request))?;
             self.in_flight = true;
         }
         Ok(())
     }
 
-    fn send(&self, command: Command) -> Result<(), String> {
+    fn send<C>(&self, queue: &mpsc::Sender<C>, command: C) -> Result<(), String> {
         if self.failed {
             return Err("the worker stopped".into());
         }
-        self.commands.send(command).map_err(|_| "the worker stopped".into())
+        queue.send(command).map_err(|_| "the worker stopped".into())
     }
 }
 
@@ -345,38 +367,28 @@ impl Drop for Worker {
     }
 }
 
-fn serve(commands: mpsc::Receiver<Command>, stopped: &AtomicBool, notify: &Notify) {
-    let mut evaluator = None;
-    let mut images = ImageCache::default();
-    while let Ok(command) = commands.recv() {
-        if stopped.load(Ordering::Relaxed) {
-            break;
-        }
-        match command {
-            Command::Bind { ticket, id, kind, params } => {
-                notify.send(Event::Bound {
-                    ticket,
-                    id,
-                    result: drip::definition::registered(kind, params),
-                });
+/// Starts a thread that handles commands in order until the worker is dropped.
+fn serve<C: Send + 'static>(
+    name: &str,
+    stopped: &Arc<AtomicBool>,
+    notify: &Notify,
+    mut handle: impl FnMut(C, &Notify) + Send + 'static,
+) -> mpsc::Sender<C> {
+    let (queue, commands) = mpsc::channel();
+    let stopped = stopped.clone();
+    let stopping = Stopping(notify.clone());
+    thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            while let Ok(command) = commands.recv() {
+                if stopped.load(Ordering::Relaxed) {
+                    break;
+                }
+                handle(command, &stopping.0);
             }
-            Command::Open { ticket, file } => {
-                let result =
-                    std::fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|text| {
-                        crate::model::Project::from_json(&text, &crate::model::Registry)
-                            .map_err(|e| e.to_string())
-                    });
-                notify.send(Event::Opened { ticket, file, result });
-            }
-            Command::Force(demand) => {
-                let evaluator = evaluator.get_or_insert_with(|| {
-                    drip::runtime::RuntimeContext::from_env().map(Evaluator::new)
-                });
-                notify.send(force(&demand, evaluator.as_ref(), &mut images));
-            }
-            Command::Collect => images.collect(),
-        }
-    }
+        })
+        .expect("start worker");
+    queue
 }
 
 fn force(
@@ -816,6 +828,11 @@ mod tests {
             graph.set_param(source, "block", json!(true)).unwrap();
             worker.request(&graph, 1, vec![preview]).unwrap();
             entered.recv_timeout(TIMEOUT).unwrap();
+            // Loading does not wait behind the blocked evaluation.
+            worker.bind(&graph, preview, graph.node(preview).unwrap().params).unwrap();
+            woke.recv_timeout(TIMEOUT).unwrap();
+            assert!(matches!(worker.poll()[..], [Notice::Bound { .. }]));
+            assert!(!worker.loading());
             graph.set_param(source, "block", json!(false)).unwrap();
             for value in [2, 3] {
                 graph.set_param(source, "value", json!(value)).unwrap();
@@ -856,8 +873,10 @@ mod tests {
             graph.set_param(source, "value", json!(4)).unwrap();
             old.action(&graph, tiff, action(&graph, tiff)).unwrap();
             drop(old);
+            // The idle loading thread stops at once; evaluation wakes the UI
+            // for its preview, then as it stops.
+            woke.recv_timeout(TIMEOUT).unwrap();
             release.send(()).unwrap();
-            // It wakes the UI for its preview, then as it stops.
             for _ in 0..2 {
                 woke.recv_timeout(TIMEOUT).unwrap();
             }
