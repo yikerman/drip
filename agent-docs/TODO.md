@@ -9,6 +9,10 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Build portability | Open | Verify Rust 1.95 and full native Windows/macOS builds and staging. |
 | Display portability | Open | Verify Windows/macOS tagging, reference white, monitor/profile transitions and Advanced Color on/off; legacy Windows needs ICC output. Exercise NVIDIA, other compositors and HDR white. |
 | Image/color validation | Follow-up | Review detail, highlights and color against measured targets; measure the display path with SpyderX. Not a proof-of-concept gate. |
+| Scene-illuminant white balance | Required | Add environment adaptation beyond as-shot gains. CAT16 with fixed camera-reference normalization is proposed; keep camera coordinates, clipping levels and matrix interpretation consistent. See DESIGN. |
+| Exposure normalization | Deferred | Sensor-white normalization does not calibrate an 18% scene reflector. Manual exposure is available; automatic baseline handling and cross-camera exposure matching need a defined convention and validation. |
+| Photo orientation | Integration test pending | Metadata-driven RGB orientation, parameter override and template wiring are implemented. User will verify preview, override, project reopening and TIFF orientation interactively. |
+| Output-gamut rendering | Deferred | LittleCMS plus selected rendering intent is accepted for the prototype. Revisit explicit target-gamut rendering only when image evidence warrants it; distinguish source compression from output mapping. |
 | Editing UI/UX | Follow-up | Refine from tester feedback; current workflows suffice for the proof of concept. |
 | Remaining frontend presentation | Open | Audit items outside the requested fixes: export-depth/intent terminology, explicit EV reference annotations, proof-mode badges, error elision, blank/stale pop-out views and distinct loading phases. |
 | Bound-source declarations | Open | Extend generated declarations to immutable bind-time assets and shared/unavailable outputs; remove handwritten RAW metadata/port duplication after agreeing on the interface. |
@@ -31,7 +35,8 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | End-to-end latency | Measured | Device scopes reduce full-detail worker latency to 164–171 ms. Profile display upload/draw; remaining worker costs include about 64 ms of CPU preview packing and an 86 ms GPU-completion/readback span. Consider device RGBA packing; keep LittleCMS proofing on CPU. |
 | Memory and drawing cost | Deferred | Measure retained RAWs/export buffers, duplicate GPU uploads across windows and scope mesh copies before considering streaming TIFF/shared textures. |
 | Evaluation performance | Deferred | Cooperative cancellation, full-detail ROI and backend optimization, driven by measured latency. |
-| Capture metadata | Deferred | Lens, GPS, orientation, time zone and maker-note passthrough. |
+| Lens-correction metadata | Deferred | Common lens identifiers, focal/aperture data and sensor geometry are retained. Resolve crop factor and correction profiles; extract exposure focus distance where available (lens minimum focus distance is distinct). Preserve image-to-capture geometry. |
+| Capture metadata | Deferred | Common capture/lens/GPS/calibration fields are available to nodes. Time zone and private maker-note passthrough remain unimplemented; extend TIFF EXIF export separately. |
 | HDR | Deferred | Define headroom/metadata and track Windows desktop SDR white. |
 | Native windows | Deferred | Windows/macOS parenting and pin control; cross-window pacing/occlusion. Retest hidden-window pacing and native dialogs after their fixes. |
 | Undo/redo | Deferred | Revisit with editing workflows. |

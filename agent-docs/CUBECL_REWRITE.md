@@ -19,7 +19,7 @@ unchanged as requested. No commits or pushes have been made.
 | Decided | Transactional edits check nominal payloads, cycles and all known descriptor relationships. Templates may connect before source binding; later bindings recheck the whole graph. Missing data fails only demanded evaluation. |
 | Decided | One topological run shares fan-out and retires intermediates after the final consumer. Batch status requests retain inputs only for observers. Independent failed branches do not block good branches. |
 | Decided | Source loading produces an immutable value or stored loading error, outside computation. Failed RAW paths remain editable/persistable; rebind or invalidate reloads snapshots. |
-| Decided | RAW separately outputs Bayer, BayerGains, CameraMatrix, CaptureMetadata and BayerLevels. Missing calibration does not invalidate usable mosaic output. |
+| Decided | RAW outputs Bayer and CaptureMetadata containing common capture fields and optional processing calibration. Bayer site gains jointly updates samples and clipping levels. Missing calibration does not invalidate usable mosaic output. |
 | Decided | Version 2 stores named ports, serde parameters and opaque frontend layout. Headless target loading instantiates only target ancestry, excluding unrelated GUI node kinds. |
 | Requirement | A global context goes to every node and contract. Demosaic internally reduces its Bayer phase planes according to that request; there are no temporary/hidden DAG nodes. Full detail/export use scale 1. |
 | Requirement | Nodes are ordinary operations with DAG bindings, not the finest algorithm stages. Shared graph machinery belongs in DAG/eval; private preparation stays in the operation. |

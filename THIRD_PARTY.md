@@ -40,6 +40,7 @@ here when introduced.
 | [rust-windowing contributors](https://github.com/rust-windowing/winit) (`winit`) | Windows and input events | Apache-2.0 |
 | [Smithay contributors](https://github.com/Smithay/wayland-rs) (`wayland-client`, `wayland-protocols`) | Wayland pop-out parenting and surface color descriptions | MIT |
 | [PolyMeilex and rfd contributors](https://github.com/PolyMeilex/rfd) | Native file dialogs | MIT |
+| [rkyv contributors](https://github.com/rkyv/rkyv) (`rkyv` 0.8.18) | Validated internal metadata byte transport | MIT; [license](https://github.com/rkyv/rkyv/blob/v0.8.18/LICENSE) |
 | [Serde contributors](https://github.com/serde-rs/serde) (`serde`, `serde_json`) | Project serialization | MIT OR Apache-2.0 |
 | [David Tolnay and thiserror contributors](https://github.com/dtolnay/thiserror) | Error definitions | MIT OR Apache-2.0 |
 | [Rust log contributors](https://github.com/rust-lang/log), [env_logger contributors](https://github.com/rust-cli/env_logger) | Logging | MIT OR Apache-2.0 |
@@ -63,6 +64,10 @@ The codecs use their upstream CMake builds with static linkage and without tools
 or tests; JPEG SIMD is required and its embedded build identifier is `drip`.
 LittleCMS 2.19 is bundled by the locked `lcms2-sys` 4.0.7 crate and built through
 its `static` feature; it has no separate submodule.
+
+RAW orientation translates LibRaw 0.22.2's `sizes.flip` convention, defined in
+[`src/metadata/tiff.cpp`](https://github.com/LibRaw/LibRaw/blob/b93f6e45c194f5df9b02a43b1af9a54b4f41f33f/src/metadata/tiff.cpp),
+to EXIF values [10]. The RGB orientation kernel is an original pixel permutation.
 
 The submodules retain their own copyright/license files. Source distributions
 must include their contents, not just Git links.
@@ -143,7 +148,7 @@ Accessed Oct. 5, 2026. Structure and writing reference for frontend node help.
 
 [10] CIPA and JEITA, “Exchangeable image file format for digital still
 cameras: Exif Version 2.32,” CIPA DC-008-2019, May 2019. Exif IFD and tag
-definitions for exported capture metadata.
+definitions for capture metadata and the eight orientation transforms.
 
 [11] Wayland contributors, “Color management protocol,” *wayland-protocols*,
 `color-management-v1.xml`, distributed with `wayland-protocols` Rust crate

@@ -6,9 +6,10 @@ in [PROGRESS](PROGRESS.md).
 ## Scope
 
 - **Decided:** The next milestone is a packaged, user-testable proof of concept.
-  Current image quality and editing workflows are accepted. Missing modules,
-  broader reference-based validation and SpyderX measurements are not blockers.
-  Prioritize installation, launch and a complete RAW-to-TIFF smoke test.
+  Scene-illuminant white balance and orientation are required additions. Other
+  current image-quality and editing limitations are accepted; broader reference
+  validation and SpyderX measurements are not blockers. Verify installation,
+  launch and a complete RAW-to-TIFF smoke test.
 - **Requirement:** Correct display color on Wayland, macOS and Windows. Linux is
   the primary development platform; X11 is unsupported. A replacement GUI must
   cover all three color paths.
@@ -105,6 +106,77 @@ in [PROGRESS](PROGRESS.md).
 
 ## Future processing contracts
 
+- **Tentative:** The refreshed ACES comparison leaves one required processing
+  feature for the first usable prototype: editable scene-illuminant adaptation.
+  Normalization, coupled sample/clipping gains, highlight reconstruction,
+  demosaic, camera conversion, orientation, exposure, sigmoid and ICC TIFF output
+  are implemented. Orientation still needs the user's interactive acceptance;
+  distribution still needs clean-desktop checks for each advertised platform.
+  This assessment uses the agreed supported-Bayer/SDR scope, not ACES conformance.
+- **Tentative:** WB acceptance should cover an as-shot starting point, manual
+  illuminant adjustment and neutral sampling before sigmoid, consistent sample
+  and clipping coordinates, persisted controls and matching preview/export.
+  CAT16 remains the proposed implementation, not an ACES requirement. ACES 2's
+  simplified Hellwig model belongs to its output rendering [1].
+- **Decided:** Keep exposure scaling distinct from sensor-white normalization.
+  The current RAW denominator and zero-EV default do not establish ACES's
+  calibrated 18% scene-reflector scale [7]; sigmoid's 0.18 pivot does not supply
+  that calibration. Manual exposure suffices for the prototype. Automatic
+  baseline/exposure normalization and cross-camera matching remain follow-ups.
+- **Tentative:** The ACES comparison supports keeping the current Rec.2020/D65
+  pipeline for the packaged proof of concept. ACES adoption is a separate scope:
+  changing primaries alone does not supply a calibrated input transform or the
+  ACES rendering transform. Existing image-quality acceptance still applies.
+- **Requirement:** Add scene-illuminant chromatic adaptation and photo orientation
+  for the first usable prototype. As-shot gains remain the only current WB source.
+- **Tentative:** Use CAT16 for scene adaptation, with a fixed camera-reference
+  normalization before demosaic and user-controlled adaptation in colorimetric
+  RGB before rendering. Derive the initial illuminant from as-shot metadata;
+  offer manual chromaticity/temperature-tint and neutral sampling. Keep clipping
+  levels and camera-matrix coordinates consistent with the reference gains.
+  Do not append absolute scene adaptation to an already as-shot-corrected image.
+  Darktable documents this separation [4]. Full CAM16/Hellwig appearance
+  modeling, mixed-illuminant masks and chart fitting remain separate work [5], [6].
+- **Decided:** Carry EXIF orientation in capture metadata and its description so
+  contracts can determine the oriented extent before allocation. Decode LibRaw's
+  transpose/flip convention at the RAW boundary; unknown orientation means
+  identity. Apply rotation/reflection once after camera-to-color conversion in
+  the starting template, preserving sensor coordinates through Bayer processing.
+  The Orientation parameter defaults to metadata and may replace it with any of
+  the eight EXIF transforms. Missing metadata means identity. Shared schema
+  controls provide the GUI override without a duplicate frontend declaration.
+  Preview and export consume the same oriented image; TIFF omits the original
+  orientation tag to prevent a second transform. Graphs are not upgraded automatically.
+- **Decided:** LittleCMS with the selected rendering intent is sufficient for
+  prototype output. Additional target-gamut rendering is deferred. ACES 2
+  integrates target-aware tone/chroma/gamut mapping into rendering [1], while its
+  reference gamut compression addresses source colors [2]; neither is required
+  for this milestone.
+- **Decided:** Missing camera calibration is a supported-input limitation, not a
+  requirement to invent a matrix or build a camera-profile database. Preserve
+  the distinction between absent calibration and extraction failures: the known
+  Sigma DNGs contain ColorMatrix tags despite zero LibRaw `cam_xyz` output.
+- **Tentative:** Explain the recommended scene-adjustment → rendering → encoding
+  order in node help/templates without imposing an artistic-order graph check.
+  Identity encoding alone does not imply scene-referred values after sigmoid.
+  Negative and above-one color coordinates are not inherently invalid; ACEScg
+  explicitly permits them [3]. Existing consumer contracts still apply.
+
+- **Decided:** RAW exposes Bayer and one owned CaptureMetadata value. It contains
+  common capture/lens/GPS/sensor fields, native WB/color/black/white calibration,
+  and optional derived site gains and camera matrix with explicit interpretations.
+  Missing usable calibration does not hide descriptive metadata or mosaic data.
+  Private vendor maker-note structures are outside the requested scope.
+- **Decided:** Bayer site gains update samples and clipping levels in one node;
+  both outputs declare the same target coordinates. Camera conversion reads its
+  matrix from metadata. Capture facts stay immutable and are not interpreted as
+  the geometry of a transformed image. Existing prototype graphs using the old
+  calibration ports require recreation; no automatic migration is provided.
+- **Decided:** Use rkyv 0.8 for the metadata payload's required byte transport,
+  with byte validation and unaligned archives. CPU consumers share owned values;
+  kernels receive only their small coefficient buffers. This is not persistence
+  or a GPU shader struct. Bincode was rejected because it is unmaintained.
+
 - **Requirement:** Sensor calibration needs matching sensor sites, CFA phase and
   sample units. Separate decoding from black subtraction/normalization/crop, or
   retain enough information to account for them. Spatial gains may require
@@ -119,6 +191,46 @@ in [PROGRESS](PROGRESS.md).
   from restricting the filter's samples.
 - **Requirement:** Capture provenance and model applicability stay separate.
   Processing must update or discard metadata whose assumptions it changes.
+- **Tentative:** Lens correction needs lens identification, camera crop factor
+  and correction profiles beyond capture metadata; vignetting may also use
+  exposure focus distance, which is not the lens minimum focus distance. Common
+  LibRaw lens fields are retained, preserving unknown values. Keep image-to-capture geometry separate from capture
+  facts; place correction before Orientation in the recommended template, or
+  account explicitly for transformed coordinates. Metadata export alone cannot
+  supply a distortion/TCA/vignetting model.
 - **Decided:** Multiple-frame operations consume decoded-value collections.
   Alignment may be internal or reusable; no graph-level frame-stack abstraction
   is needed.
+
+### ACES review references
+
+[1] Academy of Motion Picture Arts and Sciences, “Overview of Output Transform
+Structure,” ACES Documentation, Sep. 10, 2025. [Online]. Available:
+<https://docs.acescentral.com/system-components/output-transforms/technical-details/rendering-overview/>.
+Accessed: Oct. 10, 2026.
+
+[2] Academy of Motion Picture Arts and Sciences, “Reference Gamut Compression,”
+ACES Documentation, Sep. 10, 2025. [Online]. Available:
+<https://docs.acescentral.com/rgc/overview/>. Accessed: Oct. 10, 2026.
+
+[3] Academy of Motion Picture Arts and Sciences, “ACEScg — A Working Space for CGI
+Render and Compositing,” ACES Documentation, Sep. 10, 2025. [Online]. Available:
+<https://docs.acescentral.com/encodings/acescg/>. Accessed: Oct. 10, 2026.
+
+[4] darktable contributors, “Color calibration,” darktable development user
+manual. [Online]. Available:
+<https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/color-calibration/>.
+Accessed: Oct. 10, 2026.
+
+[5] C. Li et al., “Comprehensive color solutions: CAM16, CAT16, and CAM16-UCS,”
+Color Research & Application, vol. 42, no. 6, pp. 703–718, 2017,
+doi: <https://doi.org/10.1002/col.22131>.
+
+[6] L. Hellwig and M. D. Fairchild, “Brightness, lightness, colorfulness, and
+chroma in CIECAM02 and CAM16,” Color Research & Application, vol. 47, no. 5,
+pp. 1083–1095, 2022, doi: <https://doi.org/10.1002/col.22792>.
+
+[7] S. Tobenkin, “IDTs: How Do They Work,” ACESCentral, Apr. 15, 2020.
+[Online]. Available:
+<https://acescentral.com/knowledge-base-2/idts-how-do-they-work/>.
+Accessed: Oct. 10, 2026.

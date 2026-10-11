@@ -4,6 +4,67 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
 
+- Reverted the unfinished auto-exposure button and action-result changes at the
+  user's request. Exposure remains manual. Retained the completed orientation,
+  unified RAW metadata/calibration and ACES review for commit.
+- Rechecked official ACES input-transform, ACEScg, reference-gamut-compression,
+  output-rendering and display-encoding docs against the current implementation.
+  Scene-illuminant WB remains the required processing feature; orientation and
+  unified calibration are implemented, with user integration still pending.
+  Sigmoid plus ICC output remains the accepted prototype rendering path.
+  Distinguished manual exposure from calibrated scene exposure, and retained
+  packaging/platform checks as separate delivery gaps. Updated DESIGN/TODO;
+  source review only, no new tests, GUI run or hosted CI verification.
+- Consolidated RAW calibration and common capture/lens/GPS/sensor metadata into
+  one owned output. Bayer site gains now updates samples and clipping levels
+  together; camera conversion, orientation and TIFF read the shared metadata.
+  Existing prototype graphs using removed ports/nodes require the new template.
+- Replaced the provisional bincode codec with validated rkyv 0.8 archives after
+  checking its unmaintained status. Tests cover malformed buffers, exact floating
+  bits, native and derived calibration, missing gains and coordinate mismatches.
+  Sony lens/focal metadata matched ExifTool; geometry and common fields pass the
+  decoder fixture checks. No private maker-note structures or correction profiles
+  were added; TIFF's exported field subset is unchanged.
+- CPU workspace checks passed (142 tests, 15 device tests ignored), plus four
+  doctests. Five selected-backend WGPU checks passed, including combined gains,
+  metadata transport, orientation and existing algorithm references. Strict
+  workspace Clippy, formatting and whitespace checks passed. Interactive
+  integration remains assigned to the user; no GUI session was exercised here.
+
+- Audited capture metadata versus TIFF output for future lens correction. RAW
+  exposes camera make/model, ISO, shutter, aperture, focal length, timestamp,
+  capture-time text and orientation; TIFF writes the descriptive subset and ICC
+  profile, omitting original orientation. LibRaw lens fields are not copied by
+  the shim. Recorded missing lens identification, crop-factor/profile resolution
+  and focus-distance/geometry needs against the Lensfun API. Source review only;
+  no processing changes or tests.
+- Implemented metadata-driven orientation with the requested compute subagent.
+  RAW decoding now carries LibRaw orientation as EXIF 1–8. The Geometry node
+  permutes RGB samples with one CubeCL kernel; its generated dropdown replaces
+  metadata with an explicit transform. The core/GUI starting template places it
+  after camera-color conversion, shared by views and export. TIFF retains the
+  evaluated pixel order without copying capture orientation.
+  CPU-backed workspace checks pass: 138 tests, 14 opt-in ignored, and four
+  doctests. Orientation permutations also pass explicitly on WGPU. Coverage
+  includes all eight transforms, single-row/column images, metadata transport,
+  missing metadata, overrides, dropdown interaction, project reopening and
+  omission of the TIFF orientation tag. Strict workspace Clippy, formatting and
+  whitespace checks pass. Interactive integration testing is left to the user.
+- User refined prototype scope: require scene-illuminant adaptation and
+  orientation; accept LittleCMS/rendering intent and unavailable camera
+  calibration as an input limitation. Compared darktable's CAT16 workflow with
+  CAM16/Hellwig appearance modeling. Proposed separate camera-reference gains
+  and scene adaptation, plus shared RGB orientation; implementation remains open.
+  Kept known DNG extraction failures distinct from absent matrices. Documentation
+  only; no processing changes or test run. Whitespace check passed.
+- Reviewed official ACES input, output, ACEScg and gamut-compression guidance
+  against the current RAW template, normalization/matrix, sigmoid, preview,
+  TIFF, save and distribution paths. The main processing stages exist; editable
+  WB, orientation and target-aware gamut rendering remain follow-ups. Packaging,
+  clean-desktop RAW-to-TIFF use and declared platform support remain the accepted
+  proof-of-concept gates. Recorded proposals without changing that milestone.
+  Source/documentation review only: no new image measurements, GUI exercise,
+  hosted CI verification or test run.
 - Diagnosed CI run 38046592913: CPU-backed GUI evaluation timed out on all
   three platforms after scope migration. Enabling `drip/cpu` alone does not
   select that runtime for GUI tests; CI explicitly sets `DRIP_BACKEND=cpu`.

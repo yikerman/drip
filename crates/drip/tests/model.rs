@@ -34,6 +34,14 @@ fn identity() -> [[f32; 3]; 3] {
     [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
 }
 
+fn calibration(dag: &mut Dag, source: Camera) -> Output<CaptureMetadata> {
+    let data = CaptureData {
+        matrix: Some(CameraCalibration { source, target: color(), values: identity() }),
+        ..Default::default()
+    };
+    node::source::<CaptureMetadata>(dag, MetadataDesc::of(&data), data).unwrap()
+}
+
 fn copy_contract(
     _: &drip::runtime::GlobalContext,
     _: &(),
@@ -72,21 +80,17 @@ fn mismatches_are_rejected_before_runtime_exists() {
     .unwrap();
     let mut wrong = camera();
     wrong.coordinates = "other camera".into();
-    let matrix =
-        node::source::<CMatrix>(&mut d, MatrixDesc { source: wrong, target: color() }, identity())
-            .unwrap();
+    let matrix = calibration(&mut d, wrong);
     let n = node::camera_to_rgb::add(&mut d, ()).unwrap();
     d.connect(camera_image, n.image).unwrap();
     assert!(
-        d.connect(matrix, n.matrix).unwrap_err().to_string().contains("differs from matrix source")
+        d.connect(matrix, n.metadata)
+            .unwrap_err()
+            .to_string()
+            .contains("differs from matrix source")
     );
-    let valid = node::source::<CMatrix>(
-        &mut d,
-        MatrixDesc { source: camera(), target: color() },
-        identity(),
-    )
-    .unwrap();
-    d.connect(valid, n.matrix).unwrap(); // failed edit left the input free
+    let valid = calibration(&mut d, camera());
+    d.connect(valid, n.metadata).unwrap(); // failed edit left the input free
     let exposure = node::exposure::add(&mut d, node::Exposure { ev: 0. }).unwrap();
     assert!(d.connect_ids(camera_image.id(), exposure.image.id()).is_err());
     d.connect(n.output, exposure.image).unwrap();
@@ -340,24 +344,40 @@ fn data_dependent_checks_remain_at_eval() {
 }
 
 fn device_chain(runtime: RuntimeContext) {
-    let metadata = drip_raw::Metadata {
-        iso: f32::from_bits(0x7fc00012),
-        shutter: -0.0,
-        aperture: 2.8,
-        focal_length: 50.0,
-        timestamp: -1234567,
-        make: "測試".into(),
-        model: "x".into(),
-        datetime: Vec::new(),
+    let metadata = CaptureData {
+        capture: drip_raw::Metadata {
+            iso: f32::from_bits(0x7fc00012),
+            shutter: -0.0,
+            aperture: 2.8,
+            focal_length: 50.0,
+            timestamp: -1234567,
+            make: "測試".into(),
+            model: "x".into(),
+            datetime: Vec::new(),
+            orientation: 6,
+            ..Default::default()
+        },
+        ..Default::default()
     };
     let desc = MetadataDesc::of(&metadata);
     let device = CaptureMetadata::upload(&desc, &metadata, &runtime).unwrap();
     let restored = CaptureMetadata::download(&desc, &device, &runtime).unwrap();
-    assert_eq!(restored.iso.to_bits(), metadata.iso.to_bits());
-    assert_eq!(restored.shutter.to_bits(), metadata.shutter.to_bits());
+    assert_eq!(restored.capture.iso.to_bits(), metadata.capture.iso.to_bits());
+    assert_eq!(restored.capture.shutter.to_bits(), metadata.capture.shutter.to_bits());
+    assert_eq!(restored.capture.orientation, metadata.capture.orientation);
     assert_eq!(
-        (restored.make, restored.model, restored.datetime, restored.timestamp),
-        (metadata.make, metadata.model, metadata.datetime, metadata.timestamp)
+        (
+            restored.capture.make,
+            restored.capture.model,
+            restored.capture.datetime,
+            restored.capture.timestamp
+        ),
+        (
+            metadata.capture.make,
+            metadata.capture.model,
+            metadata.capture.datetime,
+            metadata.capture.timestamp
+        )
     );
     let mut d = Dag::new();
     let source = node::source::<Bayer>(
@@ -370,12 +390,7 @@ fn device_chain(runtime: RuntimeContext) {
         vec![1.; 15],
     )
     .unwrap();
-    let matrix = node::source::<CMatrix>(
-        &mut d,
-        MatrixDesc { source: camera(), target: color() },
-        identity(),
-    )
-    .unwrap();
+    let matrix = calibration(&mut d, camera());
     let preview = node::bayer_preview::add(&mut d, ()).unwrap();
     let convert = node::camera_to_rgb::add(&mut d, ()).unwrap();
     let exposure = node::exposure::add(&mut d, node::Exposure { ev: 1. }).unwrap();
@@ -383,7 +398,7 @@ fn device_chain(runtime: RuntimeContext) {
     let after = node::exposure::add(&mut d, node::Exposure { ev: -2. }).unwrap();
     d.connect(source, preview.image).unwrap();
     d.connect(preview.output, convert.image).unwrap();
-    d.connect(matrix, convert.matrix).unwrap();
+    d.connect(matrix, convert.metadata).unwrap();
     d.connect(convert.output, exposure.image).unwrap();
     d.connect(exposure.output, island.image).unwrap();
     d.connect(island.output, after.image).unwrap();
@@ -396,12 +411,12 @@ fn device_chain(runtime: RuntimeContext) {
         }
     }
     assert_eq!(result.statistics.nodes, 7);
-    assert_eq!(result.statistics.uploads, 3);
+    assert_eq!(result.statistics.uploads, 2);
     assert_eq!(result.statistics.downloads, 2);
     let resident =
         eval.evaluate::<Device<ColorRgb>>(&d, &Default::default(), exposure.output).unwrap();
     assert_eq!(resident.statistics.downloads, 0);
-    assert_eq!(resident.statistics.uploads, 2);
+    assert_eq!(resident.statistics.uploads, 1);
 
     let observer = sink::add(&mut d, ()).unwrap();
     d.connect(after.output, observer.image).unwrap();

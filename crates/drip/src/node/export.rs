@@ -88,13 +88,13 @@ fn write_image<C: ColorType>(
 where
     [C::Inner]: TiffValue,
 {
-    let exif = metadata.map(|m| write_exif(tiff, m)).transpose()?;
+    let exif = metadata.map(|m| write_exif(tiff, &m.capture)).transpose()?;
     let mut encoder = tiff.new_image::<C>(extent.width, extent.height)?;
     let ifd = encoder.encoder();
     ifd.write_tag(Tag::IccProfile, Undefined(icc))?;
     if let Some((m, exif)) = metadata.zip(exif) {
-        write_text(ifd, Tag::Make, &m.make)?;
-        write_text(ifd, Tag::Model, &m.model)?;
+        write_text(ifd, Tag::Make, &m.capture.make)?;
+        write_text(ifd, Tag::Model, &m.capture.model)?;
         ifd.write_tag(Tag::ExifDirectory, exif)?;
     }
     encoder.write_data(data)
@@ -102,10 +102,11 @@ where
 
 /// Writes the capture settings to an Exif IFD \[10\] and returns its offset for
 /// the image IFD's pointer. LibRaw reports unknown values as zero or empty, and
-/// those tags are omitted. Orientation is not copied: pixels stay unrotated.
+/// those tags are omitted. Orientation is not copied: geometry nodes determine
+/// the stored pixel orientation, independently of the original capture metadata.
 ///
 /// \[10\] CIPA DC-008-2019, Exif 2.32. Full reference in `THIRD_PARTY.md`.
-fn write_exif(tiff: &mut Tiff, m: &CaptureData) -> tiff::TiffResult<u32> {
+fn write_exif(tiff: &mut Tiff, m: &drip_raw::Metadata) -> tiff::TiffResult<u32> {
     const EXPOSURE_TIME: u16 = 0x829a;
     const F_NUMBER: u16 = 0x829d;
     const PHOTOGRAPHIC_SENSITIVITY: u16 = 0x8827;

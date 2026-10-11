@@ -79,3 +79,23 @@ an included backend explicitly if calling `RuntimeContext::from_env()`.
 
 Run the shared algorithm checks on any configured runtime with
 `DRIP_BACKEND=vulkan cargo test -p drip --features vulkan selected_backend -- --ignored`.
+
+## RAW metadata
+
+RAW exposes `mosaic: Bayer` and `metadata: CaptureMetadata`. The owned metadata
+contains common LibRaw capture settings, lens identifiers, optional GPS, sensor
+geometry, native WB/black/white/color calibration and derived Bayer/matrix
+calibration. Unknown native values retain LibRaw's sentinels. Vendor-specific
+maker-note structures and correction profiles are not included.
+
+`Bayer site gains` consumes that metadata and produces both adjusted Bayer and
+matching BayerLevels. Camera conversion and orientation read the same metadata.
+Capture facts remain unchanged; processing outputs declare their own coordinates.
+The minimum lens focus distance describes the lens, not this exposure's focus.
+TIFF continues to write the selected EXIF subset and ICC profile.
+
+Metadata uses a validated rkyv archive for explicit device transport; CPU edges
+share the owned value. The archive is internal, not a project file format.
+Projects wired to the former separate RAW calibration ports must be recreated
+with the current template; those ports and the separate clipping-gains node were
+removed.

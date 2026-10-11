@@ -7,17 +7,31 @@ fn fixture() -> PathBuf {
 #[test]
 fn decodes_a_bayer_raw() {
     let raw = drip_raw::decode(&fixture()).unwrap();
-    assert_eq!(raw.data.len(), raw.width * raw.height);
-    let mut colors: Vec<_> = raw.cfa.concat();
+    assert_eq!(raw.data.len(), raw.metadata.sensor.width * raw.metadata.sensor.height);
+    let mut colors: Vec<_> = raw.metadata.calibration.cfa.concat();
     colors.sort();
     assert_eq!(colors, [0, 1, 2, 3], "RGBG Bayer");
-    assert!(raw.maximum > raw.black + raw.channel_black.iter().max().unwrap());
-    assert!(raw.as_shot[..3].iter().all(|&m| m > 0.0));
-    assert!(raw.xyz_to_cam.iter().flatten().any(|&v| v != 0.0));
+    assert!(
+        raw.metadata.calibration.maximum
+            > raw.metadata.calibration.black
+                + raw.metadata.calibration.channel_black.iter().max().unwrap()
+    );
+    assert!(raw.metadata.calibration.as_shot[..3].iter().all(|&m| m > 0.0));
+    assert!(raw.metadata.calibration.xyz_to_cam.iter().flatten().any(|&v| v != 0.0));
     assert_eq!(
         (raw.metadata.make.as_slice(), raw.metadata.model.as_slice()),
         (b"Sony".as_slice(), b"ILCE-7RM3".as_slice())
     );
+    assert_eq!(raw.metadata.lens.model, b"E 28-200mm F2.8-5.6 A071");
+    assert_eq!(raw.metadata.lens.focal_length_35mm, 28.);
+    let sensor = &raw.metadata.sensor;
+    assert!(sensor.raw_width >= sensor.left_margin + sensor.width as u32);
+    assert!(sensor.raw_height >= sensor.top_margin + sensor.height as u32);
+    assert_eq!(sensor.pixel_aspect, 1.);
+    assert_eq!(raw.metadata.orientation, 1);
+    for text in raw.metadata.text_fields() {
+        assert!(std::str::from_utf8(text).is_ok());
+    }
     assert_eq!(raw.metadata.datetime, b"2026:05:25 08:35:00", "EXIF wall-clock time");
 }
 

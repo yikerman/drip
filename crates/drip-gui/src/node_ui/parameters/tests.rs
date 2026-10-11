@@ -13,6 +13,22 @@ struct State {
 }
 
 #[test]
+fn orientation_dropdown_selects_override_and_returns_to_metadata() {
+    let node = crate::model::Registry.get("geometry.orientation").unwrap();
+    let param = node.param("orientation").unwrap();
+    let mut h = harness(param.kind, (node.defaults)()["orientation"].clone());
+    for (label, value) in
+        [("Rotate 90° clockwise", "rotate_90_clockwise"), ("From metadata", "from_metadata")]
+    {
+        h.get_by_role(egui::accesskit::Role::ComboBox).click();
+        h.run();
+        h.get_by_label(label).click();
+        h.run();
+        assert_eq!(h.state().value, value);
+    }
+}
+
+#[test]
 fn enum_controls_show_only_active_fields_and_restore_variant_edits() {
     let mut h = harness(super::super::preview::Mode::None.schema(), json!("none"));
     assert!(h.query_by_label("Output profile").is_none());

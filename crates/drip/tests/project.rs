@@ -35,10 +35,18 @@ fn tiff_profile_extent_and_pixels_survive_encoding() {
     };
     let profile =
         drip::node::profile::Output::load(&Default::default(), &Default::default()).unwrap();
+    let metadata = CaptureData {
+        capture: drip_raw::Metadata { orientation: 6, ..Default::default() },
+        ..Default::default()
+    };
     let bytes =
-        drip::node::export::tiff(&desc, &[[0.; 3], [1.; 3]], &profile, false, None).unwrap();
+        drip::node::export::tiff(&desc, &[[0.; 3], [1.; 3]], &profile, false, Some(&metadata))
+            .unwrap();
     let mut decoder = tiff::decoder::Decoder::new(std::io::Cursor::new(bytes)).unwrap();
     assert_eq!(decoder.dimensions().unwrap(), (2, 1));
+    // Geometry has already determined stored pixel order. The capture tag must
+    // not ask another viewer to rotate the exported result a second time.
+    assert!(decoder.get_tag(tiff::tags::Tag::Orientation).is_err());
     assert!(!decoder.get_tag_u8_vec(tiff::tags::Tag::IccProfile).unwrap().is_empty());
     let tiff::decoder::DecodingResult::U16(pixels) = decoder.read_image().unwrap() else {
         panic!("expected u16")

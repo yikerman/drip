@@ -16,6 +16,7 @@ struct Info {
     width: c_int,
     height: c_int,
     cfa: [[c_int; 2]; 2],
+    flip: c_int,
     black: c_uint,
     maximum: c_uint,
     cblack: [c_uint; CBLACK_SIZE],
@@ -29,6 +30,61 @@ struct Info {
     focal_len: f32,
     timestamp: c_longlong,
     datetime: [c_char; 20],
+    raw_width: u32,
+    raw_height: u32,
+    left_margin: u32,
+    top_margin: u32,
+    pixel_aspect: f64,
+    artist: [c_char; 64],
+    description: [c_char; 512],
+    shot_order: u32,
+    body_serial: [c_char; 64],
+    internal_body_serial: [c_char; 64],
+    lens_make: [c_char; 128],
+    lens_model: [c_char; 128],
+    lens_serial: [c_char; 128],
+    lens_internal_serial: [c_char; 128],
+    lens_id: u64,
+    lens_maker_note_model: [c_char; 128],
+    lens_min_focal: f32,
+    lens_max_focal: f32,
+    lens_max_aperture_wide: f32,
+    lens_max_aperture_tele: f32,
+    focal_length_35mm: f32,
+    min_focus_distance: f32,
+    lens_mount: u32,
+    camera_mount: u32,
+    lens_format: u32,
+    camera_format: u32,
+    teleconverter: [c_char; 128],
+    teleconverter_id: u64,
+    adapter: [c_char; 128],
+    adapter_id: u64,
+    attachment: [c_char; 128],
+    attachment_id: u64,
+    latitude: [f32; 3],
+    longitude: [f32; 3],
+    gps_timestamp: [f32; 3],
+    altitude: f32,
+    latitude_ref: u8,
+    longitude_ref: u8,
+    altitude_ref: u8,
+    gps_status: u8,
+    gps_parsed: u8,
+    pre_mul: [f32; 4],
+    analog_balance: [f32; 4],
+    linear_max: [u32; 4],
+    rgb_cam: [[f32; 4]; 3],
+    camera_matrix: [[f32; 4]; 3],
+    dng_white_level: [u32; 4],
+    dng_as_shot_neutral: [f32; 4],
+    dng_user_crop: [f32; 4],
+    baseline_exposure: f32,
+    inset_crops: [[u32; 4]; 2],
+    masked_areas: [[i32; 4]; 8],
+    shooting_modes: [i32; 7],
+    dng_default_crop: [u32; 4],
+    dng_color: [DngColor; 2],
 }
 
 unsafe extern "C" {
@@ -48,64 +104,20 @@ unsafe extern "C" {
     fn drip_free(p: *mut c_void);
 }
 
-/// The visible area of a Bayer raw as stored by the camera, before any
-/// processing, with what is needed to interpret it.
+mod metadata;
+pub use metadata::*;
+
+/// Visible Bayer samples in sensor order and their owned capture metadata.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Raw {
-    pub width: usize,
-    pub height: usize,
-    /// Row-major sensor values.
     pub data: Vec<u16>,
-    /// Color index (0 R, 1 G, 2 B, 3 second G) at `[row % 2][col % 2]`.
-    pub cfa: [[u8; 2]; 2],
-    /// The black level at (row, col) is
-    /// `black + channel_black[cfa color] + pattern.at(row, col)`.
-    pub black: u32,
-    pub channel_black: [u32; 4],
-    pub pattern: BlackPattern,
-    /// Sensor saturation level.
-    pub maximum: u32,
-    /// Maps CIE XYZ (D65) to camera RGB; LibRaw calls it `cam_xyz`.
-    pub xyz_to_cam: [[f32; 3]; 3],
-    /// As-shot white balance multipliers per color index; any may be 0 if unknown.
-    pub as_shot: [f32; 4],
     pub metadata: Metadata,
 }
 
-/// A black level offset repeating over `height` × `width` sites; empty if none.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct BlackPattern {
-    pub height: usize,
-    pub width: usize,
-    pub values: Vec<u32>,
-}
-
-impl BlackPattern {
-    pub fn at(&self, row: usize, col: usize) -> u32 {
-        if self.values.is_empty() {
-            0
-        } else {
-            self.values[row % self.height * self.width + col % self.width]
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Metadata {
-    /// UTF-8 bytes, normalized at decode.
-    pub make: Vec<u8>,
-    /// UTF-8 bytes, normalized at decode.
-    pub model: Vec<u8>,
-    pub iso: f32,
-    /// Seconds.
-    pub shutter: f32,
-    pub aperture: f32,
-    /// Millimeters.
-    pub focal_length: f32,
-    /// Unix time.
-    pub timestamp: i64,
-    /// Capture time as the camera's EXIF `YYYY:MM:DD HH:MM:SS`; empty if unknown.
-    pub datetime: Vec<u8>,
+// LibRaw 0.22.2 metadata/tiff.cpp maps EXIF orientation to transpose/flip bits.
+// Invert that convention here; unknown orientation leaves the sensor order intact.
+fn exif_orientation(flip: c_int) -> u8 {
+    usize::try_from(flip).ok().and_then(|i| [1, 2, 4, 3, 5, 8, 6, 7].get(i).copied()).unwrap_or(1)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -192,16 +204,7 @@ pub fn decode(path: &Path) -> Result<Raw, Error> {
         unsafe { CStr::from_ptr(s.as_ptr()) }.to_string_lossy().trim().as_bytes().to_vec()
     };
     Ok(Raw {
-        width,
-        height,
         data,
-        cfa: info.cfa.map(|row| row.map(|color| color as u8)),
-        black: info.black,
-        channel_black: [c[0], c[1], c[2], c[3]],
-        pattern: BlackPattern { height: rows, width: cols, values: c[6..6 + rows * cols].to_vec() },
-        maximum: info.maximum,
-        xyz_to_cam: [info.cam_xyz[0], info.cam_xyz[1], info.cam_xyz[2]],
-        as_shot: info.cam_mul,
         metadata: Metadata {
             make: text(&info.make),
             model: text(&info.model),
@@ -211,6 +214,82 @@ pub fn decode(path: &Path) -> Result<Raw, Error> {
             focal_length: info.focal_len,
             timestamp: info.timestamp,
             datetime: text(&info.datetime),
+            orientation: exif_orientation(info.flip),
+            artist: text(&info.artist),
+            description: text(&info.description),
+            shot_order: info.shot_order,
+            body_serial: text(&info.body_serial),
+            internal_body_serial: text(&info.internal_body_serial),
+            shooting_modes: info.shooting_modes,
+            sensor: Sensor {
+                width,
+                height,
+                raw_width: info.raw_width,
+                raw_height: info.raw_height,
+                left_margin: info.left_margin,
+                top_margin: info.top_margin,
+                pixel_aspect: info.pixel_aspect,
+                inset_crops: info.inset_crops,
+                masked_areas: info.masked_areas,
+            },
+            calibration: Calibration {
+                cfa: info.cfa.map(|row| row.map(|color| color as u8)),
+                black: info.black,
+                channel_black: [c[0], c[1], c[2], c[3]],
+                pattern: BlackPattern {
+                    height: rows,
+                    width: cols,
+                    values: c[6..6 + rows * cols].to_vec(),
+                },
+                maximum: info.maximum,
+                linear_max: info.linear_max,
+                xyz_to_cam: info.cam_xyz,
+                as_shot: info.cam_mul,
+                reference_gains: info.pre_mul,
+                analog_balance: info.analog_balance,
+                rgb_cam: info.rgb_cam,
+                camera_matrix: info.camera_matrix,
+                dng_color: info.dng_color,
+                dng_white_level: info.dng_white_level,
+                dng_as_shot_neutral: info.dng_as_shot_neutral,
+                dng_default_crop: info.dng_default_crop,
+                dng_user_crop: info.dng_user_crop,
+                baseline_exposure: info.baseline_exposure,
+            },
+            lens: Lens {
+                make: text(&info.lens_make),
+                model: text(&info.lens_model),
+                serial: text(&info.lens_serial),
+                internal_serial: text(&info.lens_internal_serial),
+                id: info.lens_id,
+                maker_note_model: text(&info.lens_maker_note_model),
+                min_focal: info.lens_min_focal,
+                max_focal: info.lens_max_focal,
+                max_aperture_at_min_focal: info.lens_max_aperture_wide,
+                max_aperture_at_max_focal: info.lens_max_aperture_tele,
+                focal_length_35mm: info.focal_length_35mm,
+                min_focus_distance: info.min_focus_distance,
+                lens_mount: info.lens_mount,
+                camera_mount: info.camera_mount,
+                lens_format: info.lens_format,
+                camera_format: info.camera_format,
+                teleconverter: text(&info.teleconverter),
+                teleconverter_id: info.teleconverter_id,
+                adapter: text(&info.adapter),
+                adapter_id: info.adapter_id,
+                attachment: text(&info.attachment),
+                attachment_id: info.attachment_id,
+            },
+            gps: (info.gps_parsed != 0).then_some(Gps {
+                latitude: info.latitude,
+                longitude: info.longitude,
+                timestamp: info.gps_timestamp,
+                altitude: info.altitude,
+                latitude_ref: info.latitude_ref,
+                longitude_ref: info.longitude_ref,
+                altitude_ref: info.altitude_ref,
+                status: info.gps_status,
+            }),
         },
     })
 }
@@ -233,5 +312,21 @@ pub fn reference(path: &Path) -> Result<(usize, usize, Vec<[u16; 3]>), Error> {
         let pixels = std::slice::from_raw_parts(rgb.cast::<[u16; 3]>(), width * height).to_vec();
         drip_free(rgb.cast());
         Ok((width, height, pixels))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn libraw_orientation_maps_to_all_exif_transforms() {
+        for (exif, flip) in [(1, 0), (2, 1), (3, 3), (4, 2), (5, 4), (6, 6), (7, 7), (8, 5)] {
+            assert_eq!(exif_orientation(flip), exif);
+        }
+        for unknown in [-1, 8, 90] {
+            assert_eq!(exif_orientation(unknown), 1);
+        }
+        assert_eq!(Metadata::default().orientation, 1);
     }
 }

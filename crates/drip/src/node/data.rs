@@ -24,17 +24,17 @@ impl Extent {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Camera {
     pub coordinates: String,
     pub scale: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum Encoding {
     Identity,
     Srgb,
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Color {
     pub space: String,
     pub encoding: Encoding,
@@ -96,7 +96,7 @@ impl<I: Interpretation> Payload for Rgb<I> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MatrixDesc<F, T> {
     pub source: F,
     pub target: T,
@@ -126,7 +126,7 @@ impl<F: Interpretation, T: Interpretation> Payload for Matrix3<F, T> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum BayerPhase {
     Rggb,
     Grbg,
@@ -196,22 +196,11 @@ impl<D: Interpretation, const N: usize> Payload for Coefficients<D, N> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct BayerGainDesc {
-    pub phase: BayerPhase,
-    pub source: Camera,
-    pub target: Camera,
-}
-impl Interpretation for BayerGainDesc {
-    fn validate(&self) -> Result<()> {
-        self.source.validate()?;
-        self.target.validate()
-    }
-}
-pub type BayerGains = Coefficients<BayerGainDesc, 4>;
-
 mod metadata;
-pub use metadata::{CaptureData, CaptureMetadata, MetadataDesc};
+pub use metadata::{
+    BayerCalibration, BayerCalibrationDesc, CameraCalibration, CaptureData, CaptureMetadata,
+    MetadataDesc, SiteGains,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BayerLevelDesc {

@@ -7,9 +7,11 @@ contracts. Graph edits validate contracts before committing. Evaluation runs
 the requested dependency subgraph and owns transfers between host and device.
 Intermediate image results are not cached across evaluations.
 
-The current RAW path is Bayer normalization, independent as-shot gains and
-camera matrix outputs, opposed highlight reconstruction, RCD demosaic, matrix
-conversion, exposure, and sigmoid.
+The current RAW path is Bayer normalization, as-shot gains applied to samples
+and clipping levels together, opposed highlight reconstruction, RCD demosaic,
+camera matrix conversion, exposure, and sigmoid. RAW exposes pixels and one
+metadata value containing capture, lens, GPS, sensor geometry and calibration.
+Orientation follows RAW metadata after color conversion, with an explicit override.
 The GUI retains color-managed wgpu presentation, ICC proofing, diagnostic scopes,
 and TIFF export. Current decisions and validation are recorded in
 [Design](agent-docs/DESIGN.md) and [Progress](agent-docs/PROGRESS.md).
@@ -104,6 +106,13 @@ or use its gear button to open the controls in a separate window. The pop-out
 button on previews and scopes opens their views separately.
 
 The inspector describes the selected node's operation, assumptions and input/output types.
+
+**Geometry → Orientation** uses **From metadata** by default. Its **Orientation**
+dropdown can replace the camera setting with a rotation or reflection; **Identity**
+keeps the stored pixel order. The starting template connects RAW metadata and routes
+the oriented image to preview, scopes and TIFF export. Recreate older RAW graphs
+from the current template: separate calibration ports and the clipping-level
+gains node have been replaced by the unified metadata connection.
 
 Canvas gestures separate **navigation on the left button** from **modification
 on the right button**. Exploring the graph should preserve its nodes and wiring.

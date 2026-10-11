@@ -9,36 +9,55 @@ fn gain_contract(
     _: &GlobalContext,
     _: &(),
     image: Option<&BayerDesc>,
-    gains: Option<&BayerGainDesc>,
-) -> Result<(Option<BayerDesc>,)> {
-    let (Some(image), Some(gains)) = (image, gains) else {
-        return Ok((None,));
+    metadata: Option<&MetadataDesc>,
+) -> Result<(Option<BayerDesc>, Option<BayerLevelDesc>)> {
+    let (Some(image), Some(calibration)) = (image, metadata.and_then(|m| m.bayer.as_ref())) else {
+        return Ok((None, None));
     };
-    if image.phase != gains.phase || image.interpretation != gains.source {
+    if image.phase != calibration.phase || image.interpretation != calibration.source {
         return Err(Error::Contract("Bayer gain coordinates/phase do not match image".into()));
     }
+    let Some(target) = &calibration.balanced else {
+        return Ok((None, None));
+    };
     let mut d = image.clone();
-    d.interpretation = gains.target.clone();
-    Ok((Some(d),))
+    d.interpretation = target.clone();
+    Ok((Some(d), Some(BayerLevelDesc { phase: image.phase, interpretation: target.clone() })))
 }
-/// Apply four BayerGains to Bayer samples in matching response coordinates.
-/// Gains are ordered by local 2×2 site position. Output is Bayer in the gains'
-/// target interpretation. White balance is one use; no gains or CFA are inferred.
+/// Apply CaptureMetadata's site gains to Bayer samples and their clipping levels.
+/// The image must match the calibration's response coordinates and local CFA phase.
+/// Outputs are Bayer and BayerLevels in the same gain-adjusted interpretation.
+/// No gains or CFA are inferred; missing calibration prevents evaluation.
 #[crate::node(id="sensor.bayer-site-gains", name="Bayer site gains", category="Sensor",contract=gain_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),
     image: Read<'_, Device<Bayer>>,
-    gains: Read<'_, Device<BayerGains>>,
+    metadata: Read<'_, Cpu<CaptureMetadata>>,
     output: Write<'_, Device<Bayer>>,
+    levels: Write<'_, Cpu<BayerLevels>>,
 ) -> Result<()> {
+    let calibration = metadata
+        .data
+        .bayer
+        .as_ref()
+        .ok_or_else(|| Error::Contract("metadata has no Bayer calibration".into()))?;
+    let gains = &calibration
+        .gains
+        .as_ref()
+        .ok_or_else(|| Error::Contract("metadata has no Bayer site gains".into()))?
+        .values;
+    *levels.data = std::array::from_fn(|i| calibration.levels[i] * gains[i]);
+    let coefficients = DeviceBuffer::<()>::new(
+        ctx.client()?.create(cubecl::bytes::Bytes::from_elems(gains.to_vec())),
+    );
     let (count, dim) = dispatch_dims(image.desc.extent.pixels());
     kernel::bayer_gains::launch(
         ctx.client()?,
         count,
         dim,
         image.data.argument(),
-        gains.data.argument(),
+        coefficients.argument(),
         output.data.argument(),
         image.desc.extent.width as usize,
     );

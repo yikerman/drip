@@ -200,15 +200,19 @@ fn context_driven_demosaic(evaluator: &Evaluator) {
     .unwrap();
     let demosaic = node::rcd::add(&mut dag, ()).unwrap();
     dag.connect(source, demosaic.image).unwrap();
-    let matrix = node::source::<Matrix3<Camera, Color>>(
-        &mut dag,
-        MatrixDesc { source: camera, target: node::raw::working_color() },
-        [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
-    )
-    .unwrap();
+    let metadata = CaptureData {
+        matrix: Some(CameraCalibration {
+            source: camera,
+            target: node::raw::working_color(),
+            values: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
+        }),
+        ..Default::default()
+    };
+    let matrix =
+        node::source::<CaptureMetadata>(&mut dag, MetadataDesc::of(&metadata), metadata).unwrap();
     let convert = node::camera_to_rgb::add(&mut dag, ()).unwrap();
     dag.connect(demosaic.output, convert.image).unwrap();
-    dag.connect(matrix, convert.matrix).unwrap();
+    dag.connect(matrix, convert.metadata).unwrap();
     let preview = node::bayer_preview::add(&mut dag, ()).unwrap();
     dag.connect(source, preview.image).unwrap();
     let node_count = dag.nodes().count();
@@ -218,7 +222,7 @@ fn context_driven_demosaic(evaluator: &Evaluator) {
     assert_eq!(image.desc.extent, Extent { width: 32, height: 24 });
     assert_eq!(image.data.len(), 32 * 24);
     assert_eq!(image.statistics.nodes, 4); // No inserted reduction node.
-    assert_eq!(image.statistics.uploads, 2);
+    assert_eq!(image.statistics.uploads, 1);
     assert_eq!(image.statistics.downloads, 1);
     assert_eq!(dag.nodes().count(), node_count);
     assert_eq!(dag.edges().collect::<Vec<_>>(), edges);

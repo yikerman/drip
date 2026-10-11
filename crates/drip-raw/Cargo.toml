@@ -15,6 +15,9 @@ links = "raw_r"
 # LibRaw's own half-size processing, for cross-checking Drip's pipeline in tests.
 reference = []
 
+[dependencies]
+rkyv = { version = "0.8", features = ["unaligned"] }
+
 [build-dependencies]
 cc = { version = "1.2.64", features = ["parallel"] }
 cmake = "0.1"
