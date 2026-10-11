@@ -20,7 +20,11 @@ pub(crate) fn label(attrs: &[syn::Attribute], key: &str) -> syn::Result<String> 
     if let Some(attr) = attrs.iter().find(|attr| attr.path().is_ident("label")) {
         return Ok(attr.parse_args::<syn::LitStr>()?.value());
     }
+    Ok(sentence(key))
+}
+/// Sentence case for a Rust identifier: `min_ev` becomes `Min ev`.
+pub(crate) fn sentence(key: &str) -> String {
     let text = key.replace('_', " ");
     let mut chars = text.chars();
-    Ok(chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect()))
+    chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect())
 }

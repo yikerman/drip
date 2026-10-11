@@ -1,18 +1,22 @@
-//! Encode an evaluated image. File writes belong to the requesting frontend.
+//! TIFF export: an output node whose action encodes and writes its input.
 use crate::{
     Error, Result,
-    node::data::{Rec2020, Rgb, RgbDesc},
+    node::data::{CaptureMetadata, Rec2020, Rgb, RgbDesc},
     node::profile,
+    param::ParamKind,
     payload::Payload,
-    ports::Requirement,
+    ports::{Cpu, Read, Requirement},
+    resource::Resources,
+    runtime::KernelContext,
 };
+use ::tiff::encoder::colortype::{ColorType, RGB8, RGB16, RGB32Float};
+use ::tiff::encoder::compression::DeflateLevel;
+use ::tiff::encoder::{Compression, DirectoryEncoder, Rational, TiffEncoder, TiffKind, TiffValue};
+use ::tiff::tags::{Tag, Type};
 use lcms2::PixelFormat;
 use std::borrow::Cow;
 use std::io::{Cursor, Seek, Write};
-use tiff::encoder::colortype::{ColorType, RGB8, RGB16, RGB32Float};
-use tiff::encoder::compression::DeflateLevel;
-use tiff::encoder::{Compression, DirectoryEncoder, Rational, TiffEncoder, TiffKind, TiffValue};
-use tiff::tags::{Tag, Type};
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Default, crate::Choice)]
 pub enum Depth {
@@ -24,44 +28,113 @@ pub enum Depth {
     #[choice("f32")]
     F32,
 }
-
-/// Convert linear Rec.2020/D65 through the requested output profile and
-/// encode TIFF. Floating output retains the profile's floating range; integers clip.
-pub fn tiff(
-    desc: &RgbDesc,
-    pixels: &[[f32; 3]],
-    output: &profile::Output,
-    depth: Depth,
-    metadata: Option<&drip_raw::Metadata>,
-) -> Result<Vec<u8>> {
-    tiff_compressed(
-        desc,
-        pixels,
-        output,
-        depth,
-        metadata,
-        Compression::Deflate(DeflateLevel::Balanced),
-    )
+#[derive(Clone, crate::Choice)]
+pub enum CompressionMode {
+    #[choice("none")]
+    None,
+    #[choice("deflate")]
+    Deflate(DeflateSettings),
+}
+impl Default for CompressionMode {
+    fn default() -> Self {
+        Self::Deflate(DeflateSettings::default())
+    }
+}
+#[derive(Clone, Copy, Default, crate::Choice)]
+pub enum CompressionLevel {
+    #[choice("fast")]
+    Fast,
+    #[default]
+    #[choice("balanced")]
+    Balanced,
+    #[choice("best")]
+    Best,
+}
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize, crate::Parameters)]
+#[serde(deny_unknown_fields)]
+pub struct DeflateSettings {
+    /// Trade encoding speed for compression ratio without changing pixels.
+    #[param(CompressionLevel::Balanced.schema())]
+    pub level: CompressionLevel,
+}
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize, crate::Parameters)]
+#[serde(deny_unknown_fields)]
+pub struct Export {
+    /// Destination TIFF file, written at full processing detail.
+    #[label("Output file")]
+    #[param(ParamKind::Path { output: true })]
+    #[external]
+    pub path: Option<PathBuf>,
+    #[param(flatten)]
+    #[serde(flatten)]
+    pub output: profile::Settings,
+    /// u8/u16 clip to the output range; f32 retains the profile floating-point range.
+    #[param(Depth::U16.schema())]
+    pub depth: Depth,
+    /// Lossless TIFF compression, or None for an uncompressed file.
+    #[param(CompressionMode::Deflate(DeflateSettings { level: CompressionLevel::Balanced }).schema())]
+    pub compression: CompressionMode,
 }
 
-/// The same encoding with an explicit TIFF compression policy.
-pub fn tiff_compressed(
+/// Write linear Rec.2020/D65 RGB to TIFF through an RGB ICC profile.
+/// u8/u16 clip to the output range; f32 retains the profile's floating-point range.
+/// Connected capture metadata is copied when present. Export uses full processing
+/// detail, independently of preview detail. Compression is lossless.
+#[crate::node(id = "output.tiff", name = "Export TIFF", category = "Output", action = export)]
+pub fn tiff(
+    _: &KernelContext<'_>,
+    _: &Export,
+    image: Read<'_, Cpu<Rgb>, Rec2020>,
+    metadata: Option<Read<'_, Cpu<CaptureMetadata>>>,
+) -> Result<()> {
+    let _ = (image, metadata);
+    Ok(())
+}
+fn export(p: &Export, inputs: tiff::Inputs<'_>, resources: &Resources) -> Result<()> {
+    let metadata = inputs.metadata.map(|m| &**m.data);
+    write(p, inputs.image.desc, inputs.image.data, metadata, resources)
+}
+
+/// Encode and write the file named by the settings.
+pub fn write(
+    p: &Export,
     desc: &RgbDesc,
     pixels: &[[f32; 3]],
-    output: &profile::Output,
-    depth: Depth,
     metadata: Option<&drip_raw::Metadata>,
-    compression: Compression,
+    resources: &Resources,
+) -> Result<()> {
+    let path = p.path.as_ref().ok_or_else(|| Error::Contract("no output file chosen".into()))?;
+    let bytes = encode(p, desc, pixels, metadata, resources)?;
+    std::fs::write(path, bytes).map_err(|e| Error::Runtime(format!("{}: {e}", path.display())))
+}
+
+/// Convert linear Rec.2020/D65 through the requested output profile and encode
+/// TIFF. Floating output retains the profile's floating range; integers clip.
+pub fn encode(
+    p: &Export,
+    desc: &RgbDesc,
+    pixels: &[[f32; 3]],
+    metadata: Option<&drip_raw::Metadata>,
+    resources: &Resources,
 ) -> Result<Vec<u8>> {
+    let output = profile::Output::load(&p.output, resources)?;
+    let compression = match &p.compression {
+        CompressionMode::None => Compression::Uncompressed,
+        CompressionMode::Deflate(settings) => Compression::Deflate(match settings.level {
+            CompressionLevel::Fast => DeflateLevel::Fast,
+            CompressionLevel::Balanced => DeflateLevel::Balanced,
+            CompressionLevel::Best => DeflateLevel::Best,
+        }),
+    };
     Rgb::validate(desc)?;
     Rec2020::check(desc)?;
     if pixels.len() != desc.extent.pixels() {
         return Err(Error::Contract("TIFF export pixels do not match the image extent".into()));
     }
     let mut bytes = Cursor::new(Vec::new());
-    let err = |e: tiff::TiffError| Error::Runtime(e.to_string());
+    let err = |e: ::tiff::TiffError| Error::Runtime(e.to_string());
     let mut encoder = TiffEncoder::new(&mut bytes).map_err(err)?.with_compression(compression);
-    match depth {
+    match p.depth {
         Depth::U8 => {
             let pixels: Vec<[u8; 3]> = output.convert(PixelFormat::RGB_8, pixels)?;
             write_image::<RGB8>(
@@ -107,7 +180,7 @@ fn write_image<C: ColorType>(
     icc: &[u8],
     metadata: Option<&drip_raw::Metadata>,
     data: &[C::Inner],
-) -> tiff::TiffResult<()>
+) -> ::tiff::TiffResult<()>
 where
     [C::Inner]: TiffValue,
 {
@@ -129,7 +202,7 @@ where
 /// the stored pixel orientation, independently of the original capture metadata.
 ///
 /// \[10\] CIPA DC-008-2019, Exif 2.32. Full reference in `THIRD_PARTY.md`.
-fn write_exif(tiff: &mut Tiff, m: &drip_raw::Metadata) -> tiff::TiffResult<u32> {
+fn write_exif(tiff: &mut Tiff, m: &drip_raw::Metadata) -> ::tiff::TiffResult<u32> {
     const EXPOSURE_TIME: u16 = 0x829a;
     const F_NUMBER: u16 = 0x829d;
     const PHOTOGRAPHIC_SENSITIVITY: u16 = 0x8827;
@@ -157,7 +230,7 @@ fn write_text<W: Write + Seek, K: TiffKind>(
     ifd: &mut DirectoryEncoder<W, K>,
     tag: Tag,
     text: &str,
-) -> tiff::TiffResult<()> {
+) -> ::tiff::TiffResult<()> {
     if text.is_empty() { Ok(()) } else { ifd.write_tag(tag, text) }
 }
 

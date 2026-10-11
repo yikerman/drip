@@ -36,6 +36,7 @@ impl<P: Payload> Source<P> {
         loads_assets: false,
         inputs: &[],
         outputs: &[PortSpec::of::<Cpu<P>, Any>("value")],
+        action: None,
     };
 }
 impl<P: Payload> Node for Source<P> {

@@ -80,6 +80,24 @@ fn sources_load_cpu_outputs_at_admission_without_a_contract() {
 }
 
 #[test]
+fn actions_are_declared_with_the_node_and_named_from_their_function() {
+    let function = syn::parse_quote! {
+        fn tiff(c: &Context, p: &Export, image: Read<Cpu<Rgb>>) -> Result<()> { Ok(()) }
+    };
+    let module = generated_module(expand(quote!(id = "x", action = write_file), function).unwrap());
+    let action = kind_field(&module, "action");
+    let action = quote!(#action).to_string();
+    assert!(action.starts_with("Some (:: drip :: definition :: Action { name : \"Write file\""));
+    assert!(
+        action.contains("super :: write_file (& parameters , inputs . bind :: < Definition > () ?")
+    );
+    let function = syn::parse_quote! { fn x(c: &Context, p: &P) -> Result<()> { Ok(()) } };
+    let module = generated_module(expand(quote!(id = "x"), function).unwrap());
+    let action = kind_field(&module, "action");
+    assert_eq!(quote!(#action).to_string(), "None");
+}
+
+#[test]
 fn rejects_unsupported_signatures() {
     let declarations = [
         (

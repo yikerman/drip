@@ -122,6 +122,25 @@ fn kind(
     let loads_assets = signature.source;
     let inputs = signature.inputs().map(port_spec);
     let outputs = signature.outputs().map(port_spec);
+    let action = match &options.action {
+        None => quote!(None),
+        Some(path) => {
+            let label = path.segments.last().expect("action path").ident.to_string();
+            let label = crate::documentation::sentence(&label);
+            quote!(Some(::drip::definition::Action {
+                name: #label,
+                run: |parameters, inputs, resources| {
+                    let parameters: #parameters = ::drip::__private::serde_json::from_value(parameters)
+                        .map_err(|error| ::drip::Error::Contract(error.to_string()))?;
+                    super::#path(
+                        &parameters,
+                        inputs.bind::<Definition>()?,
+                        resources,
+                    )
+                },
+            }))
+        }
+    };
     quote! {
         #vis static KIND: ::drip::definition::Kind = ::drip::definition::Kind {
             id: #id,
@@ -136,6 +155,7 @@ fn kind(
             loads_assets: #loads_assets,
             inputs: &[#(#inputs),*],
             outputs: &[#(#outputs),*],
+            action: #action,
         };
     }
 }

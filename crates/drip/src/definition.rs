@@ -1,8 +1,10 @@
 //! Node declarations generated from functions. Contracts remain ordinary Rust.
 use crate::{
     Error, Result,
+    eval::InputValues,
     param::{ParamSpec, Parameters},
     ports::{Data, Description, PortSpec},
+    resource::Resources,
     runtime::KernelContext,
 };
 use std::sync::Arc;
@@ -23,6 +25,14 @@ pub struct Kind {
     pub loads_assets: bool,
     pub inputs: &'static [PortSpec],
     pub outputs: &'static [PortSpec],
+    /// An effect run on evaluated inputs, such as writing a file. Any frontend,
+    /// headless or interactive, runs it the same way.
+    pub action: Option<Action>,
+}
+#[derive(Clone, Copy)]
+pub struct Action {
+    pub name: &'static str,
+    pub run: fn(serde_json::Value, &InputValues, &Resources) -> Result<()>,
 }
 impl Kind {
     pub fn param(&self, name: &str) -> Option<&'static ParamSpec> {

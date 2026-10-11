@@ -34,7 +34,7 @@ pub fn focus_name(ctx: &egui::Context, id: crate::model::NodeId) {
 pub fn controls(ui: &mut Ui, cx: &mut NodeCx) {
     let kind = cx.node().kind;
     crate::node_ui::of(kind).controls(ui, cx);
-    if let Some(action) = crate::node_ui::binding(kind).and_then(|b| b.action_name())
+    if let Some(action) = crate::node_ui::action_name(kind)
         && ui.add_enabled(!cx.actions_disabled(), egui::Button::new(action)).clicked()
     {
         cx.run(action);

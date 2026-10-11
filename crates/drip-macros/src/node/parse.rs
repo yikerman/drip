@@ -8,6 +8,8 @@ pub(super) struct Options {
     /// Required when the node has outputs; checked against the signature.
     pub contract: Option<syn::Expr>,
     pub references: syn::Expr,
+    /// `fn(&Params, Inputs<'_>, &Resources) -> Result<()>`, run on evaluated inputs.
+    pub action: Option<syn::Path>,
 }
 
 impl Options {
@@ -19,6 +21,7 @@ impl Options {
         let mut category = None;
         let mut contract = None;
         let mut references = None;
+        let mut action = None;
 
         for entry in entries {
             let name = entry
@@ -31,6 +34,7 @@ impl Options {
                 "category" => &mut category,
                 "contract" => &mut contract,
                 "references" => &mut references,
+                "action" => &mut action,
                 _ => return Err(syn::Error::new(entry.span(), "unknown node option")),
             };
             if option.is_some() {
@@ -43,12 +47,19 @@ impl Options {
         }
 
         let id = id.ok_or_else(|| syn::Error::new(span, "missing id"))?;
+        let action = action
+            .map(|expr| match expr {
+                syn::Expr::Path(path) => Ok(path.path),
+                other => Err(syn::Error::new(other.span(), "expected an action function path")),
+            })
+            .transpose()?;
         Ok(Self {
             name: display_name.unwrap_or_else(|| id.clone()),
             category: category.unwrap_or_else(|| syn::parse_quote!("processing")),
             id,
             contract,
             references: references.unwrap_or_else(|| syn::parse_quote!([])),
+            action,
         })
     }
 }

@@ -507,7 +507,6 @@ fn run_action(
     resources: &drip::resource::Resources,
 ) -> Result<(), String> {
     let node = graph.node(id).ok_or("action node no longer exists")?;
-    let binding = crate::node_ui::binding(node.kind).ok_or("node has no actions")?;
     let inputs = evaluator
         .evaluate_inputs(&graph.dag, &Default::default(), &[id])
         .remove(&id)
@@ -518,7 +517,8 @@ fn run_action(
         level: 0,
         client: evaluator.client().ok().cloned(),
     };
-    binding.run_action(name, node.params, &inputs, &ctx).map_err(|e| e.to_string())
+    crate::node_ui::run_action(node.kind, name, node.params, &inputs, &ctx)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

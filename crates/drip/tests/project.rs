@@ -33,17 +33,18 @@ fn tiff_profile_extent_and_pixels_survive_encoding() {
         extent: Extent { width: 2, height: 1 },
         coordinates: Coordinates::Space(REC2020_D65),
     };
-    let profile =
-        drip::node::profile::Output::load(&Default::default(), &Default::default()).unwrap();
+    let export = drip::node::export::Export::default();
+    let encode = |desc, metadata| {
+        drip::node::export::encode(
+            &export,
+            desc,
+            &[[0.; 3], [1.; 3]],
+            metadata,
+            &Default::default(),
+        )
+    };
     let metadata = drip_raw::Metadata { orientation: 6, ..Default::default() };
-    let bytes = drip::node::export::tiff(
-        &desc,
-        &[[0.; 3], [1.; 3]],
-        &profile,
-        Default::default(),
-        Some(&metadata),
-    )
-    .unwrap();
+    let bytes = encode(&desc, Some(&metadata)).unwrap();
     let mut decoder = tiff::decoder::Decoder::new(std::io::Cursor::new(bytes)).unwrap();
     assert_eq!(decoder.dimensions().unwrap(), (2, 1));
     // Geometry has already determined stored pixel order. The capture tag must
@@ -57,10 +58,7 @@ fn tiff_profile_extent_and_pixels_survive_encoding() {
     assert!(pixels[3..].iter().all(|&v| v > 65530));
     let mut bad = desc.clone();
     bad.coordinates = Coordinates::Space(RgbSpace { white: [0.3127, 0.33], ..REC2020_D65 });
-    assert!(
-        drip::node::export::tiff(&bad, &[[0.; 3], [1.; 3]], &profile, Default::default(), None)
-            .is_err()
-    );
+    assert!(encode(&bad, None).is_err());
 }
 
 #[test]

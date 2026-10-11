@@ -17,10 +17,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         project.dag.typed_output::<Rgb>(project.target.ok_or("project has no export target")?)?;
     let image =
         Evaluator::new(runtime).evaluate::<Cpu<Rgb>>(&project.dag, &Default::default(), target)?;
-    let profile = drip::node::profile::Output::load(&Default::default(), &Default::default())?;
-    let bytes =
-        drip::node::export::tiff(&image.desc, &image.data, &profile, Default::default(), None)?;
-    std::fs::write(PathBuf::from(&args[1]), bytes)?;
+    let export =
+        drip::node::export::Export { path: Some(PathBuf::from(&args[1])), ..Default::default() };
+    drip::node::export::write(&export, &image.desc, &image.data, None, &Default::default())?;
     Ok(())
 }
 fn main() -> ExitCode {

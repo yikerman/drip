@@ -1,77 +1,9 @@
-//! Full-resolution file action over explicitly connected image and metadata.
-use ::tiff::encoder::{Compression, compression::DeflateLevel};
-use drip::node::export::Depth;
-use drip::{
-    Error, Result, node::data::*, node::profile, param::ParamKind, ports::*, runtime::KernelContext,
-};
-use serde::{Deserialize, Serialize};
+//! File dialogs for the library's TIFF export node.
+use drip::node::export::{Export, tiff};
 
-#[derive(Clone, drip::Choice)]
-pub enum CompressionMode {
-    #[choice("none")]
-    None,
-    #[choice("deflate")]
-    Deflate(DeflateSettings),
-}
-#[derive(Clone, Copy, Default, drip::Choice)]
-pub enum CompressionLevel {
-    #[choice("fast")]
-    Fast,
-    #[default]
-    #[choice("balanced")]
-    Balanced,
-    #[choice("best")]
-    Best,
-}
-#[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
-#[serde(deny_unknown_fields)]
-pub struct Export {
-    /// Destination TIFF file, written at full processing detail.
-    #[label("Output file")]
-    #[param(ParamKind::Path { output: true })]
-    #[external]
-    pub path: Option<std::path::PathBuf>,
-    #[param(flatten)]
-    #[serde(flatten)]
-    pub output: profile::Settings,
-    /// u8/u16 clip to the output range; f32 retains the profile floating-point range.
-    #[param(Depth::U16.schema())]
-    pub depth: Depth,
-    /// Lossless TIFF compression, or None for an uncompressed file.
-    #[param(CompressionMode::Deflate(DeflateSettings { level: CompressionLevel::Balanced }).schema())]
-    pub compression: CompressionMode,
-}
-#[derive(Clone, Default, Serialize, Deserialize, drip::Parameters)]
-#[serde(deny_unknown_fields)]
-pub struct DeflateSettings {
-    /// Trade encoding speed for compression ratio without changing pixels.
-    #[param(CompressionLevel::Balanced.schema())]
-    pub level: CompressionLevel,
-}
-impl Default for CompressionMode {
-    fn default() -> Self {
-        Self::Deflate(DeflateSettings::default())
-    }
-}
-
-/// Write linear Rec.2020/D65 RGB to TIFF through an RGB ICC profile.
-/// u8/u16 clip to the output range; f32 retains the profile's floating-point range.
-/// Connected capture metadata is copied when present. Export uses full processing
-/// detail, independently of preview detail. Compression is lossless.
-#[drip::node(id = "output.tiff", name = "Export TIFF", category = "Output")]
-fn tiff(
-    _: &KernelContext<'_>,
-    _: &Export,
-    image: Read<'_, Cpu<Rgb>, Rec2020>,
-    metadata: Option<Read<'_, Cpu<CaptureMetadata>>>,
-) -> Result<()> {
-    let _ = (image, metadata);
-    Ok(())
-}
 #[drip_macros::gui_node]
 impl super::GuiNode for tiff::Definition {
     type Presentation = ();
-    const ACTION: Option<super::binding::Action<Self>> = Some(export);
     fn parameter_ui(_: &Export, path: &str) -> super::ParameterUi {
         if path == "path" {
             super::ParameterUi {
@@ -85,25 +17,4 @@ impl super::GuiNode for tiff::Definition {
             super::profile::parameter_ui(path)
         }
     }
-}
-fn export(
-    p: Export,
-    inputs: tiff::Inputs<'_>,
-    ctx: &crate::node_ui::data::PrepareContext,
-) -> Result<()> {
-    let path = p.path.ok_or_else(|| Error::Contract("no output file chosen".into()))?;
-    let (desc, pixels) = (inputs.image.desc, inputs.image.data);
-    let metadata = inputs.metadata.map(|m| &**m.data);
-    let output = profile::Output::load(&p.output, &ctx.resources)?;
-    let compression = match p.compression {
-        CompressionMode::None => Compression::Uncompressed,
-        CompressionMode::Deflate(settings) => Compression::Deflate(match settings.level {
-            CompressionLevel::Fast => DeflateLevel::Fast,
-            CompressionLevel::Balanced => DeflateLevel::Balanced,
-            CompressionLevel::Best => DeflateLevel::Best,
-        }),
-    };
-    let bytes =
-        drip::node::export::tiff_compressed(desc, pixels, &output, p.depth, metadata, compression)?;
-    std::fs::write(&path, bytes).map_err(|e| Error::Runtime(format!("{}: {e}", path.display())))
 }

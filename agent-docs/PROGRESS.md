@@ -10,6 +10,9 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
   kernel-read payloads, facts-only RAW metadata without rkyv, and merged
   Camera/Color reduction, histogram and waveform nodes. Workspace tests pass on
   the GPU including device tests; strict workspace Clippy and formatting pass.
+- Moved TIFF export into `drip` as a node with a declared action; the CLI
+  shares its `write`. GPU workspace tests, Clippy and formatting pass; the CLI
+  exports the Nikon D70s fixture.
 - Static node kinds, generated typed inputs and GUI bindings on node types.
   Workspace tests pass on the GPU including device tests; Clippy and
   formatting pass.

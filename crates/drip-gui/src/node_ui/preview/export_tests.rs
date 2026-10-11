@@ -95,10 +95,14 @@ fn export_depth_survives_reopening_and_encodes_expected_samples() {
                 .remove(&export)
                 .unwrap()
                 .unwrap();
-            crate::node_ui::binding(node.kind)
-                .unwrap()
-                .run_action("Export", node.params, &values, &Default::default())
-                .unwrap();
+            crate::node_ui::run_action(
+                node.kind,
+                "Export",
+                node.params,
+                &values,
+                &Default::default(),
+            )
+            .unwrap();
             let (data, icc, compression_tag) = read(&path);
             assert_eq!(icc, expected_profile.icc);
             assert_eq!(compression_tag, if compression == "none" { 1 } else { 8 });
@@ -168,9 +172,7 @@ fn softproof_matches_bounded_export_across_profiles_and_intents() {
                 let shown = super::prepare(params, &image, &ctx).unwrap();
                 let values = inputs.remove(&tiff).unwrap().unwrap();
                 let node = project.graph.node(tiff).unwrap();
-                crate::node_ui::binding(node.kind)
-                    .unwrap()
-                    .run_action("Export", node.params, &values, &ctx)
+                crate::node_ui::run_action(node.kind, "Export", node.params, &values, &ctx)
                     .unwrap();
                 let (data, icc, _) = read(&path);
                 let DecodingResult::U16(data) = data else { panic!("16-bit export") };
