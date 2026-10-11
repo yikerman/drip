@@ -32,8 +32,8 @@ User statements, paraphrased.
 - The graph is acyclic and evaluated on demand: `eval(dag, global, target)`,
   requested by the GUI, export or other consumers.
 - No evaluation cache by default; large buffers can exhaust host/device memory
-  at a working scale of about 4 GB. Stay compatible with future caching that
-  preserves purity, such as a RAW reader cache.
+  at a working scale of about 4 GB. Caching that preserves purity is allowed,
+  such as a node keeping the file it read.
 
 ### Ports and contracts
 
@@ -228,9 +228,9 @@ coefficients, camera identity and dimensions are known only at evaluation.
 Concrete schemas suffice for that separation.
 
 A path is not immutable file contents: reading it twice can return different
-bytes. Source identity must refer to a frozen asset version, or loading must
-precede pure decoding. Profiles, seeds and semantic context are fixed per
-evaluation. Without a persistent cache, live intermediates, branch retention,
+bytes. Drip assumes the files a node names do not change, and the node reads
+them once, so its outputs stay fixed. Profiles, seeds and semantic context are
+fixed per evaluation. Without a persistent cache, live intermediates, branch retention,
 scratch and queued GPU work still occupy memory: a 100-megapixel four-channel
 `f32` image is about 1.49 GiB, so three exceed 4 GiB.
 

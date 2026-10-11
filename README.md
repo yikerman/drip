@@ -44,8 +44,8 @@ placed wherever you need them in the pipeline.*
 ### Experiment with confidence
 
 Branch the pipeline, try another processing order, or inspect an intermediate
-result. Drip checks image types and color spaces when you connect nodes, then
-checks image-dependent requirements during processing. Incompatible operations
+result. Drip checks image types when you connect nodes, then checks color
+spaces and other image-dependent requirements during processing. Incompatible operations
 explain what needs attention; valid combinations leave room for creative choices.
 
 ![RAW processing connections with chromatic adaptation selected and its help and white-balance control visible](fixtures/demos/sane-workflow.png)

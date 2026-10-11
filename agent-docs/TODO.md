@@ -4,13 +4,13 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 
 | Work | Status | Remaining scope |
 |------|--------|-----------------|
-| Remaining simplifications | Follow-up | Mechanical cleanup is implemented. Revisit shared preparation/kernel context, colorimetry helpers and derived shader matrices, evaluation-loop consolidation, category declarations and preview-context ownership separately. Presentation-only edits need a drawing/preparation path; source device residency and batched scope readback need ownership and performance evidence. Keep current validation boundaries. Timing/zoom extraction and native-title state were left out because they add plumbing or state rather than strictly reducing complexity. |
+| Remaining simplifications | Follow-up | Revisit shared preparation/kernel context, colorimetry helpers and derived shader matrices, evaluation-loop consolidation, category declarations and preview-context ownership separately. Presentation-only edits need a drawing/preparation path; source device residency and batched scope readback need ownership and performance evidence. |
 | Packaged proof of concept | Next | No additional processing stage identified in the post-CAT16 review. Verify saved edits and full-detail RAW-to-TIFF use, plus installation/launch on clean desktops; record supported environments and known limitations. |
 | Portable artifacts | Next | Add Linux `.tar.xz`/Flatpak and macOS `.app` bundles. Choose Linux minimum systems, macOS deployment target and Windows runtime packaging; audit runtime-loaded dependencies. Preserve executable permissions, bundle submodule sources, and include build provenance/notices. |
 | Build portability | Open | Verify Rust 1.95 and full native Windows/macOS builds and staging. |
 | Display portability | Open | Verify Windows/macOS tagging, reference white, monitor/profile transitions and Advanced Color on/off; legacy Windows needs ICC output. Exercise NVIDIA, other compositors and HDR white. |
 | Image/color validation | Follow-up | Review detail, highlights and color against measured targets; measure the display path with SpyderX. Not a proof-of-concept gate. |
-| Scene-illuminant white balance | Integration checks remaining | CAT16, metadata-derived As shot, custom source xy and RAW/template integration are implemented; user Vulkan GUI logs show successful evaluation. Confirm saved overrides and full-detail preview/export agreement. |
+| Scene-illuminant white balance | Integration checks remaining | Implemented. Confirm saved overrides and full-detail preview/export agreement. |
 | White-balance controls | Follow-up | Add temperature/tint and neutral sampling when needed; initial controls accept source xy. |
 | Partial chromatic adaptation | Deferred | Define whether the aim is manual mood preservation or observer-appearance prediction before adding adaptation-degree controls. Compare generalized/two-step CAT16 and WGM against photographic examples; initial WB uses full adaptation. |
 | Exposure normalization | Deferred | Manual exposure and whole-image mean-to-18% metering are available. Neither calibrates an 18% scene reflector; automatic baseline handling and cross-camera exposure matching need a defined convention and validation. |
@@ -19,7 +19,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Output-gamut rendering | Deferred | LittleCMS plus selected rendering intent is accepted for the prototype. Revisit explicit target-gamut rendering only when image evidence warrants it; distinguish source compression from output mapping. |
 | Editing UI/UX | Follow-up | Refine from tester feedback; current workflows suffice for the proof of concept. |
 | Wire readability | Open | Compare rounded orthogonal paths with capped Bézier handles; backward links and fan-out remain crowded. Consider obstacle avoidance and hover emphasis. Keep hit testing on the rendered path. |
-| Remaining frontend presentation | Open | Audit items outside the requested fixes: export-depth/intent terminology, explicit EV reference annotations, proof-mode badges, error elision, blank/stale pop-out views and distinct loading phases. |
+| Remaining frontend presentation | Open | Audit items outside the requested fixes: export-depth/intent terminology, explicit EV reference annotations, proof-mode badges, error elision and blank/stale pop-out views. |
 | RAW metadata extraction | Open | Canon EOS D30 (#1307): unusable as-shot WB. Samsung GX-1L (#8115): unusable WB and zero camera matrix. Excluded from the active corpus; IDs refer to raw.pixls.us. |
 | DNG matrix extraction | Open | Sigma fp 8-bit (#7280) and 14-bit (#7273): nonzero ColorMatrix1/2, but LibRaw returns zero `cam_xyz` after unpack. Excluded from the active corpus. |
 | Panic-time native teardown | Open | Investigate NVIDIA/Wayland segmentation fault during unwind after the fixed image-view panic. |

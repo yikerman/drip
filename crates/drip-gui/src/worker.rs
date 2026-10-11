@@ -835,8 +835,7 @@ mod tests {
             #[param(open = [])]
             path: Option<std::path::PathBuf>,
         }
-        // This fixture deliberately loads during computation to exercise worker ordering.
-        // Production RAW sources bind immutable assets before evaluation.
+        // Reads on every run, unlike nodes that keep their files, to exercise worker ordering.
         #[drip::node(id="test.file", category="test", name="file", contract=image_contract)]
         fn file(
             _: &KernelContext<'_>,

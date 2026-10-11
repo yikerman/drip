@@ -4,145 +4,54 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
-- GUI previews force only nodes with a view; a failed ancestor shows its own
-  error and views name it, while unforced nodes show nothing. Batch evaluation
-  retains every target's inputs, removing observers and the not-retained bind
-  error. Workspace tests, including 86 GUI tests, and strict workspace Clippy
-  pass.
-- Files are read when a node is first forced and cached in the node, error
-  included, instead of at admission. The GUI loading queue, pending bindings,
-  "Reload files", `Kind::loads_assets` and the wait-for-loading action guard
-  are removed; project open reads JSON only. Tests show a RAW decoded once and
-  shared by graph snapshots after its file is deleted, and an ICC profile read
-  at first use. Missing inputs are reported by the incomplete node's contract,
-  so downstream nodes name it. Workspace tests, including 86 GUI tests, and
-  strict workspace Clippy pass.
-- Graph edits no longer run contracts. Connecting Demosaic to Orientation in
-  the template was accepted without a RAW and refused with one, and selecting a
-  RAW into that wiring was refused with an unattributed Sigmoid requirement
-  error. Edits now check ports only; contracts run during evaluation, which
-  names the failing node. `Outcome` and `Dag::description` are removed. A
-  regression test wires and selects the RAW in both orders and reopens the
-  project. CPU workspace tests, including 90 GUI tests, and strict workspace
-  Clippy pass.
-- CI run 38164895447 passed Linux and Windows but macOS timed out waiting for
-  a dropped worker's preview completion. That wait, introduced in `31f2c18`,
-  allowed five seconds despite sharing the CPU compute client with full-RAW
-  tests. Compute completions now share the existing 90-second evaluation
-  allowance; synchronization gates retain five seconds. Linux CPU GUI tests
-  pass (90 passed, seven ignored), as do formatting and whitespace checks.
-  macOS verification remains pending.
-- Fixed parallel GPU-test startup by initializing the selected compute runtime
-  before the display test's independent wgpu instance. CubeCL's existing startup
-  serialization prevents concurrent first Vulkan calls. All seven GUI device
-  tests pass in parallel on WGPU, including five fresh-process reruns, and on
-  CPU. Strict GUI Clippy and workspace formatting pass. Application and editor
-  behavior are unchanged.
-- Isolated the parallel GUI device-test SIGSEGV to concurrent Vulkan extension
-  enumeration during display/CubeCL startup. A standalone two-thread C probe
-  crashes in 5/5 runs with only the NVIDIA ICD and passes 5/5 with lavapipe;
-  disabling Mesa device selection does not prevent the crash. The core shows
-  a null call inside `loader_icd_scan` while another thread initializes NVIDIA.
-  Commit `4e44ccd` added compute scopes to the ignored GUI tests, which previously
-  contained only the display test. This identifies the concurrency trigger by
-  source history, not a bisected driver regression. Serial device tests pass;
-  the recent refactor leaves the failing instance initialization unchanged.
-- Separated the mechanical refactor from pending editor error-label, color and
-  elision changes. The refactor-only snapshot passes all 14 editor interaction
-  tests on CPU; the behavior changes and their test remain in the working tree.
-- Mechanical simplifications: one core kind index and direct admission, core
-  port handles in the GUI, typed template handles, shared canvas snapshots and
-  cheap kind/name/layout reads. Removed redundant report/scope state, the GUI
-  kind registry and view wrapper, the extra wake-callback allocation, retained
-  preview source pixels, `Placement`, unused schema validation and integer
-  scratch wrappers. Shared Bayer indexing and production rendering setup with
-  tests. CPU workspace tests pass (159 passed, 16 device tests ignored), as do
-  three doctests, strict workspace Clippy and formatting. All 16 device tests
-  pass on WGPU with one test thread. A parallel GUI device-test process exited
-  with SIGSEGV before reporting results; see the startup investigation above. Tests
-  cover the combined tree before the user's remaining editor edits.
-- Reviewed the 21 proposed simplifications against current code and design.
-  Confirmed redundant report state, template label coupling, retained preview
-  source pixels, repeated GUI snapshots and kernel/render duplication. Checked
-  pinned winit/ecolor sources. Main corrections: GUI bindings are a separate
-  registry; presentation flags alone leave stale prepared settings; auto
-  exposure has a stricter requirement than Exposure; public export and
-  evaluation boundaries still need checks. No implementation or benchmark run;
-  recommendations remain tentative. Existing GUI edits were left untouched.
-- Rechecked the simplification details: winit 0.30.13 returns an empty title
-  on X11, which DESIGN excludes; Wayland retains its title. Worker events and
-  notices differ for evaluation and shutdown. Core scales accept every integer
-  from 1 to 256, while GUI levels select powers of two. Display tests use shipped
-  shaders but duplicate packing and pipeline/binding setup. No tests or benchmarks
-  run for this source review; concurrent tooltip edits were left untouched.
-- Refreshed the README from the user-facing `37b13bf` revisions: CubeCL,
-  flexible views, color management and pipeline checks, with brief canvas
-  gestures and current build instructions. All five user-supplied Sony demos
-  appear inline with captions, including an explicit gamut-warning caption.
-  Inspected every image and verified local links, caption coverage, LFS
-  attributes and whitespace. No processing code changed.
-- CPU CI: reproduced run 38128023310's missing `Cpu` import in the RAW
-  pipeline test and restored it within the feature-gated test. CPU workspace
-  tests pass (157 passed, 16 device tests ignored), as do three doctests,
-  strict workspace Clippy and formatting.
-- Bindings and project open moved to their own loading thread per project:
-  marking Preview and Export as asset loaders had queued their plain edits
-  behind evaluations. GPU workspace tests, Clippy and formatting pass.
-- Review findings: actions route by node with one resolved action per kind;
-  one single-parameter merge; one batch evaluation call; auto exposure returns
-  its parameters and shares the scopes' device image; a drop guard reports the
-  worker's end. GPU workspace tests, Clippy and formatting pass.
-- The app replaces its worker with the project instead of resetting it; the
-  old thread skips its queue. New/Open wait for running actions, and actions
-  for an opening project. GPU workspace tests, Clippy and formatting pass.
-- Output ICC profiles load at admission as node assets; the per-path resource
-  memo and worker cache invalidation are gone, and "Invalidate cache" became
-  "Reload files". Actions and preparations receive the admitted node. GPU
-  workspace tests, Clippy and formatting pass.
-- Desktop capture check: launched `dist/drip-gui` on KDE Wayland, moved and
-  resized its window, opened Preview detail through emulated pointer input,
-  and inspected the captured menu. Temporary helper and captures are in
-  `/tmp/drip-desktop-check.py` and `/tmp/drip-check-menu.png`; the test app
-  and input device were closed. README/demo refresh remains paused for the
-  concurrent code changes; use the Sony ILCE-7RM3 fixture when resumed.
-- Review cleanups: one `#[default]` per choice; one typed-output check;
-  test-only evaluation API removed; unread ports as `_name`; shared parameter
-  JSON helpers; scope nodes beside their preparation; the RAW template ends in
-  Export and the GUI template uses typed handles; schema-derived file lookup.
-  GPU workspace tests, Clippy and formatting pass.
-- Project format version now follows the `drip` major version (currently 0).
-  GPU workspace tests, Clippy and formatting pass.
-- Returned `drip-cli` to its scaffold and removed it from distribution builds.
-  Projects lose the export target only it read; files that still carry it
-  are rejected. The library template returns its rendered output instead. GPU workspace tests,
+- Compacted the agent docs and removed entries the lazy model made stale or
+  misleading, in DESIGN, PROGRESS, TODO, TYPE_SYSTEM, the README and three
+  code comments. Workspace tests pass; documentation only.
+- Lazy evaluation. Graph edits check ports only: connecting Demosaic to
+  Orientation in the template had been accepted without a RAW and refused with
+  one, and selecting a RAW into that wiring was refused with an unattributed
+  Sigmoid requirement error; a regression test now wires and selects the RAW in
+  both orders and reopens the project. Missing inputs are reported by the
+  incomplete node. Files are read when a node is first forced and cached in the
+  node: tests show a RAW decoded once and shared by graph snapshots after its
+  file is deleted, and an ICC profile read at first use. GUI previews force only
+  nodes with a view; a failed ancestor shows its own error and views name it.
+  Workspace tests, including 86 GUI tests, and strict workspace Clippy pass.
+- CI run 38164895447 timed out on macOS waiting for a dropped worker's preview:
+  the wait from `31f2c18` allowed five seconds while sharing the CPU compute
+  client with full-RAW tests. Compute completions now get the 90-second
+  evaluation allowance. Linux CPU GUI tests pass; macOS is unverified.
+- Parallel GUI device tests crashed (SIGSEGV) in concurrent Vulkan extension
+  enumeration: a two-thread C probe crashes 5/5 with only the NVIDIA ICD and
+  passes 5/5 with lavapipe. `4e44ccd` added compute scopes to the ignored GUI
+  tests, which identifies the trigger by history, not a driver bisection.
+  Initializing the compute runtime before the display test's wgpu instance
+  fixes it: all seven GUI device tests pass in parallel on WGPU, including five
+  fresh-process reruns, and on CPU.
+- Mechanical simplifications: one core kind index, core port handles in the
+  GUI, typed template handles, shared canvas snapshots, no retained preview
+  source pixels, fewer wrappers and report fields. CPU workspace tests pass
+  (159, with 16 device tests ignored), as do doctests, strict Clippy and
+  formatting; the 16 device tests pass on WGPU with one test thread.
+- Source review of the proposed simplifications: winit 0.30.13 returns an empty
+  title on X11 (unsupported) and keeps it on Wayland; core scales accept every
+  integer from 1 to 256 while GUI levels are powers of two. No tests run.
+- README refreshed with the five Sony demos inline and captioned, including the
+  gamut warning; images, links, LFS attributes and whitespace checked.
+- CPU CI run 38128023310 lacked a `Cpu` import in the feature-gated RAW pipeline
+  test; restored. CPU workspace tests (157, 16 ignored), doctests, strict
   Clippy and formatting pass.
-- Model refactor cleanups: per-kind parameter widgets, coordinate labels from
-  requirement labels, worker naming and the README's macro section. GPU
-  workspace tests, Clippy and formatting pass.
-- One worker queue: previews and actions are demands forced by one evaluator;
-  actions no longer start a thread and runtime. Auto exposure meters Exposure's
-  input as a queued action and applies its EV as an edit; an end-to-end test
-  runs it twice on the Sony fixture. GPU workspace tests, Clippy and formatting
-  pass.
-- Implemented typed payloads and port requirements: one RGB payload, typed
-  interpretations, requirement type arguments, contracts over known
-  descriptions, admission-time parameter checks, device layouts only for
-  kernel-read payloads, facts-only RAW metadata without rkyv, and merged
-  Camera/Color reduction, histogram and waveform nodes. Workspace tests pass on
-  the GPU including device tests; strict workspace Clippy and formatting pass.
-- Typed parameter defaults and file roles: `Default` and schemas derive from one
-  declaration, GUI file hints are gone, and histogram/waveform share a flattened
-  exposure range. GPU workspace tests, Clippy and formatting pass.
-- Moved TIFF export into `drip` as a node with a declared action; the CLI
-  shares its `write`. GPU workspace tests, Clippy and formatting pass; the CLI
-  exports the Nikon D70s fixture.
-- Static node kinds, generated typed inputs and GUI bindings on node types.
-  Workspace tests pass on the GPU including device tests; Clippy and
-  formatting pass.
-- Generated RAW as a `Load` source; `Node` lost `loads_assets` and its failing
-  default `parameters()`. Same GPU test, Clippy and formatting checks pass.
-- Resolved the model review's open questions with the user; decisions are in
-  DESIGN under Model refactor. Documentation only; no code changes or tests.
+- Desktop check: `dist/drip-gui` on KDE Wayland moved, resized and opened
+  Preview detail through emulated pointer input; the captured menu was
+  inspected.
+- Model refactor implemented in steps, each with GPU workspace tests, Clippy
+  and formatting passing: typed payloads and port requirements (one RGB
+  payload, facts-only RAW metadata, merged Camera/Color nodes), typed defaults
+  and file roles, static kinds with generated inputs and GUI bindings, RAW as a
+  `Load` source, TIFF export as a node with an action (the CLI exported the
+  Nikon D70s fixture), one worker queue for previews and actions (auto exposure
+  ran twice end to end on the Sony fixture), per-project workers, and the
+  project format version following the `drip` major version.
 
 ## 2026-10-10
 
@@ -168,9 +77,8 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
   large HDR inputs, fixed-point and button tests pass on CPU and WGPU.
 - Unified RAW metadata and orientation: 142 CPU workspace tests (15 device tests
   ignored) and four doctests pass; selected-backend WGPU checks cover gains,
-  metadata transport, orientation and algorithm references. rkyv tests cover
-  malformed buffers, exact float bits and coordinate mismatches. Sony lens and
-  focal metadata match ExifTool. All eight orientations pass on WGPU, including
+  metadata transport, orientation and algorithm references. Sony lens and focal
+  metadata match ExifTool. All eight orientations pass on WGPU, including
   single-row/column images and the omitted TIFF orientation tag.
 - CI run 38046592913 timed out on CPU-backed GUI tests after the scope move:
   fixed 256-lane barrier groups oversubscribe the CPU runtime. Capped lanes at
@@ -189,8 +97,6 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
   lanes per pixel; RCD upstream vectors pass for all four phases on CPU and WGPU.
   The latest uniform WGPU run had peak RSS 2297.0 MiB (was 3240.5); sampled
   whole-GPU maximum rose from 1342 to 4325 MiB. Live allocations unmeasured.
-- Export blocking during asset rebinding: invalidation, re-enable after commit
-  and replacement-parameter regressions pass.
 
 ## 2026-10-08
 

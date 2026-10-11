@@ -9,7 +9,7 @@ use std::{path::PathBuf, sync::Arc};
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
-    /// Bayer RAW to bind as an immutable decoded snapshot.
+    /// Bayer RAW, decoded when first evaluated.
     #[param(open = ["arw", "cr2", "cr3", "dng", "erf", "fff", "iiq", "kdc", "mef", "mos", "mrw", "nef", "nrw", "orf", "pef", "raf", "raw", "rw2", "rwl", "srw", "x3f"])]
     #[label("RAW file")]
     #[external]
