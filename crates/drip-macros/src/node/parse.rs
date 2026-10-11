@@ -8,8 +8,11 @@ pub(super) struct Options {
     /// Required when the node has outputs; checked against the signature.
     pub contract: Option<syn::Expr>,
     pub references: syn::Expr,
-    /// `fn(&Params, Inputs<'_>, &Resources) -> Result<()>`, run on evaluated inputs.
+    /// `fn(&Params, Inputs<'_>) -> Result<()>`, run on evaluated inputs; with
+    /// `assets`, `fn(&Params, &Loaded, Inputs<'_>)`.
     pub action: Option<syn::Path>,
+    /// The parameters implement `drip::definition::Assets`, loaded at admission.
+    pub assets: bool,
 }
 
 impl Options {
@@ -22,12 +25,20 @@ impl Options {
         let mut contract = None;
         let mut references = None;
         let mut action = None;
+        let mut assets = false;
 
         for entry in entries {
             let name = entry
                 .path()
                 .get_ident()
                 .ok_or_else(|| syn::Error::new(entry.span(), "expected option name"))?;
+            if name == "assets" {
+                if assets || !matches!(entry, syn::Meta::Path(_)) {
+                    return Err(syn::Error::new(entry.span(), "expected a single `assets` flag"));
+                }
+                assets = true;
+                continue;
+            }
             let option = match name.to_string().as_str() {
                 "id" => &mut id,
                 "name" => &mut display_name,
@@ -60,6 +71,7 @@ impl Options {
             contract,
             references: references.unwrap_or_else(|| syn::parse_quote!([])),
             action,
+            assets,
         })
     }
 }

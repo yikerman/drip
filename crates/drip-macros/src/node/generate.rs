@@ -37,6 +37,28 @@ pub(super) fn node(
             },
             quote!(Definition { loaded: load(&parameters), parameters }),
         )
+    } else if options.assets {
+        let loaded = quote!(<#parameters as ::drip::definition::Assets>::Loaded);
+        (
+            quote! {
+                #vis struct Definition {
+                    #vis parameters: #parameters,
+                    assets: ::drip::Result<#loaded>,
+                }
+                impl Definition {
+                    /// The files loaded at admission, or why they could not be.
+                    #vis fn assets(&self) -> ::drip::Result<&#loaded> {
+                        self.assets.as_ref().map_err(Clone::clone)
+                    }
+                }
+            },
+            quote! {
+                Definition {
+                    assets: ::drip::definition::Assets::load(&parameters),
+                    parameters,
+                }
+            },
+        )
     } else {
         (
             quote! {
@@ -112,7 +134,7 @@ fn kind(
     let help = crate::documentation(&function.attrs);
     let references = &options.references;
     let parameters = &signature.parameters;
-    let loads_assets = signature.source;
+    let loads_assets = signature.source || options.assets;
     let inputs = signature.inputs().map(port_spec);
     let outputs = signature.outputs().map(port_spec);
     let action = match &options.action {
@@ -120,11 +142,12 @@ fn kind(
         Some(path) => {
             let label = path.segments.last().expect("action path").ident.to_string();
             let label = crate::documentation::sentence(&label);
+            let assets = options.assets.then(|| quote!(node.assets()?,));
             quote!(Some(::drip::definition::Action {
                 name: #label,
-                run: |parameters, inputs, resources| {
-                    let parameters: #parameters = ::drip::param::decode(parameters)?;
-                    super::#path(&parameters, inputs.bind::<Definition>()?, resources)
+                run: |node, inputs| {
+                    let node = <Definition as ::drip::definition::Typed>::of(node)?;
+                    super::#path(&node.parameters, #assets inputs.bind::<Definition>()?)
                 },
             }))
         }

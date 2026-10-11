@@ -164,7 +164,8 @@ In **Preview**, set **Proof mode** to **None** for the original image,
 **Softproof** to simulate an output profile, or **Gamut check** to mark
 out-of-gamut colors in cyan. The active proof mode contains its profile,
 rendering intent and black point compensation settings. Match them to
-**Export TIFF**. Choose **File** under **Output profile** to select an ICC file.
+**Export TIFF**. Choose **File** under **Output profile** to select an ICC file;
+it is read when chosen, so use **Reload files** after changing it on disk.
 These modes affect only the preview and its pop-out.
 
 Gamut check is approximate near the gamut boundary.
@@ -222,7 +223,8 @@ version and repeat connection checks when opened.
 Node IDs use `category.operation`; this revision also nests variant-specific
 parameters in their enum values. Older IDs and parameter layouts are rejected
 without migration or modification. RAW files are bound as
-immutable decoded snapshots; reopening or invalidating reloads them.
+immutable decoded snapshots, as are ICC output profiles; reopening or
+**Reload files** reloads them.
 Preview detail is passed in the global evaluation context. Demosaic reduces its
 Bayer phase planes internally before interpolation, after upstream sensor
 corrections. Every contract and node receives the same context; no hidden nodes

@@ -76,19 +76,17 @@ pub fn action_name(kind: &'static Kind) -> Option<&'static str> {
 
 /// Runs the node's action; a frontend action may return new node parameters.
 pub fn run_action(
-    kind: &'static Kind,
     name: &str,
-    params: serde_json::Value,
+    node: &dyn drip::definition::Node,
     inputs: &drip::eval::InputValues,
     ctx: &data::PrepareContext,
 ) -> drip::Result<Option<serde_json::Value>> {
+    let kind = node.kind();
     if let Some(binding) = binding(kind).filter(|b| b.action_name() == Some(name)) {
-        return binding.run_action(name, params, inputs, ctx);
+        return binding.run_action(name, node, inputs, ctx);
     }
     match kind.action {
-        Some(action) if action.name == name => {
-            (action.run)(params, inputs, &ctx.resources).map(|()| None)
-        }
+        Some(action) if action.name == name => (action.run)(node, inputs).map(|()| None),
         _ => Err(drip::Error::Graph("unknown node action".into())),
     }
 }

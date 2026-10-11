@@ -52,8 +52,10 @@ pub fn observe(
 #[drip_macros::gui_node]
 impl crate::node_ui::GuiNode for observe::Definition {
     type Presentation = Arc<Histogram>;
-    const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-        Some(|p, inputs, ctx| histogram(&p.range, p.scale, &DeviceRgb::new(&inputs.image), ctx));
+    const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|node, inputs, ctx| {
+        let p = &node.parameters;
+        histogram(&p.range, p.scale, &DeviceRgb::new(&inputs.image), ctx)
+    });
 }
 
 pub fn histogram(

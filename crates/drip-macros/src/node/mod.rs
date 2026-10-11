@@ -10,6 +10,10 @@ use parse::{Options, Signature};
 pub(crate) fn expand(args: TokenStream, function: syn::ItemFn) -> syn::Result<TokenStream> {
     let options = Options::parse(args, function.sig.span())?;
     let signature = Signature::parse(&function.sig)?;
+    if options.assets && signature.source {
+        let message = "a source loads its outputs at admission; remove assets";
+        return Err(syn::Error::new(function.sig.ident.span(), message));
+    }
     match (&options.contract, signature.outputs().next()) {
         (Some(contract), _) if signature.source => {
             let message = "a source describes its outputs by loading them; remove the contract";

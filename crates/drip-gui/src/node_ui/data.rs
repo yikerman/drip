@@ -3,7 +3,6 @@ use drip::{
     Error, Result,
     node::data::{DeviceBuffer, HostBuffer, Rgb, RgbDesc},
     ports::{Cpu, Device, Read},
-    resource::Resources,
     runtime::GlobalContext,
 };
 
@@ -32,7 +31,6 @@ impl HostImage {
 #[derive(Default)]
 pub struct PrepareContext {
     pub client: Option<cubecl::prelude::Client>,
-    pub resources: Resources,
     /// The demand's context: the preview's, or full detail for actions.
     pub global: GlobalContext,
 }

@@ -1,11 +1,11 @@
 //! TIFF export: an output node whose action encodes and writes its input.
 use crate::{
     Error, Result,
+    definition::Assets,
     node::data::{CaptureMetadata, Rec2020, Rgb, RgbDesc},
     node::profile,
     payload::Payload,
     ports::{Cpu, Read, Requirement},
-    resource::Resources,
     runtime::KernelContext,
 };
 use ::tiff::encoder::colortype::{ColorType, RGB8, RGB16, RGB32Float};
@@ -70,12 +70,25 @@ pub struct Export {
     #[param]
     pub compression: CompressionMode,
 }
+impl Assets for Export {
+    type Loaded = profile::Output;
+    fn load(&self) -> Result<profile::Output> {
+        profile::Output::load(&self.output)
+    }
+}
 
 /// Write linear Rec.2020/D65 RGB to TIFF through an RGB ICC profile.
 /// u8/u16 clip to the output range; f32 retains the profile's floating-point range.
 /// Connected capture metadata is copied when present. Export uses full processing
-/// detail, independently of preview detail. Compression is lossless.
-#[crate::node(id = "output.tiff", name = "Export TIFF", category = "Output", action = export)]
+/// detail, independently of preview detail. Compression is lossless. A profile
+/// file is read when chosen; reselect it to pick up changes.
+#[crate::node(
+    id = "output.tiff",
+    name = "Export TIFF",
+    category = "Output",
+    action = export,
+    assets
+)]
 pub fn tiff(
     _: &KernelContext<'_>,
     _: &Export,
@@ -84,34 +97,24 @@ pub fn tiff(
 ) -> Result<()> {
     Ok(())
 }
-fn export(p: &Export, inputs: tiff::Inputs<'_>, resources: &Resources) -> Result<()> {
-    let metadata = inputs.metadata.map(|m| &**m.data);
-    write(p, inputs.image.desc, inputs.image.data, metadata, resources)
-}
-
 /// Encode and write the file named by the settings.
-fn write(
-    p: &Export,
-    desc: &RgbDesc,
-    pixels: &[[f32; 3]],
-    metadata: Option<&drip_raw::Metadata>,
-    resources: &Resources,
-) -> Result<()> {
+fn export(p: &Export, output: &profile::Output, inputs: tiff::Inputs<'_>) -> Result<()> {
     let path = p.path.as_ref().ok_or_else(|| Error::Contract("no output file chosen".into()))?;
-    let bytes = encode(p, desc, pixels, metadata, resources)?;
+    let metadata = inputs.metadata.map(|m| &**m.data);
+    let bytes = encode(p, output, inputs.image.desc, inputs.image.data, metadata)?;
     std::fs::write(path, bytes).map_err(|e| Error::Runtime(format!("{}: {e}", path.display())))
 }
 
-/// Convert linear Rec.2020/D65 through the requested output profile and encode
-/// TIFF. Floating output retains the profile's floating range; integers clip.
+/// Convert linear Rec.2020/D65 through `output`, the settings' loaded profile,
+/// and encode TIFF. Floating output retains the profile's floating range;
+/// integers clip.
 pub fn encode(
     p: &Export,
+    output: &profile::Output,
     desc: &RgbDesc,
     pixels: &[[f32; 3]],
     metadata: Option<&drip_raw::Metadata>,
-    resources: &Resources,
 ) -> Result<Vec<u8>> {
-    let output = profile::Output::load(&p.output, resources)?;
     let compression = match &p.compression {
         CompressionMode::None => Compression::Uncompressed,
         CompressionMode::Deflate(settings) => Compression::Deflate(match settings.level {

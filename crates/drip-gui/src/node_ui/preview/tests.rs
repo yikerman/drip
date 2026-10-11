@@ -12,7 +12,7 @@ fn preview(image: &Rec2020Mat, params: serde_json::Value) -> Result<PreviewImage
         values[name] = value.clone();
     }
     let params: Preview = serde_json::from_value(values).unwrap();
-    super::prepare(params, image, &PrepareContext::default())
+    super::prepare(&params, params.load()?.as_ref(), image)
 }
 
 fn proof(mode: &str, overrides: serde_json::Value) -> serde_json::Value {

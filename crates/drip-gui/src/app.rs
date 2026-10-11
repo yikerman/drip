@@ -326,8 +326,8 @@ impl App {
             if ui.button("Save template…").clicked() {
                 self.save_as(true);
             }
-            if ui.button("Invalidate cache").clicked() {
-                self.invalidate_cache();
+            if ui.button("Reload files").clicked() {
+                self.reload_files();
             }
             ui.separator();
             let label = |level| {
@@ -438,10 +438,9 @@ impl App {
         saved
     }
 
-    fn invalidate_cache(&mut self) {
-        self.dirty = true;
+    /// Readmits every node that loads files, picking up changes on disk.
+    fn reload_files(&mut self) {
         let result = (|| {
-            self.worker.invalidate()?;
             for (id, node) in self.project.graph.dag.nodes().filter(|(_, n)| n.kind().loads_assets)
             {
                 self.worker.bind(
@@ -452,7 +451,7 @@ impl App {
             }
             Ok(())
         })();
-        self.report(result.map(|()| "Invalidating cache…".into()));
+        self.report(result.map(|()| "Reloading files…".into()));
     }
 
     fn actions_disabled(&self) -> bool {
@@ -576,12 +575,12 @@ mod tests {
     }
 
     #[test]
-    fn invalidation_disables_export_in_main_and_popped_windows_until_bindings_commit() {
+    fn reloading_disables_export_in_main_and_popped_windows_until_bindings_commit() {
         for popped in [false, true] {
             let mut app = App::new(None, true, || {});
             let export = app.project.graph.find("Export TIFF").unwrap();
             app.selected = Some(export);
-            app.invalidate_cache();
+            app.reload_files();
             // Do not poll: even a completed load must block exports until committed.
             let mut h = Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).build_ui_state(
                 move |ui, app: &mut App| {
@@ -726,7 +725,7 @@ mod tests {
             .clone();
         assert_eq!(app.level, DEFAULT_LEVEL);
         assert_eq!(image.width, 3984, "1/2 preview with reduced Bayer input to RCD");
-        h.get_by_label("Invalidate cache").click();
+        h.get_by_label("Reload files").click();
         settle(&mut h);
         let refreshed = &h
             .state()
@@ -872,8 +871,8 @@ mod tests {
         }
         impl crate::node_ui::GuiNode for slow::Definition {
             type Presentation = PreviewImage;
-            const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|p, _, _| {
-                if p.block {
+            const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|node, _, _| {
+                if node.parameters.block {
                     let gate = GATE.lock().unwrap();
                     let (started, release) = gate.as_ref().unwrap();
                     started.send(()).unwrap();

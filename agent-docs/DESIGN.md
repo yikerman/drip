@@ -109,8 +109,16 @@ Resolved with the user on 2026-10-11 after the review against
   a failure is stored as the node's unknown reason. Loading stays separate
   from computation. Admission no longer canonicalizes the RAW path; the stored
   path is the one supplied.
+- **Decided:** Other files a node names (output ICC profiles in Export TIFF and
+  Preview proofing) are assets: `#[node(assets)]` with `impl Assets for Params`
+  reads them once at admission into the node, keeping a load error as the
+  node's error. Actions and preparations receive the admitted node, so neither
+  reads files nor re-decodes parameters. This replaces the shared per-path
+  resource memo: a file is read when chosen, and "Reload files" readmits every
+  node that loads assets.
 - **Decided:** Headless actions are declared with the node,
-  `#[node(action = export)]`, as `fn(&Params, Inputs<'_>, &Resources)`; the
+  `#[node(action = export)]`, as `fn(&Params, Inputs<'_>)` (with `&Loaded`
+  assets before the inputs); the
   action's label comes from the function name and lives in `Kind`. The GUI runs
   a `GuiNode` extra action if declared, otherwise the node's action. TIFF export
   is such a node in `drip`. The CLI is an empty scaffold until batch work
@@ -237,7 +245,7 @@ Resolved with the user on 2026-10-11 after the review against
   exclude drawing, texture upload and file export. Harness and results live in
   `../drip-benchmark-results/`.
 - **Open:** Bounded reuse for exposure/sigmoid edits conflicts with the no-cache
-  requirement; it would need a byte budget and context/resource invalidation.
+  requirement; it would need a byte budget and context invalidation.
 
 ## GUI
 

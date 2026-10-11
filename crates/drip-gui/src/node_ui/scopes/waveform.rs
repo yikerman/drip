@@ -37,8 +37,10 @@ pub fn observe(
 #[drip_macros::gui_node]
 impl crate::node_ui::GuiNode for observe::Definition {
     type Presentation = Arc<Scope>;
-    const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-        Some(|p, inputs, ctx| waveform(&p.range, p.scale, &DeviceRgb::new(&inputs.image), ctx));
+    const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|node, inputs, ctx| {
+        let p = &node.parameters;
+        waveform(&p.range, p.scale, &DeviceRgb::new(&inputs.image), ctx)
+    });
 }
 
 pub fn waveform(

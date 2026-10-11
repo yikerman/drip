@@ -38,7 +38,6 @@ enum Effect {
 enum Command {
     Force(Demand),
     Reset,
-    Invalidate,
     Collect,
     Shutdown,
     Bind { ticket: u64, id: NodeId, kind: &'static str, params: Json },
@@ -227,13 +226,6 @@ impl Worker {
         self.send(Command::Reset)
     }
 
-    pub fn invalidate(&mut self) -> Result<(), String> {
-        self.generation += 1;
-        self.pending = None;
-        log::debug!("invalidating node and resource caches generation={}", self.generation);
-        self.send(Command::Invalidate)
-    }
-
     pub fn action(&self, graph: &Graph, id: NodeId, name: &'static str) -> Result<(), String> {
         // Processing Bind first cannot update an action's immutable graph snapshot.
         if self.binding_pending() {
@@ -354,7 +346,6 @@ impl Drop for Worker {
 fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
     let mut evaluator = None;
     let mut images = ImageCache::default();
-    let mut resources = drip::resource::Resources::default();
     while let Ok(command) = commands.recv() {
         match command {
             Command::Bind { ticket, id, kind, params } => {
@@ -376,12 +367,9 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
                 let evaluator = evaluator.get_or_insert_with(|| {
                     drip::runtime::RuntimeContext::from_env().map(Evaluator::new)
                 });
-                notify.send(force(&demand, evaluator.as_ref(), &mut images, &resources));
+                notify.send(force(&demand, evaluator.as_ref(), &mut images));
             }
-            Command::Reset | Command::Invalidate => {
-                resources = Default::default();
-                images.collect();
-            }
+            Command::Reset => images.collect(),
             Command::Collect => images.collect(),
             Command::Shutdown => break,
         }
@@ -392,13 +380,11 @@ fn force(
     demand: &Demand,
     evaluator: Result<&Evaluator, &NodeError>,
     images: &mut ImageCache,
-    resources: &drip::resource::Resources,
 ) -> Event {
     let start = Instant::now();
     let trace = log::log_enabled!(log::Level::Trace);
     let mut timings = Vec::new();
     let ctx = crate::node_ui::data::PrepareContext {
-        resources: resources.clone(),
         global: demand.global,
         client: evaluator.ok().and_then(|e| e.client().ok()).cloned(),
     };
@@ -421,8 +407,7 @@ fn force(
             let views = targets
                 .iter()
                 .filter_map(|&id| {
-                    let node = demand.graph.node(id)?;
-                    let kind = node.kind;
+                    let node = demand.graph.dag.node(id).ok()?;
                     let result = match inputs.remove(&id) {
                         Some(inputs) => inputs.and_then(|inputs| {
                             prepare_view(
@@ -439,7 +424,7 @@ fn force(
                     if let Err(error) = &result {
                         let (id, kind) = match error {
                             NodeError::Node { node, kind, .. } => (*node, *kind),
-                            _ => (id, kind.id),
+                            _ => (id, node.kind().id),
                         };
                         failures.insert(id, Failure { kind, error: error.clone() });
                     }
@@ -458,14 +443,13 @@ fn force(
         Effect::Perform { id, name } => {
             let result = demand
                 .graph
+                .dag
                 .node(id)
-                .ok_or_else(|| "action node no longer exists".to_owned())
+                .map_err(|_| "action node no longer exists".to_owned())
                 .and_then(|node| {
                     let inputs = inputs.remove(&id).expect("demanded node");
                     inputs
-                        .and_then(|inputs| {
-                            crate::node_ui::run_action(node.kind, name, node.params, &inputs, &ctx)
-                        })
+                        .and_then(|inputs| crate::node_ui::run_action(name, node, &inputs, &ctx))
                         .map_err(|e| e.to_string())
                 });
             log::debug!("action {name} node={id:?} elapsed={:.1?}", start.elapsed());
@@ -516,21 +500,22 @@ impl Demand {
 
 fn prepare_view(
     id: NodeId,
-    node: crate::model::Node,
+    node: &dyn drip::definition::Node,
     inputs: &InputValues,
     ctx: &crate::node_ui::data::PrepareContext,
     images: &mut ImageCache,
     timings: Option<&mut Vec<NodeTiming>>,
 ) -> ViewResult {
-    let Some(binding) = crate::node_ui::binding(node.kind).filter(|b| b.has_preparation()) else {
+    let kind = node.kind();
+    let Some(binding) = crate::node_ui::binding(kind).filter(|b| b.has_preparation()) else {
         return Ok(None);
     };
     let start = timings.as_ref().map(|_| Instant::now());
-    let result = binding.prepare(node.params, inputs, ctx, images);
+    let result = binding.prepare(node, inputs, ctx, images);
     if let (Some(start), Some(timings)) = (start, timings) {
         timings.push(NodeTiming {
             node: id,
-            kind: node.kind.id,
+            kind: kind.id,
             host_elapsed: start.elapsed(),
             success: result.is_ok(),
         });
@@ -581,7 +566,7 @@ mod tests {
         let demand = preview(7, graph, 2, vec![id]);
         let error = NodeError::Runtime("DRIP_BACKEND=cpu requires --features drip/cpu".into());
         let Event::Evaluated { generation, views, failures } =
-            force(&demand, Err(&error), &mut ImageCache::default(), &Default::default())
+            force(&demand, Err(&error), &mut ImageCache::default())
         else {
             panic!("expected preview completion");
         };
@@ -762,12 +747,9 @@ mod tests {
             let evaluator = Evaluator::new(drip::runtime::RuntimeContext::from_env().unwrap());
             for enabled in [true, false] {
                 TRACE.set(enabled);
-                let Event::Evaluated { failures, .. } = super::super::force(
-                    &demand,
-                    Ok(&evaluator),
-                    &mut ImageCache::default(),
-                    &Default::default(),
-                ) else {
+                let Event::Evaluated { failures, .. } =
+                    super::super::force(&demand, Ok(&evaluator), &mut ImageCache::default())
+                else {
                     panic!("expected preview completion")
                 };
                 assert!(failures.is_empty());
@@ -860,26 +842,6 @@ mod tests {
             assert!(worker.result(preview).is_none());
             assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0, 3.0]);
 
-            // Invalidation also recomputes nodes with no file dependencies.
-            worker.invalidate().unwrap();
-            worker.request(&graph, 1, vec![preview, histogram]).unwrap();
-            wait(&mut worker);
-            assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0, 3.0, 3.0]);
-
-            // Work already running at invalidation cannot restore an old result.
-            graph.set_param(source, "block", json!(true)).unwrap();
-            worker.request(&graph, 1, vec![preview]).unwrap();
-            entered.recv_timeout(TIMEOUT).unwrap();
-            worker.request(&graph, 2, vec![preview]).unwrap();
-            worker.invalidate().unwrap();
-            assert!(worker.pending.is_none());
-            release.send(()).unwrap();
-            assert!(wait(&mut worker).is_empty(), "invalidated completion is not presented");
-            graph.set_param(source, "block", json!(false)).unwrap();
-            worker.request(&graph, 1, vec![preview]).unwrap();
-            wait(&mut worker);
-            assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0, 3.0, 3.0, 3.0, 3.0]);
-
             graph.set_param(source, "block", json!(true)).unwrap();
             worker.request(&graph, 1, vec![preview]).unwrap();
             entered.recv_timeout(TIMEOUT).unwrap();
@@ -902,7 +864,7 @@ mod tests {
         }
     }
 
-    mod exports_follow_invalidation_order_and_always_use_full_detail_fixture {
+    mod exports_read_current_files_at_full_detail_fixture {
         use super::*;
 
         #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
@@ -949,18 +911,21 @@ mod tests {
             type Presentation = ();
             const ACTION: Option<crate::node_ui::Action<Self>> = Some(crate::node_ui::Action {
                 name: "write",
-                run: |p, inputs, ctx| {
+                run: |node, inputs, ctx| {
                     assert_eq!(ctx.global.scale, 1);
                     let image = inputs.image.data;
-                    std::fs::write(p.path.as_ref().unwrap(), format!("{:?}", image[0]))
-                        .map_err(|e| KernelError::Runtime(e.to_string()))?;
+                    std::fs::write(
+                        node.parameters.path.as_ref().unwrap(),
+                        format!("{:?}", image[0]),
+                    )
+                    .map_err(|e| KernelError::Runtime(e.to_string()))?;
                     Ok(None)
                 },
             });
         }
 
         #[test]
-        fn exports_follow_invalidation_order_and_always_use_full_detail() {
+        fn exports_read_current_files_at_full_detail() {
             let input =
                 std::env::temp_dir().join(format!("drip-worker-input-{}", std::process::id()));
             let output = input.with_extension("out");
@@ -975,28 +940,23 @@ mod tests {
             wait(&mut worker);
             let before = pixel(&worker, preview);
             std::fs::write(&input, "2").unwrap();
-            for (invalidate, expected) in [(false, "[2.0, 1.0, 0.0]"), (true, "[2.0, 1.0, 0.0]")] {
-                if invalidate {
-                    worker.invalidate().unwrap();
-                }
-                worker.action(&graph, export, "write").unwrap();
-                let deadline = Instant::now() + TIMEOUT;
-                loop {
-                    if worker.poll().into_iter().any(|notice| match notice {
-                        Notice::Performed { result, .. } => {
-                            result.unwrap();
-                            true
-                        }
-                        _ => false,
-                    }) {
-                        break;
+            worker.action(&graph, export, "write").unwrap();
+            let deadline = Instant::now() + TIMEOUT;
+            loop {
+                if worker.poll().into_iter().any(|notice| match notice {
+                    Notice::Performed { result, .. } => {
+                        result.unwrap();
+                        true
                     }
-                    assert!(Instant::now() < deadline);
-                    thread::sleep(Duration::from_millis(1));
+                    _ => false,
+                }) {
+                    break;
                 }
-                assert_eq!(std::fs::read_to_string(&output).unwrap(), expected);
-                assert_eq!(pixel(&worker, preview), before, "export leaves preview intact");
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(1));
             }
+            assert_eq!(std::fs::read_to_string(&output).unwrap(), "[2.0, 1.0, 0.0]");
+            assert_eq!(pixel(&worker, preview), before, "export leaves preview intact");
             worker.request(&graph, 3, vec![preview]).unwrap();
             wait(&mut worker);
             assert_eq!(pixel(&worker, preview), [2.0, 1.0, 0.0, 1.0]);
@@ -1056,9 +1016,9 @@ mod tests {
         }
         impl crate::node_ui::GuiNode for probe::Definition {
             type Presentation = ();
-            const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|settings, _, _| {
+            const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|node, _, _| {
                 CALLS.fetch_add(1, Ordering::Relaxed);
-                if settings.fail { Err("preparation failed".into()) } else { Ok(()) }
+                if node.parameters.fail { Err("preparation failed".into()) } else { Ok(()) }
             });
         }
         #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
@@ -1093,10 +1053,6 @@ mod tests {
         worker.request(&graph, 2, vec![id]).unwrap();
         wait(&mut worker);
         assert_eq!(CALLS.load(Ordering::Relaxed), 5);
-        worker.invalidate().unwrap();
-        worker.request(&graph, 2, vec![id]).unwrap();
-        wait(&mut worker);
-        assert_eq!(CALLS.load(Ordering::Relaxed), 6);
     }
 
     mod panic_wakes_the_ui_and_ends_the_busy_state_fixture {

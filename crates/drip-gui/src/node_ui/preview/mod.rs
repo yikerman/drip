@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::node_ui::data::{HostImage, PrepareContext};
+use crate::node_ui::data::HostImage;
 use drip::Error as KernelError;
 use drip::node::profile;
 
@@ -18,20 +18,18 @@ mod proofing;
 mod tests;
 mod view;
 
+/// `output` is the proof mode's loaded output profile.
 pub fn prepare(
-    p: Preview,
+    p: &Preview,
+    output: Option<&profile::Output>,
     image: &Arc<HostImage>,
-    ctx: &PrepareContext,
 ) -> Result<PreviewImage, KernelError> {
     let input = image;
+    let output = || output.expect("proof modes load their output");
     let pixels = match p.mode {
         Mode::None => None,
-        Mode::Softproof(output) => {
-            Some(softproof(&profile::Output::load(&output, &ctx.resources)?, &input.pixels)?)
-        }
-        Mode::Gamutcheck(output) => {
-            Some(gamutcheck(&profile::Output::load(&output, &ctx.resources)?, &input.pixels)?)
-        }
+        Mode::Softproof(_) => Some(softproof(output(), &input.pixels)?),
+        Mode::Gamutcheck(_) => Some(gamutcheck(output(), &input.pixels)?),
     };
     let mut view = match pixels {
         None => PreviewImage::new(image),
@@ -47,13 +45,14 @@ pub fn prepare(
 #[drip_macros::gui_node]
 impl super::GuiNode for observe::Definition {
     type Presentation = PreviewImage;
-    const PREPARE: Option<super::Prepare<Self>> = Some(|p, inputs, ctx| {
+    const PREPARE: Option<super::Prepare<Self>> = Some(|node, inputs, ctx| {
         let image = Arc::new(HostImage::new(&inputs.image, ctx.global.scale));
-        prepare(p, &image, ctx)
+        prepare(&node.parameters, node.assets()?.as_ref(), &image)
     });
 }
 
 use drip::{
+    definition::Assets,
     node::data::{Rec2020, Rgb},
     ports::{Cpu, Read},
     runtime::KernelContext,
@@ -81,11 +80,22 @@ pub struct Preview {
     #[param]
     pub mode: Mode,
 }
+impl Assets for Preview {
+    type Loaded = Option<profile::Output>;
+    fn load(&self) -> drip::Result<Self::Loaded> {
+        match &self.mode {
+            Mode::None => Ok(None),
+            Mode::Softproof(output) | Mode::Gamutcheck(output) => {
+                profile::Output::load(output).map(Some)
+            }
+        }
+    }
+}
 /// Display linear Rec.2020/D65 RGB. Softproof simulates an output profile; Gamut
 /// check marks out-of-gamut colors in cyan. Each proof mode owns its output
-/// settings. Interpolation selects bilinear or nearest-neighbor display sampling
-/// and does not alter processing pixels.
-#[drip::node(id = "view.preview", name = "Preview", category = "View")]
+/// settings; a profile file is read when chosen. Interpolation selects bilinear
+/// or nearest-neighbor display sampling and does not alter processing pixels.
+#[drip::node(id = "view.preview", name = "Preview", category = "View", assets)]
 pub fn observe(
     _: &KernelContext<'_>,
     _: &Preview,

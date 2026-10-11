@@ -101,13 +101,45 @@ fn actions_are_declared_with_the_node_and_named_from_their_function() {
     let action = kind_field(&module, "action");
     let action = quote!(#action).to_string();
     assert!(action.starts_with("Some (:: drip :: definition :: Action { name : \"Write file\""));
-    assert!(
-        action.contains("super :: write_file (& parameters , inputs . bind :: < Definition > () ?")
-    );
+    assert!(action.contains(
+        "super :: write_file (& node . parameters , inputs . bind :: < Definition > () ?"
+    ));
     let function = syn::parse_quote! { fn x(c: &Context, p: &P) -> Result<()> { Ok(()) } };
     let module = generated_module(expand(quote!(id = "x"), function).unwrap());
     let action = kind_field(&module, "action");
     assert_eq!(quote!(#action).to_string(), "None");
+}
+
+#[test]
+fn assets_load_at_admission_and_reach_the_action() {
+    let function: syn::ItemFn = syn::parse_quote! {
+        fn tiff(c: &Context, p: &Export, image: Read<Cpu<Rgb>>) -> Result<()> { Ok(()) }
+    };
+    let options = quote!(id = "x", action = export, assets);
+    let module = generated_module(expand(options, function.clone()).unwrap());
+    let field = kind_field(&module, "loads_assets");
+    assert_eq!(quote!(#field).to_string(), "true");
+    let action = kind_field(&module, "action");
+    assert!(quote!(#action).to_string().contains(
+        "super :: export (& node . parameters , node . assets () ? , inputs . bind :: < Definition > () ?"
+    ));
+    let items = &module.content.as_ref().unwrap().1;
+    let admit = items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Fn(f) if f.sig.ident == "definition" => Some(quote!(#f).to_string()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(admit.contains("assets : :: drip :: definition :: Assets :: load (& parameters)"));
+    for options in [quote!(id = "x", assets, assets), quote!(id = "x", assets = true)] {
+        let error = expand(options, function.clone()).unwrap_err();
+        assert_eq!(error.to_string(), "expected a single `assets` flag");
+    }
+    let source =
+        syn::parse_quote! { fn read(p: &Settings, raw: Load<'_, Bayer>) -> Result<()> { Ok(()) } };
+    let error = expand(quote!(id = "x", assets), source).unwrap_err();
+    assert!(error.to_string().contains("remove assets"), "{error}");
 }
 
 #[test]

@@ -4,6 +4,16 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Output ICC profiles load at admission as node assets; the per-path resource
+  memo and worker cache invalidation are gone, and "Invalidate cache" became
+  "Reload files". Actions and preparations receive the admitted node. GPU
+  workspace tests, Clippy and formatting pass.
+- Desktop capture check: launched `dist/drip-gui` on KDE Wayland, moved and
+  resized its window, opened Preview detail through emulated pointer input,
+  and inspected the captured menu. Temporary helper and captures are in
+  `/tmp/drip-desktop-check.py` and `/tmp/drip-check-menu.png`; the test app
+  and input device were closed. README/demo refresh remains paused for the
+  concurrent code changes; use the Sony ILCE-7RM3 fixture when resumed.
 - Review cleanups: one `#[default]` per choice; one typed-output check;
   test-only evaluation API removed; unread ports as `_name`; shared parameter
   JSON helpers; scope nodes beside their preparation; the RAW template ends in

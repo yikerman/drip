@@ -64,17 +64,18 @@ pub struct Settings {
     black_point_compensation: bool,
 }
 
-/// Loaded output settings, retaining the original ICC bytes for embedding.
+/// Loaded output settings. Keeps the validated ICC bytes, which are also
+/// embedded in exports; an LCMS profile is not shareable across threads.
 pub struct Output {
-    pub profile: Profile,
     pub icc: Vec<u8>,
     pub intent: Intent,
     pub flags: Flags,
 }
 
 impl Output {
-    pub fn load(p: &Settings, resources: &crate::resource::Resources) -> Result<Self, Error> {
-        let (profile, icc) = match p.profile.built_in() {
+    /// Builds a built-in profile or reads and checks a profile file.
+    pub fn load(p: &Settings) -> Result<Self, Error> {
+        let icc = match p.profile.built_in() {
             None => {
                 let ProfileSource::File(source) = &p.profile else {
                     unreachable!("built-in profile")
@@ -83,16 +84,12 @@ impl Output {
                     .path
                     .as_deref()
                     .ok_or(Error::Contract("no output profile file chosen".into()))?;
-                let in_file = |e| format!("{}: {e}", file.display());
-                let icc = resources
-                    .load(file, |file| std::fs::read(file).map_err(|e| in_file(e.to_string())))?;
-                let icc = (*icc).clone();
-                (output_profile(&icc).map_err(in_file)?, icc)
+                let in_file = |e: String| Error::Runtime(format!("{}: {e}", file.display()));
+                let icc = std::fs::read(file).map_err(|e| in_file(e.to_string()))?;
+                output_profile(&icc).map_err(in_file)?;
+                icc
             }
-            Some(profile) => {
-                let icc = profile.icc().map_err(|e| e.to_string())?;
-                (profile, icc)
-            }
+            Some(profile) => profile.icc().map_err(|e| e.to_string())?,
         };
         let intent = match p.intent {
             RenderingIntent::Perceptual => Intent::Perceptual,
@@ -105,7 +102,12 @@ impl Output {
         } else {
             Flags::default()
         };
-        Ok(Self { profile, icc, intent, flags })
+        Ok(Self { icc, intent, flags })
+    }
+
+    /// The output profile, parsed from the bytes checked at load.
+    pub fn profile(&self) -> Profile {
+        Profile::new_icc(&self.icc).expect("checked at load")
     }
 
     /// Converts linear Rec.2020 to the selected device encoding.
@@ -118,7 +120,7 @@ impl Output {
             lcms2::GlobalContext::new(),
             &rec2020_linear(),
             PixelFormat::RGB_FLT,
-            &self.profile,
+            &self.profile(),
             format,
             self.intent,
             self.flags | Flags::NO_CACHE,

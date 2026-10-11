@@ -11,7 +11,7 @@
   never a collection of unrelated node kernels.
 - Outside `node/`, keep shared DAG/evaluation infrastructure: definitions and
   discovery, ports and payload interfaces, graph checks, scheduling, runtime
-  access, parameter schemas, resources and generic project persistence. These
+  access, parameter schemas, admission assets and generic project persistence. These
   modules must not depend on concrete image-processing nodes or payloads.
 
 The same ownership rule applies to `drip-gui`: node-specific declarations,

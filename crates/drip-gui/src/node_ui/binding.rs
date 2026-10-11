@@ -9,9 +9,9 @@ use crate::{
 };
 use drip::{
     Result,
-    definition::Typed,
+    definition::{Node, Typed},
     eval::InputValues,
-    param::{decode, encode},
+    param::encode,
 };
 use egui::Ui;
 use serde_json::Value;
@@ -19,13 +19,10 @@ use std::sync::Arc;
 
 type Parameters<G> = <G as Typed>::Parameters;
 type Inputs<'a, G> = <G as Typed>::Inputs<'a>;
-pub type Prepare<G> = for<'a> fn(
-    Parameters<G>,
-    Inputs<'a, G>,
-    &PrepareContext,
-) -> Result<<G as GuiNode>::Presentation>;
-type Run<G> =
-    for<'a> fn(Parameters<G>, Inputs<'a, G>, &PrepareContext) -> Result<Option<Parameters<G>>>;
+/// Runs on the admitted node, which holds its parameters and any assets.
+pub type Prepare<G> =
+    for<'a> fn(&G, Inputs<'a, G>, &PrepareContext) -> Result<<G as GuiNode>::Presentation>;
+type Run<G> = for<'a> fn(&G, Inputs<'a, G>, &PrepareContext) -> Result<Option<Parameters<G>>>;
 /// A named frontend action. It may return new parameters for its node, which
 /// the app applies as an ordinary edit once the action finishes.
 pub struct Action<G: Typed> {
@@ -43,8 +40,8 @@ pub trait GuiNode: Typed {
     }
 }
 type PrepareErased =
-    fn(Value, &InputValues, &PrepareContext, &mut ImageCache) -> Result<Arc<dyn Drawable>>;
-type ActionErased = fn(Value, &InputValues, &PrepareContext) -> Result<Option<Value>>;
+    fn(&dyn Node, &InputValues, &PrepareContext, &mut ImageCache) -> Result<Arc<dyn Drawable>>;
+type ActionErased = fn(&dyn Node, &InputValues, &PrepareContext) -> Result<Option<Value>>;
 pub struct Binding {
     kind: &'static Kind,
     controls: fn(&mut Ui, &mut crate::editing::NodeCx),
@@ -57,17 +54,17 @@ impl Binding {
             kind: G::KIND,
             controls: |ui, node| G::controls(ui, &mut ControlCx::new(node)),
             prepare: if G::PREPARE.is_some() {
-                Some(|params, inputs, ctx, cache| {
+                Some(|node, inputs, ctx, cache| {
                     let prepare = G::PREPARE.expect("declared preparation");
-                    Ok(prepare(decode(params)?, inputs.bind::<G>()?, ctx)?.into_drawable(cache))
+                    Ok(prepare(G::of(node)?, inputs.bind::<G>()?, ctx)?.into_drawable(cache))
                 })
             } else {
                 None
             },
             action: match G::ACTION {
-                Some(action) => Some((action.name, |params, inputs, ctx| {
+                Some(action) => Some((action.name, |node, inputs, ctx| {
                     let run = G::ACTION.expect("declared action").run;
-                    run(decode(params)?, inputs.bind::<G>()?, ctx)?.as_ref().map(encode).transpose()
+                    run(G::of(node)?, inputs.bind::<G>()?, ctx)?.as_ref().map(encode).transpose()
                 })),
                 None => None,
             },
@@ -84,12 +81,12 @@ impl Binding {
     }
     pub fn prepare(
         &self,
-        params: Value,
+        node: &dyn Node,
         inputs: &InputValues,
         ctx: &PrepareContext,
         cache: &mut ImageCache,
     ) -> Result<Option<Arc<dyn Drawable>>> {
-        self.prepare.map(|prepare| prepare(params, inputs, ctx, cache)).transpose()
+        self.prepare.map(|prepare| prepare(node, inputs, ctx, cache)).transpose()
     }
     pub fn action_name(&self) -> Option<&'static str> {
         self.action.map(|(name, _)| name)
@@ -97,7 +94,7 @@ impl Binding {
     pub fn run_action(
         &self,
         name: &str,
-        params: Value,
+        node: &dyn Node,
         inputs: &InputValues,
         ctx: &PrepareContext,
     ) -> Result<Option<Value>> {
@@ -105,6 +102,6 @@ impl Binding {
             .action
             .filter(|(declared, _)| name == *declared)
             .ok_or_else(|| drip::Error::Graph("unknown node action".into()))?;
-        action(params, inputs, ctx)
+        action(node, inputs, ctx)
     }
 }

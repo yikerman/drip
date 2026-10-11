@@ -34,20 +34,34 @@ fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     assert!(error.contains("not migrated"), "{error}");
 }
 #[test]
+fn export_reads_its_profile_file_once_at_admission() {
+    use drip::definition::{Typed, registered};
+    use drip::node::export::tiff::Definition;
+    let file = std::env::temp_dir().join(format!("drip-profile-{}.icc", std::process::id()));
+    let srgb = drip::node::profile::Output::load(&Default::default()).unwrap().icc;
+    std::fs::write(&file, &srgb).unwrap();
+    let mut params = serde_json::to_value(drip::node::export::Export::default()).unwrap();
+    params["profile"] = json!({"file": {"path": file}});
+    let loaded = registered("output.tiff", params.clone()).unwrap();
+    std::fs::remove_file(&file).unwrap();
+    assert_eq!(Definition::of(&*loaded).unwrap().assets().unwrap().icc, srgb);
+    // A missing file is the node's error, not a refused edit.
+    let missing = registered("output.tiff", params.clone()).unwrap();
+    let error = Definition::of(&*missing).unwrap().assets().err().unwrap();
+    assert!(error.to_string().contains(&*file.to_string_lossy()), "{error}");
+    assert_eq!(missing.parameters().unwrap(), params);
+}
+
+#[test]
 fn tiff_profile_extent_and_pixels_survive_encoding() {
     let desc = RgbDesc {
         extent: Extent { width: 2, height: 1 },
         coordinates: Coordinates::Space(REC2020_D65),
     };
     let export = drip::node::export::Export::default();
+    let output = drip::definition::Assets::load(&export).unwrap();
     let encode = |desc, metadata| {
-        drip::node::export::encode(
-            &export,
-            desc,
-            &[[0.; 3], [1.; 3]],
-            metadata,
-            &Default::default(),
-        )
+        drip::node::export::encode(&export, &output, desc, &[[0.; 3], [1.; 3]], metadata)
     };
     let metadata = drip_raw::Metadata { orientation: 6, ..Default::default() };
     let bytes = encode(&desc, Some(&metadata)).unwrap();

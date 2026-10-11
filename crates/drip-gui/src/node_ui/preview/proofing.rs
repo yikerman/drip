@@ -12,7 +12,7 @@ pub(super) fn softproof(
     // conversion, not to this return to the display pipeline's working space.
     let transform = Transform::new_flags_context(
         lcms2::GlobalContext::new(),
-        &output.profile,
+        &output.profile(),
         PixelFormat::RGB_FLT,
         &profile::rec2020_linear(),
         PixelFormat::RGB_FLT,

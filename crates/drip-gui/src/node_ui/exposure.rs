@@ -113,7 +113,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::node_ui::data::PrepareContext;
     use drip::{
-        eval::Evaluator, graph::Dag, node, node::data::*, ports::NodeId, runtime::RuntimeContext,
+        definition::Typed, eval::Evaluator, graph::Dag, node, node::data::*, ports::NodeId,
+        runtime::RuntimeContext,
     };
 
     /// Source → Exposure → Sigmoid; returns Exposure's node.
@@ -139,14 +140,11 @@ pub(crate) mod tests {
     fn meter(evaluator: &Evaluator, dag: &Dag, id: NodeId) -> Result<f32> {
         let inputs =
             evaluator.evaluate_inputs(dag, &Default::default(), &[id]).remove(&id).unwrap()?;
-        let ctx = PrepareContext {
-            client: evaluator.client().ok().cloned(),
-            resources: Default::default(),
-            global: Default::default(),
-        };
+        let ctx =
+            PrepareContext { client: evaluator.client().ok().cloned(), global: Default::default() };
         let run = <exposure::Definition as GuiNode>::ACTION.unwrap().run;
-        let current = serde_json::from_value(dag.node(id)?.parameters()?).unwrap();
-        Ok(run(current, inputs.bind::<exposure::Definition>()?, &ctx)?.unwrap().ev)
+        let node = exposure::Definition::of(dag.node(id)?)?;
+        Ok(run(node, inputs.bind::<exposure::Definition>()?, &ctx)?.unwrap().ev)
     }
 
     #[test]

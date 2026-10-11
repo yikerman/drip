@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::model::{NodeId, Port};
 use drip::{
+    definition::Typed,
     eval::Evaluator,
     node::data::{Coordinates, Extent, REC2020_D65, Rgb, RgbDesc},
     ports::{Cpu, Write},
@@ -79,7 +80,7 @@ fn export_depth_survives_reopening_and_encodes_expected_samples() {
     assert_eq!(project.graph.node(export).unwrap().params["depth"], "u16");
     set(&mut project, export, json!({"path":path}));
     let evaluator = Evaluator::new(RuntimeContext::host());
-    let expected_profile = profile::Output::load(&Default::default(), &Default::default()).unwrap();
+    let expected_profile = profile::Output::load(&Default::default()).unwrap();
     let profile_path = scratch.0.join("srgb.icc");
     std::fs::write(&profile_path, &expected_profile.icc).unwrap();
     set(&mut project, export, json!({"profile":{"file":{"path":profile_path}}}));
@@ -88,21 +89,14 @@ fn export_depth_survives_reopening_and_encodes_expected_samples() {
             set(&mut project, export, json!({"depth":depth,"compression":compression}));
             let reopened = Project::from_json(&project.to_json().unwrap(), &Registry).unwrap();
             let export = reopened.graph.find("Export TIFF").unwrap();
-            let node = reopened.graph.node(export).unwrap();
-            assert_eq!(node.params["depth"], depth);
+            assert_eq!(reopened.graph.node(export).unwrap().params["depth"], depth);
             let values = evaluator
                 .evaluate_inputs(&reopened.graph.dag, &Default::default(), &[export])
                 .remove(&export)
                 .unwrap()
                 .unwrap();
-            crate::node_ui::run_action(
-                node.kind,
-                "Export",
-                node.params,
-                &values,
-                &Default::default(),
-            )
-            .unwrap();
+            let node = reopened.graph.dag.node(export).unwrap();
+            crate::node_ui::run_action("Export", node, &values, &Default::default()).unwrap();
             let (data, icc, compression_tag) = read(&path);
             assert_eq!(icc, expected_profile.icc);
             assert_eq!(compression_tag, if compression == "none" { 1 } else { 8 });
@@ -162,18 +156,18 @@ fn softproof_matches_bounded_export_across_profiles_and_intents() {
                 );
                 let ctx = crate::node_ui::data::PrepareContext::default();
                 let values = inputs.remove(&preview).unwrap().unwrap();
-                let params =
-                    serde_json::from_value(project.graph.node(preview).unwrap().params).unwrap();
+                let node = project.graph.dag.node(preview).unwrap();
+                let node = <super::observe::Definition as Typed>::of(node).unwrap();
                 let bound = values.bind::<super::observe::Definition>().unwrap();
                 let image = std::sync::Arc::new(crate::node_ui::data::HostImage::new(
                     &bound.image,
                     ctx.global.scale,
                 ));
-                let shown = super::prepare(params, &image, &ctx).unwrap();
+                let output = node.assets().unwrap();
+                let shown = super::prepare(&node.parameters, output.as_ref(), &image).unwrap();
                 let values = inputs.remove(&tiff).unwrap().unwrap();
-                let node = project.graph.node(tiff).unwrap();
-                crate::node_ui::run_action(node.kind, "Export", node.params, &values, &ctx)
-                    .unwrap();
+                let node = project.graph.dag.node(tiff).unwrap();
+                crate::node_ui::run_action("Export", node, &values, &ctx).unwrap();
                 let (data, icc, _) = read(&path);
                 let DecodingResult::U16(data) = data else { panic!("16-bit export") };
                 let encoded = data.as_chunks::<3>().0;
