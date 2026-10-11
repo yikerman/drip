@@ -107,6 +107,11 @@ button on previews and scopes opens their views separately.
 
 The inspector describes the selected node's operation, assumptions and input/output types.
 
+In **Exposure**, **Auto exposure** sets the whole-image mean linear luminance to
+18% grey. It evaluates through Exposure at full detail, then updates the ordinary
+EV control. Use it before Sigmoid; mostly bright or dark subjects may need a
+manual adjustment. The UI pauses while this one-shot evaluation runs.
+
 **Geometry → Orientation** uses **From metadata** by default. Its **Orientation**
 dropdown can replace the camera setting with a rotation or reflection; **Identity**
 keeps the stored pixel order. The starting template connects RAW metadata and routes

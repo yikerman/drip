@@ -22,6 +22,11 @@ beside each algorithm identify the source and explain changes made for Drip.
 Further algorithm ports must add their authors, exact source revision and license
 here when introduced.
 
+Exposure's whole-image meter uses the luminance-ratio principle described by
+darktable's area exposure mapping [20]. This is an original implementation with
+a fixed linear Y target of 0.18, rather than darktable's configurable L* target;
+no darktable source code is copied.
+
 ## Runtime dependencies
 
 | Project and credit | Use | License |
@@ -250,3 +255,8 @@ an explicit integer factor and retains a minimum Bayer cell for small inputs.
 overflow for large finite samples, and supplies the same computation to the explicit node and demosaic's context-driven local reduction on every
 CubeCL backend. Unlike darktable's approximate demosaic path, Drip retains the
 selected interpolation algorithm. No preview nodes are injected into the graph.
+
+[20] darktable contributors, “exposure,” *darktable development user manual*.
+[Online]. Available:
+<https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/exposure/>.
+Accessed: Oct. 10, 2026.

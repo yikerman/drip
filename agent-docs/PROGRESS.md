@@ -4,6 +4,14 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
 
+- Added Auto exposure locally in the Exposure parameter panel. It evaluates
+  through Exposure at full detail, meters mean linear luminance and edits EV.
+  Documented why retaining the current EV reaches the same fixed point as
+  resetting to zero. The one-shot evaluation is synchronous; processing nodes
+  and the worker action interface are unchanged. GUI tests pass on CPU (83,
+  seven ignored); the three metering/button tests also pass on WGPU. Strict
+  workspace Clippy, formatting and whitespace checks pass. Interactive testing
+  remains with the user.
 - Reverted the unfinished auto-exposure button and action-result changes at the
   user's request. Exposure remains manual. Retained the completed orientation,
   unified RAW metadata/calibration and ACES review for commit.

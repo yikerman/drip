@@ -3,6 +3,7 @@
 mod binding;
 mod controls;
 mod export;
+mod exposure;
 pub mod help;
 pub mod preview;
 pub mod scopes;

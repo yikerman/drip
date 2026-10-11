@@ -167,7 +167,7 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
 
     /// Whether actions are disabled while one runs or assets are loading.
     pub fn actions_disabled(&self) -> bool {
-        self.frame.actions_disabled
+        self.frame.actions_disabled || !self.frame.report.bindings.is_empty()
     }
 
     /// Whether `part` of the node is shown in its own window.

@@ -106,6 +106,13 @@ in [PROGRESS](PROGRESS.md).
 
 ## Future processing contracts
 
+- **Decided:** Exposure's custom GUI adds a one-shot Auto exposure button. It
+  evaluates through that node at full detail, averages linear Rec.2020 luminance
+  and adds `log2(0.18 / mean)` to the current EV through the ordinary parameter
+  edit path. This reaches the same fixed point as metering at zero EV, within
+  floating-point rounding. The control evaluates synchronously; it introduces
+  no worker action or automatic processing mode. The average-grey assumption is
+  a content-dependent starting point, not calibrated scene reflectance.
 - **Tentative:** The refreshed ACES comparison leaves one required processing
   feature for the first usable prototype: editable scene-illuminant adaptation.
   Normalization, coupled sample/clipping gains, highlight reconstruction,
@@ -121,7 +128,7 @@ in [PROGRESS](PROGRESS.md).
 - **Decided:** Keep exposure scaling distinct from sensor-white normalization.
   The current RAW denominator and zero-EV default do not establish ACES's
   calibrated 18% scene-reflector scale [7]; sigmoid's 0.18 pivot does not supply
-  that calibration. Manual exposure suffices for the prototype. Automatic
+  that calibration. Manual exposure and one-shot mean metering suffice for the prototype. Automatic
   baseline/exposure normalization and cross-camera matching remain follow-ups.
 - **Tentative:** The ACES comparison supports keeping the current Rec.2020/D65
   pipeline for the packaged proof of concept. ACES adoption is a separate scope:

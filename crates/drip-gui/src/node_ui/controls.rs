@@ -20,7 +20,7 @@ pub struct FileUi {
 }
 
 pub struct ControlCx<'n, 'g, 'f, 'a, N: DeserializeOwned> {
-    node: &'n mut NodeCx<'g, 'f, 'a>,
+    pub(super) node: &'n mut NodeCx<'g, 'f, 'a>,
     parameters: PhantomData<fn() -> N>,
 }
 
