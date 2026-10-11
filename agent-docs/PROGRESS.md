@@ -4,6 +4,24 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
 
+- Refined the default layout to aligned rows and columns: preview, histogram
+  and vectorscope share their top edge; waveform sits directly under histogram.
+  Per user clarification, retained the screenshot's stagger through Orientation
+  to separate metadata branches; Exposure/Sigmoid align with Orientation.
+  RAW and TIFF sit beneath the chain; TIFF has an additional 100 units of
+  vertical clearance below Sigmoid following the user's layout check.
+  Wire routing is unchanged.
+  Template wiring/persistence and formatting/whitespace checks pass.
+- Inspected wire rendering after the landscape-template change. Existing cubic
+  handles grow with horizontal separation and do not consider node obstacles;
+  backward links produce large loops. Proposed rounded orthogonal routing as a
+  readability option; no rendering or interaction changes in this review.
+- Rearranged the default RAW template to follow the user's screenshot: views
+  above the processing chain, RAW at lower left, and TIFF at lower right.
+  The graph is about 1,840 units wide instead of 3,100. Only initial positions
+  change; existing saved layouts and processing connections are retained.
+  The existing template wiring/persistence test and formatting/whitespace checks
+  pass. Interactive layout review remains with the user.
 - Added u8 TIFF export through LittleCMS RGB_8 and the TIFF RGB8 encoder.
   The library owns the shared depth choice; GUI controls persist u8/u16/f32,
   and the CLI retains its u16 default. Profile and metadata writing stay shared.

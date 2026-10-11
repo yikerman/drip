@@ -18,6 +18,17 @@ in [PROGRESS](PROGRESS.md).
   transfers and allocations. Earlier Rayon comparisons are historical evidence,
   not the current backend policy.
 - **Decided:** Prototype project formats have no migration guarantee.
+- **Decided:** The default RAW template uses a landscape layout:
+  preview/histogram/vectorscope share a top edge, histogram/waveform share a
+  column, and processing nodes stagger down through Orientation to separate
+  metadata branches. Exposure and Sigmoid align with Orientation. RAW and TIFF sit at the
+  bottom corners to keep metadata wires below most processing nodes;
+  the editor's existing fit-to-view handles the available canvas.
+- **Tentative:** Rounded orthogonal wire paths could improve tracing in the
+  landscape layout. The current single cubic uses half the horizontal distance
+  for each handle, producing large loops for backward connections. Separate
+  curve styling from routing: avoiding nodes needs obstacle-aware paths, and
+  overlapping branches still need spacing or hover emphasis. No router chosen.
 - **Decided:** TIFF depth is a shared export choice: u8, u16 (default), or f32.
   LittleCMS converts into the selected output encoding before integer quantization;
   depth does not select a transfer function. ICC and EXIF writing are shared.

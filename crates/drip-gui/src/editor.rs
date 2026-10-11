@@ -510,8 +510,12 @@ fn fit(graph: &Graph, area: Rect) -> (Vec2, f32) {
     (area.size() / 2.0 - bounds.center().to_vec2() * zoom, zoom)
 }
 
+/// Forward wires bend by half their horizontal run. Backward and steep wires
+/// bend with their length but bounded, so they cross as near-diagonals with
+/// short hooks instead of loops as wide as their span.
 fn bezier(from: Pos2, to: Pos2, stroke: Stroke) -> CubicBezierShape {
-    let bend = vec2(((to.x - from.x).abs() / 2.0).max(40.0), 0.0);
+    let delta = to - from;
+    let bend = vec2((delta.x / 2.0).max((delta.length() / 4.0).clamp(20.0, 80.0)), 0.0);
     CubicBezierShape::from_points_stroke(
         [from, from + bend, to - bend, to],
         false,

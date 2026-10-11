@@ -17,6 +17,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Auto exposure | Integration test pending | Device mean-to-18% metering and fixed-point tests pass on CPU/WGPU. User will check real-photo response, repeated clicks, saved EV and preview/export agreement; full-detail evaluation remains synchronous. |
 | Output-gamut rendering | Deferred | LittleCMS plus selected rendering intent is accepted for the prototype. Revisit explicit target-gamut rendering only when image evidence warrants it; distinguish source compression from output mapping. |
 | Editing UI/UX | Follow-up | Refine from tester feedback; current workflows suffice for the proof of concept. |
+| Wire readability | Open | Compare rounded orthogonal paths with capped Bézier handles; backward links and fan-out remain crowded. Consider obstacle avoidance and hover emphasis. Keep hit testing on the rendered path. |
 | Remaining frontend presentation | Open | Audit items outside the requested fixes: export-depth/intent terminology, explicit EV reference annotations, proof-mode badges, error elision, blank/stale pop-out views and distinct loading phases. |
 | Bound-source declarations | Open | Extend generated declarations to immutable bind-time assets and shared/unavailable outputs; remove handwritten RAW metadata/port duplication after agreeing on the interface. |
 | RAW metadata extraction | Open | Canon EOS D30 (#1307): unusable as-shot WB. Samsung GX-1L (#8115): unusable WB and zero camera matrix. Excluded from the active corpus; IDs refer to raw.pixls.us. |

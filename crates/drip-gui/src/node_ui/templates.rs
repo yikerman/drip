@@ -6,27 +6,30 @@ pub fn raw_to_tiff() -> Project {
     let pipeline = drip::node::templates::raw_pipeline(None).expect("valid built-in pipeline");
     let target = pipeline.target.expect("pipeline output");
     let mut graph = Graph::from_dag(pipeline.dag).expect("registered built-in nodes");
+    // Align views on the top edge, stack histogram/waveform in one column,
+    // and stagger processing through Orientation to separate metadata branches.
+    // Exposure/Sigmoid align with Orientation; RAW and TIFF sit below the chain.
     let positions = [
-        ("RAW", [0.0, 0.0]),
-        ("Bayer site gains", [195.0, 0.0]),
-        ("Reconstruct highlights (opposed)", [390.0, 0.0]),
-        ("RCD demosaic", [585.0, 0.0]),
-        ("Camera RGB to color RGB", [780.0, 0.0]),
-        ("Chromatic adaptation", [975.0, 0.0]),
-        ("Orientation", [1170.0, 0.0]),
-        ("Exposure", [1365.0, 0.0]),
-        ("Sigmoid", [1560.0, 0.0]),
+        ("RAW", [0.0, 800.0]),
+        ("Bayer site gains", [195.0, 550.0]),
+        ("Reconstruct highlights (opposed)", [390.0, 565.0]),
+        ("RCD demosaic", [585.0, 600.0]),
+        ("Camera RGB to color RGB", [780.0, 635.0]),
+        ("Chromatic adaptation", [975.0, 670.0]),
+        ("Orientation", [1170.0, 720.0]),
+        ("Exposure", [1365.0, 720.0]),
+        ("Sigmoid", [1560.0, 720.0]),
     ];
     for (name, pos) in positions {
         graph.set_ui(graph.find(name).expect("pipeline node"), json!({"pos":pos})).unwrap();
     }
     let raw = graph.find("RAW").unwrap();
     for (kind, pos, size) in [
-        ("view.preview", [1755.0, 0.0], json!([672, 440])),
-        ("view.histogram", [2447.0, 0.0], json!([320, 240])),
-        ("view.waveform", [2447.0, 300.0], json!([320, 240])),
-        ("view.vectorscope", [2787.0, 0.0], json!([320, 320])),
-        ("output.tiff", [1560.0, 220.0], json!(null)),
+        ("view.preview", [195.0, 0.0], json!([672, 440])),
+        ("view.histogram", [975.0, 0.0], json!([320, 240])),
+        ("view.waveform", [975.0, 320.0], json!([320, 240])),
+        ("view.vectorscope", [1365.0, 0.0], json!([320, 320])),
+        ("output.tiff", [1560.0, 900.0], json!(null)),
     ] {
         let id = graph.add_node(Registry.get(kind).expect("built-in observer")).unwrap();
         graph.set_ui(id, json!({"pos":pos, "size":size})).unwrap();
