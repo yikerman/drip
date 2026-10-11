@@ -661,7 +661,7 @@ mod tests {
         }
         #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
         struct Source {
-            #[param(default = State::Incomplete)]
+            #[param]
             state: State,
         }
         #[drip::node(id="test.diagnostics", category="test", name="diagnostics", contract=image_contract)]

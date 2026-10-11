@@ -39,7 +39,7 @@ pub struct ExposureSettings {
     #[serde(flatten)]
     pub range: ExposureRange,
     /// Scale sample counts linearly or logarithmically; the exposure axis remains in stops.
-    #[param(default = Scale::Linear)]
+    #[param]
     #[label("Density scale")]
     pub scale: Scale,
 }

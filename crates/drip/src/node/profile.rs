@@ -12,6 +12,7 @@ use crate::node::color::{D65, P3, REC709, REC2020};
 
 #[derive(Clone, crate::Choice)]
 pub enum ProfileSource {
+    #[default]
     #[choice("srgb")]
     #[label("sRGB")]
     Srgb,
@@ -38,6 +39,7 @@ pub struct ProfileFile {
 enum RenderingIntent {
     #[choice("perceptual")]
     Perceptual,
+    #[default]
     #[choice("relative")]
     Relative,
     #[choice("saturation")]
@@ -50,11 +52,11 @@ enum RenderingIntent {
 pub struct Settings {
     /// RGB output profile used for conversion or proofing.
     #[label("Output profile")]
-    #[param(default = ProfileSource::Srgb)]
+    #[param]
     pub profile: ProfileSource,
     /// Rendering intent for the conversion into the output profile.
     #[label("Rendering intent")]
-    #[param(default = RenderingIntent::Relative)]
+    #[param]
     intent: RenderingIntent,
     /// Map the source black point to the output profile black point.
     #[label("Black point compensation")]

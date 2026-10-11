@@ -59,7 +59,7 @@ impl Orientation {
 pub struct Settings {
     /// Use capture orientation, or replace it with an explicit transform.
     #[label("Orientation")]
-    #[param(default = Orientation::FromMetadata)]
+    #[param]
     pub orientation: Orientation,
 }
 

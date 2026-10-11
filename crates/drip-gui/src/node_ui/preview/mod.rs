@@ -78,7 +78,7 @@ pub struct Preview {
     pub interpolation: bool,
     /// Show the image directly, simulate the output profile, or mark out-of-gamut colors in cyan.
     #[label("Proof mode")]
-    #[param(default = Mode::None)]
+    #[param]
     pub mode: Mode,
 }
 /// Display linear Rec.2020/D65 RGB. Softproof simulates an output profile; Gamut

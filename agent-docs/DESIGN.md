@@ -131,8 +131,9 @@ Resolved with the user on 2026-10-11 after the review against
 
 ### Parameters and GUI
 
-- **Decided:** `#[param(default = 1.5, range = 0.5..=4.0)]`, `#[param(default =
-  Scale::Log)]` or a bare `#[param]` for the choice's `#[default]` variant,
+- **Decided:** `#[param(default = 1.5, range = 0.5..=4.0)]`, a bare `#[param]` for the
+  choice's required `#[default]` variant, `#[param(default = Scale::Log)]` only
+  to override it,
   `#[param(open = ["icc", "icm"])]`/`save = [..]`, `#[param(flatten)]`. The typed
   default is the source of `Default` and the schema; `ParamKind` literals are
   gone. The const field/schema assertion stays as the type check. Flattened

@@ -49,7 +49,7 @@ pub enum CompressionLevel {
 #[serde(deny_unknown_fields)]
 pub struct DeflateSettings {
     /// Trade encoding speed for compression ratio without changing pixels.
-    #[param(default = CompressionLevel::Balanced)]
+    #[param]
     pub level: CompressionLevel,
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
@@ -64,7 +64,7 @@ pub struct Export {
     #[serde(flatten)]
     pub output: profile::Settings,
     /// u8/u16 clip to the output range; f32 retains the profile floating-point range.
-    #[param(default = Depth::U16)]
+    #[param]
     pub depth: Depth,
     /// Lossless TIFF compression, or None for an uncompressed file.
     #[param]

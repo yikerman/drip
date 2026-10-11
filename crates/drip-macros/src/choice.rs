@@ -66,7 +66,10 @@ pub(crate) fn expand(item: syn::DeriveInput) -> syn::Result<proc_macro2::TokenSt
         );
         names.push(name);
     }
-    let default = default.map(|(name, value)| {
+    let Some((name, value)) = default else {
+        return Err(syn::Error::new_spanned(&item, "mark one variant #[default]"));
+    };
+    let default = {
         quote! {
             impl #ty {
                 /// The schema of a field defaulting to the `#[default]` choice.
@@ -79,7 +82,7 @@ pub(crate) fn expand(item: syn::DeriveInput) -> syn::Result<proc_macro2::TokenSt
                 }
             }
         }
-    });
+    };
     Ok(quote! {
         #default
         impl #ty {
@@ -126,6 +129,7 @@ mod tests {
     fn serde_return_types_cannot_resolve_to_a_callers_result_alias() {
         let item = syn::parse_quote! {
             enum Choice {
+                #[default]
                 #[choice("one")]
                 One,
             }
@@ -157,5 +161,33 @@ mod tests {
             }
         }
         assert_eq!(checked, ["deserialize", "serialize"]);
+    }
+
+    #[test]
+    fn exactly_one_variant_is_the_default() {
+        for (variants, message) in [
+            (
+                quote!(
+                    #[choice("one")]
+                    One
+                ),
+                "mark one variant #[default]",
+            ),
+            (
+                quote!(
+                    #[default]
+                    #[choice("one")]
+                    One,
+                    #[default]
+                    #[choice("two")]
+                    Two
+                ),
+                "duplicate #[default] choice",
+            ),
+        ] {
+            let item = syn::parse_quote!(enum Choice { #variants });
+            let error = expand(item).unwrap_err().to_string();
+            assert!(error.contains(message), "{error}");
+        }
     }
 }

@@ -47,8 +47,9 @@ pub fn parameters(input: TokenStream) -> TokenStream {
 
 /// A finite parameter choice. Each variant declares its persisted spelling
 /// with `#[choice("name")]`. Generates JSON conversion and `variant.schema()`.
-/// One `#[default]` variant generates `Default` (a variant's struct uses its own
-/// default) and `DEFAULT_SCHEMA`, used by a bare `#[param]` field.
+/// Exactly one `#[default]` variant generates `Default` (a variant's struct uses
+/// its own default) and `DEFAULT_SCHEMA`, used by a bare `#[param]` field; a
+/// field states `default = Choice::Variant` only to override it.
 /// Variants may contain one parameter struct; its fields render only when selected.
 /// Serialization uses Serde's externally tagged representation.
 /// `#[label("sRGB")]` supplies display text independently of the persisted key.

@@ -3,6 +3,7 @@ use serde_json::json;
 
 #[derive(Debug, PartialEq, drip::Choice)]
 enum Mode {
+    #[default]
     #[choice("first")]
     First,
     #[choice("second_mode")]
@@ -42,6 +43,7 @@ struct Options {
 
 #[derive(Debug, PartialEq, drip::Choice)]
 enum Nested {
+    #[default]
     #[choice("none")]
     None,
     #[choice("configured")]

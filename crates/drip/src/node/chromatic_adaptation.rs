@@ -40,7 +40,7 @@ pub struct WhitePoint {
 #[validate(validate)]
 pub struct Settings {
     /// Infer the scene white from CaptureMetadata, or supply its chromaticity.
-    #[param(default = Illuminant::AsShot)]
+    #[param]
     pub illuminant: Illuminant,
 }
 
