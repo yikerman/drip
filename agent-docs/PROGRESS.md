@@ -2,6 +2,11 @@
 
 Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
+## 2026-10-11
+
+- Resolved the model review's open questions with the user; decisions are in
+  DESIGN under Model refactor. Documentation only; no code changes or tests.
+
 ## 2026-10-10
 
 - Reviewed the model against `AGENTS.md` and the user's principles; recorded
