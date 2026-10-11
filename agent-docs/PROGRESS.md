@@ -4,6 +4,10 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- CPU CI: reproduced run 38128023310's missing `Cpu` import in the RAW
+  pipeline test and restored it within the feature-gated test. CPU workspace
+  tests pass (157 passed, 16 device tests ignored), as do three doctests,
+  strict workspace Clippy and formatting.
 - Bindings and project open moved to their own loading thread per project:
   marking Preview and Export as asset loaders had queued their plain edits
   behind evaluations. GPU workspace tests, Clippy and formatting pass.

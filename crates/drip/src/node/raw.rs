@@ -113,7 +113,7 @@ mod tests {
     #[cfg(feature = "cpu")]
     #[test]
     fn raw_neutral_survives_as_shot_to_reference_and_cat16() {
-        use crate::{eval::Evaluator, node, node::color, runtime::RuntimeContext};
+        use crate::{eval::Evaluator, node, node::color, ports::Cpu, runtime::RuntimeContext};
         let mut r = raw();
         r.metadata.sensor.width = 64;
         r.metadata.sensor.height = 64;

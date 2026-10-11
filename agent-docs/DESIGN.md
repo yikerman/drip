@@ -289,6 +289,8 @@ Resolved with the user on 2026-10-11 after the review against
 - **Decided:** Headless CI builds `drip/cpu` and tests with `DRIP_BACKEND=cpu`;
   GPU tests are opt-in. Tests on every platform gate distribution; distribution
   jobs only build and upload. Clippy uses `--workspace --no-deps`.
+  Validate test changes with `drip/cpu` enabled too: default-feature builds
+  omit CPU-only integration tests.
 - **Requirement:** Minimize user-installed dependencies; native processing
   libraries are static, the normal Linux C/C++ runtime may stay external.
 - **Decided:** Vendor unmodified sources at release tags; builds never fetch.
