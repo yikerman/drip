@@ -4,6 +4,11 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Review cleanups: one `#[default]` per choice; one typed-output check;
+  test-only evaluation API removed; unread ports as `_name`; shared parameter
+  JSON helpers; scope nodes beside their preparation; the RAW template ends in
+  Export and the GUI template uses typed handles; schema-derived file lookup.
+  GPU workspace tests, Clippy and formatting pass.
 - Project format version now follows the `drip` major version (currently 0).
   GPU workspace tests, Clippy and formatting pass.
 - Returned `drip-cli` to its scaffold and removed it from distribution builds.

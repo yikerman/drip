@@ -22,6 +22,7 @@ use documentation::documentation;
 /// The parameter type supplies its schema through `Parameters` (usually derived).
 /// Use `&()` for nodes without parameters.
 /// `Option<Read<Port>>` declares an optional input; output ports remain required.
+/// A node without computation names an unread port `_image`; the port is `image`.
 #[proc_macro_attribute]
 pub fn node(args: TokenStream, item: TokenStream) -> TokenStream {
     node::expand(args.into(), parse_macro_input!(item as syn::ItemFn))
