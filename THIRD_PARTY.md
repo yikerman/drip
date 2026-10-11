@@ -218,7 +218,7 @@ retains partial edge blocks and uses f32 accumulation with exponent scaling for
 large finite values, replacing the former CPU f64 sum.
 The same CubeCL source is used by each enabled computation runtime. The original
 PoC source and its complete notices are preserved in the external benchmark
-archive documented in `agent-docs/CUBECL_REWRITE.md`.
+archive at `../drip-benchmark-results/2026-10-08/`.
 
 RCD in `crates/drip/src/node/rcd/kernel.rs` and sigmoid's kernel and coefficient
 preparation in `crates/drip/src/node/sigmoid.rs` retain the darktable
