@@ -173,15 +173,8 @@ fn required_nodes(dag: &Dag, target: NodeId) -> Result<HashSet<usize>> {
         if !needed.insert(id.index) {
             continue;
         }
-        let e = dag.entry(id)?;
-        for (from, port) in e.inputs.iter().zip(e.node.kind().inputs) {
-            if from.is_none() && port.optional {
-                continue;
-            }
-            let from =
-                from.ok_or(Error::MissingInput { node: e.node.kind().id, port: port.name })?;
-            stack.push(from.node);
-        }
+        // An unconnected required input is the node's own contract failure.
+        stack.extend(dag.entry(id)?.inputs.iter().flatten().map(|from| from.node));
     }
     Ok(needed)
 }

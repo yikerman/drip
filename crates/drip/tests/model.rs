@@ -413,7 +413,11 @@ fn node_targets_include_input_only_nodes() {
     let eval = Evaluator::new(RuntimeContext::host());
     let sink = sink::add(&mut d, ()).unwrap();
     let demand = |d: &Dag| eval.evaluate_inputs(d, &Default::default(), &[sink.node]);
-    assert!(matches!(demand(&d)[&sink.node], Err(Error::MissingInput { .. })));
+    let missing = |error: &Error| {
+        matches!(error, Error::Node { node, source, .. }
+            if *node == sink.node && matches!(**source, Error::MissingInput { .. }))
+    };
+    assert!(demand(&d)[&sink.node].as_ref().is_err_and(missing));
     d.connect(outputs.output, sink.image).unwrap();
     let inputs = demand(&d).remove(&sink.node).unwrap().unwrap();
     assert_eq!(inputs.bind::<sink::Definition>().unwrap().image.data.len(), 2);
@@ -480,15 +484,15 @@ fn batch_shares_ancestors_retains_only_observers_and_isolates_failures() {
         &[a.node, b.node],
         Some(&mut timings),
     );
-    assert_eq!(timings.len(), 6); // Shared nodes once; upstream failures and missing inputs skipped.
+    assert_eq!(timings.len(), 7); // Shared nodes once; nodes after a failure skipped.
     assert_eq!(timings.iter().filter(|t| t.node == producer.node).count(), 1);
     let position = |id| timings.iter().position(|t| t.node == id).unwrap();
     assert!(position(source.node()) < position(producer.node));
     assert!(position(producer.node) < position(a.node));
     assert!(position(producer.node) < position(b.node));
     let failed: Vec<_> = timings.iter().filter(|t| !t.success).map(|t| (t.node, t.kind)).collect();
-    assert_eq!(failed, [(failure.node, "test-value-check")]);
-    assert!(!timings.iter().any(|t| t.node == downstream.node || t.node == incomplete.node));
+    assert_eq!(failed, [(incomplete.node, "test-input-only"), (failure.node, "test-value-check")]);
+    assert!(!timings.iter().any(|t| t.node == downstream.node));
     assert_eq!(BATCH_PRODUCED.load(Ordering::Relaxed), 1);
     let retained = values[&producer.node].as_ref().unwrap();
     assert!(retained.bind::<batch_producer::Definition>().is_err());
@@ -497,7 +501,8 @@ fn batch_shares_ancestors_retains_only_observers_and_isolates_failures() {
     for id in [failure.node, downstream.node] {
         assert!(matches!(&values[&id], Err(Error::Node { node, .. }) if *node == failure.node));
     }
-    assert!(matches!(&values[&incomplete.node], Err(Error::MissingInput { .. })));
+    assert!(matches!(&values[&incomplete.node], Err(Error::Node { node, source, .. })
+        if *node == incomplete.node && matches!(**source, Error::MissingInput { .. })));
 }
 
 #[node(id = "test-optional-input")]
