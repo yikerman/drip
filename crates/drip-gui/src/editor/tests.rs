@@ -47,6 +47,9 @@ impl Scene {
     }
 }
 
+/// Where the harness node's outputs sit, in graph units.
+const OUTPUT_X: f32 = 100.0 + node_ui::WIDTH;
+
 fn harness(zoom: f32) -> Harness<'static, Scene> {
     let mut graph = Graph::default();
     let node = graph.add_node(drip::definition::kind("tone.exposure").unwrap()).unwrap();
@@ -312,12 +315,12 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
             let target = add_node(
                 &mut h,
                 drip::definition::kind("tone.exposure").unwrap(),
-                vec2(340.0, 118.0),
+                vec2(OUTPUT_X + 80.0, 118.0),
             );
             let branch = add_node(
                 &mut h,
                 drip::definition::kind("tone.exposure").unwrap(),
-                vec2(340.0, 230.0),
+                vec2(OUTPUT_X + 80.0, 230.0),
             );
             for id in [target, branch] {
                 h.state_mut().connect(source, id);
@@ -350,10 +353,16 @@ fn crossing_wires_choose_the_nearest_curve() {
     let upper = h.state().node;
     let lower =
         add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(100.0, 202.0));
-    let upper_target =
-        add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(440.0, 118.0));
-    let lower_target =
-        add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(440.0, 220.0));
+    let upper_target = add_node(
+        &mut h,
+        drip::definition::kind("tone.exposure").unwrap(),
+        vec2(OUTPUT_X + 180.0, 118.0),
+    );
+    let lower_target = add_node(
+        &mut h,
+        drip::definition::kind("tone.exposure").unwrap(),
+        vec2(OUTPUT_X + 180.0, 220.0),
+    );
     h.state_mut().connect(upper, lower_target);
     h.state_mut().connect(lower, upper_target);
     let curve = bezier(
@@ -375,8 +384,11 @@ fn wires_leave_panning_and_overlapping_nodes_and_ports_interactive() {
     for over_port in [false, true] {
         let mut h = harness(1.0);
         let source = h.state().node;
-        let target =
-            add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(440.0, 118.0));
+        let target = add_node(
+            &mut h,
+            drip::definition::kind("tone.exposure").unwrap(),
+            vec2(OUTPUT_X + 180.0, 118.0),
+        );
         h.state_mut().connect(source, target);
         let start = h.state().port_point(source, Direction::Output);
         let end = h.state().port_point(target, Direction::Input);
@@ -386,7 +398,9 @@ fn wires_leave_panning_and_overlapping_nodes_and_ports_interactive() {
         drag(&mut h, midpoint, Primary, delta);
         assert_eq!(h.state().editor.offset.unwrap(), offset + delta);
         assert_eq!(h.state().graph.source(h.state().input(target)), Some(h.state().output(source)));
-        let position = if over_port { vec2(350.0, 109.0) } else { vec2(330.0, 130.0) };
+        // Over the overlay's input port, or its header, at the wire's midpoint.
+        let x = OUTPUT_X + 90.0;
+        let position = if over_port { vec2(x, 109.0) } else { vec2(x - 20.0, 130.0) };
         let overlay = add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), position);
         click(&mut h, midpoint + delta, Secondary);
         assert_eq!(h.state().graph.source(h.state().input(target)), Some(h.state().output(source)));

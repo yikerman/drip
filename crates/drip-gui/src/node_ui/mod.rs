@@ -19,7 +19,7 @@ use crate::model::{Node, NodeId};
 use egui::{Rect, Ui, Vec2, vec2};
 
 /// Width of a node whose body does not set one, in graph units.
-pub const WIDTH: f32 = 160.0;
+pub const WIDTH: f32 = 200.0;
 /// Space around a node's contents, in graph units.
 pub const PAD: f32 = 6.0;
 

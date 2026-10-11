@@ -22,19 +22,19 @@ pub fn raw_to_tiff() -> Project {
     // Exposure/Sigmoid align with Orientation; RAW and TIFF sit below the chain.
     let layout = [
         (pipeline.raw.node, json!({"pos": [0.0, 800.0]})),
-        (pipeline.gains.node, json!({"pos": [195.0, 550.0]})),
-        (pipeline.highlights.node, json!({"pos": [390.0, 565.0]})),
-        (pipeline.demosaic.node, json!({"pos": [585.0, 600.0]})),
-        (pipeline.color.node, json!({"pos": [780.0, 635.0]})),
-        (pipeline.adaptation.node, json!({"pos": [975.0, 670.0]})),
-        (pipeline.orientation.node, json!({"pos": [1170.0, 720.0]})),
-        (pipeline.exposure.node, json!({"pos": [1365.0, 720.0]})),
-        (pipeline.sigmoid.node, json!({"pos": [1560.0, 720.0]})),
-        (pipeline.export.node, json!({"pos": [1560.0, 900.0], "size": null})),
-        (views[0].node(), json!({"pos": [195.0, 0.0], "size": [672, 440]})),
-        (views[1].node(), json!({"pos": [975.0, 0.0], "size": [320, 240]})),
-        (views[2].node(), json!({"pos": [975.0, 320.0], "size": [320, 240]})),
-        (views[3].node(), json!({"pos": [1365.0, 0.0], "size": [320, 320]})),
+        (pipeline.gains.node, json!({"pos": [240.0, 550.0]})),
+        (pipeline.highlights.node, json!({"pos": [480.0, 565.0]})),
+        (pipeline.demosaic.node, json!({"pos": [720.0, 600.0]})),
+        (pipeline.color.node, json!({"pos": [960.0, 635.0]})),
+        (pipeline.adaptation.node, json!({"pos": [1200.0, 670.0]})),
+        (pipeline.orientation.node, json!({"pos": [1440.0, 720.0]})),
+        (pipeline.exposure.node, json!({"pos": [1680.0, 720.0]})),
+        (pipeline.sigmoid.node, json!({"pos": [1920.0, 720.0]})),
+        (pipeline.export.node, json!({"pos": [1920.0, 900.0], "size": null})),
+        (views[0].node(), json!({"pos": [240.0, 0.0], "size": [672, 440]})),
+        (views[1].node(), json!({"pos": [1200.0, 0.0], "size": [320, 240]})),
+        (views[2].node(), json!({"pos": [1200.0, 320.0], "size": [320, 240]})),
+        (views[3].node(), json!({"pos": [1680.0, 0.0], "size": [320, 320]})),
     ];
     for (id, ui) in layout {
         graph.set_ui(id, ui).unwrap();
