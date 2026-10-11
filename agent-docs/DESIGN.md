@@ -140,7 +140,8 @@ Resolved with the user on 2026-10-11 after the review against
 - **Decided:** A node reads its files (source outputs or assets) when first
   forced and keeps the result, failure included, in a generated `OnceLock`.
   Files are assumed not to change, so the cache does not change the node's
-  outputs; graph snapshots share it, and a parameter edit admits a new node
+  outputs; it holds file contents, not intermediate results. Graph snapshots
+  share it, and a parameter edit admits a new node
   that reads again. Choosing a file again replaces "Reload files". Until
   2026-10-11, admission read files on a separate GUI loading queue; that queue,
   its pending-binding state and the `loads_assets` flag are gone.

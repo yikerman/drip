@@ -1,7 +1,8 @@
 //! Concrete port values, CPU contracts, and demand-driven CubeCL execution.
 //!
-//! Graph edits validate descriptions before committing. Evaluation supplies
-//! each node's declared CPU/device representations and allocates fresh outputs.
+//! Graph edits check ports only. Evaluation runs the contracts of the nodes it
+//! forces, supplies their declared CPU/device representations and allocates
+//! fresh outputs.
 //! Passing a contract establishes declared compatibility, not physical accuracy.
 
 extern crate self as drip;
