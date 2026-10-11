@@ -14,9 +14,10 @@
 
 - code should be single-source-of-truth, modular, concise, functional and
   self-explanatory. check inputs at boundaries, trust internal code afterwards.
-  keep abstractions proportional to actual needs.
+  keep abstractions proportional to actual needs. there should be minimal
+  branching; if needed, maybe dispatch is the right way.
 
-- a node computes context × parameters × inputs → outputs. 
+- a node computes context × parameters × inputs → outputs.
   where computation is pure. define contracts and docs with the node,
   generate mechanical discovery and bindings.
 
