@@ -384,7 +384,7 @@ fn force(
     };
     let (targets, observers) = demand.nodes();
     let mut inputs = match evaluator {
-        Ok(evaluator) => evaluator.evaluate_batch_with_timings(
+        Ok(evaluator) => evaluator.evaluate_batch(
             &demand.graph.dag,
             &demand.global,
             &targets,

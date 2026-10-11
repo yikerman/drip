@@ -59,26 +59,17 @@ impl Evaluator {
         global: &GlobalContext,
         targets: &[NodeId],
     ) -> BTreeMap<NodeId, Result<InputValues>> {
-        self.evaluate_batch(dag, global, targets, targets)
+        self.evaluate_batch(dag, global, targets, targets, None)
     }
 
     /// Evaluate node status, retaining inputs only for the named observers.
     /// Status-only targets do not keep their intermediate buffers alive.
-    pub fn evaluate_batch(
-        &self,
-        dag: &Dag,
-        global: &GlobalContext,
-        targets: &[NodeId],
-        observers: &[NodeId],
-    ) -> BTreeMap<NodeId, Result<InputValues>> {
-        self.evaluate_batch_with_timings(dag, global, targets, observers, None)
-    }
-
-    /// Optionally append host timings for attempted nodes in execution order.
+    ///
+    /// `timings` receives host timings for attempted nodes in execution order.
     /// Shared ancestors appear once; nodes skipped after upstream failure do not.
     /// Recording adds no device waits. Existing readback waits are charged to the
     /// consuming node; the terminal device wait is outside these measurements.
-    pub fn evaluate_batch_with_timings(
+    pub fn evaluate_batch(
         &self,
         dag: &Dag,
         global: &GlobalContext,

@@ -357,7 +357,7 @@ fn device_chain(runtime: RuntimeContext) {
     let observer = sink::add(&mut d, ()).unwrap();
     d.connect(after.output, observer.image).unwrap();
     let mut timings = Vec::new();
-    let values = eval.evaluate_batch_with_timings(
+    let values = eval.evaluate_batch(
         &d,
         &Default::default(),
         &[observer.node],
@@ -463,7 +463,7 @@ fn batch_shares_ancestors_retains_only_observers_and_isolates_failures() {
     let incomplete = sink::add(&mut dag, ()).unwrap();
     let targets = [producer.node, a.node, b.node, failure.node, downstream.node, incomplete.node];
     let mut timings = Vec::new();
-    let values = Evaluator::new(RuntimeContext::host()).evaluate_batch_with_timings(
+    let values = Evaluator::new(RuntimeContext::host()).evaluate_batch(
         &dag,
         &Default::default(),
         &targets,
