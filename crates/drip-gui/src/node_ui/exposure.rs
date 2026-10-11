@@ -1,6 +1,6 @@
 //! Auto exposure: meter the node's input at full detail, then set its EV.
-use super::{Action, GuiNode};
-use cubecl::{prelude::*, server::Handle};
+use super::{Action, GuiNode, data::argument};
+use cubecl::prelude::*;
 use drip::{
     Error, Result,
     node::{
@@ -42,11 +42,6 @@ fn ev(image: &Read<'_, Device<Rgb>>, client: &Client) -> Result<f32> {
     drip::param::Parameters::validate(&params)
         .map_err(|_| Error::Contract("auto exposure gain is not representable".into()))?;
     Ok(params.ev)
-}
-
-fn argument(handle: &Handle) -> BufferArg {
-    // SAFETY: reduction scratch is a scalar f32 array on every pass.
-    unsafe { BufferArg::from_raw_parts(handle.clone(), 1) }
 }
 
 fn mean_luminance(client: &Client, mut input: BufferArg, pixels: usize) -> Result<f64> {

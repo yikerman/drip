@@ -52,3 +52,10 @@ impl PrepareContext {
         self.client.as_ref().ok_or_else(|| Error::Runtime("no compute runtime is bound".into()))
     }
 }
+
+/// A GUI kernel's scratch buffer as an argument. Every such buffer holds
+/// 4-byte scalars (f32 or u32), matching the kernels' slices.
+pub(crate) fn argument(handle: &cubecl::server::Handle) -> cubecl::prelude::BufferArg {
+    // SAFETY: the buffer's element size is one scalar, as documented above.
+    unsafe { cubecl::prelude::BufferArg::from_raw_parts(handle.clone(), 1) }
+}

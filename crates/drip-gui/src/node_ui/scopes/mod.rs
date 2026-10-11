@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 pub(super) mod device;
 pub(super) mod histogram;
+pub(super) mod vectorscope;
 mod view;
 pub(super) mod waveform;
-pub use super::vectorscope::vectorscope_xyz;
 pub use histogram::Histogram;
 #[cfg(test)]
 pub(super) mod tests;
@@ -32,16 +32,6 @@ pub struct ExposureRange {
     #[param(default = 4, range = 1..=10)]
     #[label("Maximum exposure (EV)")]
     pub max_ev: i64,
-}
-#[derive(Clone, Serialize, Deserialize, drip::Parameters)]
-pub struct ExposureSettings {
-    #[param(flatten)]
-    #[serde(flatten)]
-    pub range: ExposureRange,
-    /// Scale sample counts linearly or logarithmically; the exposure axis remains in stops.
-    #[param]
-    #[label("Density scale")]
-    pub scale: Scale,
 }
 fn exposure_range(p: &ExposureRange) -> Result<()> {
     if p.min_ev >= p.max_ev || p.min_ev < -126 || p.max_ev > 127 {

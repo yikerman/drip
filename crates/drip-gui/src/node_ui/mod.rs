@@ -165,7 +165,4 @@ pub fn fitted(ctx: &egui::Context) -> Option<Vec2> {
 }
 
 pub mod data;
-pub mod histogram;
 pub mod templates;
-mod vectorscope;
-mod waveform;

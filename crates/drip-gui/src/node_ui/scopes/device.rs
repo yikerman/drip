@@ -1,15 +1,10 @@
 //! Device reductions. Only compact integer counts cross back to the GUI.
-use crate::node_ui::data::{DeviceRgb, PrepareContext};
+use crate::node_ui::data::{DeviceRgb, PrepareContext, argument};
 use cubecl::{bytes::Bytes, prelude::*, server::Handle};
 use drip::{Error, Result};
 
 const BINS: usize = 256;
 const SHARDS: usize = 32;
-
-fn argument(handle: &Handle) -> BufferArg {
-    // SAFETY: all buffers here are scalar f32/u32 arrays, matching kernel slices.
-    unsafe { BufferArg::from_raw_parts(handle.clone(), 1) }
-}
 
 fn zeroed(client: &Client, len: usize) -> Handle {
     let handle = client.empty(len * 4);

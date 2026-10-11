@@ -5,7 +5,7 @@ use std::sync::Arc;
 use drip::node::color::{self, D65, REC709};
 use egui::{Align2, FontId, Painter, Rect, Stroke};
 
-use super::vectorscope_xyz;
+use super::vectorscope::vectorscope_xyz;
 use super::{Histogram, Scope, ScopeAxes};
 use crate::render::node_views::{Drawable, ImageCache, IntoDrawable};
 use crate::theme;

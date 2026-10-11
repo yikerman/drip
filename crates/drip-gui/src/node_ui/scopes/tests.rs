@@ -1,11 +1,10 @@
-use super::{histogram::histogram, waveform::waveform};
-use crate::node_ui::vectorscope::vectorscope;
+use super::{histogram::histogram, vectorscope::vectorscope, waveform::waveform};
 use std::sync::Arc;
 
 use super::ScopeAxes;
 use crate::model::{Graph, Registry};
 use crate::node_ui::data::{HostImage, PrepareContext};
-use crate::node_ui::scopes::{ExposureRange, ExposureSettings, Scale};
+use crate::node_ui::scopes::{ExposureRange, Scale, histogram::Settings};
 use drip::{eval::Evaluator, graph::Dag, node::data::*, runtime::RuntimeContext};
 use serde_json::json;
 
@@ -38,9 +37,8 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
     )
     .unwrap();
     // One histogram kind plots either coordinate system without conversion.
-    let histogram = crate::node_ui::histogram::add(&mut dag, ExposureSettings::default()).unwrap();
-    let camera_histogram =
-        crate::node_ui::histogram::add(&mut dag, ExposureSettings::default()).unwrap();
+    let histogram = super::histogram::observe::add(&mut dag, Settings::default()).unwrap();
+    let camera_histogram = super::histogram::observe::add(&mut dag, Settings::default()).unwrap();
     dag.connect(working, histogram.image).unwrap();
     dag.connect(camera, camera_histogram.image).unwrap();
     let targets = [histogram.image.node(), camera_histogram.image.node()];
@@ -52,7 +50,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
     let ctx = context();
     let device = |id| {
         let inputs = values[id].as_ref().unwrap();
-        let inputs = inputs.bind::<crate::node_ui::histogram::observe::Definition>().unwrap();
+        let inputs = inputs.bind::<super::histogram::observe::Definition>().unwrap();
         crate::node_ui::data::DeviceRgb::new(&inputs.image)
     };
     let (a, b) = (device(&targets[0]), device(&targets[1]));
@@ -62,8 +60,8 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
     ) -> (Arc<super::Histogram>, Arc<super::Scope>) {
         let range = ExposureRange { min_ev: -12, max_ev: 4 };
         (
-            super::histogram::histogram(&range, Scale::Log, (image,), ctx).unwrap(),
-            waveform(&range, Scale::Log, (image,), ctx).unwrap(),
+            super::histogram::histogram(&range, Scale::Log, image, ctx).unwrap(),
+            waveform(&range, Scale::Log, image, ctx).unwrap(),
         )
     }
     let (histogram, waveform) = prepare(&a, &ctx);
@@ -90,8 +88,8 @@ fn histogram_bins_by_stops() {
     let id = graph.add_node(Registry.get("view.histogram").unwrap()).unwrap();
     let context = context();
     let prepare = |graph: &Graph| {
-        let p: ExposureSettings = serde_json::from_value(graph.node(id).unwrap().params).unwrap();
-        histogram(&p.range, p.scale, (&device(&image, &context),), &context).unwrap()
+        let p: Settings = serde_json::from_value(graph.node(id).unwrap().params).unwrap();
+        histogram(&p.range, p.scale, &device(&image, &context), &context).unwrap()
     };
     let h = prepare(&graph);
     let bin = |v: f32| ((v.log2() - h.min_stop) / (h.max_stop - h.min_stop) * 256.0) as usize;
@@ -122,7 +120,7 @@ fn vectorscope_uses_working_rec2020_coordinates() {
         pixels: vec![[1.0, 0.0, 0.0]].into(),
     };
     let context = context();
-    let scope = vectorscope((), (&device(&image, &context),), &context).unwrap();
+    let scope = vectorscope(&device(&image, &context), &context).unwrap();
     let ScopeAxes::Vectorscope { primaries, color_space } = scope.axes else {
         panic!("chromaticity")
     };
@@ -159,7 +157,7 @@ pub(crate) fn device(image: &HostImage, ctx: &PrepareContext) -> crate::node_ui:
 #[ignore = "requires the DRIP_BACKEND compute device; run explicitly"]
 fn device_reductions_match_reference() {
     let ctx = context();
-    let settings = ExposureSettings::default();
+    let settings = Settings::default();
     let edges = std::array::from_fn(|i| 2f32.powf(-12.0 + i as f32 / 16.0));
     let mut pixels = Vec::new();
     for &edge in &edges {
@@ -184,11 +182,11 @@ fn device_reductions_match_reference() {
         };
         let gpu = device(&image, &ctx);
         assert_eq!(
-            histogram(&settings.range, settings.scale, (&gpu,), &ctx).unwrap().counts,
+            histogram(&settings.range, settings.scale, &gpu, &ctx).unwrap().counts,
             super::histogram::count(&image.pixels, &edges)
         );
         assert_eq!(
-            waveform(&settings.range, settings.scale, (&gpu,), &ctx).unwrap().counts,
+            waveform(&settings.range, settings.scale, &gpu, &ctx).unwrap().counts,
             super::waveform::waveform_counts(&image, -12.0, 4.0)
         );
     }

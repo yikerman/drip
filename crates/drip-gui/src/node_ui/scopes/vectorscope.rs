@@ -5,10 +5,10 @@
 //! The vectorscope uses u′v′ directly, not darktable's lightness-scaled u*v*.
 //! Negative RGB components are clipped only for chromaticity visualization.
 
-use super::data::{DeviceRgb, PrepareContext};
 #[cfg(test)]
-use super::scopes::SIZE;
-use super::scopes::{Scope, ScopeAxes, scope};
+use super::SIZE;
+use super::{Scope, ScopeAxes, scope};
+use crate::node_ui::data::{DeviceRgb, PrepareContext};
 use drip::Error as KernelError;
 use drip::node::color::{self, D65, REC2020};
 use drip::{node::data::*, ports::*, runtime::KernelContext};
@@ -27,13 +27,9 @@ fn observe(
 ) -> drip::Result<()> {
     Ok(())
 }
-pub fn vectorscope(
-    _: (),
-    (image,): (&DeviceRgb,),
-    ctx: &PrepareContext,
-) -> Result<Arc<Scope>, KernelError> {
+pub fn vectorscope(image: &DeviceRgb, ctx: &PrepareContext) -> Result<Arc<Scope>, KernelError> {
     let matrix = &color::rgb_to_xyz(REC2020, D65);
-    let counts = super::scopes::device::vectorscope(image, ctx, matrix, white_uv())?;
+    let counts = super::device::vectorscope(image, ctx, matrix, white_uv())?;
     let primaries = color::transpose(*matrix).map(|primary| position(uv(primary)));
     Ok(scope(
         counts,
@@ -98,7 +94,7 @@ fn vector_counts(pixels: &[[f32; 3]], matrix: &color::Mat3) -> Vec<[u32; 3]> {
 impl crate::node_ui::GuiNode for observe::Definition {
     type Presentation = Arc<Scope>;
     const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-        Some(|p, inputs, ctx| vectorscope(p, (&DeviceRgb::new(&inputs.image),), ctx));
+        Some(|_, inputs, ctx| vectorscope(&DeviceRgb::new(&inputs.image), ctx));
 }
 
 #[cfg(test)]
@@ -127,7 +123,7 @@ mod tests {
             color_space: "Rec.2020 / D65".into(),
             pixels: pixels.into(),
         };
-        let counts = vectorscope((), (&device(&image, &ctx),), &ctx).unwrap().counts.clone();
+        let counts = vectorscope(&device(&image, &ctx), &ctx).unwrap().counts.clone();
         let expected = vector_counts(&image.pixels, &color::rgb_to_xyz(REC2020, D65));
         assert_eq!(counts, expected);
     }
@@ -153,7 +149,7 @@ mod tests {
             color_space: "Rec.2020 / D65".into(),
             pixels: pixels.into(),
         };
-        let counts = vectorscope((), (&device(&image, &ctx),), &ctx).unwrap().counts.clone();
+        let counts = vectorscope(&device(&image, &ctx), &ctx).unwrap().counts.clone();
         let expected = vector_counts(&image.pixels, &color::rgb_to_xyz(REC2020, D65));
         assert_eq!(
             counts.iter().map(|v| u64::from(v[0])).sum::<u64>(),

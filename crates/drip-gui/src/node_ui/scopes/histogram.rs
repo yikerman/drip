@@ -4,6 +4,8 @@ use super::{ExposureRange, Scale};
 use crate::node_ui::data::DeviceRgb;
 use crate::node_ui::data::PrepareContext;
 use drip::Error as KernelError;
+use drip::{node::data::*, ports::*, runtime::KernelContext};
+use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
 use rayon::prelude::*;
@@ -25,10 +27,39 @@ pub struct Histogram {
 #[cfg(test)]
 const BINS: usize = 256;
 
+#[derive(Clone, Serialize, Deserialize, drip::Parameters)]
+/// The exposure axis and how bin counts are scaled.
+pub struct Settings {
+    #[param(flatten)]
+    #[serde(flatten)]
+    pub range: ExposureRange,
+    /// Scale sample counts linearly or logarithmically; the exposure axis remains in stops.
+    #[param]
+    #[label("Density scale")]
+    pub scale: Scale,
+}
+/// Plot linear RGB channel counts by exposure, without a color conversion; camera
+/// RGB shows native channels. Exposure is measured relative to sample value 1;
+/// the density scale controls counts, not the exposure axis.
+#[drip::node(id = "view.histogram", name = "Histogram", category = "View")]
+pub fn observe(
+    _: &KernelContext<'_>,
+    _: &Settings,
+    _image: Read<'_, Device<Rgb>>,
+) -> drip::Result<()> {
+    Ok(())
+}
+#[drip_macros::gui_node]
+impl crate::node_ui::GuiNode for observe::Definition {
+    type Presentation = Arc<Histogram>;
+    const PREPARE: Option<crate::node_ui::Prepare<Self>> =
+        Some(|p, inputs, ctx| histogram(&p.range, p.scale, &DeviceRgb::new(&inputs.image), ctx));
+}
+
 pub fn histogram(
     range: &ExposureRange,
     scale: Scale,
-    (image,): (&DeviceRgb,),
+    image: &DeviceRgb,
     ctx: &PrepareContext,
 ) -> Result<Arc<Histogram>, KernelError> {
     let (min, max) = (range.min_ev as f32, range.max_ev as f32);
