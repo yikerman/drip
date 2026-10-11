@@ -33,7 +33,6 @@ impl<P: Payload> Source<P> {
         references: &[],
         parameters: &[],
         defaults: || serde_json::Value::Null,
-        loads_assets: false,
         build: |_| Err(crate::Error::Graph("bound sources have no persistent parameters".into())),
         inputs: &[],
         outputs: &[PortSpec::of::<Cpu<P>, Any>("value")],

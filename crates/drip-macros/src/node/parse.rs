@@ -11,7 +11,7 @@ pub(super) struct Options {
     /// `fn(&Params, Inputs<'_>) -> Result<()>`, run on evaluated inputs; with
     /// `assets`, `fn(&Params, &Loaded, Inputs<'_>)`.
     pub action: Option<syn::Path>,
-    /// The parameters implement `drip::definition::Assets`, loaded at admission.
+    /// The parameters implement `drip::definition::Assets`, loaded when first used.
     pub assets: bool,
 }
 
@@ -98,7 +98,7 @@ pub(super) struct Port {
 pub(super) struct Signature {
     pub parameters: syn::Type,
     pub ports: Vec<Port>,
-    /// `fn(&Params, Load<Payload>...)`: outputs loaded once at admission.
+    /// `fn(&Params, Load<Payload>...)`: outputs loaded once, when first forced.
     pub source: bool,
 }
 

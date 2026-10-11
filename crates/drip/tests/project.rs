@@ -36,7 +36,7 @@ fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     assert!(error.contains("not migrated"), "{error}");
 }
 #[test]
-fn export_reads_its_profile_file_once_at_admission() {
+fn export_reads_its_profile_file_when_first_used() {
     use drip::definition::{Typed, registered};
     use drip::node::export::tiff::Definition;
     let file = std::env::temp_dir().join(format!("drip-profile-{}.icc", std::process::id()));
@@ -45,8 +45,10 @@ fn export_reads_its_profile_file_once_at_admission() {
     let mut params = serde_json::to_value(drip::node::export::Export::default()).unwrap();
     params["profile"] = json!({"file": {"path": file}});
     let loaded = registered("output.tiff", params.clone()).unwrap();
+    let icc = || Definition::of(&*loaded).unwrap().assets().map(|output| output.icc.clone());
+    assert_eq!(icc().unwrap(), srgb);
     std::fs::remove_file(&file).unwrap();
-    assert_eq!(Definition::of(&*loaded).unwrap().assets().unwrap().icc, srgb);
+    assert_eq!(icc().unwrap(), srgb, "files are assumed unchanged once read");
     // A missing file is the node's error, not a refused edit.
     let missing = registered("output.tiff", params.clone()).unwrap();
     let error = Definition::of(&*missing).unwrap().assets().err().unwrap();
@@ -114,7 +116,7 @@ fn missing_raw_preserves_editable_parameters_and_reports_load_error() {
 }
 
 #[test]
-fn bound_raw_snapshot_survives_file_removal_until_explicit_rebind() {
+fn raw_is_decoded_once_when_forced_and_again_only_when_chosen_again() {
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/raw/pixls/nikon-d70s.nef");
     let temporary =
@@ -124,14 +126,21 @@ fn bound_raw_snapshot_survives_file_removal_until_explicit_rebind() {
     let source = dag
         .add(node::raw::definition(node::raw::Settings { path: Some(temporary.clone()) }).unwrap())
         .unwrap();
-    std::fs::remove_file(&temporary).unwrap();
     let output = dag.typed_output::<Bayer>(dag.output_port(source, "mosaic").unwrap()).unwrap();
     let evaluator = Evaluator::new(RuntimeContext::host());
-    assert!(evaluator.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), output).is_ok());
+    let evaluate = |dag: &drip::graph::Dag| {
+        evaluator.evaluate::<Cpu<Bayer>>(dag, &Default::default(), output).map(|e| e.data)
+    };
+    let first = evaluate(&dag).unwrap();
+    std::fs::remove_file(&temporary).unwrap();
+    // Files are assumed unchanged: the node and every graph snapshot sharing it
+    // keep the first decode.
+    assert!(std::sync::Arc::ptr_eq(&first, &evaluate(&dag.clone()).unwrap()));
+    // Choosing the file again admits a new node, which reads it again.
     dag.set_parameters(source, json!({"path":temporary})).unwrap();
-    assert!(evaluator.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), output).is_err());
+    assert!(evaluate(&dag).is_err());
     dag.set_parameters(source, json!({"path":fixture})).unwrap();
-    assert!(evaluator.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), output).is_ok());
+    assert!(evaluate(&dag).is_ok());
 }
 
 #[test]

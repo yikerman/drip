@@ -11,7 +11,7 @@ pub(crate) fn expand(args: TokenStream, function: syn::ItemFn) -> syn::Result<To
     let options = Options::parse(args, function.sig.span())?;
     let signature = Signature::parse(&function.sig)?;
     if options.assets && signature.source {
-        let message = "a source loads its outputs at admission; remove assets";
+        let message = "a source loads its outputs itself; remove assets";
         return Err(syn::Error::new(function.sig.ident.span(), message));
     }
     match (&options.contract, signature.outputs().next()) {

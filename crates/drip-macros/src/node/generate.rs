@@ -25,17 +25,27 @@ pub(super) fn node(
     } else {
         (contract(options, signature), run(name, signature))
     };
+    // Files are read when first forced and kept with the node, error included.
+    // They are assumed not to change, so the cache keeps the node pure; any
+    // parameter edit admits a new node, which reads them again.
     let (definition, admission) = if signature.source {
         let load = load(name, signature);
+        let values = quote!([(::drip::ports::Description, ::drip::ports::Data)]);
         (
             quote! {
                 #vis struct Definition {
                     #vis parameters: #parameters,
-                    loaded: ::drip::Result<Vec<(::drip::ports::Description, ::drip::ports::Data)>>,
+                    loaded: ::std::sync::OnceLock<::drip::Result<Vec<(::drip::ports::Description, ::drip::ports::Data)>>>,
+                }
+                impl Definition {
+                    fn loaded(&self) -> ::drip::Result<&#values> {
+                        let loaded = self.loaded.get_or_init(|| load(&self.parameters));
+                        loaded.as_deref().map_err(Clone::clone)
+                    }
                 }
                 #load
             },
-            quote!(Definition { loaded: load(&parameters), parameters }),
+            quote!(Definition { parameters, loaded: Default::default() }),
         )
     } else if options.assets {
         let loaded = quote!(<#parameters as ::drip::definition::Assets>::Loaded);
@@ -43,21 +53,19 @@ pub(super) fn node(
             quote! {
                 #vis struct Definition {
                     #vis parameters: #parameters,
-                    assets: ::drip::Result<#loaded>,
+                    assets: ::std::sync::OnceLock<::drip::Result<#loaded>>,
                 }
                 impl Definition {
-                    /// The files loaded at admission, or why they could not be.
+                    /// The files the parameters name, or why they could not be read.
                     #vis fn assets(&self) -> ::drip::Result<&#loaded> {
-                        self.assets.as_ref().map_err(Clone::clone)
+                        let assets = self.assets.get_or_init(|| {
+                            ::drip::definition::Assets::load(&self.parameters)
+                        });
+                        assets.as_ref().map_err(Clone::clone)
                     }
                 }
             },
-            quote! {
-                Definition {
-                    assets: ::drip::definition::Assets::load(&parameters),
-                    parameters,
-                }
-            },
+            quote!(Definition { parameters, assets: Default::default() }),
         )
     } else {
         (
@@ -130,7 +138,6 @@ fn kind(
     let help = crate::documentation(&function.attrs);
     let references = &options.references;
     let parameters = &signature.parameters;
-    let loads_assets = signature.source || options.assets;
     let inputs = signature.inputs().map(port_spec);
     let outputs = signature.outputs().map(port_spec);
     let action = match &options.action {
@@ -159,7 +166,6 @@ fn kind(
             defaults: || ::drip::__private::serde_json::to_value(
                 <#parameters as ::std::default::Default>::default()
             ).expect("node parameter defaults serialize"),
-            loads_assets: #loads_assets,
             build: |json| definition(::drip::param::decode(json)?),
             inputs: &[#(#inputs),*],
             outputs: &[#(#outputs),*],
@@ -328,8 +334,8 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
     }
 }
 
-/// Run a source once at admission. A failure is kept for evaluation to report,
-/// so the node stays editable and persistable.
+/// Run a source when it is first forced. A failure is cached like a value, so
+/// the node stays editable and persistable and evaluation reports it.
 fn load(name: &syn::Ident, signature: &Signature) -> TokenStream {
     let slots: Vec<_> =
         signature.outputs().map(|port| format_ident!("slot_{}", port.index)).collect();
@@ -366,8 +372,7 @@ fn loaded_contract() -> TokenStream {
             _: &::drip::runtime::GlobalContext,
             _: &[Option<::drip::ports::Description>],
         ) -> ::drip::Result<Vec<::drip::ports::Description>> {
-            let values = self.loaded.as_ref().map_err(Clone::clone)?;
-            Ok(values.iter().map(|(desc, _)| desc.clone()).collect())
+            Ok(self.loaded()?.iter().map(|(desc, _)| desc.clone()).collect())
         }
     }
 }
@@ -380,8 +385,7 @@ fn loaded_run() -> TokenStream {
             _: &[Option<(::drip::ports::Description, ::drip::ports::Data)>],
             _: &[::drip::ports::Description],
         ) -> ::drip::Result<Vec<::drip::ports::Data>> {
-            let values = self.loaded.as_ref().map_err(Clone::clone)?;
-            Ok(values.iter().map(|(_, data)| data.clone()).collect())
+            Ok(self.loaded()?.iter().map(|(_, data)| data.clone()).collect())
         }
     }
 }

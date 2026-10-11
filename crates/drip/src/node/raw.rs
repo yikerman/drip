@@ -1,4 +1,4 @@
-//! Load a Bayer RAW once at admission; evaluation reports a load error.
+//! Decode a Bayer RAW when first evaluated; the node keeps it or the error.
 use crate::{
     Error, Result,
     node::{camera, data::*},
@@ -17,8 +17,8 @@ pub struct Settings {
 }
 /// Read a Bayer RAW, subtract black and normalize by a common white reference.
 /// Outputs Bayer camera responses and the decoded capture metadata, including
-/// native calibration. The file is decoded once when the path is set; evaluation
-/// performs no file I/O. Calibration remains approximate.
+/// native calibration. The file is decoded when first evaluated and kept with
+/// the node; choose it again to pick up changes. Calibration remains approximate.
 #[crate::node(id = "input.bayer-raw", name = "RAW", category = "Input", references = [(
     "LibRaw black normalization",
     "https://github.com/LibRaw/LibRaw/blob/0.22.0/src/utils/utils_libraw.cpp",

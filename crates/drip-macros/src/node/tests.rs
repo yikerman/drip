@@ -56,7 +56,7 @@ fn an_unread_port_drops_its_underscore() {
 }
 
 #[test]
-fn sources_load_cpu_outputs_at_admission_without_a_contract() {
+fn sources_load_cpu_outputs_without_a_contract() {
     let function: syn::ItemFn = syn::parse_quote! {
         fn read(p: &Settings, mosaic: Load<'_, Bayer>, metadata: Load<'_, Facts>) -> Result<()> {
             Ok(())
@@ -111,14 +111,12 @@ fn actions_are_declared_with_the_node_and_named_from_their_function() {
 }
 
 #[test]
-fn assets_load_at_admission_and_reach_the_action() {
+fn assets_load_when_first_used_and_reach_the_action() {
     let function: syn::ItemFn = syn::parse_quote! {
         fn tiff(c: &Context, p: &Export, image: Read<Cpu<Rgb>>) -> Result<()> { Ok(()) }
     };
     let options = quote!(id = "x", action = export, assets);
     let module = generated_module(expand(options, function.clone()).unwrap());
-    let field = kind_field(&module, "loads_assets");
-    assert_eq!(quote!(#field).to_string(), "true");
     let action = kind_field(&module, "action");
     assert!(quote!(#action).to_string().contains(
         "super :: export (& node . parameters , node . assets () ? , inputs . bind :: < Definition > () ?"
@@ -131,7 +129,7 @@ fn assets_load_at_admission_and_reach_the_action() {
             _ => None,
         })
         .unwrap();
-    assert!(admit.contains("assets : :: drip :: definition :: Assets :: load (& parameters)"));
+    assert!(admit.contains("assets : Default :: default ()"), "admission reads no files");
     for options in [quote!(id = "x", assets, assets), quote!(id = "x", assets = true)] {
         let error = expand(options, function.clone()).unwrap_err();
         assert_eq!(error.to_string(), "expected a single `assets` flag");

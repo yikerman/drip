@@ -81,7 +81,7 @@ impl Assets for Export {
 /// u8/u16 clip to the output range; f32 retains the profile's floating-point range.
 /// Connected capture metadata is copied when present. Export uses full processing
 /// detail, independently of preview detail. Compression is lossless. A profile
-/// file is read when chosen; reselect it to pick up changes.
+/// file is read at the first export; choose it again to pick up changes.
 #[crate::node(
     id = "output.tiff",
     name = "Export TIFF",

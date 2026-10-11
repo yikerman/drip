@@ -23,9 +23,6 @@ pub struct Kind {
     pub parameters: &'static [ParamSpec],
     /// Persisted default parameters.
     pub defaults: fn() -> serde_json::Value,
-    /// Admitting parameters loads files (a source's outputs or `#[node(assets)]`),
-    /// so frontends should do it away from their UI thread.
-    pub loads_assets: bool,
     /// Admit persisted parameters using this kind's typed definition.
     pub build: fn(serde_json::Value) -> Result<Arc<dyn Node>>,
     pub inputs: &'static [PortSpec],
@@ -40,9 +37,9 @@ pub struct Action {
     /// Runs on the admitted node, which holds its parameters and assets.
     pub run: fn(&dyn Node, &InputValues) -> Result<()>,
 }
-/// Files a node's parameters name, read once when the node is admitted
-/// (`#[node(assets)]`), so evaluation and actions perform no file I/O. A load
-/// error is kept with the node, which stays editable and persistable.
+/// Files a node's parameters name (`#[node(assets)]`), read when an action or
+/// preparation first needs them and kept with the node, error included. Files
+/// are assumed not to change; the node stays editable and persistable.
 pub trait Assets {
     type Loaded: Send + Sync + 'static;
     fn load(&self) -> Result<Self::Loaded>;

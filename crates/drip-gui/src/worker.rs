@@ -1,7 +1,7 @@
-//! Two sequential queues per project. Evaluation runs previews and node actions
-//! in order with one evaluator; loading admits nodes and opens projects, so an
-//! edit that reads files never waits behind an evaluation. The app replaces the
-//! worker with its project, discarding queued work and late replies.
+//! One sequential queue per project: previews and node actions run in order
+//! with one evaluator, which also reads a node's files when first forced. The
+//! app replaces the worker with its project, discarding queued work and late
+//! replies.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -44,17 +44,10 @@ enum Command {
     Collect,
 }
 
-enum Load {
-    Bind { ticket: u64, id: NodeId, kind: &'static drip::definition::Kind, params: Json },
-    Open { ticket: u64, file: std::path::PathBuf },
-}
-
 enum Event {
     Evaluated { generation: u64, views: Snapshot, failures: BTreeMap<NodeId, Failure> },
     Performed { id: NodeId, result: Result<Option<Json>, String> },
     Stopped,
-    Bound { ticket: u64, id: NodeId, result: drip::Result<Arc<dyn drip::definition::Node>> },
-    Opened { ticket: u64, file: std::path::PathBuf, result: Result<crate::model::Project, String> },
 }
 
 pub enum Notice {
@@ -65,14 +58,6 @@ pub enum Notice {
         result: Result<Option<Json>, String>,
     },
     Failed,
-    Bound {
-        id: NodeId,
-        result: drip::Result<Arc<dyn drip::definition::Node>>,
-    },
-    Opened {
-        file: std::path::PathBuf,
-        result: Result<crate::model::Project, String>,
-    },
 }
 
 #[derive(Clone, PartialEq)]
@@ -114,7 +99,7 @@ impl Notify {
 }
 
 /// Reports a thread's end, by return or panic, so the UI stops showing
-/// “evaluating…” or “loading…”.
+/// “Evaluating…”.
 struct Stopping(Notify);
 
 impl Drop for Stopping {
@@ -126,7 +111,6 @@ impl Drop for Stopping {
 /// UI-side mailbox. At most one preview is sent and one latest request waits.
 pub struct Worker {
     commands: mpsc::Sender<Command>,
-    loads: mpsc::Sender<Load>,
     /// Set when dropped: each thread skips queued commands after its current one.
     stopped: Arc<AtomicBool>,
     events: mpsc::Receiver<Event>,
@@ -138,9 +122,6 @@ pub struct Worker {
     failures: BTreeMap<NodeId, Failure>,
     collect: bool,
     failed: bool,
-    job_ticket: u64,
-    bindings: BTreeMap<NodeId, u64>,
-    opening: Option<u64>,
 }
 
 impl Worker {
@@ -160,24 +141,8 @@ impl Worker {
                 }
                 Command::Collect => images.collect(),
             });
-        let loads = serve("drip-loader", &stopped, &notify, |load, notify| {
-            notify.send(match load {
-                Load::Bind { ticket, id, kind, params } => {
-                    Event::Bound { ticket, id, result: (kind.build)(params) }
-                }
-                Load::Open { ticket, file } => {
-                    let result = std::fs::read_to_string(&file)
-                        .map_err(|e| e.to_string())
-                        .and_then(|text| {
-                            crate::model::Project::from_json(&text).map_err(|e| e.to_string())
-                        });
-                    Event::Opened { ticket, file, result }
-                }
-            })
-        });
         Self {
             commands,
-            loads,
             stopped,
             events: replies,
             generation: 0,
@@ -188,9 +153,6 @@ impl Worker {
             failures: BTreeMap::new(),
             collect: false,
             failed: false,
-            job_ticket: 0,
-            bindings: BTreeMap::new(),
-            opening: None,
         }
     }
 
@@ -204,31 +166,7 @@ impl Worker {
     }
 
     pub fn busy(&self) -> bool {
-        self.in_flight || self.pending.is_some() || self.loading()
-    }
-
-    /// True until the latest bindings and project open are handed to the app.
-    pub fn loading(&self) -> bool {
-        !self.bindings.is_empty() || self.opening.is_some()
-    }
-
-    pub fn bind(
-        &mut self,
-        graph: &Graph,
-        id: NodeId,
-        params: serde_json::Value,
-    ) -> Result<(), String> {
-        let kind = graph.dag.node(id).map_err(|e| e.to_string())?.kind();
-        self.job_ticket += 1;
-        self.send(&self.loads, Load::Bind { ticket: self.job_ticket, id, kind, params })?;
-        self.bindings.insert(id, self.job_ticket);
-        Ok(())
-    }
-    pub fn open(&mut self, file: std::path::PathBuf) -> Result<(), String> {
-        self.job_ticket += 1;
-        self.send(&self.loads, Load::Open { ticket: self.job_ticket, file })?;
-        self.opening = Some(self.job_ticket);
-        Ok(())
+        self.in_flight || self.pending.is_some()
     }
 
     pub fn request(
@@ -257,11 +195,6 @@ impl Worker {
 
     /// Runs `action`, which belongs to node `id`'s kind.
     pub fn action(&self, graph: &Graph, id: NodeId, action: NodeAction) -> Result<(), String> {
-        // A bind cannot update the action's graph snapshot, and an open
-        // replaces the project and this worker with it.
-        if self.loading() {
-            return Err("wait for loading to finish before running an action".into());
-        }
         let effect = Effect::Perform { id, action };
         let demand = Demand { graph: graph.clone(), global: Default::default(), effect };
         self.send(&self.commands, Command::Force(demand))
@@ -271,18 +204,6 @@ impl Worker {
         let mut notices = Vec::new();
         while let Ok(event) = self.events.try_recv() {
             match event {
-                Event::Bound { ticket, id, result } => {
-                    if self.bindings.get(&id) == Some(&ticket) {
-                        self.bindings.remove(&id);
-                        notices.push(Notice::Bound { id, result });
-                    }
-                }
-                Event::Opened { ticket, file, result } => {
-                    if self.opening == Some(ticket) {
-                        self.opening = None;
-                        notices.push(Notice::Opened { file, result });
-                    }
-                }
                 Event::Evaluated { generation, views, failures } => {
                     self.in_flight = false;
                     self.collect = true;
@@ -342,8 +263,6 @@ impl Worker {
         self.failed = true;
         self.in_flight = false;
         self.pending = None;
-        self.bindings.clear();
-        self.opening = None;
         Notice::Failed
     }
 
@@ -651,20 +570,6 @@ mod tests {
         })
     }
 
-    #[test]
-    fn newest_binding_wins() {
-        let mut graph = Graph::default();
-        let id = graph.add_node(drip::definition::kind("tone.exposure").unwrap()).unwrap();
-        let mut worker = Worker::new(Arc::new(|| {}));
-        worker.bind(&graph, id, json!({"ev":1.0})).unwrap();
-        worker.bind(&graph, id, json!({"ev":2.0})).unwrap();
-        let notices = wait(&mut worker);
-        assert_eq!(notices.len(), 1);
-        let Notice::Bound { id: loaded, result } = &notices[0] else { panic!("expected binding") };
-        assert_eq!(*loaded, id);
-        assert_eq!(result.as_ref().unwrap().parameters().unwrap(), json!({"ev":2.0}));
-    }
-
     mod preview_logs_only_changed_root_failures_at_their_severity_fixture {
         use super::*;
         #[derive(Clone, drip::Choice)]
@@ -855,11 +760,6 @@ mod tests {
             graph.set_param(source, "block", json!(true)).unwrap();
             worker.request(&graph, 1, vec![preview]).unwrap();
             entered.recv_timeout(TIMEOUT).unwrap();
-            // Loading does not wait behind the blocked evaluation.
-            worker.bind(&graph, preview, graph.node(preview).unwrap().params).unwrap();
-            woke.recv_timeout(TIMEOUT).unwrap();
-            assert!(matches!(worker.poll()[..], [Notice::Bound { .. }]));
-            assert!(!worker.loading());
             graph.set_param(source, "block", json!(false)).unwrap();
             for value in [2, 3] {
                 graph.set_param(source, "value", json!(value)).unwrap();
@@ -905,9 +805,7 @@ mod tests {
             graph.set_param(source, "value", json!(4)).unwrap();
             old.action(&graph, tiff, action(&graph, tiff)).unwrap();
             drop(old);
-            // The idle loading thread stops at once; evaluation wakes the UI
-            // for its preview, then as it stops.
-            woke.recv_timeout(TIMEOUT).unwrap();
+            // Evaluation wakes the UI for its preview, then as it stops.
             release.send(()).unwrap();
             for _ in 0..2 {
                 woke.recv_timeout(COMPUTE_TIMEOUT).unwrap();

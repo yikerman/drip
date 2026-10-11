@@ -133,7 +133,7 @@ impl<'a, P: Port> OutputSlot<'a, P> {
     }
 }
 
-/// An output of a source node, set once when its parameters are admitted.
+/// An output of a source node, set once when the node is first evaluated.
 /// Setting it is the boundary check of the loaded value.
 pub struct Load<'a, P> {
     slot: &'a mut Option<(Description, Data)>,

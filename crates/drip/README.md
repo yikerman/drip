@@ -11,7 +11,7 @@
   never a collection of unrelated node kernels.
 - Outside `node/`, keep shared DAG/evaluation infrastructure: definitions and
   discovery, ports and payload interfaces, graph checks, scheduling, runtime
-  access, parameter schemas, admission assets and generic project persistence. These
+  access, parameter schemas, node file assets and generic project persistence. These
   modules must not depend on concrete image-processing nodes or payloads.
 
 The same ownership rule applies to `drip-gui`: node-specific declarations,
@@ -49,9 +49,9 @@ consume them, rather than independent inactive fields.
 File extensions are file-format facts in the schema; the GUI derives its
 dialogs from them. Scope annotations belong to `drip-gui`. The library owns
 processing values and their interpretations. Sources use the same `#[node]`
-declaration with `Load` ports, `fn(&Settings, Load<'_, P>...)`: they load once
-when parameters are admitted and publish shared values; evaluation reports a
-load failure.
+declaration with `Load` ports, `fn(&Settings, Load<'_, P>...)`: they load once,
+when first evaluated, and the node keeps the shared values or the failure.
+Files are assumed not to change while a node names them.
 
 ## Compute backends
 

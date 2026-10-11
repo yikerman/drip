@@ -15,7 +15,7 @@ pub struct Frame<'a> {
     pub results: &'a dyn Fn(NodeId) -> Option<&'a ViewResult>,
     /// The windows popped out.
     pub popped: &'a BTreeSet<Popped>,
-    /// Disables actions while one runs or assets are loading.
+    /// Disables actions while one runs.
     pub actions_disabled: bool,
     pub report: Report,
 }
@@ -33,9 +33,6 @@ pub struct Report {
     pub action: Option<NodeId>,
     /// A window the user opened or closed.
     pub toggled: Option<Popped>,
-    /// Asset-backed parameter edits are admitted on the worker, then checked
-    /// against the current graph before publication to any window.
-    pub bindings: Vec<(NodeId, serde_json::Value)>,
 }
 
 /// All frontend graph mutations pass through `Frame::edit`, which owns their
@@ -79,11 +76,8 @@ impl<'a> Frame<'a> {
                 Edit::Disconnect(input) => {
                     graph.disconnect(input)?;
                 }
-                Edit::Param(id, name, value) => {
-                    let params = graph.with_param(id, name, value)?;
-                    self.set_parameters(graph, id, params)?;
-                }
-                Edit::Parameters(id, params) => self.set_parameters(graph, id, params)?,
+                Edit::Param(id, name, value) => graph.set_param(id, name, value)?,
+                Edit::Parameters(id, params) => graph.dag.set_parameters(id, params)?,
                 Edit::Name(id, name) => graph.set_name(id, name)?,
                 Edit::External(id, name, external) => graph.set_external(id, name, external)?,
                 Edit::Ui(id, key, value) => set_ui(graph, id, key, value),
@@ -101,20 +95,6 @@ impl<'a> Frame<'a> {
                 None
             }
         }
-    }
-
-    /// Nodes that load assets are rebuilt on the worker, then committed.
-    fn set_parameters(
-        &mut self,
-        graph: &mut Graph,
-        id: NodeId,
-        params: Json,
-    ) -> Result<(), GraphError> {
-        if graph.dag.node(id)?.kind().loads_assets {
-            self.report.bindings.push((id, params));
-            return Ok(());
-        }
-        graph.dag.set_parameters(id, params)
     }
 }
 
@@ -174,9 +154,9 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
         self.frame.report.action = Some(self.id);
     }
 
-    /// Whether actions are disabled while one runs or assets are loading.
+    /// Whether actions are disabled while one runs.
     pub fn actions_disabled(&self) -> bool {
-        self.frame.actions_disabled || !self.frame.report.bindings.is_empty()
+        self.frame.actions_disabled
     }
 
     /// Whether `part` of the node is shown in its own window.

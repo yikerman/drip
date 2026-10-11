@@ -184,11 +184,6 @@ impl App {
 
     /// Applies what a frame's GUIs did and requests evaluation after edits.
     fn apply(&mut self, report: Report) {
-        for (id, params) in report.bindings {
-            if let Err(error) = self.worker.bind(&self.project.graph, id, params) {
-                self.report(Err(error));
-            }
-        }
         self.redraw |= report.changed;
         self.modified |= report.changed;
         self.dirty |= report.edited;
@@ -233,38 +228,6 @@ impl App {
         self.redraw |= !notices.is_empty();
         for notice in notices {
             match notice {
-                Notice::Bound { id, result } => {
-                    if self.project.graph.dag.node(id).is_ok() {
-                        let result = result.and_then(|node| {
-                            let old = self.project.graph.dag.node(id)?.parameters()?;
-                            let changed = old != node.parameters()?;
-                            self.project.graph.dag.replace(id, node)?;
-                            self.modified |= changed;
-                            Ok(())
-                        });
-                        self.dirty |= result.is_ok();
-                        let node = self.project.graph.node(id).expect("bound node exists");
-                        let text = match node.file(false) {
-                            Some(path) => format!("Loaded {}: {path}", node.name),
-                            None => format!("Updated {}", node.name),
-                        };
-                        self.report(result.map(|()| text).map_err(|e| e.to_string()));
-                        action_reported = true;
-                    }
-                }
-                Notice::Opened { file, result } => {
-                    let destination = if file
-                        .extension()
-                        .is_some_and(|ext| ext.eq_ignore_ascii_case("drip-template"))
-                    {
-                        None
-                    } else {
-                        Some(file.clone())
-                    };
-                    let result = result.and_then(|project| self.set_project(project, destination));
-                    self.report(result.map(|()| format!("Opened {}", file.display())));
-                    action_reported = true;
-                }
                 Notice::Evaluated(result) => evaluated = Some(result),
                 Notice::Performed { id, result } => {
                     let action = self.action.take();
@@ -331,9 +294,6 @@ impl App {
             if ui.button("Save template…").clicked() {
                 self.save_as(true);
             }
-            if ui.button("Reload files").clicked() {
-                self.reload_files();
-            }
             ui.separator();
             let label = |level| {
                 if level == 0 { "Full".to_owned() } else { format!("1/{}", 1u32 << level) }
@@ -396,9 +356,15 @@ impl App {
         Ok(())
     }
 
+    /// Opens a project, or a template as an untitled project.
     fn open(&mut self, file: PathBuf) {
-        let result = self.worker.open(file.clone());
-        self.report(result.map(|()| format!("Opening {}", file.display())));
+        let template =
+            file.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("drip-template"));
+        let result = std::fs::read_to_string(&file)
+            .map_err(|e| e.to_string())
+            .and_then(|text| Project::from_json(&text).map_err(|e| e.to_string()))
+            .and_then(|project| self.set_project(project, (!template).then(|| file.clone())));
+        self.report(result.map(|()| format!("Opened {}", file.display())));
     }
 
     fn save_as(&mut self, template: bool) {
@@ -445,24 +411,8 @@ impl App {
         saved
     }
 
-    /// Readmits every node that loads files, picking up changes on disk.
-    fn reload_files(&mut self) {
-        let result = (|| {
-            for (id, node) in self.project.graph.dag.nodes().filter(|(_, n)| n.kind().loads_assets)
-            {
-                self.worker.bind(
-                    &self.project.graph,
-                    id,
-                    node.parameters().map_err(|e| e.to_string())?,
-                )?;
-            }
-            Ok(())
-        })();
-        self.report(result.map(|()| "Reloading files…".into()));
-    }
-
     fn actions_disabled(&self) -> bool {
-        self.action.is_some() || self.worker.loading()
+        self.action.is_some()
     }
 
     fn run_action(&mut self, id: NodeId) {
@@ -575,55 +525,6 @@ mod tests {
         h.state_mut().edit(Edit::Param(id, name, value));
     }
 
-    fn finish_bindings(app: &mut App) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while app.worker.loading() {
-            app.poll();
-            assert!(std::time::Instant::now() < deadline, "binding did not finish");
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-    }
-
-    #[test]
-    fn reloading_disables_export_in_main_and_popped_windows_until_bindings_commit() {
-        for popped in [false, true] {
-            let mut app = App::new(None, true, || {});
-            let export = app.project.graph.find("Export TIFF").unwrap();
-            app.selected = Some(export);
-            app.reload_files();
-            // Do not poll: even a completed load must block exports until committed.
-            let mut h = Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).build_ui_state(
-                move |ui, app: &mut App| {
-                    if popped {
-                        app.window(ui, Popped { node: export, part: node_ui::Part::Parameters });
-                    } else {
-                        app.ui(ui);
-                    }
-                },
-                app,
-            );
-            h.run();
-            assert!(h.get_by_label("Export").accesskit_node().is_disabled());
-            h.state_mut().run_action(export);
-            assert!(h.state().action.is_none());
-            assert!(h.state().status.as_ref().unwrap().text.contains("wait for loading"));
-
-            finish_bindings(h.state_mut());
-            h.run();
-            assert!(!h.get_by_label("Export").accesskit_node().is_disabled());
-        }
-    }
-
-    #[test]
-    fn actions_wait_for_an_opening_project() {
-        let mut app = App::new(None, true, || {});
-        let export = app.project.graph.find("Export TIFF").unwrap();
-        app.open(fixture_project("opening"));
-        app.run_action(export);
-        assert!(app.action.is_none());
-        assert!(app.status.as_ref().unwrap().text.contains("wait for loading"));
-    }
-
     #[test]
     fn auto_exposure_is_queued_and_applies_its_ev_as_an_edit() {
         let file = fixture_project("auto-exposure");
@@ -657,26 +558,6 @@ mod tests {
         // The meter reads Exposure's input, so the current EV does not matter.
         assert!(metered[0] != 0.0 && metered[0] == metered[1], "{metered:?}");
         std::fs::remove_file(file).unwrap();
-    }
-
-    #[test]
-    fn binding_and_export_in_the_same_frame_cannot_snapshot_old_parameters() {
-        let mut app = App::new(None, true, || {});
-        let exposure = app.project.graph.find("Exposure").unwrap();
-        let export = app.project.graph.find("Export TIFF").unwrap();
-        app.apply(Report {
-            bindings: vec![(exposure, json!({"ev": 2.0}))],
-            action: Some(export),
-            ..Default::default()
-        });
-        assert!(app.action.is_none());
-        assert!(app.status.as_ref().unwrap().text.contains("wait for loading"));
-        assert_ne!(app.project.graph.node(exposure).unwrap().params["ev"], json!(2.0));
-
-        finish_bindings(&mut app);
-        assert_eq!(app.project.graph.node(exposure).unwrap().params["ev"], json!(2.0));
-        app.run_action(export);
-        assert!(app.action.as_ref().unwrap().running.contains("Export TIFF"));
     }
 
     #[test]
@@ -738,11 +619,6 @@ mod tests {
         let image = view::<ImageView>(&app.worker, id).image.clone();
         assert_eq!(app.level, DEFAULT_LEVEL);
         assert_eq!(image.width, 3984, "1/2 preview with reduced Bayer input to RCD");
-        h.get_by_label("Reload files").click();
-        settle(&mut h);
-        let refreshed = &view::<ImageView>(&h.state().worker, id).image;
-        assert!(!std::sync::Arc::ptr_eq(&image, refreshed));
-        assert_eq!(image.texels, refreshed.texels);
         h.get_by_label("Preview detail").click();
         settle(&mut h);
         h.get_by_label("1/4").click();

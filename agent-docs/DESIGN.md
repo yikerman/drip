@@ -59,9 +59,9 @@ Resolved with the user on 2026-10-11 after the review against
   write live in `drip`. `GuiNode` binds to the generated node type. File roles
   live in the parameter schema. `Default` derives from the schema.
 - **Decided:** One sequential evaluation queue with one evaluator runs
-  previews, export and auto exposure. Bindings and project open run on a second
-  queue, so an edit to a node that loads files never waits behind an
-  evaluation; actions still wait for pending bindings. A preview or an action is a
+  previews, export and auto exposure, and reads a node's files when first
+  forced. Edits read no files, and project open reads only the project JSON on
+  the UI thread. A preview or an action is a
   `Demand`: a graph snapshot forced under one `GlobalContext`, evaluated in one
   batch (shared ancestors run once; each output lives until its last consumer
   finishes), then its effect consumes the inputs. Actions override the preview
@@ -112,9 +112,9 @@ Resolved with the user on 2026-10-11 after the review against
   mode (CAT16 As shot) reports its absence at evaluation.
 - **Decided:** Each check depends only on what its event supplies. A graph
   edit checks ports: payload types, occupancy and cycles. Admission checks the
-  parameters (`#[validate]`) and loads files, storing a load failure. Contracts,
-  requirements and load failures are checked when evaluation forces the node,
-  and are reported on it; a branch nothing evaluates reports nothing. Edits
+  parameters (`#[validate]`) and reads no files. Contracts, requirements and
+  file reads happen when evaluation forces the node, and their failures are
+  reported on it; a branch nothing evaluates reports nothing. Edits
   checked contracts on loaded descriptions until 2026-10-11, so the same
   connection, parameter change, RAW selection or project open was accepted or
   refused depending on whether a RAW was loaded.
@@ -124,17 +124,20 @@ Resolved with the user on 2026-10-11 after the review against
 - **Decided:** Two declaration forms. Computation, view and action nodes:
   `fn(&KernelContext, &Params, Read..., Write...) -> Result<()>`, with an empty
   body for views/actions. Sources: `fn(&Params, Load<'_, P>...) -> Result<()>`,
-  run once at admission; `Load::set(desc, host)` validates at the boundary, and
-  a failure is stored for evaluation to report. Loading stays separate
-  from computation. Admission no longer canonicalizes the RAW path; the stored
+  run once when first forced; `Load::set(desc, host)` validates at the
+  boundary. Loading stays separate from computation. Admission no longer canonicalizes the RAW path; the stored
   path is the one supplied.
 - **Decided:** Other files a node names (output ICC profiles in Export TIFF and
-  Preview proofing) are assets: `#[node(assets)]` with `impl Assets for Params`
-  reads them once at admission into the node, keeping a load error as the
-  node's error. Actions and preparations receive the admitted node, so neither
-  reads files nor re-decodes parameters. This replaces the shared per-path
-  resource memo: a file is read when chosen, and "Reload files" readmits every
-  node that loads assets.
+  Preview proofing) are assets: `#[node(assets)]` with `impl Assets for Params`.
+  Actions and preparations receive the admitted node and its assets, so neither
+  re-decodes parameters.
+- **Decided:** A node reads its files (source outputs or assets) when first
+  forced and keeps the result, failure included, in a generated `OnceLock`.
+  Files are assumed not to change, so the cache does not change the node's
+  outputs; graph snapshots share it, and a parameter edit admits a new node
+  that reads again. Choosing a file again replaces "Reload files". Until
+  2026-10-11, admission read files on a separate GUI loading queue; that queue,
+  its pending-binding state and the `loads_assets` flag are gone.
 - **Decided:** Headless actions are declared with the node,
   `#[node(action = export)]`, as `fn(&Params, Inputs<'_>)` (with `&Loaded`
   assets before the inputs); the action's label comes from the function name
@@ -314,9 +317,9 @@ Resolved with the user on 2026-10-11 after the review against
   density, histograms to linear.
 - **Decided:** Inspector help joins Rustdoc source wraps and keeps paragraphs;
   reflow belongs to presentation.
-- **Decided:** Actions are disabled while asset bindings or a project open are
-  pending. Same-frame
-  actions are rejected before snapshotting the graph.
+- **Decided:** Actions are disabled only while another action runs. Without
+  admission-time loading there are no pending bindings or project opens to wait
+  for (until 2026-10-11 actions waited for both).
 - **Decided:** The default RAW template uses a landscape layout: views share a
   top edge, processing staggers down through Orientation, RAW and TIFF sit at
   the bottom corners.
