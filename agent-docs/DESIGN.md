@@ -10,6 +10,12 @@ Status: **Requirement** is stated by the user; **Decided** is agreed;
 
 ## Scope
 
+- **Requirement:** The README addresses users: highlight CubeCL computation,
+  freely arranged controls/views, color-managed output and pipeline checks.
+  Explain only the unusual canvas gestures; leave conventional node controls
+  to the interface. Demo captures use the Sony ILCE-7RM3 fixture and show only
+  Drip. Use cheerful, benefit-led product copy and show every supplied demo
+  inline with its own visible caption. Identify gamut warnings in the caption.
 - **Decided:** The next milestone is a packaged, user-testable proof of concept.
   Scene-illuminant white balance and orientation are required additions. Other
   image-quality and editing limitations are accepted; broader reference

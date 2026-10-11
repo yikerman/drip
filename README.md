@@ -1,36 +1,76 @@
 # Drip
 
-A Rust RAW processor with a checked node graph and CubeCL image kernels.
+**Done Right Image Processing**
 
-Nodes declare concrete payloads, CPU/device placement, and interpretation
-contracts. Graph edits validate contracts before committing. Evaluation runs
-the requested dependency subgraph and owns transfers between host and device.
-Intermediate image results are not cached across evaluations.
+Your photos. Your workflow.
 
-The current RAW path is Bayer normalization, as-shot gains applied to samples
-and clipping levels together, opposed highlight reconstruction, RCD demosaic,
-camera matrix conversion, CAT16 chromatic adaptation, exposure, and sigmoid. RAW exposes pixels and one
-metadata value containing capture, lens, GPS, sensor geometry and calibration.
-Orientation follows RAW metadata after color conversion, with an explicit override.
-Chromatic adaptation defaults to As shot; Custom white point accepts source CIE
-1931 xy and adapts it to D65. Camera conversion replaces the upstream as-shot
-gains with reference gains, leaving scene WB to CAT16. Existing projects need
-the adaptation node wired after camera conversion, or a fresh RAW template;
-graphs are not migrated automatically.
-The GUI retains color-managed wgpu presentation, ICC proofing, diagnostic scopes,
-and TIFF export. Current decisions and validation are recorded in
-[Design](agent-docs/DESIGN.md) and [Progress](agent-docs/PROGRESS.md).
+Drip is an open-source RAW photo editor that puts the whole processing pipeline
+in your hands. Start with a ready-to-edit workflow, explore your image at every
+step, and make the workspace your own.
 
-## Build & install
+![Sony A7R III photo in Drip's complete RAW-to-TIFF pipeline, with preview and scopes](fixtures/demos/pipeline-overview.png)
+
+*From RAW to TIFF: your photo, processing steps and live scopes on one canvas.*
+
+### Put your GPU to work
+
+CubeCL powers Drip's image processing, with the same kernels across Vulkan,
+Metal, CUDA and other compute backends. An optional CPU backend runs those
+same kernels, too. Adjust preview detail as you edit; export at full resolution.
+
+### Give your photo more room
+
+Keep your image front and center, your scopes alongside it, and your favorite
+controls within reach. Previews, scopes and adjustment panels can live on the
+canvas or in their own windows. Arrange them your way.
+
+![Detached preview with cyan gamut warnings, waveform, sigmoid and exposure controls](fixtures/demos/pop-out-workspace.png)
+
+*A workspace built around the photo, with detached waveform and tone controls.
+Cyan highlights show colors outside the selected proof profile's gamut.*
+
+### Keep color in view
+
+Wide-gamut previews, ICC softproofing and color-managed TIFF export carry your
+edit from screen to file. Underneath, floating-point linear Rec.2020 processing
+and CAT16 white balance keep color handling explicit. Histograms, waveforms and
+vectorscopes let you see what each adjustment does.
+
+![Histogram, waveform and vectorscope on the canvas, with histogram settings in the inspector](fixtures/demos/scopes.png)
+
+*A closer look at brightness and color: histogram, waveform and vectorscope,
+placed wherever you need them in the pipeline.*
+
+### Experiment with confidence
+
+Branch the pipeline, try another processing order, or inspect an intermediate
+result. Drip checks image types and color spaces when you connect nodes, then
+checks image-dependent requirements during processing. Incompatible operations
+explain what needs attention; valid combinations leave room for creative choices.
+
+![RAW processing connections with chromatic adaptation selected and its help and white-balance control visible](fixtures/demos/sane-workflow.png)
+
+*Follow the image from sensor data through demosaic and camera color, with
+white balance and its assumptions open in the inspector.*
+
+### Make your next edit feel familiar
+
+Save a pipeline as a reusable template, with the settings you want to change
+brought to the surface. Keep your starting look ready for the next photo.
+
+![Exposure's context menu offers Expose as template parameter, alongside the reusable RAW-to-TIFF pipeline](fixtures/demos/generalized-automation.png)
+
+*Turn an adjustment into a template parameter—here, Exposure—so your reusable
+workflow presents the controls you choose.*
+
+## Build and run
 
 Drip is an early **0.1.0-dev** prototype for Bayer RAW photos, developed on Linux
-with Wayland. You'll need to build it from source; Windows and macOS packaging
-hasn't been verified yet.
+with Wayland. Windows and macOS builds and display behavior still need verification.
 
-Install [Rust](https://rustup.rs/) 1.95 or newer, then the build tools for your
-platform. Cargo builds pinned LibRaw, JPEG, zlib and LittleCMS sources statically;
-system installations of those libraries are unnecessary. Linux uses the system
-C++ runtime (`libstdc++` with GCC).
+Install [Rust](https://rustup.rs/) 1.95 or newer and your platform's build tools.
+LibRaw, JPEG, zlib and LittleCMS are built from pinned sources; system installs
+of those libraries are unnecessary.
 
 <details>
 <summary>Fedora</summary>
@@ -70,242 +110,51 @@ brew install cmake nasm git-lfs
 
 Install Git with Git LFS, Rust's MSVC toolchain, and Visual Studio Build Tools
 with **Desktop development with C++** and a Windows SDK. Install CMake and NASM
-and put them on `PATH`. Run the build below in Developer PowerShell. Native
-compilation follows Rust's selected CRT linkage. Windows runtime packaging and
-execution remain unverified.
+and put them on `PATH`. Run the build below in Developer PowerShell.
 
 </details>
 
-From the Drip checkout, initialize the release-pinned submodules, fetch the
-fixtures and build the editor:
+From the checkout:
 
 ```sh
 git submodule update --init --recursive
+git lfs install
 git lfs pull
-cargo build --release --workspace
-```
-
-Build both frontends and stage only their executables in `./dist/`:
-
-```sh
 cargo xtask dist
-# Or select a target explicitly:
-cargo xtask dist --target x86_64-unknown-linux-gnu
+./dist/drip-gui
 ```
 
-Without `--target`, this builds for the Rust compiler's host. Distribution builds
-select Vulkan/SPIR-V on Linux, native Metal on macOS, and WGSL/D3D12 on Windows.
-These are also their startup defaults. WGSL remains available through
-`DRIP_BACKEND=wgsl`; CPU/LLVM, CUDA and HIP are not included by `xtask dist`.
+On Windows, run `dist\drip-gui.exe`. The distribution build selects Vulkan on
+Linux, native Metal on macOS, and D3D12 on Windows. See
+[compute backends](crates/drip/README.md#compute-backends) for alternatives.
 
-## Usage
+Choose the RAW file under **Template parameters** to begin. You can also pass
+an existing `.drip` project or `.drip-template` to `drip-gui` when launching it.
 
-Launch the installed editor with `drip-gui`, or run it from the checkout:
+## Canvas gestures
 
-```sh
-cargo run --release -p drip-gui
-```
+The canvas uses the left button to navigate and the right button to edit:
 
-Choose a RAW file under **Template parameters** to start editing. Select a node to adjust it,
-or use its gear button to open the controls in a separate window. The pop-out
-button on previews and scopes opens their views separately.
+| Gesture | Action |
+| --- | --- |
+| Left-drag / scroll | Pan / zoom around the pointer |
+| Right-drag a node | Move it |
+| Right-click empty canvas / a node | Add / rename or delete |
+| Right-click a port, then another | Connect; either direction works |
+| Right-click a wire | Disconnect |
+| Escape / right-click empty canvas while connecting | Cancel the pending wire |
+| Left-click a port | Open the connected-node navigation menu |
 
-The inspector describes the selected node's operation, assumptions and input/output types.
+## Status and development
 
-In **Exposure**, **Auto exposure** sets the whole-image mean linear luminance to
-18% grey. It evaluates through Exposure at full detail, then updates the ordinary
-EV control. Use it before Sigmoid; mostly bright or dark subjects may need a
-manual adjustment. The UI pauses while this one-shot evaluation runs.
+Undo/redo, denoising, lens corrections and batch processing are still to come.
+Project formats may change during development. Display color has software
+validation; instrument-based verification is still pending.
 
-**Geometry → Orientation** uses **From metadata** by default. Its **Orientation**
-dropdown can replace the camera setting with a rotation or reflection; **Identity**
-keeps the stored pixel order. The starting template connects RAW metadata and routes
-the oriented image to preview, scopes and TIFF export. Recreate older RAW graphs
-from the current template: separate calibration ports and the clipping-level
-gains node have been replaced by the unified metadata connection.
-
-Canvas gestures separate **navigation on the left button** from **modification
-on the right button**. Exploring the graph should preserve its nodes and wiring.
-Moving a node changes its layout, so it uses the right button too.
-
-| Context | Left click | Left drag | Right click | Right drag |
-|---------|------------|-----------|-------------|------------|
-| Empty canvas | Clear selection | Pan canvas | Add node menu | No action |
-| Node body | Select and show inspector | Pan canvas | Rename / Delete menu | Move node |
-| Input port | Show source menu | Pan canvas | Start or complete a connection | No action |
-| Output port | Show destinations menu | Pan canvas | Start or complete a connection | No action |
-| Wire | Clear selection | Pan canvas | Disconnect highlighted wire | No action |
-
-The Add node menu groups kinds by category, with categories and node names sorted
-alphabetically. Choose, for example, **Tone → Exposure**. New nodes use the
-declared operation name; **Rename** edits that node's name.
-
-Scroll to zoom around the pointer. A port's navigation menu lists connected
-`node · port` entries; choose one to select that node and bring it into view.
-Opening the menu preserves selection. Canvas ports show the port name and declared payload type; `?` marks an optional input.
-Hover over a port for its full contract, or a truncated node title for its full name.
-
-Buttons, menu items and parameter controls use ordinary left-click operation;
-drag a view's corner handle to resize it.
-
-In parameter panels, scroll over a slider to adjust it: up increases, down
-decreases. Each scroll line changes a floating-point value by 1% of its range,
-or an integer by one. The panel stays still while scrolling over a slider.
-
-Scroll over a dropdown to change its selection: down selects the next option,
-up the previous, stopping at either end. This also works for **Preview detail**
-and the preview pop-out's zoom selector.
-
-Right-click a slider, checkbox, dropdown or filename and choose **Reset to default**
-to restore its node-defined default (or clear a path). These gestures also work
-in pop-outs and template parameters. The parameter name's menu also offers reset.
-
-In **Preview**, set **Proof mode** to **None** for the original image,
-**Softproof** to simulate an output profile, or **Gamut check** to mark
-out-of-gamut colors in cyan. The active proof mode contains its profile,
-rendering intent and black point compensation settings. Match them to
-**Export TIFF**. Choose **File** under **Output profile** to select an ICC file;
-it is read when chosen, so use **Reload files** after changing it on disk.
-These modes affect only the preview and its pop-out.
-
-Gamut check is approximate near the gamut boundary.
-
-Histogram and waveform axes show exposure in stops relative to sample value 1.
-**Density scale** changes counts, not the exposure axis. Scopes identify their source color space; other settings remain in the
-parameter panel and global detail control.
-Camera scopes plot native channels without a color conversion.
-
-In the preview pop-out, scroll to zoom around the pointer and left-drag to pan.
-The zoom selector offers **Fit**, **25%**, **50%**, **100%**, **200%** and **400%**.
-Fit follows the window size; fixed percentages account for desktop scaling.
-At 100%, one rendered image pixel occupies one display pixel. The dimensions and
-detail label describe that rendered image; choose **Full** Preview detail for
-full-resolution inspection.
-
-Node bodies gain a thin border on hover. Wires thicken when targeted; their hit
-band stays narrow at every zoom level. Nodes, ports and controls take priority
-over wires. At a crossing, the nearest wire is highlighted and right-click removes
-only that connection.
-
-To connect nodes, right-click a port, move to a compatible port in the opposite
-direction, then right-click again. You can start at either an input or an output.
-
-An input keeps its current source until a valid replacement is committed; an
-output can feed multiple inputs. Invalid targets leave the connection pending
-and report the reason.
-
-**Escape** or **right-click on empty canvas** cancels the
-temporary wire without changing existing connections or opening the Add node menu.
-
-Set **Output file** and press **Export** in **Export TIFF**. Export always
-uses full processing detail. **Deflate** compression exposes its compression
-level; **None** writes an uncompressed TIFF.
-
-Save your work as a `.drip` project, or use **Save template…** to write a
-`.drip-template`. Opening a template creates an untitled project; **Save** asks
-for a project destination. The title bar shows the current filename and an
-asterisk after unsaved changes.
-
-Right-click a parameter name and choose **Expose as template parameter** to
-include it under **Template parameters**. Saving a template resets exposed
-parameters to their node-defined defaults; **Keep value in template** retains
-the current value instead. An exposed enum includes its selected variant and
-that variant's settings.
-
-You can also open a saved project from the command line:
-
-```sh
-cargo run --release -p drip-gui -- project.drip
-```
-
-Saved projects carry the `drip` crate's major version as their format
-version and repeat connection checks when opened.
-Node IDs use `category.operation`; this revision also nests variant-specific
-parameters in their enum values. Older IDs and parameter layouts are rejected
-without migration or modification. RAW files are bound as
-immutable decoded snapshots, as are ICC output profiles; reopening or
-**Reload files** reloads them.
-Preview detail is passed in the global evaluation context. Demosaic reduces its
-Bayer phase planes internally before interpolation, after upstream sensor
-corrections. Every contract and node receives the same context; no hidden nodes
-or temporary graph rewrites are involved. Export requests full detail.
-
-`DRIP_BACKEND` selects computation, including GUI previews and exports. Without
-an override it prefers native Metal on macOS when built with
-`drip/metal-native`, or Vulkan on Linux with `drip/vulkan`; otherwise it uses
-`wgpu`. An ordinary default-feature Cargo build still uses wgpu. To run the same
-kernels on CPU:
-
-```sh
-DRIP_BACKEND=cpu cargo run --release -p drip-gui --features drip/cpu -- project.drip
-```
-
-`DRIP_BACKEND=cuda` requires `--features drip/cuda`. Unknown values or backends
-not enabled in the build report an error. An explicit selection is never replaced
-by another backend, and failed initialization does not trigger a fallback. GUI
-drawing still uses wgpu. See [compute backend options](crates/drip/README.md#compute-backends).
-
-`RUST_LOG=warn,drip_gui::worker=trace` prints per-node host timings for evaluation
-and GUI preparation, followed by the total preview time. Tracing adds no device
-waits; asynchronous GPU execution is not measured separately. Evaluation timings
-include input transfers, contracts and dispatch; existing blocking readbacks are
-charged to their consumer. The final runtime wait appears only in the preview
-total. Timing records are printed after processing; clock reads and record storage
-still add a small cost. Use `drip_gui::worker=debug` for preview totals alone.
-
-## Development
-
-```sh
-DRIP_BACKEND=cpu cargo test --workspace --features drip/cpu
-cargo test -p drip --test algorithms -- --ignored
-cargo test -p drip --test model cubecl_wgpu_hybrid -- --ignored
-cargo clippy --workspace --all-targets --no-deps -- -D warnings
-```
-
-The ignored tests require a compute-capable GPU. `drip/cpu` uses CubeCL's CPU
-runtime; `drip/cuda` enables CUDA. All use the same image kernel sources.
-Presentation shaders remain WGSL in `drip-gui`; scopes and auto exposure run
-GUI-owned kernels on the evaluator's device RGB.
-
-The macro crate separates parsing/validation from binding generation.
-Node functions own Rustdoc help and contracts; the macro generates the node's
-static `Kind`, port handles, typed inputs, discovery, parameter persistence and
-invocation adapters. Parameter schemas and `Default` come from the function's
-parameter type via `Parameters`, one `#[param(...)]` declaration per field;
-use `&()` for nodes without parameters. Sources take `Load` ports and run when
-their parameters are admitted; `#[node(action = f)]` declares an action, such
-as TIFF export, run on evaluated inputs.
-
-Parameter and choice labels default to sentence case; `#[label("sRGB")]`
-overrides display text without renaming the persisted key. A `Choice` variant
-may be empty or contain one struct deriving `Parameters` and Serde traits:
-
-```rust
-#[derive(drip::Choice)]
-enum Proof {
-    #[choice("none")]
-    None,
-    #[choice("softproof")]
-    Softproof(drip::node::profile::Settings),
-}
-```
-
-The generated schema renders only the selected variant's fields. Serde uses
-`"none"` for an empty variant and `{"softproof": {...}}` for a variant with
-settings. File parameters declare their extensions, `#[param(open = ["icc"])]`
-or `save = [..]`, and every GUI file dialog derives from them.
-
-Port labels are the declared payload name plus the port's requirement, such as
-`RGB · Rec.2020 / D65`; they do not affect connection names or compatibility.
-`drip-gui` binds controls, views and extra actions to a node with
-`#[gui_node] impl GuiNode for <node>::Definition`.
-
-Borrowed algorithms and dependency licenses are in [THIRD_PARTY.md](THIRD_PARTY.md).
-Benchmark outputs and retired experiment sources live outside this repository;
-the archive location is recorded in the rewrite status.
+See the [roadmap](agent-docs/TODO.md), [architecture and backend guide](crates/drip/README.md),
+[design decisions](agent-docs/DESIGN.md) and [validation notes](agent-docs/PROGRESS.md).
+Algorithm sources and dependency credits are in [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## License
 
 AGPL-3.0-or-later; see [LICENSE](LICENSE).
-
-Source ownership rules are in [crates/drip/README.md](crates/drip/README.md).

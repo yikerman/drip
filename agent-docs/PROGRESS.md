@@ -4,6 +4,12 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Refreshed the README from the user-facing `37b13bf` revisions: CubeCL,
+  flexible views, color management and pipeline checks, with brief canvas
+  gestures and current build instructions. All five user-supplied Sony demos
+  appear inline with captions, including an explicit gamut-warning caption.
+  Inspected every image and verified local links, caption coverage, LFS
+  attributes and whitespace. No processing code changed.
 - CPU CI: reproduced run 38128023310's missing `Cpu` import in the RAW
   pipeline test and restored it within the feature-gated test. CPU workspace
   tests pass (157 passed, 16 device tests ignored), as do three doctests,
