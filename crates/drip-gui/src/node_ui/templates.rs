@@ -54,7 +54,7 @@ mod tests {
         let color = project.graph.find("Camera RGB to color RGB").unwrap();
         let adaptation = project.graph.find("Chromatic adaptation").unwrap();
         let gains = project.graph.find("Bayer site gains").unwrap();
-        let highlights = project.graph.find("Reconstruct highlights (opposed)").unwrap();
+        let highlights = project.graph.find("Opposed highlights").unwrap();
         assert!(project.graph.find("Apply clipping-level gains").is_none());
         let exposure = project.graph.find("Exposure").unwrap();
         let sigmoid = project.graph.find("Sigmoid").unwrap();
