@@ -1,21 +1,19 @@
-//! Neutral UI on middle grey, the standard surround for judging color, with
-//! lighter menus and no shadows, rounding or strokes beyond what is
-//! needed to tell elements apart.
+//! Neutral charcoal workspace. Color accents are confined to controls and status.
 
 use egui::{Color32, CornerRadius, FontId, Shadow, Stroke, TextStyle, Visuals};
 
-/// sRGB 118 is 18% linear reflectance.
-pub const GREY: Color32 = Color32::from_gray(118);
-pub const DARKER: Color32 = Color32::from_gray(104);
-pub const LIGHTER: Color32 = Color32::from_gray(134);
-pub const LIGHTEST: Color32 = Color32::from_gray(150);
-pub const TEXT: Color32 = Color32::from_gray(16);
-pub const WEAK: Color32 = Color32::from_gray(56);
-pub const ERROR: Color32 = Color32::from_rgb(96, 16, 16);
-pub const LINK: Color32 = Color32::from_rgb(0, 32, 80);
+pub const GREY: Color32 = Color32::from_gray(29);
+pub const DARKER: Color32 = Color32::from_gray(21);
+pub const LIGHTER: Color32 = Color32::from_gray(47);
+pub const LIGHTEST: Color32 = Color32::from_gray(64);
+pub const TEXT: Color32 = Color32::from_gray(225);
+pub const WEAK: Color32 = Color32::from_gray(157);
+pub const ERROR: Color32 = Color32::from_rgb(245, 139, 131);
+pub const ACCENT: Color32 = Color32::from_rgb(213, 180, 131);
+pub const LINK: Color32 = ACCENT;
 
-pub const BODY_SIZE: f32 = 16.0;
-pub const SMALL_SIZE: f32 = 14.0;
+pub const BODY_SIZE: f32 = 14.0;
+pub const SMALL_SIZE: f32 = 12.0;
 
 pub fn context_menu(response: &egui::Response) -> egui::Popup<'_> {
     egui::Popup::context_menu(response).style(menu_style)
@@ -32,7 +30,7 @@ fn menu_style(style: &mut egui::Style) {
 }
 
 pub fn apply(ctx: &egui::Context) {
-    let mut v = Visuals::light();
+    let mut v = Visuals::dark();
     v.override_text_color = Some(TEXT);
     v.weak_text_color = Some(WEAK);
     v.panel_fill = GREY;
@@ -63,13 +61,15 @@ pub fn apply(ctx: &egui::Context) {
         w.weak_bg_fill = fill;
         w.bg_stroke = Stroke::NONE;
         w.fg_stroke = Stroke::new(1.0, TEXT);
-        w.corner_radius = CornerRadius::ZERO;
+        w.corner_radius = CornerRadius::same(4);
         w.expansion = 0.0;
     }
     // Keep panel separators visible against the surround.
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, DARKER);
     ctx.set_visuals(v);
     ctx.all_styles_mut(|style| {
+        style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+        style.spacing.button_padding = egui::vec2(10.0, 6.0);
         style.text_styles = [
             (TextStyle::Heading, FontId::proportional(22.0)),
             (TextStyle::Body, FontId::proportional(BODY_SIZE)),

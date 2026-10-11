@@ -22,6 +22,7 @@ struct Request {
 }
 
 enum Command {
+    Meter { graph: Graph, id: NodeId, ticket: u64, generation: u64 },
     Evaluate(Request),
     Reset,
     Invalidate,
@@ -33,6 +34,7 @@ enum Command {
 }
 
 enum Event {
+    Metered { id: NodeId, ticket: u64, generation: u64, result: Result<f32, String> },
     Evaluated { generation: u64, level: u8, views: Snapshot, failures: BTreeMap<NodeId, Failure> },
     Action(Result<(), String>),
     Stopped,
@@ -41,6 +43,7 @@ enum Event {
 }
 
 pub enum Notice {
+    Metered { id: NodeId, result: Result<f32, String> },
     Evaluated(Result<(), String>),
     Action(Result<(), String>),
     Failed,
@@ -95,6 +98,7 @@ pub struct Worker {
     job_ticket: u64,
     bindings: BTreeMap<NodeId, u64>,
     opening: Option<u64>,
+    metering: Option<u64>,
 }
 
 impl Worker {
@@ -126,6 +130,7 @@ impl Worker {
             job_ticket: 0,
             bindings: BTreeMap::new(),
             opening: None,
+            metering: None,
         }
     }
 
@@ -139,7 +144,26 @@ impl Worker {
     }
 
     pub fn busy(&self) -> bool {
-        self.in_flight || self.pending.is_some() || self.binding_pending() || self.opening.is_some()
+        self.in_flight
+            || self.pending.is_some()
+            || self.binding_pending()
+            || self.opening.is_some()
+            || self.metering.is_some()
+    }
+
+    pub fn meter(&mut self, graph: &Graph, id: NodeId) -> Result<(), String> {
+        if self.binding_pending() || self.metering.is_some() {
+            return Err("Wait for the current measurement or RAW loading to finish.".into());
+        }
+        self.job_ticket += 1;
+        self.send(Command::Meter {
+            graph: graph.clone(),
+            id,
+            ticket: self.job_ticket,
+            generation: self.generation,
+        })?;
+        self.metering = Some(self.job_ticket);
+        Ok(())
     }
 
     /// True until the latest binding results are handed to the app for commit.
@@ -197,6 +221,7 @@ impl Worker {
         self.pending = None;
         self.bindings.clear();
         self.opening = None;
+        self.metering = None;
         self.views.clear();
         self.views_generation = None;
         self.failures.clear();
@@ -224,6 +249,17 @@ impl Worker {
         let mut notices = Vec::new();
         while let Ok(event) = self.events.try_recv() {
             match event {
+                Event::Metered { id, ticket, generation, result } => {
+                    if self.metering == Some(ticket) {
+                        self.metering = None;
+                        let result = if generation == self.generation && ticket == self.job_ticket {
+                            result
+                        } else {
+                            Err("Exposure measurement discarded because the project changed. Try Auto exposure again.".into())
+                        };
+                        notices.push(Notice::Metered { id, result });
+                    }
+                }
                 Event::Bound { ticket, id, result } => {
                     if self.bindings.get(&id) == Some(&ticket) {
                         self.bindings.remove(&id);
@@ -296,6 +332,7 @@ impl Worker {
         self.pending = None;
         self.bindings.clear();
         self.opening = None;
+        self.metering = None;
         Notice::Failed
     }
 
@@ -330,6 +367,19 @@ fn serve(commands: mpsc::Receiver<Command>, notify: &Notify) {
     let mut resources = drip::resource::Resources::default();
     while let Ok(command) = commands.recv() {
         match command {
+            Command::Meter { graph, id, ticket, generation } => {
+                let notify = notify.clone();
+                thread::spawn(move || {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let runtime =
+                            drip::runtime::RuntimeContext::from_env().map_err(|e| e.to_string())?;
+                        crate::node_ui::exposure::meter(&Evaluator::new(runtime), &graph.dag, id)
+                            .map_err(|e| e.to_string())
+                    }))
+                    .unwrap_or_else(|_| Err("Exposure measurement failed.".into()));
+                    notify.send(Event::Metered { id, ticket, generation, result });
+                });
+            }
             Command::Bind { ticket, id, kind, params } => {
                 notify.send(Event::Bound {
                     ticket,
@@ -555,6 +605,46 @@ mod tests {
     use std::time::{Duration, Instant};
 
     const TIMEOUT: Duration = Duration::from_secs(5);
+
+    #[test]
+    fn background_meter_returns_exposure_without_mutating_the_graph() {
+        let mut graph = Graph::default();
+        let source = drip::node::source::<ColorRgb>(
+            &mut graph.dag,
+            ImageDesc {
+                extent: Extent { width: 1, height: 1 },
+                interpretation: drip::node::raw::working_color(),
+            },
+            vec![[0.045; 3]],
+        )
+        .unwrap();
+        let exposure = drip::node::exposure::add(&mut graph.dag, Default::default()).unwrap();
+        graph.dag.connect(source, exposure.image).unwrap();
+        let mut worker = Worker::new(|| {});
+        worker.meter(&graph, exposure.node).unwrap();
+        let notices = wait(&mut worker);
+        assert!(notices.iter().any(|n| matches!(n, Notice::Metered { id, result: Ok(ev) } if *id == exposure.node && (*ev - 2.).abs() < 1e-5)));
+        assert_eq!(graph.dag.node(exposure.node).unwrap().parameters().unwrap()["ev"], json!(0.));
+    }
+
+    #[test]
+    fn stale_measurements_cannot_overwrite_new_edits_or_projects() {
+        let mut graph = Graph::default();
+        let id = graph.add_node(Registry.get("tone.exposure").unwrap()).unwrap();
+        let mut worker = Worker::new(|| {});
+        let (send, receive) = mpsc::channel();
+        worker.events = receive;
+        worker.generation = 2;
+        worker.job_ticket = 1;
+        worker.metering = Some(1);
+        send.send(Event::Metered { id, ticket: 1, generation: 1, result: Ok(2.) }).unwrap();
+        assert!(worker.poll().iter().any(|n| matches!(n, Notice::Metered { result: Err(_), .. })));
+        assert!(!worker.busy());
+        worker.metering = Some(1);
+        worker.reset().unwrap();
+        send.send(Event::Metered { id, ticket: 1, generation: 2, result: Ok(2.) }).unwrap();
+        assert!(worker.poll().is_empty());
+    }
 
     #[test]
     fn backend_configuration_errors_reach_preview_results() {

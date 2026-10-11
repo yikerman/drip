@@ -1,13 +1,14 @@
 //! Meter the node's current output, then edit its ordinary exposure parameter.
 use super::{ControlCx, GuiNode};
 use cubecl::{prelude::*, server::Handle};
+#[cfg(test)]
+use drip::runtime::RuntimeContext;
 use drip::{
     Error, Result,
     eval::Evaluator,
     graph::Dag,
     node::{color, data::ColorRgb, exposure, raw},
     ports::{Device, NodeId},
-    runtime::RuntimeContext,
 };
 use egui::Ui;
 
@@ -20,33 +21,16 @@ impl GuiNode for ExposureGui {
 
     fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Parameters>) {
         node.schema(ui);
-        let error_id = ui.id().with((node.node.id(), "auto-exposure-error"));
         if ui.add_enabled(!node.node.actions_disabled(), egui::Button::new("Auto exposure"))
             .on_hover_text("Set the whole-image mean luminance to 18% grey. Meter before sigmoid; bright or dark subjects may need a manual adjustment.")
             .clicked()
         {
-            // This explicit, synchronous request stops at Exposure and uses full
-            // detail, independently of preview size and downstream rendering.
-            let result = RuntimeContext::from_env().and_then(|runtime| {
-                meter(&Evaluator::new(runtime), &node.node.graph().dag, node.node.id())
-            });
-            match result {
-                Ok(ev) => {
-                    ui.data_mut(|data| data.remove::<String>(error_id));
-                    node.node.set_param("ev", serde_json::json!(ev));
-                }
-                Err(error) => {
-                    ui.data_mut(|data| data.insert_temp(error_id, error.to_string()));
-                }
-            }
-        }
-        if let Some(error) = ui.data(|data| data.get_temp::<String>(error_id)) {
-            ui.colored_label(crate::theme::ERROR, error);
+            node.node.meter_exposure();
         }
     }
 }
 
-fn meter(evaluator: &Evaluator, dag: &Dag, id: NodeId) -> Result<f32> {
+pub(crate) fn meter(evaluator: &Evaluator, dag: &Dag, id: NodeId) -> Result<f32> {
     let output = dag.typed_output(dag.output_port(id, "output")?)?;
     let image = evaluator.evaluate::<Device<ColorRgb>>(dag, &Default::default(), output)?;
     if image.desc.interpretation != raw::working_color() {
@@ -236,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn button_sets_ev_through_normal_edits_and_respects_loading() {
+    fn button_requests_background_metering_and_respects_loading() {
         use crate::{
             editing::{Frame, NodeCx, Report},
             model::{Graph, Registry},
@@ -254,7 +238,7 @@ mod tests {
         struct State {
             graph: Graph,
             disabled: bool,
-            changed: bool,
+            requested: Option<NodeId>,
         }
         let mut h = Harness::builder().with_size(egui::vec2(450., 300.)).build_ui_state(
             move |ui, state: &mut State| {
@@ -264,22 +248,15 @@ mod tests {
                     ui,
                     &mut NodeCx::new(&mut state.graph, id, &mut frame),
                 );
-                let Report { changed, edited, .. } = frame.report;
-                state.changed |= changed && edited;
+                let Report { meter, .. } = frame.report;
+                state.requested = state.requested.or(meter);
             },
-            State { graph, disabled: false, changed: false },
+            State { graph, disabled: false, requested: None },
         );
         h.get_by_label("Auto exposure").click();
         h.run();
-        assert!(h.state().changed);
-        assert!(
-            (h.state().graph.node(id).unwrap().params["ev"].as_f64().unwrap() - 2.).abs() < 1e-6
-        );
-        h.get_by_label("Auto exposure").click();
-        h.run();
-        assert!(
-            (h.state().graph.node(id).unwrap().params["ev"].as_f64().unwrap() - 2.).abs() < 1e-6
-        );
+        assert_eq!(h.state().requested, Some(id));
+        assert_eq!(h.state().graph.node(id).unwrap().params["ev"], serde_json::json!(3.));
         h.state_mut().disabled = true;
         h.run();
         assert!(h.get_by_label("Auto exposure").accesskit_node().is_disabled());

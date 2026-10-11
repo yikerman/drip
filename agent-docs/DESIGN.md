@@ -43,6 +43,21 @@ in [PROGRESS](PROGRESS.md).
   paragraph breaks, so prose wraps to the sidebar width. Node metadata retains
   the source line breaks; reflow belongs to presentation.
 
+## Photo workspace
+
+- **Requirement:** Redesign the GUI around photo editing, with a large preview,
+  accessible adjustments and an optional processing graph.
+- **Decided:** Photo is the default workspace. Its sidebar reuses registered node
+  controls, ordering Tone first; it owns no duplicate processing parameters.
+  Preview/scope selectors follow node identities and recover when nodes disappear.
+  The graph remains available as a resizable drawer or full canvas with inspector.
+  Workspace navigation is session-local; existing project documents stay compatible.
+- **Decided:** Use neutral charcoal chrome and reserve the warm accent for controls.
+  Preserve the existing color-managed image presentation and proofing paths.
+- **Decided:** Auto exposure runs on a background snapshot. Apply its EV only if
+  the request generation and asset-job ticket still match; resets discard results.
+  Report progress and stale measurements through the shared application status.
+
 ## RCD scratch
 
 - **Decided:** Allocate scratch immediately before its first pass and release it
@@ -131,14 +146,14 @@ in [PROGRESS](PROGRESS.md).
   evaluates through that node at full detail, averages linear Rec.2020 luminance
   and adds `log2(0.18 / mean)` to the current EV through the ordinary parameter
   edit path. This reaches the same fixed point as metering at zero EV, within
-  floating-point rounding. The control evaluates synchronously; it introduces
-  no worker action or automatic processing mode. The average-grey assumption is
+  floating-point rounding. The control requests background measurement and applies
+  the result only to an unchanged processing snapshot. The average-grey assumption is
   a content-dependent starting point, not calibrated scene reflectance.
 - **Decided:** Auto exposure requests `Device<ColorRgb>` and reduces mean
   luminance with a GUI-owned CubeCL kernel, shared across compute backends.
   Normalize sample contributions before bounded reductions for HDR headroom;
   read back one f32 rather than the full image. The EV calculation remains on
-  the host, and the button retains its synchronous behavior.
+  the host, off the UI thread.
 - **Tentative:** The post-CAT16 ACES review finds no further missing processing
   stage blocking the agreed Bayer/SDR prototype [1], [3], [7]. CAT16 completes
   the previously missing editable scene-illuminant adaptation.

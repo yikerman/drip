@@ -26,6 +26,7 @@ mod theme;
 mod ui_state;
 mod widgets;
 mod worker;
+mod workspace;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

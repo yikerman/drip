@@ -15,7 +15,10 @@ use crate::editor::Editor;
 use crate::node_ui::{self, Popped};
 use crate::ui_state::{self, DEFAULT_LEVEL, MAX_LEVEL};
 use crate::worker::{Notice, Worker};
-use crate::{inspector, theme};
+use crate::{
+    theme,
+    workspace::{Sidebar, Workspace},
+};
 
 pub struct App {
     project: Project,
@@ -28,6 +31,7 @@ pub struct App {
     file: Option<PathBuf>,
     selected: Option<NodeId>,
     editor: Editor,
+    workspace: Workspace,
     /// One user-selected level for every preview target.
     level: u8,
     status: Option<Status>,
@@ -71,6 +75,7 @@ impl App {
             file: None,
             selected: None,
             editor: Editor::default(),
+            workspace: Workspace::default(),
             level: DEFAULT_LEVEL,
             status: None,
             action: None,
@@ -102,23 +107,54 @@ impl App {
     fn main_ui(&mut self, ui: &mut Ui) {
         Panel::top("menu").show_separator_line(false).show(ui, |ui| self.menu(ui));
         Panel::bottom("status").show_separator_line(false).show(ui, |ui| self.status_line(ui));
+        let busy = self.worker.busy();
         let results = |id| self.worker.result(id);
         let mut frame = Frame::new(&results, &self.popped, self.actions_disabled());
         let graph = &mut self.project.graph;
-        Panel::right("inspector").resizable(true).default_size(320.0).show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                if let Some(id) = self.selected.filter(|id| graph.node(*id).is_some()) {
-                    inspector::selected_node(ui, &mut NodeCx::new(graph, id, &mut frame));
-                    ui.separator();
-                }
-                inspector::inputs(ui, graph, &mut frame);
+        Panel::right("inspector")
+            .resizable(true)
+            .default_size(360.0)
+            .min_size(300.0)
+            .max_size(520.0)
+            .show(ui, |ui| {
+                self.workspace.sidebar(ui, graph, self.selected, &mut frame);
             });
-        });
+        if self.workspace.pipeline && !self.workspace.nodes {
+            Panel::bottom("pipeline")
+                .resizable(true)
+                .default_size(260.0)
+                .min_size(150.0)
+                .max_size((ui.available_height() * 0.6).max(150.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.strong("Processing pipeline");
+                        ui.weak(
+                            "Left drag to pan · Right drag to move · Right-click ports to connect",
+                        );
+                        if ui.small_button("Expand").clicked() {
+                            self.workspace.nodes = true;
+                        }
+                    });
+                    let previous = self.selected;
+                    self.editor.show(ui, graph, &self.registry, &mut self.selected, &mut frame);
+                    if self.selected != previous && self.selected.is_some() {
+                        self.workspace.sidebar = Sidebar::Inspect;
+                    }
+                });
+        }
+        let mut open_raw = false;
         CentralPanel::default().show(ui, |ui| {
-            self.editor.show(ui, graph, &self.registry, &mut self.selected, &mut frame);
+            if self.workspace.nodes {
+                self.editor.show(ui, graph, &self.registry, &mut self.selected, &mut frame);
+            } else {
+                open_raw = self.workspace.photo(ui, graph, &mut frame, busy);
+            }
         });
         let report = frame.report;
         self.apply(report);
+        if open_raw {
+            self.open_raw();
+        }
     }
 
     /// A popped-out window.
@@ -211,6 +247,19 @@ impl App {
             }
             self.redraw = true;
         }
+        if let Some(id) = report.meter
+            && !self.actions_disabled()
+        {
+            match self.worker.meter(&self.project.graph, id) {
+                Ok(()) => {
+                    self.action = Some(ActionStatus {
+                        running: "Measuring exposure…".into(),
+                        completed: "Exposure updated".into(),
+                    })
+                }
+                Err(error) => self.report(Err(error)),
+            }
+        }
     }
 
     /// Takes the worker's notices; called whenever the worker wakes the app.
@@ -221,6 +270,21 @@ impl App {
         self.redraw |= !notices.is_empty();
         for notice in notices {
             match notice {
+                Notice::Metered { id, result } => {
+                    self.action = None;
+                    let result = result.and_then(|ev| {
+                        self.project
+                            .graph
+                            .set_param(id, "ev", serde_json::json!(ev))
+                            .map_err(|e| e.to_string())
+                    });
+                    if result.is_ok() {
+                        self.modified = true;
+                        self.dirty = true;
+                    }
+                    self.report(result.map(|()| "Exposure updated".into()));
+                    action_reported = true;
+                }
                 Notice::Bound { id, result } => {
                     if self.project.graph.dag.node(id).is_ok() {
                         let result = result.and_then(|node| {
@@ -283,19 +347,17 @@ impl App {
     }
 
     fn menu(&mut self, ui: &mut Ui) {
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
+            ui.label(RichText::new("drip").size(25.0).strong().color(theme::ACCENT));
+            ui.add_space(18.0);
             if ui.button("New").clicked()
                 && let Err(error) = self.set_project(templates::raw_to_tiff(), None)
             {
                 self.report(Err(error));
             }
-            if ui.button("Open…").clicked()
-                && let Some(file) = rfd::FileDialog::new()
-                    .set_title("Open Drip project or template")
-                    .add_filter("Drip project or template", &["drip", "drip-template"])
-                    .pick_file()
-            {
-                self.open(file);
+            if ui.button("Open RAW…").clicked() {
+                self.open_raw();
             }
             if ui.button("Save").clicked() {
                 match self.file.clone() {
@@ -307,46 +369,92 @@ impl App {
                     None => self.save_as(false),
                 }
             }
-            if ui.button("Save as…").clicked() {
-                self.save_as(false);
-            }
-            if ui.button("Save template…").clicked() {
-                self.save_as(true);
-            }
-            if ui.button("Invalidate cache").clicked() {
-                self.invalidate_cache();
-            }
+            ui.menu_button("Project", |ui| {
+                if ui.button("Open…").clicked()
+                    && let Some(file) = rfd::FileDialog::new()
+                        .set_title("Open Drip project or template")
+                        .add_filter("Drip project or template", &["drip", "drip-template"])
+                        .pick_file()
+                {
+                    self.open(file);
+                }
+                if ui.button("Save as…").clicked() {
+                    self.save_as(false);
+                }
+                if ui.button("Save template…").clicked() {
+                    self.save_as(true);
+                }
+                if ui.button("Invalidate cache").clicked() {
+                    self.invalidate_cache();
+                    ui.close();
+                }
+            });
             ui.separator();
-            let label = |level| {
-                if level == 0 { "Full".to_owned() } else { format!("1/{}", 1u32 << level) }
-            };
-            let previous = self.level;
-            crate::widgets::dropdown(
-                ui,
-                egui::ComboBox::from_label("Preview detail").width(64.0),
-                &mut self.level,
-                &(0..=MAX_LEVEL).collect::<Vec<_>>(),
-                label,
-            )
-            .on_hover_text("Global preview scale. Export always uses full detail.");
-            if self.level != previous {
-                log::debug!("preview level changed from {previous} to {}", self.level);
-                ui_state::set_preview_level(&mut self.project.ui, self.level);
-                self.modified = true;
-                self.dirty = true;
-            }
+            ui.selectable_value(&mut self.workspace.nodes, false, "Photo");
+            ui.selectable_value(&mut self.workspace.nodes, true, "Node graph");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add(egui::Button::new("Export TIFF…").fill(theme::LIGHTEST)).clicked() {
+                    self.workspace.nodes = false;
+                    self.workspace.sidebar = Sidebar::Output;
+                }
+            });
         });
+        ui.add_space(6.0);
+        ui.separator();
+        ui.horizontal(|ui| {
+            let name = self.project.graph.nodes().find_map(|(_, n)| {
+                (n.kind.id == "input.bayer-raw")
+                    .then(|| n.params["path"].as_str().map(str::to_owned))
+                    .flatten()
+            });
+            let name =
+                name.as_deref().and_then(|p| Path::new(p).file_name()).map(|n| n.to_string_lossy());
+            ui.label(name.as_deref().unwrap_or("No photograph selected"));
+            if self.modified {
+                ui.weak("· Unsaved changes");
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let label = |level| {
+                    if level == 0 { "Full".to_owned() } else { format!("1/{}", 1u32 << level) }
+                };
+                let previous = self.level;
+                crate::widgets::dropdown(
+                    ui,
+                    egui::ComboBox::from_label("Preview detail").width(64.0),
+                    &mut self.level,
+                    &(0..=MAX_LEVEL).collect::<Vec<_>>(),
+                    label,
+                )
+                .on_hover_text("Global preview scale. Export always uses full detail.");
+                if self.level != previous {
+                    log::debug!("preview level changed from {previous} to {}", self.level);
+                    ui_state::set_preview_level(&mut self.project.ui, self.level);
+                    self.modified = true;
+                    self.dirty = true;
+                }
+            });
+        });
+        ui.add_space(4.0);
     }
 
     fn status_line(&self, ui: &mut Ui) {
         ui.horizontal(|ui| {
+            ui.add_space(6.0);
+            if self.wide_gamut {
+                ui.weak("Wide gamut");
+            }
             if !self.wide_gamut {
                 ui.label(RichText::new("Previews clipped to sRGB").color(theme::ERROR));
             }
             if self.worker.busy() {
-                let label = ui.label("Evaluating…");
+                ui.label(RichText::new("●").color(theme::ACCENT));
+                ui.label(if self.worker.binding_pending() {
+                    "Loading RAW…"
+                } else {
+                    "Evaluating…"
+                });
                 if self.worker.showing_previous() {
-                    label.on_hover_text("Views retain the previous completed evaluation while the current request runs.");
+                    ui.weak("Showing previous result");
                 }
             }
             if let Some(action) = &self.action {
@@ -370,6 +478,8 @@ impl App {
         self.modified = false;
         self.selected = None;
         self.editor = Editor::default();
+        self.workspace = Workspace::default();
+        self.action = None;
         // Node ids are reused across projects.
         self.popped.clear();
         self.dirty = true;
@@ -379,6 +489,47 @@ impl App {
     fn open(&mut self, file: PathBuf) {
         let result = self.worker.open(file.clone());
         self.report(result.map(|()| format!("Opening {}", file.display())));
+    }
+
+    fn open_raw(&mut self) {
+        let sources: Vec<_> = self
+            .project
+            .graph
+            .nodes()
+            .filter(|(_, n)| n.kind.id == "input.bayer-raw")
+            .map(|(id, _)| id)
+            .collect();
+        let source = self
+            .selected
+            .filter(|id| sources.contains(id))
+            .or(if let [id] = sources.as_slice() { Some(*id) } else { None });
+        let Some(id) = source else {
+            self.workspace.nodes = true;
+            self.report(Err(
+                "Select a RAW source node in the graph before opening a photograph.".into()
+            ));
+            return;
+        };
+        let kind = self.project.graph.node(id).expect("source exists").kind;
+        let hint = node_ui::binding(kind)
+            .and_then(|binding| {
+                binding.parameter_ui(serde_json::json!({"path": null}), "path").file
+            })
+            .expect("RAW file picker");
+        let Some(path) = rfd::FileDialog::new()
+            .set_title(hint.title)
+            .add_filter(hint.filter, hint.extensions)
+            .pick_file()
+        else {
+            return;
+        };
+        let results = |id| self.worker.result(id);
+        let mut frame = Frame::new(&results, &self.popped, self.actions_disabled());
+        frame.edit(
+            &mut self.project.graph,
+            crate::editing::Edit::Param(id, "path", serde_json::json!(path)),
+        );
+        self.apply(frame.report);
     }
 
     fn save_as(&mut self, template: bool) {
@@ -528,7 +679,9 @@ mod tests {
         file
     }
 
-    fn harness<'a>(app: App) -> Harness<'a, App> {
+    // Existing canvas/inspector regressions exercise the full node workspace.
+    fn harness<'a>(mut app: App) -> Harness<'a, App> {
+        app.workspace.nodes = true;
         Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).build_ui_state(
             |ui, app: &mut App| {
                 app.poll();
@@ -536,6 +689,50 @@ mod tests {
             },
             app,
         )
+    }
+
+    #[test]
+    fn photo_workspace_shares_adjustments_with_the_graph_and_export_panel() {
+        let app = App::new(None, true, || {});
+        assert!(!app.workspace.nodes);
+        let mut h = harness(app);
+        h.get_by_label("Photo").click();
+        h.run();
+        assert!(h.query_by_label("Choose RAW…").is_some());
+        assert!(h.query_by_label("Auto exposure").is_some());
+        let exposure = h.state().project.graph.find("Exposure").unwrap();
+        set_param(&mut h, exposure, "ev", json!(1.25));
+        settle(&mut h);
+        let document = h.state().project.to_json().unwrap();
+        h.get_by_label("Show pipeline").click();
+        h.run();
+        assert!(h.query_by_label("Processing pipeline").is_some());
+        h.get_by_label("Node graph").click();
+        h.run();
+        h.get_by_label("Photo").click();
+        h.run();
+        assert_eq!(h.state().project.to_json().unwrap(), document);
+        h.get_by_label("Export TIFF…").click();
+        h.run();
+        for label in ["Output profile", "Depth", "Export"] {
+            assert!(h.query_by_label(label).is_some(), "{label}");
+        }
+    }
+
+    #[test]
+    fn photo_workspace_handles_projects_without_preview_or_export_nodes() {
+        let mut app = App::new(None, true, || {});
+        app.set_project(Project::default(), None).unwrap();
+        let mut h = harness(app);
+        h.get_by_label("Photo").click();
+        settle(&mut h);
+        assert!(h.query_by_label("This graph has no adjustable processing nodes.").is_some());
+        h.get_by_label("Export TIFF…").click();
+        h.run();
+        assert!(
+            h.query_by_label("Add an Export TIFF node in the node graph to export this project.")
+                .is_some()
+        );
     }
 
     fn settle(h: &mut Harness<'_, App>) {
@@ -579,6 +776,7 @@ mod tests {
             let mut app = App::new(None, true, || {});
             let export = app.project.graph.find("Export TIFF").unwrap();
             app.selected = Some(export);
+            app.workspace.sidebar = Sidebar::Output;
             app.invalidate_cache();
             // Do not poll: even a completed load must block exports until committed.
             let mut h = Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).build_ui_state(
@@ -693,6 +891,8 @@ mod tests {
             .clone();
         assert_eq!(app.level, DEFAULT_LEVEL);
         assert_eq!(image.width, 3984, "1/2 preview with reduced Bayer input to RCD");
+        h.get_by_label("Project").click();
+        h.run();
         h.get_by_label("Invalidate cache").click();
         settle(&mut h);
         let refreshed = &h
@@ -1268,7 +1468,7 @@ mod tests {
             // The window opens at the size its content takes, smaller than a
             // guess yet with every parameter inside.
             let size = app.window_size(popped, 1.25);
-            assert!(size.x < 480.0 && size.y < 320.0, "{size:?}");
+            assert!(size.x < 480.0 && size.y < 400.0, "{size:?}");
             let mut h = Harness::builder()
                 .with_size(size)
                 .build_ui_state(move |ui, app: &mut App| app.window(ui, popped), app);

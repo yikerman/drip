@@ -106,16 +106,26 @@ Launch the installed editor with `drip-gui`, or run it from the checkout:
 cargo run --release -p drip-gui
 ```
 
-Choose a RAW file under **Template parameters** to start editing. Select a node to adjust it,
-or use its gear button to open the controls in a separate window. The pop-out
-button on previews and scopes opens their views separately.
+The editor opens in **Photo**, with a large navigable preview and an **Adjust**
+sidebar. Choose **Open RAW…** to load a photograph. Exposure and Sigmoid appear
+first; expand the other adjustment groups as needed. The scope selector switches
+between the graph's histogram, waveform and vectorscope views. **Preview options**
+contains interpolation and proofing; **Export TIFF…** opens export settings.
+
+Use **Show pipeline** for a resizable graph below the photograph, or **Node graph**
+for the full canvas and inspector. These workspaces edit the same project.
+Select a node to inspect it, or use its gear button to open its controls in a
+separate window. **Pop out** opens the main preview separately. Project open,
+Save as, Save template and cache invalidation are in the **Project** menu.
 
 The inspector describes the selected node's operation, assumptions and input/output types.
 
 In **Exposure**, **Auto exposure** sets the whole-image mean linear luminance to
 18% grey. It evaluates through Exposure at full detail, then updates the ordinary
 EV control. Use it before Sigmoid; mostly bright or dark subjects may need a
-manual adjustment. The UI pauses while this one-shot evaluation runs.
+manual adjustment. Measurement runs in the background. If processing settings,
+source bindings or the project change meanwhile, its result is discarded so it
+cannot overwrite newer edits.
 
 **Geometry → Orientation** uses **From metadata** by default. Its **Orientation**
 dropdown can replace the camera setting with a rotation or reflection; **Identity**

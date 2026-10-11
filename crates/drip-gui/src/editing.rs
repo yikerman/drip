@@ -33,6 +33,8 @@ pub struct Report {
     pub refused: Option<String>,
     /// An action the user asked to run.
     pub action: Option<(NodeId, &'static str)>,
+    /// One-shot exposure measurement, dispatched after the frame's edits.
+    pub meter: Option<NodeId>,
     /// A window the user opened or closed.
     pub toggled: Option<Popped>,
     /// Asset-backed parameter edits are admitted on the worker, then checked
@@ -163,6 +165,10 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
 
     pub fn run(&mut self, action: &'static str) {
         self.frame.report.action = Some((self.id, action));
+    }
+
+    pub fn meter_exposure(&mut self) {
+        self.frame.report.meter = Some(self.id);
     }
 
     /// Whether actions are disabled while one runs or assets are loading.

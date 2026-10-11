@@ -3,7 +3,7 @@
 use super::{ControlCx, GuiNode};
 use crate::theme;
 use drip::node::sigmoid;
-use egui::{Color32, Sense, Shape, Stroke, Ui, vec2};
+use egui::{Sense, Shape, Stroke, Ui, vec2};
 
 struct SigmoidGui;
 #[drip_macros::gui_node]
@@ -32,7 +32,7 @@ impl GuiNode for SigmoidGui {
             .collect();
         ui.painter()
             .line_segment([point(0.5, 0.0), point(0.5, 1.0)], Stroke::new(1.0, theme::WEAK));
-        ui.painter().add(Shape::line(points, Stroke::new(1.5, Color32::BLACK)));
+        ui.painter().add(Shape::line(points, Stroke::new(1.5, theme::TEXT)));
         ui.small("−8 … +8 EV relative to middle grey");
     }
 }

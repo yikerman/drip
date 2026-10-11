@@ -1,5 +1,82 @@
 # Progress
 
+## 2026-10-11: integrate photo workspace for publication
+
+- Fetched `caochun/drip` and rebased the GUI changes onto `525fdd7`, retaining
+  all five upstream commits. Resolved the design-document overlap by preserving
+  the completed CAT16 decisions and the new background-metering behavior.
+- Release workspace/all-targets tests passed (151 passed, 16 explicitly ignored),
+  along with four doctests. Strict workspace/all-targets Clippy, formatting and
+  whitespace checks passed.
+
+## 2026-10-11: photo workspace redesign and relaunch
+
+- Added the default Photo workspace with a large preview, shared adjustment/export
+  controls, selectable scopes, and a resizable pipeline drawer. The full node
+  editor remains available. Updated the toolbar, neutral charcoal theme and
+  Sigmoid curve contrast; moved auto-exposure measurement off the UI thread with
+  stale-result rejection.
+- GUI release tests passed (88 passed, seven ignored). Strict GUI/all-targets
+  Clippy, workspace formatting and whitespace checks passed. Rebuilt the release
+  GUI and refreshed both local app bundles; their executable hashes match the
+  release binary. Interactive TIFF export was not exercised in this session.
+- Visually checked the earlier redesign build with the Sony RAW preview,
+  histogram and pipeline drawer. The final rebuild launched from `target/Drip.app`
+  as PID 90886; logs confirm Apple M4 / Metal and `Rgba16Float` /
+  `ExtendedSrgbLinear`. Final screenshot verification was unavailable because
+  computer-use capture reported a native-pipe startup failure. Preserved the
+  older `Drip Workspace` process because its project has unsaved edits.
+- Changed `origin` fetch/push URLs to `git@github.com:caochun/drip.git`;
+  `master` still tracks `origin/master`. No commit or push was performed.
+
+## 2026-10-11: architecture walkthrough at 0884d6f
+
+- Traced crate boundaries, typed payload contracts, transactional DAG edits, per-run evaluation/transfers, RAW snapshot binding, GUI worker scheduling, display preparation and JSON persistence. Confirmed that CLI export and device-side scope reductions are implemented despite older descriptions in AGENTS/README. Source review only; no application changes or new tests.
+
+## 2026-10-11: launch upstream 0884d6f on macOS
+
+- Launched `target/release/drip-gui` directly. The process remained running, and startup logs confirmed an Apple M4 / Metal window with `Rgba16Float` and `ExtendedSrgbLinear` output. Log: `target/run-20261011-135424.log`.
+
+## 2026-10-11: LFS download and build upstream 0884d6f on macOS
+
+- Hydrated all 18 Git LFS files (215,576,420 bytes), including the 14 previously unavailable RAW fixtures. Working-tree sizes and SHA-256 hashes match the committed pointers; `git lfs fsck` passed.
+- Built every release workspace target with `cargo build --release --workspace --all-targets --locked` on Apple Silicon, using the pinned native submodules. Build completed without warnings; current executables are under `target/release/`.
+- All three `drip-raw` tests passed with the `reference` feature. The explicit WGPU algorithm test passed, including reduction, highlights, small-image handling and RCD reference comparisons across all four Bayer phases.
+- The existing `target/Drip.app` bundle remains from the earlier build; this session compiled binaries without launching the GUI.
+
+## 2026-10-11: pull upstream 0884d6f on macOS
+
+- Updated `master` from `b9b1045` to `0884d6f`. Resolved the progress-log conflict by preserving all local records and upstream content. No build or tests were run; existing LFS pointers remain unhydrated.
+
+## 2026-10-09: build and run upstream b9b1045 on macOS
+
+- Built the release workspace and refreshed `target/Drip.app` on Apple Silicon.
+- Workspace tests excluding the unavailable PIXLS corpus check passed: 164 passed and one GPU-only test ignored. The GUI launched on Apple M4 / Metal with `Rgba16Float` and `ExtendedSrgbLinear`; the Sony preview rendered successfully.
+
+## 2026-10-08: pull upstream b9b1045
+
+- Fast-forwarded `master` from `44ad038` to `b9b1045` and restored local run records without conflicts. This update changes inspector help wrapping; it was not rebuilt in this session.
+
+## 2026-10-08: build and run upstream 44ad038 on macOS
+
+- Initialized the pinned `libjpeg-turbo`, LibRaw and zlib submodules and built the release workspace with the bundled RAW stack on Apple Silicon.
+- The GUI launched on Apple M4 / Metal with `Rgba16Float` and `ExtendedSrgbLinear`; the Sony fixture preview, histogram, waveform and Sigmoid controls rendered successfully.
+- Workspace tests excluding the RAW corpus check passed: 71 passed and one GPU-only test ignored. The full PIXLS corpus check is blocked by 14 new RAW files that remain Git LFS pointers after the LFS batch endpoint failed; the existing Sony fixture decoded and exported successfully.
+
+
+## 2026-10-06: update and run on macOS
+
+- Fast-forwarded `master` from `fe591e4` to `5e3a3f6`, preserving the previous local build record. Fetched all LFS fixtures; `git lfs fsck` passed.
+- Built all release workspace targets with the lockfile and pinned wgpu revision. All 109 regular tests and the explicitly invoked GPU colorimetric-reference test passed on Apple M4 / Metal. Formatting passed.
+- Clippy completed with one Rust 1.98 style warning in `display/tests.rs:191` (`chunks_exact_to_as_chunks`); the same check with warnings denied fails on that warning. Application source remains upstream-identical.
+- Refreshed `target/Drip.app` and launched it with `Rgba16Float` / `ExtendedSrgbLinear` output. The bundle continues to depend on the local Homebrew libraries.
+
+## 2026-10-05: local macOS build and launch
+
+- Cloned `fe591e4` on an Apple Silicon Mac and installed Homebrew Rust 1.98.1 and LibRaw 0.22.2; LittleCMS 2 and pkg-config were already installed. Retrieved the RAW fixture through GitHub's media endpoint after proxy/LFS download trouble, verified its SHA-256 against the LFS pointer, and passed `git lfs fsck`.
+- Built all workspace targets in release mode with the existing lockfile. All 74 tests, formatting, and workspace/all-targets clippy with warnings denied pass.
+- Launched the GUI on Apple M4; it selected `Rgba16Float` / `ExtendedSrgbLinear`. Confirmed that the window displays the RAW fixture preview and histogram with status `done`. Created a local launchable bundle at `target/Drip.app`; this uses the installed Homebrew libraries and is not a standalone distribution package. Application source is unchanged.
+
 Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
