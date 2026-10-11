@@ -126,7 +126,7 @@ impl Worker {
         let (events, replies) = mpsc::channel();
         let notify = Notify { events, wake: Arc::new(wake) };
         thread::Builder::new()
-            .name("drip-preview".into())
+            .name("drip-worker".into())
             .spawn(move || {
                 // A panic must wake the UI too, so it can stop showing “evaluating…”.
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -134,7 +134,7 @@ impl Worker {
                 }));
                 notify.send(Event::Stopped);
             })
-            .expect("start preview worker");
+            .expect("start worker");
         Self {
             commands,
             events: replies,
@@ -297,13 +297,13 @@ impl Worker {
                     }
                 }
                 Event::Stopped => {
-                    log::error!("preview worker stopped");
+                    log::error!("worker stopped");
                     notices.push(self.fail());
                 }
             }
         }
         if self.start().is_err() && !self.failed {
-            log::error!("preview worker disconnected");
+            log::error!("worker disconnected");
             notices.push(self.fail());
         }
         notices
@@ -338,9 +338,9 @@ impl Worker {
 
     fn send(&self, command: Command) -> Result<(), String> {
         if self.failed {
-            return Err("the preview worker stopped".into());
+            return Err("the worker stopped".into());
         }
-        self.commands.send(command).map_err(|_| "the preview worker stopped".into())
+        self.commands.send(command).map_err(|_| "the worker stopped".into())
     }
 }
 

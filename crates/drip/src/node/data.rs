@@ -66,8 +66,10 @@ pub enum Coordinates {
 impl fmt::Display for Coordinates {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Camera(_) => f.write_str("Camera RGB"),
-            Self::Space(space) if *space == REC2020_D65 => f.write_str("Rec.2020 / D65"),
+            Self::Camera(_) => f.write_str(<CameraRgb as Requirement<Rgb>>::LABEL),
+            Self::Space(space) if *space == REC2020_D65 => {
+                f.write_str(<Rec2020 as Requirement<Rgb>>::LABEL)
+            }
             Self::Space(_) => f.write_str("RGB"),
         }
     }

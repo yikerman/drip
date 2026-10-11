@@ -4,6 +4,9 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Model refactor cleanups: per-kind parameter widgets, coordinate labels from
+  requirement labels, worker naming and the README's macro section. GPU
+  workspace tests, Clippy and formatting pass.
 - One worker queue: previews and actions are demands forced by one evaluator;
   actions no longer start a thread and runtime. Auto exposure meters Exposure's
   input as a queued action and applies its EV as an edit; an end-to-end test

@@ -274,14 +274,17 @@ cargo clippy --workspace --all-targets --no-deps -- -D warnings
 
 The ignored tests require a compute-capable GPU. `drip/cpu` uses CubeCL's CPU
 runtime; `drip/cuda` enables CUDA. All use the same image kernel sources.
-Presentation shaders remain WGSL in `drip-gui`. GUI preparation consumes host RGB values. Device-side scope preparation and
-GPU resource sharing remain follow-up work.
+Presentation shaders remain WGSL in `drip-gui`; scopes and auto exposure run
+GUI-owned kernels on the evaluator's device RGB.
 
 The macro crate separates parsing/validation from binding generation.
-Node functions own Rustdoc help and contracts; the macro generates port handles,
-discovery, parameter persistence and invocation adapters.
-Parameter schemas come from the function's parameter type via `Parameters`;
-derive it on settings structs and use `&()` for nodes without parameters.
+Node functions own Rustdoc help and contracts; the macro generates the node's
+static `Kind`, port handles, typed inputs, discovery, parameter persistence and
+invocation adapters. Parameter schemas and `Default` come from the function's
+parameter type via `Parameters`, one `#[param(...)]` declaration per field;
+use `&()` for nodes without parameters. Sources take `Load` ports and run when
+their parameters are admitted; `#[node(action = f)]` declares an action, such
+as TIFF export, run on evaluated inputs.
 
 Parameter and choice labels default to sentence case; `#[label("sRGB")]`
 overrides display text without renaming the persisted key. A `Choice` variant
@@ -299,15 +302,13 @@ enum Proof {
 
 The generated schema renders only the selected variant's fields. Serde uses
 `"none"` for an empty variant and `{"softproof": {...}}` for a variant with
-settings. File-dialog hints belong to the node's GUI binding and apply in the
-inspector, parameter pop-out and template panel.
+settings. File parameters declare their extensions, `#[param(open = ["icc"])]`
+or `save = [..]`, and every GUI file dialog derives from them.
 
-Port labels retain declared payload names. The node macro's optional
-`port_labels(port = "PayloadName")` overrides display text without changing
-connection names or compatibility. Unknown ports and duplicate labels are
-compile errors. RAW sources currently implement `Node` directly to bind assets
-before evaluation and return shared buffers; the function macro handles
-parameter-only nodes with allocated outputs.
+Port labels are the declared payload name plus the port's requirement, such as
+`RGB · Rec.2020 / D65`; they do not affect connection names or compatibility.
+`drip-gui` binds controls, views and extra actions to a node with
+`#[gui_node] impl GuiNode for <node>::Definition`.
 
 Borrowed algorithms and dependency licenses are in [THIRD_PARTY.md](THIRD_PARTY.md).
 Benchmark outputs and retired experiment sources live outside this repository;

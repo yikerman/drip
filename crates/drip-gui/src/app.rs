@@ -278,7 +278,7 @@ impl App {
                 }
                 Notice::Failed => {
                     self.action = None;
-                    self.report(Err("the preview worker stopped".into()));
+                    self.report(Err("the worker stopped".into()));
                     action_reported = true;
                 }
             }
