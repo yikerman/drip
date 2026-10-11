@@ -4,6 +4,12 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
 
+- Committed the layout and wire-bend changes, then gave waveform its own
+  parameters with logarithmic density as the node and reset default. Camera
+  waveform shares these settings; histogram and the shared reduction code are
+  unchanged. Templates inherit the node default; saved scales remain explicit.
+  GUI tests pass on CPU, including registered defaults, reset schema and saved
+  linear settings for both waveform nodes. Strict GUI Clippy and formatting pass.
 - Refined the default layout to aligned rows and columns: preview, histogram
   and vectorscope share their top edge; waveform sits directly under histogram.
   Per user clarification, retained the screenshot's stagger through Orientation

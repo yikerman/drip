@@ -24,6 +24,10 @@ in [PROGRESS](PROGRESS.md).
   metadata branches. Exposure and Sigmoid align with Orientation. RAW and TIFF sit at the
   bottom corners to keep metadata wires below most processing nodes;
   the editor's existing fit-to-view handles the available canvas.
+- **Decided:** Waveform nodes own their parameter schema and default to
+  logarithmic density, including reset controls. Camera waveform uses the same
+  waveform settings. Histogram defaults remain linear; reductions and exposure
+  validation stay shared. Templates inherit node defaults and saved scales persist.
 - **Tentative:** Rounded orthogonal wire paths could improve tracing in the
   landscape layout. The current single cubic uses half the horizontal distance
   for each handle, producing large loops for backward connections. Separate
