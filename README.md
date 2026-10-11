@@ -9,9 +9,14 @@ Intermediate image results are not cached across evaluations.
 
 The current RAW path is Bayer normalization, as-shot gains applied to samples
 and clipping levels together, opposed highlight reconstruction, RCD demosaic,
-camera matrix conversion, exposure, and sigmoid. RAW exposes pixels and one
+camera matrix conversion, CAT16 chromatic adaptation, exposure, and sigmoid. RAW exposes pixels and one
 metadata value containing capture, lens, GPS, sensor geometry and calibration.
 Orientation follows RAW metadata after color conversion, with an explicit override.
+Chromatic adaptation defaults to As shot; Custom white point accepts source CIE
+1931 xy and adapts it to D65. Camera conversion replaces the upstream as-shot
+gains with reference gains, leaving scene WB to CAT16. Existing projects need
+the adaptation node wired after camera conversion, or a fresh RAW template;
+graphs are not migrated automatically.
 The GUI retains color-managed wgpu presentation, ICC proofing, diagnostic scopes,
 and TIFF export. Current decisions and validation are recorded in
 [Design](agent-docs/DESIGN.md) and [Progress](agent-docs/PROGRESS.md).

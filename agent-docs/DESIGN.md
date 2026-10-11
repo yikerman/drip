@@ -118,17 +118,18 @@ in [PROGRESS](PROGRESS.md).
   Normalize sample contributions before bounded reductions for HDR headroom;
   read back one f32 rather than the full image. The EV calculation remains on
   the host, and the button retains its synchronous behavior.
-- **Tentative:** The refreshed ACES comparison leaves one required processing
-  feature for the first usable prototype: editable scene-illuminant adaptation.
+- **Tentative:** The refreshed ACES comparison identified editable scene-illuminant
+  adaptation as the remaining required processing feature; CAT16 now implements it.
   Normalization, coupled sample/clipping gains, highlight reconstruction,
   demosaic, camera conversion, orientation, exposure, sigmoid and ICC TIFF output
-  are implemented. Orientation still needs the user's interactive acceptance;
+  are implemented, including device mean-to-18% auto exposure. Orientation and
+  auto exposure and chromatic adaptation still need the user's interactive acceptance;
   distribution still needs clean-desktop checks for each advertised platform.
   This assessment uses the agreed supported-Bayer/SDR scope, not ACES conformance.
-- **Tentative:** WB acceptance should cover an as-shot starting point, manual
-  illuminant adjustment and neutral sampling before sigmoid, consistent sample
+- **Decided:** Initial WB offers an as-shot starting point and manual source xy
+  before sigmoid. Temperature/tint and neutral sampling remain follow-ups. Check consistent sample
   and clipping coordinates, persisted controls and matching preview/export.
-  CAT16 remains the proposed implementation, not an ACES requirement. ACES 2's
+  CAT16 is the chosen implementation, not an ACES requirement. ACES 2's
   simplified Hellwig model belongs to its output rendering [1].
 - **Decided:** Keep exposure scaling distinct from sensor-white normalization.
   The current RAW denominator and zero-EV default do not establish ACES's
@@ -140,15 +141,28 @@ in [PROGRESS](PROGRESS.md).
   changing primaries alone does not supply a calibrated input transform or the
   ACES rendering transform. Existing image-quality acceptance still applies.
 - **Requirement:** Add scene-illuminant chromatic adaptation and photo orientation
-  for the first usable prototype. As-shot gains remain the only current WB source.
-- **Tentative:** Use CAT16 for scene adaptation, with a fixed camera-reference
-  normalization before demosaic and user-controlled adaptation in colorimetric
-  RGB before rendering. Derive the initial illuminant from as-shot metadata;
-  offer manual chromaticity/temperature-tint and neutral sampling. Keep clipping
-  levels and camera-matrix coordinates consistent with the reference gains.
-  Do not append absolute scene adaptation to an already as-shot-corrected image.
-  Darktable documents this separation [4]. Full CAM16/Hellwig appearance
+  for the first usable prototype. Both are implemented, pending interactive checks.
+- **Decided:** Keep as-shot gains through highlights and demosaic, then fold
+  reference/as-shot gain ratios into the prepared camera matrix. This follows
+  darktable's current "as shot to reference" placement (THIRD_PARTY [22]); it
+  supersedes the earlier proposal to change upstream conditioning. Bayer gains,
+  clipping levels and reconstruction keep their existing convention. Derive
+  the scene white from that matrix's mapped camera neutral, then apply CAT16
+  in linear Rec.2020 before rendering. The separate node accepts metadata or
+  custom source xy; target white is D65. No evaluator or metadata layout changes.
+  Existing graphs need this node after camera conversion; no automatic migration.
+  Full CAM16/Hellwig appearance
   modeling, mixed-illuminant masks and chart fitting remain separate work [5], [6].
+- **Decided:** Start with full adaptation using the CAT16 response matrix;
+  compose the white-point transform into one working-RGB matrix and reuse the
+  existing CubeCL matrix kernel. Full adaptation neutralizes the chosen scene
+  white without requiring scene luminance or observer-surround estimates.
+  Partial adaptation needs a separate policy: generalized von Kries/two-step
+  formulations preserve inverse/composition consistency [8], while WGM offers
+  a different model of incomplete adaptation [9]. Neither establishes a
+  universally best photographic result. Recent high-chroma experiments expose
+  limitations in all six tested standard CATs [10]. Keep model selection and
+  illuminant estimation separate; temperature/tint is a white-point UI, not a CAT.
 - **Decided:** Carry EXIF orientation in capture metadata and its description so
   contracts can determine the oriented extent before allocation. Decode LibRaw's
   transpose/flip convention at the RAW boundary; unknown orientation means
@@ -246,3 +260,15 @@ pp. 1083–1095, 2022, doi: <https://doi.org/10.1002/col.22792>.
 [Online]. Available:
 <https://acescentral.com/knowledge-base-2/idts-how-do-they-work/>.
 Accessed: Oct. 10, 2026.
+
+[8] C. Gao et al., “The development of the CIECAM16 and visualization of its
+domain and range,” Color Research & Application, 2025,
+doi: <https://doi.org/10.1002/col.22959>.
+
+[9] C. Shen and M. D. Fairchild, “Weighted Geometric Mean (WGM) method: A new
+chromatic adaptation model,” PLOS ONE, vol. 18, no. 8, e0290017, 2023,
+doi: <https://doi.org/10.1371/journal.pone.0290017>.
+
+[10] Y. Shen et al., “Performance of Chromatic Adaptation Transforms for Stimuli
+at Different Chroma Levels,” Color Research & Application, vol. 51, no. 4,
+e70108, 2026, doi: <https://doi.org/10.1002/col.70108>.

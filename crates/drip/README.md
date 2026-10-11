@@ -89,7 +89,10 @@ calibration. Unknown native values retain LibRaw's sentinels. Vendor-specific
 maker-note structures and correction profiles are not included.
 
 `Bayer site gains` consumes that metadata and produces both adjusted Bayer and
-matching BayerLevels. Camera conversion and orientation read the same metadata.
+matching BayerLevels. Camera conversion, chromatic adaptation and orientation
+read the same metadata. The prepared camera matrix replaces as-shot gains with
+D65 reference gains; its mapped camera neutral supplies CAT16's initial source
+white. As-shot conditioning remains in place through highlights and demosaic.
 Capture facts remain unchanged; processing outputs declare their own coordinates.
 The minimum lens focus distance describes the lens, not this exposure's focus.
 TIFF continues to write the selected EXIF subset and ICC profile.

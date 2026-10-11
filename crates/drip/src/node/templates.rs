@@ -20,6 +20,7 @@ pub fn raw_pipeline(path: Option<&Path>) -> Result<Project> {
     let highlights = node::highlights::reconstruct::add(&mut p.dag, Default::default())?;
     let demosaic = node::rcd::add(&mut p.dag, ())?;
     let color = node::camera_to_rgb::add(&mut p.dag, ())?;
+    let adaptation = node::chromatic_adaptation::add(&mut p.dag, Default::default())?;
     let orientation = node::orientation::add(&mut p.dag, Default::default())?;
     let exposure = node::exposure::add(&mut p.dag, Default::default())?;
     let sigmoid = sigmoid::apply::add(&mut p.dag, Default::default())?;
@@ -31,7 +32,9 @@ pub fn raw_pipeline(path: Option<&Path>) -> Result<Project> {
         edit.connect(highlights.output, demosaic.image)?;
         edit.connect(demosaic.output, color.image)?;
         edit.connect(metadata, color.metadata)?;
-        edit.connect(color.output, orientation.image)?;
+        edit.connect(color.output, adaptation.image)?;
+        edit.connect(metadata, adaptation.metadata)?;
+        edit.connect(adaptation.output, orientation.image)?;
         edit.connect(metadata, orientation.metadata)?;
         edit.connect(orientation.output, exposure.image)?;
         edit.connect(exposure.output, sigmoid.image)?;

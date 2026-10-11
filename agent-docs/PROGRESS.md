@@ -4,6 +4,34 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
 
+- User ran the release GUI with Vulkan on an RTX 3080. The supplied log shows
+  successful CAT16 evaluation and previews after RAW selection, with a clean
+  exit. Final visible previews took about 75 ms; node timings measure host
+  submission, not GPU execution. The log does not establish visual color accuracy
+  or saved-project/export agreement.
+- Added full CAT16 scene adaptation with As shot and custom source xy controls,
+  using the existing CubeCL matrix kernel. RAW keeps as-shot conditioning through
+  highlights/demosaic and folds reference/as-shot correction into camera conversion.
+  Both templates place adaptation before rendering. Existing graphs need the new
+  node or a fresh template; no graph migration or metadata layout change.
+  Colour 0.4.7 numerical references pass on CPU and WGPU, including signed/HDR
+  samples. Synthetic RAW neutrality, clipping levels, generated controls and saved
+  overrides pass. The ideal-XYZ-camera test independently checks cancellation of
+  conditioning gains. Full CPU workspace tests and strict Clippy pass; the WGPU
+  CLI exports the Nikon D70s fixture to TIFF. Formatting and whitespace checks pass.
+  Interactive photo acceptance remains with the user;
+  temperature/tint and neutral sampling remain follow-ups.
+- Reviewed CAT16, Bradford, generalized/two-step adaptation, WGM and recent
+  2025–2026 research for scene WB. Recommend full CAT16 adaptation for the first
+  module; retain partial-adaptation policy as open. Recorded the distinction
+  between response matrix, adaptation degree and illuminant estimation, and
+  high-chroma limitations. Research only; no processing changes or tests.
+- Rechecked the official ACES input, exposure-scaling, rendering, display-encoding
+  and gamut guidance after device auto exposure landed. Editable scene-illuminant
+  WB remains the only required processing addition for the agreed Bayer/SDR
+  prototype. Orientation and auto exposure await user integration acceptance;
+  packaged delivery still needs clean-system checks. Inspected current template,
+  calibration, highlights, metering and TIFF paths; no new tests or GUI run.
 - Moved auto-exposure metering to CubeCL. Evaluation retains device RGB;
   successive reductions produce one mean-luminance f32 for readback. Added
   reference checks across partial reduction blocks and large HDR inputs.

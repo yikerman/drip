@@ -137,11 +137,7 @@ fn normalize(raw: &drip_raw::Raw) -> Result<Bound> {
     let mosaic = normalized_samples(raw)?.into();
     let gains = site_gains(raw);
     let xyz_to_cam = std::array::from_fn(|i| raw.metadata.calibration.xyz_to_cam[i]);
-    let matrix = color::camera_to_rgb(
-        &color::to_f64(&xyz_to_cam),
-        &color::rgb_to_xyz(color::REC2020, color::D65),
-    )
-    .filter(|m| m.iter().flatten().all(|v| v.is_finite()));
+    let matrix = reference_matrix(&xyz_to_cam, raw.metadata.calibration.as_shot);
     let camera = Camera {
         coordinates: format!(
             "{}/{}:{:?}",
@@ -196,6 +192,26 @@ fn normalize(raw: &drip_raw::Raw) -> Result<Bound> {
         matrix,
     };
     Ok(Bound { metadata: Arc::new(metadata), desc, mosaic: Arc::new(mosaic) })
+}
+
+// Keep as-shot gains through highlights/demosaic, then replace them with D65
+// reference gains in the camera matrix. This is darktable's "as shot to
+// reference" placement [22], without another image pass. Scene WB follows in CAT16.
+fn reference_matrix(xyz_to_cam: &[[f32; 3]; 3], as_shot: [f32; 4]) -> Option<color::Mat3> {
+    let xyz_to_cam = color::to_f64(xyz_to_cam);
+    let rgb_to_xyz = color::rgb_to_xyz(color::REC2020, color::D65);
+    let reference = color::apply(&xyz_to_cam, color::apply(&rgb_to_xyz, [1.; 3]));
+    if reference.iter().any(|v| !v.is_finite() || *v <= 0.0)
+        || as_shot[..3].iter().any(|v| !v.is_finite() || *v <= 0.0)
+    {
+        return None;
+    }
+    let correction: [f64; 3] = std::array::from_fn(|c| {
+        (reference[1] / reference[c]) * f64::from(as_shot[1]) / f64::from(as_shot[c])
+    });
+    let matrix = color::camera_to_rgb(&xyz_to_cam, &rgb_to_xyz)?
+        .map(|row| std::array::from_fn(|c| row[c] * correction[c]));
+    matrix.iter().flatten().all(|v| (*v as f32).is_finite()).then_some(matrix)
 }
 
 fn normalized_samples(raw: &drip_raw::Raw) -> Result<Vec<f32>> {
@@ -306,5 +322,83 @@ mod tests {
             .evaluate::<Cpu<CaptureMetadata>>(&dag, &Default::default(), Output::new(id, 1))
             .unwrap();
         assert_eq!(metadata.data.capture, r.metadata);
+    }
+
+    #[cfg(feature = "cpu")]
+    #[test]
+    fn raw_neutral_survives_as_shot_to_reference_and_cat16() {
+        use crate::{eval::Evaluator, node, runtime::RuntimeContext};
+        let mut r = raw();
+        r.metadata.sensor.width = 64;
+        r.metadata.sensor.height = 64;
+        r.metadata.calibration.black = 0;
+        r.metadata.calibration.channel_black = [0; 4];
+        r.metadata.calibration.pattern = Default::default();
+        r.metadata.calibration.maximum = 10000;
+        r.metadata.calibration.xyz_to_cam =
+            [[0.6, 0.2, 0.05], [0.1, 0.8, 0.1], [0.02, 0.1, 0.7], [0.; 3]];
+        r.metadata.calibration.as_shot = [2., 1., 4., 0.];
+        r.data = (0..64 * 64)
+            .map(|i| {
+                [2500, 5000, 1250, 5000][r.metadata.calibration.cfa[i / 64 % 2][i % 2] as usize]
+            })
+            .collect();
+        let b = normalize(&r).unwrap();
+        let camera_matrix = &b.metadata.matrix.as_ref().unwrap().values;
+        let mapped = color::apply(&color::to_f64(camera_matrix), [0.5; 3]);
+        assert!((mapped[0] - mapped[1]).abs() > 0.01); // WB is now deferred to CAT16.
+        let expected_y = color::apply(&color::rgb_to_xyz(color::REC2020, color::D65), mapped)[1];
+        let mut dag = crate::graph::Dag::new();
+        let mosaic = node::source::<Bayer>(&mut dag, b.desc, b.mosaic.to_vec()).unwrap();
+        let metadata = node::source::<CaptureMetadata>(
+            &mut dag,
+            MetadataDesc::of(&b.metadata),
+            (*b.metadata).clone(),
+        )
+        .unwrap();
+        let gains = node::bayer_gains::add(&mut dag, ()).unwrap();
+        let highlights = node::highlights::reconstruct::add(&mut dag, Default::default()).unwrap();
+        let demosaic = node::rcd::add(&mut dag, ()).unwrap();
+        let color = node::camera_to_rgb::add(&mut dag, ()).unwrap();
+        let cat = node::chromatic_adaptation::add(&mut dag, Default::default()).unwrap();
+        dag.connect(mosaic, gains.image).unwrap();
+        dag.connect(metadata, gains.metadata).unwrap();
+        dag.connect(gains.output, highlights.image).unwrap();
+        dag.connect(gains.levels, highlights.levels).unwrap();
+        dag.connect(highlights.output, demosaic.image).unwrap();
+        dag.connect(demosaic.output, color.image).unwrap();
+        dag.connect(metadata, color.metadata).unwrap();
+        dag.connect(color.output, cat.image).unwrap();
+        dag.connect(metadata, cat.metadata).unwrap();
+        let evaluator = Evaluator::new(RuntimeContext::cpu());
+        let levels = evaluator
+            .evaluate::<Cpu<BayerLevels>>(&dag, &Default::default(), gains.levels)
+            .unwrap();
+        assert_eq!(*levels.data, [2., 1., 1., 4.]);
+        let output =
+            evaluator.evaluate::<Cpu<ColorRgb>>(&dag, &Default::default(), cat.output).unwrap();
+        for pixel in output.data.iter() {
+            for value in pixel {
+                assert!((f64::from(*value) - expected_y).abs() < 2e-5);
+            }
+        }
+    }
+
+    #[test]
+    fn camera_conversion_cancels_conditioning_gains() {
+        // An ideal XYZ camera must recover the original tristimulus values,
+        // regardless of the as-shot gains used to condition Bayer processing.
+        let xyz_camera = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+        let rgb_to_xyz = color::rgb_to_xyz(color::REC2020, color::D65);
+        let native = [0.2, 0.3, 0.4];
+        for gains in [[1., 1., 1., 0.], [2., 1., 4., 0.], [4., 2., 3., 0.]] {
+            let balanced =
+                std::array::from_fn(|c| native[c] * f64::from(gains[c]) / f64::from(gains[1]));
+            let matrix = reference_matrix(&xyz_camera, gains).unwrap();
+            let recovered = color::apply(&rgb_to_xyz, color::apply(&matrix, balanced));
+            for (actual, expected) in recovered.into_iter().zip(native) {
+                assert!((actual - expected).abs() < 1e-12);
+            }
+        }
     }
 }

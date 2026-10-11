@@ -260,3 +260,30 @@ selected interpolation algorithm. No preview nodes are injected into the graph.
 [Online]. Available:
 <https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/exposure/>.
 Accessed: Oct. 10, 2026.
+
+## Chromatic adaptation
+
+`node/chromatic_adaptation.rs` implements full von Kries adaptation using the
+CAT16 response matrix [21], composed into linear Rec.2020/D65 coordinates.
+The Rust equations are original; no upstream implementation is copied.
+Coefficients and independent numerical test vectors use Colour 0.4.7's
+`matrix_chromatic_adaptation_VonKries`, `CAT_CAT16` and BT.2020 conversions.
+Colour is a reference only, not a dependency; its source is BSD-3-Clause:
+[source](https://github.com/colour-science/colour/tree/v0.4.7/colour/adaptation),
+[license](https://github.com/colour-science/colour/blob/v0.4.7/LICENSE).
+
+RAW camera-matrix preparation follows darktable's placement of reference/as-shot
+gain correction after demosaic [22]. Drip folds the ratio into its existing
+camera matrix and adapts to D65; no darktable code is copied.
+
+[21] C. Li et al., “Comprehensive color solutions: CAM16, CAT16, and CAM16-UCS,”
+*Color Research & Application*, vol. 42, no. 6, pp. 703–718, 2017,
+doi: [10.1002/col.22131](https://doi.org/10.1002/col.22131).
+
+[22] darktable contributors, “white balance,” *darktable development user manual*,
+and “Input color profile,” `src/iop/colorin.c`, `commit_params()`.
+[Online]. Available:
+<https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/white-balance/>,
+<https://github.com/darktable-org/darktable/blob/master/src/iop/colorin.c>.
+Accessed: Oct. 10, 2026. Algorithm reference; source is GPL-3.0-or-later
+([license](https://github.com/darktable-org/darktable/blob/master/LICENSE)).

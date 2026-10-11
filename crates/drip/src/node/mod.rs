@@ -2,6 +2,7 @@
 pub mod bayer_gains;
 pub mod bayer_preview;
 pub mod camera_to_rgb;
+pub mod chromatic_adaptation;
 pub mod color;
 pub mod data;
 pub mod export;

@@ -13,6 +13,26 @@ struct State {
 }
 
 #[test]
+fn chromatic_adaptation_exposes_custom_white_and_as_shot() {
+    let node = crate::model::Registry.get("color.chromatic-adaptation").unwrap();
+    let param = node.param("illuminant").unwrap();
+    let mut h = harness(param.kind, (node.defaults)()["illuminant"].clone());
+    assert_eq!(h.state().value, "as_shot");
+    h.get_by_role(egui::accesskit::Role::ComboBox).click();
+    h.run();
+    h.get_by_label("Custom white point").click();
+    h.run();
+    assert_eq!(h.state().value, json!({"custom":{"x":0.3127,"y":0.329}}));
+    assert!(h.query_by_label("x").is_some());
+    assert!(h.query_by_label("y").is_some());
+    h.get_by_role(egui::accesskit::Role::ComboBox).click();
+    h.run();
+    h.get_by_label("As shot").click();
+    h.run();
+    assert_eq!(h.state().value, "as_shot");
+}
+
+#[test]
 fn orientation_dropdown_selects_override_and_returns_to_metadata() {
     let node = crate::model::Registry.get("geometry.orientation").unwrap();
     let param = node.param("orientation").unwrap();

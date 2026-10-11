@@ -1,0 +1,261 @@
+use crate::{
+    Error, Result,
+    node::{
+        color::{self, Mat3},
+        data::*,
+        raw,
+    },
+    ports::*,
+    runtime::{GlobalContext, KernelContext, dispatch_dims},
+};
+pub use compute::{Definition, Ports, add, definition};
+
+#[derive(Clone, Default, crate::Choice)]
+pub enum Illuminant {
+    #[default]
+    #[choice("as_shot")]
+    #[label("As shot")]
+    AsShot,
+    #[choice("custom")]
+    #[label("Custom white point")]
+    Custom(WhitePoint),
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
+#[serde(deny_unknown_fields)]
+pub struct WhitePoint {
+    /// CIE 1931 x of the source illuminant; both whites are normalized to Y = 1.
+    #[param(crate::param::ParamKind::Float { min: 0.0, max: 1.0, default: color::D65[0] })]
+    #[label("x")]
+    pub x: f64,
+    /// CIE 1931 y of the source illuminant.
+    #[param(crate::param::ParamKind::Float { min: 0.0, max: 1.0, default: color::D65[1] })]
+    #[label("y")]
+    pub y: f64,
+}
+
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize, crate::Parameters)]
+#[serde(deny_unknown_fields)]
+pub struct Settings {
+    /// Infer the scene white from CaptureMetadata, or supply its chromaticity.
+    #[param(Illuminant::AsShot.schema())]
+    pub illuminant: Illuminant,
+}
+
+// CAT16 response matrix [21]. Full von Kries adaptation follows Colour 0.4.7's
+// matrix_chromatic_adaptation_VonKries(..., transform="CAT16"). Original Rust
+// implementation of the published equations; no Python code is copied.
+const CAT16: Mat3 = [
+    [0.401288, 0.650173, -0.051461],
+    [-0.250268, 1.204414, 0.045854],
+    [-0.002079, 0.048952, 0.953127],
+];
+
+fn xyz([x, y]: [f64; 2]) -> [f64; 3] {
+    [x / y, 1.0, (1.0 - x - y) / y]
+}
+
+/// Full CAT16 adaptation between equal-luminance CIE 1931 xy whites.
+/// White responses must be finite and positive; image samples remain unrestricted.
+fn adaptation(source: [f64; 2], target: [f64; 2]) -> Result<Mat3> {
+    let source = color::apply(&CAT16, xyz(source));
+    let target = color::apply(&CAT16, xyz(target));
+    if source.iter().chain(&target).any(|v| !v.is_finite() || *v <= 0.0) {
+        return Err(Error::Contract(
+            "CAT16 white must have finite, positive cone responses".into(),
+        ));
+    }
+    let scaled = std::array::from_fn(|r| CAT16[r].map(|v| v * target[r] / source[r]));
+    Ok(color::mul(&color::inverse(&CAT16), &scaled))
+}
+
+fn matrix(p: &Settings, metadata: Option<&CaptureData>) -> Result<[[f32; 3]; 3]> {
+    let rgb_to_xyz = color::rgb_to_xyz(color::REC2020, color::D65);
+    let source = match &p.illuminant {
+        Illuminant::Custom(white) => [white.x, white.y],
+        Illuminant::AsShot => {
+            let camera = metadata.and_then(|m| m.matrix.as_ref()).ok_or_else(|| {
+                Error::Contract("as-shot adaptation needs CaptureMetadata's camera matrix".into())
+            })?;
+            if camera.target.space != raw::working_color().space
+                || camera.target.encoding != Encoding::Identity
+            {
+                return Err(Error::Contract(
+                    "as-shot camera matrix must output linear Rec.2020/D65".into(),
+                ));
+            }
+            // As-shot-balanced camera neutral is (1,1,1). The matrix includes
+            // as-shot -> reference gains, so its mapped neutral is the scene white.
+            let white =
+                color::apply(&rgb_to_xyz, color::apply(&color::to_f64(&camera.values), [1.; 3]));
+            let sum: f64 = white.iter().sum();
+            if !white[1].is_finite() || white[1] <= 0.0 || !sum.is_finite() || sum <= 0.0 {
+                return Err(Error::Contract("camera matrix has no usable as-shot white".into()));
+            }
+            [white[0] / sum, white[1] / sum]
+        }
+    };
+    let matrix = color::to_f32(&color::mul(
+        &color::inverse(&rgb_to_xyz),
+        &color::mul(&adaptation(source, color::D65)?, &rgb_to_xyz),
+    ));
+    if matrix.iter().flatten().any(|v| !v.is_finite()) {
+        return Err(Error::Contract("CAT16 matrix exceeds finite f32 coefficients".into()));
+    }
+    Ok(matrix)
+}
+
+fn contract(
+    _: &GlobalContext,
+    p: &Settings,
+    image: Option<&ImageDesc<Color>>,
+    _: Option<&MetadataDesc>,
+) -> Result<(Option<ImageDesc<Color>>,)> {
+    if let Illuminant::Custom(_) = p.illuminant {
+        matrix(p, None)?;
+    }
+    if image.is_some_and(|d| {
+        d.interpretation.space != raw::working_color().space
+            || d.interpretation.encoding != Encoding::Identity
+    }) {
+        return Err(Error::Contract("CAT16 requires identity-encoded Rec.2020/D65 RGB".into()));
+    }
+    Ok((image.cloned(),))
+}
+
+/// Adapt a scene illuminant to D65 using full CAT16 chromatic adaptation.
+/// Input/output are identity-encoded Rec.2020/D65 ColorRgb; scale is retained.
+/// As shot maps camera neutral through CaptureMetadata's camera matrix to infer
+/// the source white. Custom white point supplies CIE 1931 xy without metadata.
+/// The RAW template cancels as-shot gains at camera conversion before this node.
+/// Place before rendering; on already-balanced RGB, a custom source white is a
+/// creative reinterpretation. Signed/HDR samples are preserved without clipping.
+#[crate::node(id="color.chromatic-adaptation", name="Chromatic adaptation", category="Color", contract=contract,
+    references=[("CAT16", "https://doi.org/10.1002/col.22131"),
+        ("Colour full adaptation", "https://colour.readthedocs.io/en/v0.4.7/generated/colour.adaptation.matrix_chromatic_adaptation_VonKries.html")])]
+pub fn compute(
+    ctx: &KernelContext<'_>,
+    p: &Settings,
+    image: Read<'_, Device<ColorRgb>>,
+    metadata: Option<Read<'_, Cpu<CaptureMetadata>>>,
+    output: Write<'_, Device<ColorRgb>>,
+) -> Result<()> {
+    let values = matrix(p, metadata.as_ref().map(|m| m.data))?;
+    let coefficients = DeviceBuffer::<()>::new(
+        ctx.client()?.create(cubecl::bytes::Bytes::from_elems(values.to_vec())),
+    );
+    let (count, dim) = dispatch_dims(image.desc.extent.pixels());
+    super::shared_kernel::matrix::launch(
+        ctx.client()?,
+        count,
+        dim,
+        image.data.argument(),
+        coefficients.argument(),
+        output.data.argument(),
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{eval::Evaluator, graph::Dag, runtime::RuntimeContext};
+
+    fn custom(xy: [f64; 2]) -> Settings {
+        Settings { illuminant: Illuminant::Custom(WhitePoint { x: xy[0], y: xy[1] }) }
+    }
+
+    #[test]
+    fn white_mapping_inverse_and_colour_reference() {
+        let a = [0.44757, 0.40745];
+        let matrix = adaptation(a, color::D65).unwrap();
+        // Colour 0.4.7, matrix_chromatic_adaptation_VonKries(xy_to_XYZ(A),
+        // xy_to_XYZ(D65), transform="CAT16"). See THIRD_PARTY [21].
+        let expected = [
+            [0.950686466778631, -0.187385883906847, 0.262897668222764],
+            [-0.0256671403956933, 1.03230983361068, -0.0115657309820062],
+            [-0.00274218552169476, 0.0910058500023380, 2.81337816897230],
+        ];
+        for (actual, expected) in matrix.iter().flatten().zip(expected.iter().flatten()) {
+            assert!((actual - expected).abs() < 1e-13);
+        }
+        for source in [a, color::D65, [0.34567, 0.35850], [0.28, 0.31]] {
+            let forward = adaptation(source, color::D65).unwrap();
+            let reverse = adaptation(color::D65, source).unwrap();
+            for (actual, expected) in
+                color::apply(&forward, xyz(source)).into_iter().zip(xyz(color::D65))
+            {
+                assert!((actual - expected).abs() < 1e-12);
+            }
+            let roundtrip = color::mul(&reverse, &forward);
+            for (r, row) in roundtrip.iter().enumerate() {
+                for (c, value) in row.iter().enumerate() {
+                    assert!((value - if r == c { 1.0 } else { 0.0 }).abs() < 1e-12);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn contracts_and_metadata_failures() {
+        for white in [[0.3, 0.0], [f64::NAN, 0.3], [0.3, f64::INFINITY], [0.9, 0.01]] {
+            assert!(add(&mut Dag::new(), custom(white)).is_err());
+        }
+        assert!(matrix(&Settings::default(), None).is_err());
+        assert!(matrix(&Settings::default(), Some(&CaptureData::default())).is_err());
+        let p = custom(color::D65);
+        let mut desc = ImageDesc {
+            extent: Extent { width: 1, height: 1 },
+            interpretation: raw::working_color(),
+        };
+        desc.interpretation.scale = "creative-scale".into();
+        assert!(contract(&Default::default(), &p, Some(&desc), None).is_ok());
+        desc.interpretation.encoding = Encoding::Srgb;
+        assert!(contract(&Default::default(), &p, Some(&desc), None).is_err());
+        desc.interpretation.encoding = Encoding::Identity;
+        desc.interpretation.space = "camera-like".into();
+        assert!(contract(&Default::default(), &p, Some(&desc), None).is_err());
+    }
+
+    fn device_reference(runtime: RuntimeContext) {
+        let mut dag = Dag::new();
+        let desc = ImageDesc {
+            extent: Extent { width: 4, height: 1 },
+            interpretation: raw::working_color(),
+        };
+        let input = crate::node::source::<ColorRgb>(
+            &mut dag,
+            desc,
+            vec![[0.2, 0.5, 0.8], [-0.1, 0.2, 8.], [0.; 3], [16., -2., 0.5]],
+        )
+        .unwrap();
+        let cat = add(&mut dag, custom([0.44757, 0.40745])).unwrap();
+        dag.connect(input, cat.image).unwrap();
+        let output = Evaluator::new(runtime)
+            .evaluate::<Cpu<ColorRgb>>(&dag, &Default::default(), cat.output)
+            .unwrap();
+        // Colour 0.4.7: RGB_to_XYZ -> CAT16 A-to-D65 -> XYZ_to_RGB, BT.2020.
+        let expected = [
+            [0.0150916964441549, 0.432812976444011, 2.31325856901239],
+            [-0.440684843548889, -1.11172371305315, 22.5979969299213],
+            [0., 0., 0.],
+            [14.2259813421445, -1.65111855363381, 1.52244860850617],
+        ];
+        for (actual, expected) in output.data.iter().flatten().zip(expected.iter().flatten()) {
+            assert!((f64::from(*actual) - expected).abs() < 5e-6, "{actual} != {expected}");
+        }
+        assert_eq!(output.desc.interpretation, raw::working_color());
+    }
+
+    #[cfg(feature = "cpu")]
+    #[test]
+    fn cpu_colour_reference() {
+        device_reference(RuntimeContext::cpu());
+    }
+
+    #[test]
+    #[ignore = "requires the DRIP_BACKEND runtime and device; run explicitly"]
+    fn selected_backend_colour_reference() {
+        device_reference(RuntimeContext::from_env().unwrap());
+    }
+}
