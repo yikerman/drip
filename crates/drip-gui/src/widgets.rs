@@ -5,7 +5,7 @@ use egui::{Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::editing::NodeCx;
 use crate::node_ui::Part;
-use crate::theme;
+use crate::theme::{self, Tip};
 
 /// Side of a pop-out button.
 pub const BUTTON: f32 = 20.0;
@@ -69,7 +69,7 @@ pub fn pop_out(ui: &mut Ui, rect: Rect, node: &mut NodeCx, part: Part) {
     };
     let button = egui::Button::new(icon).frame(false).selected(popped);
     let hint = if popped { "Close window" } else { "Open separate window" };
-    if ui.put(rect, button).on_hover_text(format!("{}: {hint}", part.name())).clicked() {
+    if ui.put(rect, button).tip(format!("{}: {hint}", part.name())).clicked() {
         node.toggle(part);
     }
 }

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use egui::{PointerButton, Pos2, Rect, Sense, Ui, Vec2, pos2, vec2};
 
 use crate::render::image::{self, Image};
+use crate::theme::Tip;
 
 #[derive(Clone, Copy)]
 struct ViewState {
@@ -70,7 +71,7 @@ pub(super) fn show(ui: &mut Ui, image: &Arc<Image>, interpolation: bool) {
             &options,
             |zoom| zoom_label(zoom, &options),
         )
-        .on_hover_text("100%: one rendered image pixel per display pixel");
+        .tip("100%: one rendered image pixel per display pixel");
         if state.zoom.is_none() {
             state.center = pos2(0.5, 0.5);
         }

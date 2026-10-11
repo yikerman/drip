@@ -14,6 +14,7 @@ use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
 use crate::editing::{Edit, Frame, NodeCx, Report};
 use crate::editor::Editor;
 use crate::node_ui::{self, Popped};
+use crate::theme::Tip;
 use crate::ui_state::{self, DEFAULT_LEVEL, MAX_LEVEL};
 use crate::worker::{Notice, Worker};
 use crate::{inspector, theme};
@@ -348,7 +349,7 @@ impl App {
                 &(0..=MAX_LEVEL).collect::<Vec<_>>(),
                 label,
             )
-            .on_hover_text("Global preview scale. Export always uses full detail.");
+            .tip("Global preview scale. Export always uses full detail.");
             if self.level != previous {
                 log::debug!("preview level changed from {previous} to {}", self.level);
                 ui_state::set_preview_level(&mut self.project.ui, self.level);
@@ -366,7 +367,7 @@ impl App {
             if self.worker.busy() {
                 let label = ui.label("Evaluating…");
                 if self.worker.showing_previous() {
-                    label.on_hover_text("Views retain the previous completed evaluation while the current request runs.");
+                    label.tip("Views retain the previous completed evaluation while the current request runs.");
                 }
             }
             if let Some(action) = &self.action {

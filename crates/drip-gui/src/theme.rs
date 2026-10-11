@@ -1,5 +1,5 @@
 //! Neutral UI on middle grey, the standard surround for judging color, with
-//! lighter menus and no shadows, rounding or strokes beyond what is
+//! lighter menus, dark tooltips and no shadows, rounding or strokes beyond what is
 //! needed to tell elements apart.
 
 use egui::{Color32, CornerRadius, FontId, Shadow, Stroke, TextStyle, Visuals};
@@ -17,18 +17,27 @@ pub const LINK: Color32 = Color32::from_rgb(0, 32, 80);
 pub const BODY_SIZE: f32 = 16.0;
 pub const SMALL_SIZE: f32 = 14.0;
 
-pub fn context_menu(response: &egui::Response) -> egui::Popup<'_> {
-    egui::Popup::context_menu(response).style(menu_style)
+/// Hover text, dark so it reads as information rather than as a menu of actions.
+/// Use instead of egui's `on_hover_text`, whose tooltips look like menus.
+pub trait Tip {
+    fn tip(self, text: impl Into<egui::WidgetText>) -> Self;
 }
 
-pub fn menu(response: &egui::Response) -> egui::Popup<'_> {
-    egui::Popup::menu(response).style(menu_style)
-}
-
-fn menu_style(style: &mut egui::Style) {
-    egui::containers::menu::menu_style(style);
-    style.visuals.window_fill = LIGHTEST;
-    style.visuals.window_stroke = Stroke::new(1.0, WEAK);
+impl Tip for egui::Response {
+    fn tip(self, text: impl Into<egui::WidgetText>) -> Self {
+        let mut tooltip = egui::Tooltip::for_enabled(&self);
+        tooltip.popup = tooltip.popup.style(|style: &mut egui::Style| {
+            style.visuals.window_fill = Color32::from_gray(40);
+            style.visuals.window_stroke = Stroke::NONE;
+            style.visuals.override_text_color = Some(Color32::from_gray(220));
+        });
+        tooltip.show(|ui| {
+            // As egui's own: keep auto-sizing from shrinking dynamic text.
+            ui.set_max_width(ui.spacing().tooltip_width);
+            ui.label(text);
+        });
+        self
+    }
 }
 
 pub fn apply(ctx: &egui::Context) {
@@ -36,14 +45,15 @@ pub fn apply(ctx: &egui::Context) {
     v.override_text_color = Some(TEXT);
     v.weak_text_color = Some(WEAK);
     v.panel_fill = GREY;
-    v.window_fill = GREY;
+    // Drip has no egui windows, so this styles menus and dropdowns.
+    v.window_fill = LIGHTEST;
+    v.window_stroke = Stroke::new(1.0, WEAK);
     v.faint_bg_color = GREY;
     v.extreme_bg_color = DARKER;
     v.code_bg_color = DARKER;
     v.error_fg_color = ERROR;
     v.warn_fg_color = ERROR;
     v.hyperlink_color = LINK;
-    v.window_stroke = Stroke::NONE;
     v.window_shadow = Shadow::NONE;
     v.popup_shadow = Shadow::NONE;
     v.window_corner_radius = CornerRadius::ZERO;

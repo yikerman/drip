@@ -20,7 +20,7 @@ use egui::{
     Vec2, pos2, vec2,
 };
 
-use crate::theme;
+use crate::theme::{self, Tip};
 
 mod node_menu;
 
@@ -152,7 +152,7 @@ impl Editor {
         {
             frame.edit(graph, Edit::Disconnect(input));
         } else {
-            theme::context_menu(&background).show(|ui| {
+            egui::Popup::context_menu(&background).show(|ui| {
                 if let Some(kind) = node_menu::show(ui, registry) {
                     let pointer = ui
                         .ctx()
@@ -209,7 +209,7 @@ impl Editor {
             frame.edit(graph, Edit::Ui(l.id, LayoutField::Position, pos));
         }
         let mut remove = false;
-        theme::context_menu(&body).show(|ui| {
+        egui::Popup::context_menu(&body).show(|ui| {
             if ui.button("Rename").clicked() {
                 *selected = Some(l.id);
                 node_ui::parameters::focus_name(ui.ctx(), l.id);
@@ -233,7 +233,7 @@ impl Editor {
             ui.id().with((l.id, "title")),
             Sense::hover(),
         )
-        .on_hover_text(&node.name);
+        .tip(&node.name);
         let (kind, kind_params) = (node_ui::of(node.kind), node.kind.parameters);
         let texts = node_ui::ports::texts(graph, l.id);
         paint(&painter, l, &node, &texts, *selected == Some(l.id));
@@ -243,13 +243,13 @@ impl Editor {
             let endpoint = Endpoint { port: Port(l.id, name.into()), direction };
             let response = ui
                 .interact(hit(pos), ui.id().with((l.id, name, direction)), Sense::click_and_drag())
-                .on_hover_text(text.hover());
+                .tip(text.hover());
             self.pan(&response);
             if response.secondary_clicked() {
                 egui::Popup::close_all(ui.ctx());
                 self.connect(endpoint.clone(), graph, frame);
             }
-            theme::menu(&response).show(|ui| {
+            egui::Popup::menu(&response).show(|ui| {
                 if let Some(id) = peer_menu(ui, graph, &endpoint) {
                     navigate = Some(id);
                 }
@@ -260,7 +260,7 @@ impl Editor {
                 pos2(l.rect.min.x, at.y - ROW / 2.0),
                 vec2(l.rect.width(), ROW),
             );
-            ui.interact(row, ui.id().with((l.id, "error")), Sense::hover()).on_hover_text(error);
+            ui.interact(row, ui.id().with((l.id, "error")), Sense::hover()).tip(error);
         }
         let mut cx = NodeCx::new(graph, l.id, frame);
         if !kind_params.is_empty() {

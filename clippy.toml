@@ -1,0 +1,3 @@
+disallowed-methods = [
+    { path = "egui::Response::on_hover_text", reason = "use `theme::Tip::tip` so tooltips are dark" },
+]

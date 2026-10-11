@@ -5,6 +5,7 @@ use egui::{PointerButton, Sense, Ui};
 use serde_json::{Value as Json, json};
 
 use crate::editing::NodeCx;
+use crate::theme::Tip;
 use crate::widgets::{dropdown, scroll_steps};
 
 /// A node's name, kind, parameters and actions, without inspector help.
@@ -55,11 +56,11 @@ pub fn schema(ui: &mut Ui, cx: &mut NodeCx) {
                 "" => "Right-click for reset and template options".to_owned(),
                 doc => format!("{doc}\n\nRight-click for reset and template options"),
             };
-            let name = ui.label(text).interact(Sense::click()).on_hover_text(hint);
+            let name = ui.label(text).interact(Sense::click()).tip(hint);
             if let Some(value) = edit_parameter(ui, egui::Id::new((id, spec.name)), &node, spec) {
                 cx.set_param(spec.name, value);
             }
-            crate::theme::context_menu(&name).show(|ui| {
+            egui::Popup::context_menu(&name).show(|ui| {
                 if let Some(value) = reset_action(ui, &spec.kind) {
                     cx.set_param(spec.name, value);
                 }
@@ -118,8 +119,8 @@ fn edit_value_with(
         ParamKind::Choice { options, .. } => choice(ui, id, options, value),
         ParamKind::Path { output, extensions } => path(ui, value, output, extensions, label),
     };
-    let response = response.on_hover_text("Right-click to reset to default");
-    let mut menu = crate::theme::context_menu(&response).id(ui.make_persistent_id((id, "reset")));
+    let response = response.tip("Right-click to reset to default");
+    let mut menu = egui::Popup::context_menu(&response).id(ui.make_persistent_id((id, "reset")));
     // Slider rails sense drags, so their response does not report clicks.
     if response.hovered()
         && ui.input(|input| input.pointer.button_clicked(PointerButton::Secondary))
@@ -236,7 +237,7 @@ fn path(
             }
             let name = ui.add(egui::Label::new(name).sense(Sense::click()));
             if let Some(path) = selected {
-                name.clone().on_hover_text(path.display().to_string());
+                name.clone().tip(path.display().to_string());
             }
             name
         })
@@ -248,7 +249,7 @@ fn path(
 pub fn label(ui: &mut Ui, text: impl Into<egui::WidgetText>, documentation: &str) {
     let label = ui.label(text);
     if !documentation.is_empty() {
-        label.on_hover_text(documentation);
+        label.tip(documentation);
     }
 }
 
