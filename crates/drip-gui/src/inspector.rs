@@ -24,10 +24,7 @@ pub fn inputs(ui: &mut Ui, graph: &mut Graph, frame: &mut Frame) {
         for (id, param) in inputs {
             let node = graph.node(id).expect("listed");
             let spec = node.kind.param(param).expect("listed");
-            let label = ui.label(format!("{} · {}", node.name, spec.label));
-            if !spec.documentation.is_empty() {
-                label.on_hover_text(spec.documentation);
-            }
+            parameters::label(ui, format!("{} · {}", node.name, spec.label), spec.documentation);
             if let Some(value) =
                 parameters::edit_parameter(ui, egui::Id::new(("input", id, param)), &node, spec)
             {

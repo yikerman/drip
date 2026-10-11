@@ -241,8 +241,7 @@ impl App {
                         });
                         self.dirty |= result.is_ok();
                         let node = self.project.graph.node(id).expect("bound node exists");
-                        let source = node.params.get("path").and_then(|v| v.as_str());
-                        let text = match source {
+                        let text = match node.file(false) {
                             Some(path) => format!("Loaded {}: {path}", node.name),
                             None => format!("Updated {}", node.name),
                         };
@@ -464,12 +463,7 @@ impl App {
         match self.worker.action(&self.project.graph, id, name) {
             Ok(()) => {
                 let node = self.project.graph.node(id).expect("action node exists");
-                let destination = node.kind.parameters.iter().find_map(|p| {
-                    matches!(p.kind, drip::param::ParamKind::Path { output: true, .. })
-                        .then(|| node.params[p.name].as_str())
-                        .flatten()
-                });
-                let subject = match destination {
+                let subject = match node.file(true) {
                     Some(path) => format!("{} → {path}", node.name),
                     None => node.name.clone(),
                 };

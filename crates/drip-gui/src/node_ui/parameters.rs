@@ -183,10 +183,7 @@ fn choice(
             ui.indent(id.with(option.name), |ui| {
                 egui::Grid::new(id.with((option.name, "fields"))).num_columns(2).show(ui, |ui| {
                     for spec in parameters {
-                        let label = ui.label(spec.label);
-                        if !spec.documentation.is_empty() {
-                            label.on_hover_text(spec.documentation);
-                        }
+                        label(ui, spec.label, spec.documentation);
                         let field = &mut edited[option.name][spec.name];
                         let id = id.with((option.name, spec.name));
                         if let Some(value) = edit_value_with(ui, id, &spec.kind, field, spec.label)
@@ -245,6 +242,14 @@ fn path(
         })
         .inner;
     (response, chosen)
+}
+
+/// A parameter's name, with its generated documentation on hover.
+pub fn label(ui: &mut Ui, text: impl Into<egui::WidgetText>, documentation: &str) {
+    let label = ui.label(text);
+    if !documentation.is_empty() {
+        label.on_hover_text(documentation);
+    }
 }
 
 fn slider<T: egui::emath::Numeric>(

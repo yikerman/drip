@@ -34,6 +34,18 @@ pub struct Node {
     pub external: BTreeSet<String>,
     pub ui: Json,
 }
+impl Node {
+    /// The chosen file of the node's first file parameter that reads
+    /// (`output` false) or writes (`output` true), as its schema declares.
+    pub fn file(&self, output: bool) -> Option<&str> {
+        self.kind.parameters.iter().find_map(|spec| match spec.kind {
+            drip::param::ParamKind::Path { output: writes, .. } if writes == output => {
+                self.params[spec.name].as_str()
+            }
+            _ => None,
+        })
+    }
+}
 impl Graph {
     pub fn from_dag(dag: Dag) -> Result<Self> {
         let mut graph = Self { dag, ..Self::default() };
