@@ -4,6 +4,12 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-10
 
+- Added u8 TIFF export through LittleCMS RGB_8 and the TIFF RGB8 encoder.
+  The library owns the shared depth choice; GUI controls persist u8/u16/f32,
+  and the CLI retains its u16 default. Profile and metadata writing stay shared.
+  Export tests pass for all depths, uncompressed/Deflate output, saved settings,
+  exact embedded ICC bytes and sRGB-encoded neutral samples. Existing proof/export
+  and library project tests pass, as do strict workspace Clippy and formatting.
 - Rechecked official ACES input-transform, exposure-scaling, ACEScg, output-transform,
   display-encoding and source-gamut guidance after CAT16 landed. User clarified
   that “scientific” means sound processing. No additional processing-stage blocker

@@ -1,18 +1,11 @@
 //! Full-resolution file action over explicitly connected image and metadata.
 use ::tiff::encoder::{Compression, compression::DeflateLevel};
+use drip::node::export::Depth;
 use drip::{
     Error, Result, node::data::*, node::profile, param::ParamKind, ports::*, runtime::KernelContext,
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Default, drip::Choice)]
-pub enum Depth {
-    #[default]
-    #[choice("u16")]
-    U16,
-    #[choice("f32")]
-    F32,
-}
 #[derive(Clone, drip::Choice)]
 pub enum CompressionMode {
     #[choice("none")]
@@ -41,7 +34,7 @@ pub struct Export {
     #[param(flatten)]
     #[serde(flatten)]
     pub output: profile::Settings,
-    /// u16 clips to the output range; f32 retains the profile floating-point range.
+    /// u8/u16 clip to the output range; f32 retains the profile floating-point range.
     #[param(Depth::U16.schema())]
     pub depth: Depth,
     /// Lossless TIFF compression, or None for an uncompressed file.
@@ -70,7 +63,7 @@ fn contract(
     crate::node_ui::contracts::working(image)
 }
 /// Write identity-encoded Rec.2020/D65 ColorRgb to TIFF through an RGB ICC profile.
-/// u16 clips to the output range; f32 retains the profile's floating-point range.
+/// u8/u16 clip to the output range; f32 retains the profile's floating-point range.
 /// Connected CaptureMetadata is copied when present. Export uses full processing
 /// detail, independently of preview detail. Compression is lossless.
 #[drip::node(id="output.tiff", name="Export TIFF", category="Output", contract=contract)]
@@ -127,13 +120,7 @@ fn export(
             CompressionLevel::Best => DeflateLevel::Best,
         }),
     };
-    let bytes = drip::node::export::tiff_compressed(
-        desc,
-        pixels,
-        &output,
-        matches!(p.depth, Depth::F32),
-        metadata,
-        compression,
-    )?;
+    let bytes =
+        drip::node::export::tiff_compressed(desc, pixels, &output, p.depth, metadata, compression)?;
     std::fs::write(&path, bytes).map_err(|e| Error::Runtime(format!("{}: {e}", path.display())))
 }

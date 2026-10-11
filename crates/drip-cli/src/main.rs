@@ -22,7 +22,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         target,
     )?;
     let profile = drip::node::profile::Output::load(&Default::default(), &Default::default())?;
-    let bytes = drip::node::export::tiff(&image.desc, &image.data, &profile, false, None)?;
+    let bytes =
+        drip::node::export::tiff(&image.desc, &image.data, &profile, Default::default(), None)?;
     std::fs::write(PathBuf::from(&args[1]), bytes)?;
     Ok(())
 }

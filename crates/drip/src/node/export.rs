@@ -7,25 +7,36 @@ use crate::{
 use lcms2::PixelFormat;
 use std::borrow::Cow;
 use std::io::{Cursor, Seek, Write};
-use tiff::encoder::colortype::{ColorType, RGB16, RGB32Float};
+use tiff::encoder::colortype::{ColorType, RGB8, RGB16, RGB32Float};
 use tiff::encoder::compression::DeflateLevel;
 use tiff::encoder::{Compression, DirectoryEncoder, Rational, TiffEncoder, TiffKind, TiffValue};
 use tiff::tags::{Tag, Type};
 
+#[derive(Clone, Copy, Default, crate::Choice)]
+pub enum Depth {
+    #[choice("u8")]
+    U8,
+    #[default]
+    #[choice("u16")]
+    U16,
+    #[choice("f32")]
+    F32,
+}
+
 /// Convert identity-encoded Rec.2020 through the requested output profile and
-/// encode TIFF. Floating output retains the profile's floating range; u16 clips.
+/// encode TIFF. Floating output retains the profile's floating range; integers clip.
 pub fn tiff(
     desc: &ImageDesc<Color>,
     pixels: &[[f32; 3]],
     output: &profile::Output,
-    floating: bool,
+    depth: Depth,
     metadata: Option<&CaptureData>,
 ) -> Result<Vec<u8>> {
     tiff_compressed(
         desc,
         pixels,
         output,
-        floating,
+        depth,
         metadata,
         Compression::Deflate(DeflateLevel::Balanced),
     )
@@ -36,7 +47,7 @@ pub fn tiff_compressed(
     desc: &ImageDesc<Color>,
     pixels: &[[f32; 3]],
     output: &profile::Output,
-    floating: bool,
+    depth: Depth,
     metadata: Option<&CaptureData>,
     compression: Compression,
 ) -> Result<Vec<u8>> {
@@ -52,26 +63,40 @@ pub fn tiff_compressed(
     let mut bytes = Cursor::new(Vec::new());
     let err = |e: tiff::TiffError| Error::Runtime(e.to_string());
     let mut encoder = TiffEncoder::new(&mut bytes).map_err(err)?.with_compression(compression);
-    if floating {
-        let pixels: Vec<[f32; 3]> = output.convert(PixelFormat::RGB_FLT, pixels)?;
-        write_image::<RGB32Float>(
-            &mut encoder,
-            &desc.extent,
-            &output.icc,
-            metadata,
-            pixels.as_flattened(),
-        )
-        .map_err(err)?;
-    } else {
-        let pixels: Vec<[u16; 3]> = output.convert(PixelFormat::RGB_16, pixels)?;
-        write_image::<RGB16>(
-            &mut encoder,
-            &desc.extent,
-            &output.icc,
-            metadata,
-            pixels.as_flattened(),
-        )
-        .map_err(err)?;
+    match depth {
+        Depth::U8 => {
+            let pixels: Vec<[u8; 3]> = output.convert(PixelFormat::RGB_8, pixels)?;
+            write_image::<RGB8>(
+                &mut encoder,
+                &desc.extent,
+                &output.icc,
+                metadata,
+                pixels.as_flattened(),
+            )
+            .map_err(err)?;
+        }
+        Depth::F32 => {
+            let pixels: Vec<[f32; 3]> = output.convert(PixelFormat::RGB_FLT, pixels)?;
+            write_image::<RGB32Float>(
+                &mut encoder,
+                &desc.extent,
+                &output.icc,
+                metadata,
+                pixels.as_flattened(),
+            )
+            .map_err(err)?;
+        }
+        Depth::U16 => {
+            let pixels: Vec<[u16; 3]> = output.convert(PixelFormat::RGB_16, pixels)?;
+            write_image::<RGB16>(
+                &mut encoder,
+                &desc.extent,
+                &output.icc,
+                metadata,
+                pixels.as_flattened(),
+            )
+            .map_err(err)?;
+        }
     }
     Ok(bytes.into_inner())
 }

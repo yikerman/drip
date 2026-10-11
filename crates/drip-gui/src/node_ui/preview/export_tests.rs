@@ -72,6 +72,65 @@ fn read(path: &Path) -> (DecodingResult, Vec<u8>, u32) {
 }
 
 #[test]
+fn export_depth_survives_reopening_and_encodes_expected_samples() {
+    let scratch = Scratch::new("depth");
+    let path = scratch.0.join("depth.tif");
+    let mut project = Project::default();
+    let source = project.graph.add_node(Registry.get("test.proof-source").unwrap()).unwrap();
+    let export = project.graph.add_node(Registry.get("output.tiff").unwrap()).unwrap();
+    project.graph.connect(Port(source, "image".into()), Port(export, "image".into())).unwrap();
+    assert_eq!(project.graph.node(export).unwrap().params["depth"], "u16");
+    set(&mut project, export, json!({"path":path}));
+    let evaluator = Evaluator::new(RuntimeContext::host());
+    let expected_profile = profile::Output::load(&Default::default(), &Default::default()).unwrap();
+    let profile_path = scratch.0.join("srgb.icc");
+    std::fs::write(&profile_path, &expected_profile.icc).unwrap();
+    set(&mut project, export, json!({"profile":{"file":{"path":profile_path}}}));
+    for depth in ["u8", "u16", "f32"] {
+        for compression in [json!("none"), json!({"deflate":{"level":"balanced"}})] {
+            set(&mut project, export, json!({"depth":depth,"compression":compression}));
+            let reopened = Project::from_json(&project.to_json().unwrap(), &Registry).unwrap();
+            let export = reopened.graph.find("Export TIFF").unwrap();
+            let node = reopened.graph.node(export).unwrap();
+            assert_eq!(node.params["depth"], depth);
+            let values = evaluator
+                .evaluate_inputs(&reopened.graph.dag, &Default::default(), &[export])
+                .remove(&export)
+                .unwrap()
+                .unwrap();
+            crate::node_ui::binding(node.kind)
+                .unwrap()
+                .run_action("Export", node.params, &values, &Default::default())
+                .unwrap();
+            let (data, icc, compression_tag) = read(&path);
+            assert_eq!(icc, expected_profile.icc);
+            assert_eq!(compression_tag, if compression == "none" { 1 } else { 8 });
+            let (samples, max, tolerance): (Vec<f64>, f64, f64) = match (depth, data) {
+                ("u8", DecodingResult::U8(v)) => (v.into_iter().map(f64::from).collect(), 255., 1.),
+                ("u16", DecodingResult::U16(v)) => {
+                    (v.into_iter().map(f64::from).collect(), 65535., 2.)
+                }
+                ("f32", DecodingResult::F32(v)) => {
+                    (v.into_iter().map(f64::from).collect(), 1., 3e-5)
+                }
+                _ => panic!("wrong TIFF sample type for {depth}"),
+            };
+            assert_eq!(samples.len(), 12);
+            // Neutral 18% linear light is sRGB-encoded before quantization.
+            let grey = 1.055 * 0.18f64.powf(1. / 2.4) - 0.055;
+            for (range, expected) in [(0..3, max), (3..6, grey * max), (9..12, 0.)] {
+                for &sample in &samples[range] {
+                    assert!(
+                        (sample - expected).abs() <= tolerance,
+                        "{depth}: {sample} vs {expected}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn softproof_matches_bounded_export_across_profiles_and_intents() {
     let scratch = Scratch::new("proof");
     let custom = scratch.profile("linear.icc", &profile::rec2020_linear());

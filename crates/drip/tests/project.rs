@@ -39,9 +39,14 @@ fn tiff_profile_extent_and_pixels_survive_encoding() {
         capture: drip_raw::Metadata { orientation: 6, ..Default::default() },
         ..Default::default()
     };
-    let bytes =
-        drip::node::export::tiff(&desc, &[[0.; 3], [1.; 3]], &profile, false, Some(&metadata))
-            .unwrap();
+    let bytes = drip::node::export::tiff(
+        &desc,
+        &[[0.; 3], [1.; 3]],
+        &profile,
+        Default::default(),
+        Some(&metadata),
+    )
+    .unwrap();
     let mut decoder = tiff::decoder::Decoder::new(std::io::Cursor::new(bytes)).unwrap();
     assert_eq!(decoder.dimensions().unwrap(), (2, 1));
     // Geometry has already determined stored pixel order. The capture tag must
@@ -55,7 +60,10 @@ fn tiff_profile_extent_and_pixels_survive_encoding() {
     assert!(pixels[3..].iter().all(|&v| v > 65530));
     let mut bad = desc.clone();
     bad.interpretation.encoding = Encoding::Srgb;
-    assert!(drip::node::export::tiff(&bad, &[[0.; 3], [1.; 3]], &profile, false, None).is_err());
+    assert!(
+        drip::node::export::tiff(&bad, &[[0.; 3], [1.; 3]], &profile, Default::default(), None)
+            .is_err()
+    );
 }
 
 #[test]

@@ -18,6 +18,9 @@ in [PROGRESS](PROGRESS.md).
   transfers and allocations. Earlier Rayon comparisons are historical evidence,
   not the current backend policy.
 - **Decided:** Prototype project formats have no migration guarantee.
+- **Decided:** TIFF depth is a shared export choice: u8, u16 (default), or f32.
+  LittleCMS converts into the selected output encoding before integer quantization;
+  depth does not select a transfer function. ICC and EXIF writing are shared.
 - **Decided:** “Scientific” for the first usable prototype means sound,
   documented image processing, not calibrated radiometry or ACES conformance.
   Quantitative sensor/chart calibration is outside this milestone.
