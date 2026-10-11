@@ -569,6 +569,9 @@ mod tests {
     use std::time::{Duration, Instant};
 
     const TIMEOUT: Duration = Duration::from_secs(5);
+    // The compute client is shared with full-RAW GUI tests. Allow their
+    // queued work and cold kernel compilation; channel gates stay short.
+    const COMPUTE_TIMEOUT: Duration = Duration::from_secs(90);
 
     fn preview(generation: u64, graph: Graph, level: u8, targets: Vec<NodeId>) -> Demand {
         let global = GlobalContext { scale: 1 << level };
@@ -608,9 +611,7 @@ mod tests {
     }
 
     fn wait(worker: &mut Worker) -> Vec<Notice> {
-        // The compute client is shared with full-RAW GUI tests. Allow their
-        // queued work and cold kernel compilation; channel gates stay short.
-        let deadline = Instant::now() + Duration::from_secs(90);
+        let deadline = Instant::now() + COMPUTE_TIMEOUT;
         let mut notices = Vec::new();
         loop {
             notices.extend(worker.poll());
@@ -628,7 +629,7 @@ mod tests {
 
     fn perform(worker: &mut Worker, graph: &Graph, id: NodeId) {
         worker.action(graph, id, action(graph, id)).unwrap();
-        let deadline = Instant::now() + TIMEOUT;
+        let deadline = Instant::now() + COMPUTE_TIMEOUT;
         loop {
             for notice in worker.poll() {
                 if let Notice::Performed { id: performed, result } = notice {
@@ -870,7 +871,7 @@ mod tests {
             };
             assert_eq!(targets, &[preview, histogram]);
             release.send(()).unwrap();
-            woke.recv_timeout(TIMEOUT).unwrap();
+            woke.recv_timeout(COMPUTE_TIMEOUT).unwrap();
             assert!(worker.poll().is_empty(), "obsolete completion is not presented");
             assert!(worker.result(preview).is_none());
             wait(&mut worker);
@@ -909,7 +910,7 @@ mod tests {
             woke.recv_timeout(TIMEOUT).unwrap();
             release.send(()).unwrap();
             for _ in 0..2 {
-                woke.recv_timeout(TIMEOUT).unwrap();
+                woke.recv_timeout(COMPUTE_TIMEOUT).unwrap();
             }
             assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0, 3.0, 3.0]);
             worker.request(&graph, 2, vec![preview]).unwrap();

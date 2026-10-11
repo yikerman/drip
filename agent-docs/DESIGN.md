@@ -324,6 +324,9 @@ Resolved with the user on 2026-10-11 after the review against
   jobs only build and upload. Clippy uses `--workspace --no-deps`.
   Validate test changes with `drip/cpu` enabled too: default-feature builds
   omit CPU-only integration tests.
+- **Decided:** Worker tests allow 90 seconds for compute completion, including
+  a dropped worker finishing its current preview. CPU tests share a compute
+  client with full-RAW evaluations; synchronization gates retain five seconds.
 - **Requirement:** Minimize user-installed dependencies; native processing
   libraries are static, the normal Linux C/C++ runtime may stay external.
 - **Decided:** Vendor unmodified sources at release tags; builds never fetch.

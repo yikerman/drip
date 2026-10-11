@@ -4,6 +4,13 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- CI run 38164895447 passed Linux and Windows but macOS timed out waiting for
+  a dropped worker's preview completion. That wait, introduced in `31f2c18`,
+  allowed five seconds despite sharing the CPU compute client with full-RAW
+  tests. Compute completions now share the existing 90-second evaluation
+  allowance; synchronization gates retain five seconds. Linux CPU GUI tests
+  pass (90 passed, seven ignored), as do formatting and whitespace checks.
+  macOS verification remains pending.
 - Fixed parallel GPU-test startup by initializing the selected compute runtime
   before the display test's independent wgpu instance. CubeCL's existing startup
   serialization prevents concurrent first Vulkan calls. All seven GUI device
