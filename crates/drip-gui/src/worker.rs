@@ -78,16 +78,22 @@ pub enum Notice {
 #[derive(Clone, PartialEq)]
 struct Failure {
     kind: &'static str,
+    /// The failed node's name in the evaluated snapshot, for the status line.
+    name: String,
     error: NodeError,
 }
 
 impl Failure {
-    fn level(&self) -> log::Level {
-        let error = match &self.error {
-            NodeError::Node { source, .. } => source.as_ref(),
+    /// The error without the node it is reported against.
+    fn cause(&self) -> &NodeError {
+        match &self.error {
+            NodeError::Node { source, .. } => source,
             error => error,
-        };
-        match error {
+        }
+    }
+
+    fn level(&self) -> log::Level {
+        match self.cause() {
             NodeError::MissingInput { .. } | NodeError::Contract(_) => log::Level::Debug,
             _ => log::Level::Warn,
         }
@@ -297,9 +303,10 @@ impl Worker {
                             );
                         }
                     }
-                    let error = failures.iter().next().map(|(id, failure)| {
-                        format!("{id:?} ({}): {}", failure.kind, failure.error)
-                    });
+                    let error = failures
+                        .values()
+                        .next()
+                        .map(|failure| format!("{}: {}", failure.name, failure.cause()));
                     self.failures = failures;
                     self.views = views;
                     self.views_generation = Some(generation);
@@ -436,7 +443,8 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
                             NodeError::Node { node, kind, .. } => (*node, *kind),
                             _ => (id, node.kind().id),
                         };
-                        failures.insert(id, Failure { kind, error: error.clone() });
+                        let name = demand.graph.name(id).unwrap_or(kind).to_owned();
+                        failures.insert(id, Failure { kind, name, error: error.clone() });
                     }
                     Some((id, result))
                 })
@@ -744,7 +752,7 @@ mod tests {
                 }
                 if state != "ok" {
                     assert!(notices.iter().any(|notice| matches!(notice,
-                    Notice::Evaluated(Err(error)) if error.contains("test.diagnostics")
+                    Notice::Evaluated(Err(error)) if error.starts_with("diagnostics: ")
                         && !error.contains("upstream"))));
                 }
             }
