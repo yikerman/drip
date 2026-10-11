@@ -94,7 +94,7 @@ pub fn edit_parameter(
     edit_value_with(ui, id, &spec.kind, &node.params[spec.name], spec.label)
 }
 
-/// `label` names the parameter in file dialogs.
+/// `label` names the parameter in file dialogs. Every widget offers a reset.
 fn edit_value_with(
     ui: &mut Ui,
     id: egui::Id,
@@ -105,119 +105,18 @@ fn edit_value_with(
     let id = ui.make_persistent_id(id);
     let (response, mut chosen) = match *kind {
         ParamKind::Float { min, max, .. } => {
-            let mut v = value.as_f64().expect("validated float");
-            let response = slider(ui, &mut v, min..=max);
-            let steps = scroll_steps(ui, &response);
-            if steps != 0.0 {
-                v = (v + steps * (max - min) / 100.0).clamp(min, max);
-            }
-            (response, Some(json!(v)))
+            let v = value.as_f64().expect("validated float");
+            number(ui, v, min..=max, (max - min) / 100.0)
         }
         ParamKind::Int { min, max, .. } => {
-            let mut v = value.as_i64().expect("validated int");
-            let response = slider(ui, &mut v, min..=max);
-            let steps = scroll_steps(ui, &response) as i64;
-            if steps != 0 {
-                v = v.saturating_add(steps).clamp(min, max);
-            }
-            (response, Some(json!(v)))
+            number(ui, value.as_i64().expect("validated int"), min..=max, 1.0)
         }
         ParamKind::Bool { .. } => {
             let mut v = value.as_bool().expect("validated bool");
-            let response = ui.checkbox(&mut v, "");
-            (response, Some(json!(v)))
+            (ui.checkbox(&mut v, ""), Some(json!(v)))
         }
-        ParamKind::Choice { options, .. } => {
-            ui.vertical(|ui| {
-                let previous = options
-                    .iter()
-                    .position(|option| option.selected(value))
-                    .expect("validated choice");
-                let mut selected = previous;
-                let response = dropdown(
-                    ui,
-                    egui::ComboBox::from_id_salt(id),
-                    &mut selected,
-                    &(0..options.len()).collect::<Vec<_>>(),
-                    |index| options[index].label.into(),
-                );
-                let option = &options[selected];
-                let mut edited = if selected == previous {
-                    value.clone()
-                } else {
-                    ui.data_mut(|data| {
-                        data.insert_temp(id.with(options[previous].name), value.clone())
-                    });
-                    ui.data(|data| data.get_temp::<Json>(id.with(option.name)))
-                        .unwrap_or_else(|| option.default_value())
-                };
-                if let Some(parameters) = option.parameters {
-                    ui.indent(id.with(option.name), |ui| {
-                        egui::Grid::new(id.with((option.name, "fields"))).num_columns(2).show(
-                            ui,
-                            |ui| {
-                                for spec in parameters {
-                                    let label = ui.label(spec.label);
-                                    if !spec.documentation.is_empty() {
-                                        label.on_hover_text(spec.documentation);
-                                    }
-                                    if let Some(value) = edit_value_with(
-                                        ui,
-                                        id.with((option.name, spec.name)),
-                                        &spec.kind,
-                                        &edited[option.name][spec.name],
-                                        spec.label,
-                                    ) {
-                                        edited[option.name][spec.name] = value;
-                                    }
-                                    ui.end_row();
-                                }
-                            },
-                        );
-                    });
-                }
-                (response, Some(edited))
-            })
-            .inner
-        }
-        ParamKind::Path { output, extensions } => {
-            let selected_path = value.as_str().map(std::path::Path::new);
-            let name = selected_path
-                .and_then(|p| p.file_name())
-                .map_or("Not selected".into(), |n| n.to_string_lossy());
-            let mut chosen = None;
-            let response = ui
-                .horizontal(|ui| {
-                    if ui.button("Browse…").clicked() {
-                        let mut dialog = rfd::FileDialog::new().set_title(label);
-                        if !extensions.is_empty() {
-                            dialog = dialog.add_filter(label, extensions);
-                        }
-                        let dialog = match selected_path.and_then(|p| p.parent()) {
-                            Some(dir) => dialog.set_directory(dir),
-                            None => dialog,
-                        };
-                        chosen = if output { dialog.save_file() } else { dialog.pick_file() }.map(
-                            |mut p| {
-                                if output
-                                    && p.extension().is_none()
-                                    && let Some(extension) = extensions.first()
-                                {
-                                    p.set_extension(extension);
-                                }
-                                json!(p)
-                            },
-                        );
-                    }
-                    let label = ui.add(egui::Label::new(name).sense(Sense::click()));
-                    if let Some(path) = selected_path {
-                        label.clone().on_hover_text(path.display().to_string());
-                    }
-                    label
-                })
-                .inner;
-            (response, chosen)
-        }
+        ParamKind::Choice { options, .. } => choice(ui, id, options, value),
+        ParamKind::Path { output, extensions } => path(ui, value, output, extensions, label),
     };
     let response = response.on_hover_text("Right-click to reset to default");
     let mut menu = crate::theme::context_menu(&response).id(ui.make_persistent_id((id, "reset")));
@@ -234,6 +133,118 @@ fn edit_value_with(
         }
     });
     chosen.filter(|chosen| chosen != value)
+}
+
+/// A slider that also steps by `step` per scrolled line.
+fn number<T: egui::emath::Numeric + serde::Serialize>(
+    ui: &mut Ui,
+    mut value: T,
+    range: std::ops::RangeInclusive<T>,
+    step: f64,
+) -> (egui::Response, Option<Json>) {
+    let response = slider(ui, &mut value, range.clone());
+    let steps = scroll_steps(ui, &response);
+    if steps != 0.0 {
+        let (min, max) = (range.start().to_f64(), range.end().to_f64());
+        value = T::from_f64((value.to_f64() + steps * step).clamp(min, max));
+    }
+    (response, Some(json!(value)))
+}
+
+/// A dropdown over the options, with the selected option's own settings below.
+/// Settings of an option left behind are kept for this session if it is chosen
+/// again.
+fn choice(
+    ui: &mut Ui,
+    id: egui::Id,
+    options: &[drip::param::ChoiceSpec],
+    value: &Json,
+) -> (egui::Response, Option<Json>) {
+    ui.vertical(|ui| {
+        let previous =
+            options.iter().position(|option| option.selected(value)).expect("validated choice");
+        let mut selected = previous;
+        let response = dropdown(
+            ui,
+            egui::ComboBox::from_id_salt(id),
+            &mut selected,
+            &(0..options.len()).collect::<Vec<_>>(),
+            |index| options[index].label.into(),
+        );
+        let option = &options[selected];
+        let mut edited = if selected == previous {
+            value.clone()
+        } else {
+            ui.data_mut(|data| data.insert_temp(id.with(options[previous].name), value.clone()));
+            ui.data(|data| data.get_temp::<Json>(id.with(option.name)))
+                .unwrap_or_else(|| option.default_value())
+        };
+        if let Some(parameters) = option.parameters {
+            ui.indent(id.with(option.name), |ui| {
+                egui::Grid::new(id.with((option.name, "fields"))).num_columns(2).show(ui, |ui| {
+                    for spec in parameters {
+                        let label = ui.label(spec.label);
+                        if !spec.documentation.is_empty() {
+                            label.on_hover_text(spec.documentation);
+                        }
+                        let field = &mut edited[option.name][spec.name];
+                        let id = id.with((option.name, spec.name));
+                        if let Some(value) = edit_value_with(ui, id, &spec.kind, field, spec.label)
+                        {
+                            *field = value;
+                        }
+                        ui.end_row();
+                    }
+                });
+            });
+        }
+        (response, Some(edited))
+    })
+    .inner
+}
+
+/// A file dialog button and the chosen file's name. Saved files get the first
+/// extension when the user typed none.
+fn path(
+    ui: &mut Ui,
+    value: &Json,
+    output: bool,
+    extensions: &[&str],
+    label: &str,
+) -> (egui::Response, Option<Json>) {
+    let selected = value.as_str().map(std::path::Path::new);
+    let name =
+        selected.and_then(|p| p.file_name()).map_or("Not selected".into(), |n| n.to_string_lossy());
+    let mut chosen = None;
+    let response = ui
+        .horizontal(|ui| {
+            if ui.button("Browse…").clicked() {
+                let mut dialog = rfd::FileDialog::new().set_title(label);
+                if !extensions.is_empty() {
+                    dialog = dialog.add_filter(label, extensions);
+                }
+                if let Some(dir) = selected.and_then(|p| p.parent()) {
+                    dialog = dialog.set_directory(dir);
+                }
+                chosen =
+                    if output { dialog.save_file() } else { dialog.pick_file() }.map(|mut p| {
+                        if output
+                            && p.extension().is_none()
+                            && let Some(extension) = extensions.first()
+                        {
+                            p.set_extension(extension);
+                        }
+                        json!(p)
+                    });
+            }
+            let name = ui.add(egui::Label::new(name).sense(Sense::click()));
+            if let Some(path) = selected {
+                name.clone().on_hover_text(path.display().to_string());
+            }
+            name
+        })
+        .inner;
+    (response, chosen)
 }
 
 fn slider<T: egui::emath::Numeric>(
