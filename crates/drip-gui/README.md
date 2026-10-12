@@ -3,6 +3,24 @@
 Ownership follows the [library's organization](../drip/README.md#organization):
 node-specific controls, preparation and presentation live under `src/node_ui/`.
 
+## Files
+
+The non-trivial files outside `node_ui/`:
+
+- `app.rs`: application state: the project, windows, menus, project commands
+  and shortcuts, the unsaved-edits prompt, undo/redo.
+- `history.rs`: undo history of whole-graph snapshots.
+- `editing.rs`: applies a frame's graph edits and reports their effects.
+- `editor.rs`, `editor/picker.rs`: the canvas (node frames, ports, wires, pan
+  and zoom) and the node picker.
+- `model/`: `Graph`, the DAG plus names, template inputs and layout, and its
+  project persistence.
+- `registry.rs`: the hand-maintained `VIEWS`, `REGISTRY` and `BINDINGS`.
+- `worker.rs`: the background queue for previews and node actions.
+- `parent.rs`: pop-outs as child windows of the main window.
+- `render/`: worker-prepared node drawing, linear Rec.2020 images and
+  color-managed presentation per window system.
+
 ## Registries
 
 `src/registry.rs` lists, by hand, everything the GUI discovers:

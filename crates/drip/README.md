@@ -32,6 +32,23 @@ RGB spaces, compared exactly). Ports declare requirements as type arguments,
 `Read<'_, Device<Rgb>, Rec2020>`; the checker, help and editor read the same
 declaration. Do not flatten unrelated ports merely to make storage uniform.
 
+## Files
+
+The non-trivial files outside `node/`:
+
+- `definition.rs`: what `#[node]` generates against: `Kind`, `Tag`, the
+  `Node`/`Typed` traits, `Action`, `Assets`.
+- `registry.rs`: the hand-maintained `NODES`, `TAGS` and `Registry`.
+- `graph.rs`: `Dag` and transactional edits, checked on ports only.
+- `eval.rs`: `Evaluator`, demand-driven evaluation of the requested subgraph;
+  contracts run here.
+- `ports.rs`: port views (`Read`/`Write`/`Load`), `Cpu`/`Device` residency and
+  interpretation requirements.
+- `payload.rs`: payload families and their host/device storage.
+- `param.rs`: parameter schemas, encoding and validation.
+- `project.rs`: `.drip` persistence, loaded through a `Registry`.
+- `runtime.rs`: one compute client per evaluator; `DRIP_BACKEND` selection.
+
 ## Registries
 
 Everything a frontend discovers is listed by hand in a registry module, not
