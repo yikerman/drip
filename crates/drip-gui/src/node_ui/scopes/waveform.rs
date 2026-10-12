@@ -26,7 +26,7 @@ pub struct Settings {
 /// Plot linear RGB channel exposure against horizontal image position, without a
 /// color conversion; camera RGB shows native channels. Exposure is measured
 /// relative to sample value 1; the density scale controls bin brightness.
-#[drip::node(id = "view.waveform", name = "Waveform", category = "View")]
+#[drip::node(id = "waveform", name = "Waveform", category = "View")]
 pub fn observe(
     _: &KernelContext<'_>,
     _: &Settings,

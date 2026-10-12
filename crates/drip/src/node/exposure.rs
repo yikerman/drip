@@ -26,7 +26,7 @@ fn exposure_contract(_: &GlobalContext, _: &Exposure, image: &RgbDesc) -> Result
 /// Adjust RGB exposure by multiplying linear samples by 2^EV. Output retains
 /// the input coordinates. Negative and above-one samples are allowed; this
 /// operation does not impose a scene/display processing order.
-#[crate::node(id = "tone.exposure", name="Exposure", category="Tone", contract = exposure_contract)]
+#[crate::node(id = "exposure", name="Exposure", category="Tone", contract = exposure_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     params: &Exposure,

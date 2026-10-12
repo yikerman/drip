@@ -4,6 +4,9 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Node IDs by operation alone: workspace tests, including project round trips
+  and GUI help and error labels, pass with the new IDs; strict workspace Clippy
+  passes.
 - Explicit GUI bindings: GUI tests for prepared views, custom controls, the
   preparation probe and the write action run through the listed bindings; a
   test checks entries are unique and never double a node action. 94 GUI tests,

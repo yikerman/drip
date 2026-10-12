@@ -83,7 +83,7 @@ impl Assets for Export {
 /// detail, independently of preview detail. Compression is lossless. A profile
 /// file is read at the first export; choose it again to pick up changes.
 #[crate::node(
-    id = "output.tiff",
+    id = "export-tiff",
     name = "Export TIFF",
     category = "Output",
     action = export,

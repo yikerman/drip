@@ -110,7 +110,7 @@ fn typed_macro_supplies_docs_ports_and_discovery() {
     let sigmoid = node::sigmoid::apply::definition(Default::default()).unwrap();
     assert_eq!(sigmoid.kind().inputs[0].label(), "RGB · Rec.2020 / D65");
     assert!(n.kind().parameters.is_empty());
-    assert!(registry.build("tone.exposure", serde_json::json!({"ev":"bad"})).is_err());
+    assert!(registry.build("exposure", serde_json::json!({"ev":"bad"})).is_err());
 }
 #[test]
 fn parameter_schema_comes_from_the_function_parameter_type() {

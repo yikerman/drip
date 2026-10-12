@@ -83,7 +83,7 @@ fn apply_contract(_: &GlobalContext, _: &Settings, image: &RgbDesc) -> Result<(R
 /// with reference white at 1. Grey is fixed at 0.18; black stays zero and the
 /// curve approaches one. Outputs edited RGB in the same coordinates. Negative
 /// channels use an achromatic projection; no output encoding is applied.
-#[crate::node(id="tone.sigmoid",
+#[crate::node(id="sigmoid",
 name="Sigmoid",
 category="Tone",
 contract=apply_contract,

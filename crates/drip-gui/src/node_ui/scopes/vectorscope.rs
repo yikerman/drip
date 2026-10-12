@@ -19,7 +19,7 @@ const RADIUS: f32 = 0.5;
 /// Plot linear Rec.2020/D65 RGB chromaticity in CIE 1976 u′v′. Negative channels
 /// are clipped for visualization; black has no chromaticity and is omitted.
 /// Density uses logarithmic counts.
-#[drip::node(id = "view.vectorscope", name = "Vectorscope", category = "View")]
+#[drip::node(id = "vectorscope", name = "Vectorscope", category = "View")]
 pub fn observe(
     _: &KernelContext<'_>,
     _: &(),

@@ -50,7 +50,8 @@ a new node is one more line.
 ## Node metadata and parameters
 
 Declare operation names, categories, help and port contracts beside node functions.
-Registered IDs use `category.operation`; display labels use sentence case and
+IDs name the operation in kebab case (`exposure`, `rcd-demosaic`) and are the
+persistence keys; display labels use sentence case and
 retain technical spellings such as RAW, RGB, ICC, sRGB and Rec.2020. Labels do
 not determine compatibility or persistence keys.
 

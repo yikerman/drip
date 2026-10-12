@@ -37,7 +37,7 @@ fn source_contract(_: &drip::runtime::GlobalContext, _: &()) -> drip::Result<(Rg
         coordinates: Coordinates::Space(REC2020_D65),
     },))
 }
-#[drip::node(id="test.proof-source", name="display", category="test", contract=source_contract)]
+#[drip::node(id="test-proof-source", name="display", category="test", contract=source_contract)]
 pub fn display(_: &KernelContext<'_>, _: &(), image: Write<'_, Cpu<Rgb>>) -> drip::Result<()> {
     image.data.copy_from_slice(&PIXELS);
     Ok(())
@@ -50,7 +50,7 @@ pub struct SlowKernel {
     #[param(default = false)]
     block: bool,
 }
-#[drip::node(id="test.slow", name="slow", category="test", contract=empty_contract)]
+#[drip::node(id="test-slow", name="slow", category="test", contract=empty_contract)]
 pub fn slow(_: &KernelContext<'_>, _: &SlowKernel) -> drip::Result<()> {
     Ok(())
 }
@@ -73,7 +73,7 @@ impl GuiNode for slow::Definition {
     });
 }
 
-#[drip::node(id="test.declared_view", category="test", name="Declared view", contract=empty_contract)]
+#[drip::node(id="test-declared_view", category="test", name="Declared view", contract=empty_contract)]
 pub fn declared_view(_: &KernelContext<'_>, _: &()) -> drip::Result<()> {
     Ok(())
 }
@@ -88,7 +88,7 @@ pub struct CustomSettings {
     #[param(default = false)]
     enabled: bool,
 }
-#[drip::node(id="test.custom_controls_view", category="test", name="Custom controls view", contract=empty_contract)]
+#[drip::node(id="test-custom_controls_view", category="test", name="Custom controls view", contract=empty_contract)]
 pub fn custom_controls_view(_: &KernelContext<'_>, _: &CustomSettings) -> drip::Result<()> {
     Ok(())
 }
@@ -110,7 +110,7 @@ pub struct ProbeSettings {
     #[param(default = true)]
     fail: bool,
 }
-#[drip::node(id="test.preparation_cache", category="test", name="Preparation", contract=empty_contract)]
+#[drip::node(id="test-preparation_cache", category="test", name="Preparation", contract=empty_contract)]
 pub fn probe(_: &KernelContext<'_>, _: &ProbeSettings) -> drip::Result<()> {
     Ok(())
 }
@@ -135,7 +135,7 @@ fn sink_contract(
     Ok(())
 }
 /// A frontend action that writes the first input pixel at full detail.
-#[drip::node(id="test.write", category="test", name="write", contract=sink_contract)]
+#[drip::node(id="test-write", category="test", name="write", contract=sink_contract)]
 pub fn write(
     _: &KernelContext<'_>,
     _: &WriteKernel,

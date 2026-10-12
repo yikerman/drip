@@ -180,7 +180,7 @@ fn invalid_port_targets_keep_the_pending_connection_and_existing_source() {
     let pending = h.state().editor.wire;
     for (id, direction, error) in [
         (source, Direction::Input, "Choose an output port"),
-        (bayer, Direction::Output, "payload mismatch at tone.exposure.image"),
+        (bayer, Direction::Output, "payload mismatch at exposure.image"),
         (target, Direction::Output, "cycle"),
     ] {
         click_port(&mut h, id, direction, Secondary);
@@ -496,7 +496,7 @@ fn click_selection_and_node_menu_actions() {
     h.run();
     assert_eq!(h.state().graph.nodes().count(), 1);
     let added = h.state().graph.node(h.state().selected.unwrap()).unwrap();
-    assert_eq!(added.kind.id, "tone.exposure");
+    assert_eq!(added.kind.id, "exposure");
     assert_eq!(added.name, "Exposure");
     assert!(!egui::Popup::is_any_open(&h.ctx));
 }
@@ -532,7 +532,7 @@ fn downstream_error_rows_name_the_failed_node() {
     let below = graph.add_node(&drip::node::exposure::compute::KIND).unwrap();
     graph.set_name(raw, "RAW").unwrap();
     let source = Box::new(drip::Error::Runtime("select a RAW".into()));
-    let error = drip::Error::Node { node: raw, kind: "input.bayer-raw", source };
+    let error = drip::Error::Node { node: raw, kind: "bayer-raw", source };
     let own = ErrorRow::new(&graph, raw, &error);
     assert_eq!((own.text.as_str(), own.color), ("select a RAW", theme::ERROR));
     let downstream = ErrorRow::new(&graph, below, &error);

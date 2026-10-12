@@ -93,7 +93,7 @@ impl Assets for Preview {
 /// check marks out-of-gamut colors in cyan. Each proof mode owns its output
 /// settings; a profile file is read at the first preview. Interpolation selects bilinear
 /// or nearest-neighbor display sampling and does not alter processing pixels.
-#[drip::node(id = "view.preview", name = "Preview", category = "View", assets)]
+#[drip::node(id = "preview", name = "Preview", category = "View", assets)]
 pub fn observe(
     _: &KernelContext<'_>,
     _: &Preview,

@@ -884,7 +884,7 @@ mod tests {
             #[param(default = false)]
             value: bool,
         }
-        #[drip::node(id="test.offscreen", name="offscreen", category="test", contract=empty_contract)]
+        #[drip::node(id="test-offscreen", name="offscreen", category="test", contract=empty_contract)]
         fn offscreen(_: &KernelContext<'_>, _: &OffscreenKernel) -> drip::Result<()> {
             CALLS.fetch_add(1, Ordering::SeqCst);
             Ok(())
@@ -1202,7 +1202,7 @@ mod tests {
         app.selected = Some(id);
         let mut h = harness(app);
         h.run();
-        let kind = h.get_by_label("tone.sigmoid").rect();
+        let kind = h.get_by_label("sigmoid").rect();
         let description = h.get_by_label(&documentation).rect();
         let output = h.get_by_label("Output").rect();
         let control = h.get_by_label("Contrast").rect();
@@ -1220,7 +1220,7 @@ mod tests {
             },
         );
         popup.run();
-        assert!(popup.query_by_label("tone.sigmoid").is_some());
+        assert!(popup.query_by_label("sigmoid").is_some());
         assert!(popup.query_by_label("Contrast").is_some());
         assert!(popup.query_by_label("Rec.2020 RGB").is_none());
         assert!(popup.query_by_label("darktable: sigmoid").is_none());
@@ -1233,7 +1233,7 @@ mod tests {
         app.selected = app.project.graph.find("RCD demosaic");
         let mut h = harness(app);
         h.run();
-        let kind = h.get_by_label("demosaic.rcd").rect();
+        let kind = h.get_by_label("rcd-demosaic").rect();
         let input = h.get_by_label("Input · image").rect();
         let output = h.get_by_label("Output").rect();
         let reference = h.get_by_label("RCD source").rect();
@@ -1255,7 +1255,7 @@ mod tests {
         ) -> drip::Result<(RgbDesc,)> {
             Ok((image.clone(),))
         }
-        #[drip::node(id="test.generic", name="generic", category="test", contract=contract)]
+        #[drip::node(id="test-generic", name="generic", category="test", contract=contract)]
         fn generic(
             _: &KernelContext<'_>,
             _: &(),
@@ -1275,7 +1275,7 @@ mod tests {
             app.selected = Some(id);
             let mut h = harness(app);
             h.run();
-            let kind = h.get_by_label("test.generic").rect();
+            let kind = h.get_by_label("test-generic").rect();
             let input = h.get_by_label("Input · image").rect();
             let output = h.get_by_label("Output").rect();
             assert!(kind.bottom() <= input.top() && input.bottom() <= output.top());

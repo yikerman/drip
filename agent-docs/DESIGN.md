@@ -266,8 +266,10 @@ Settled with the user on 2026-10-11 after a review against
 - **Requirement:** Preserve universal node controls/views, per-node pop-out
   windows and interaction logic; internal APIs may change.
 - **Decided:** Sentence-case display labels independent of persisted keys. IDs
-  use `category.operation` without migration aliases. Categories: Input, Sensor,
-  Demosaic, Color, Tone, Geometry, View, Output.
+  name the operation alone in kebab case, qualified where it would be unclear
+  (`rcd-demosaic`, `export-tiff`), without migration aliases; projects saved
+  with the earlier `category.operation` IDs do not load. Categories: Input,
+  Sensor, Demosaic, Color, Tone, Geometry, View, Output.
 - **Decided:** Enum variants own their dependent parameter structs; Serde
   adapters and UI schemas are generated together, externally tagged. Only the
   selected variant's fields are shown and saved.

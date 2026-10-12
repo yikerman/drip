@@ -49,13 +49,13 @@ fn export_reads_its_profile_file_when_first_used() {
     std::fs::write(&file, &srgb).unwrap();
     let mut params = serde_json::to_value(drip::node::export::Export::default()).unwrap();
     params["profile"] = json!({"file": {"path": file}});
-    let loaded = registry().build("output.tiff", params.clone()).unwrap();
+    let loaded = registry().build("export-tiff", params.clone()).unwrap();
     let icc = || Definition::of(&*loaded).unwrap().assets().map(|output| output.icc.clone());
     assert_eq!(icc().unwrap(), srgb);
     std::fs::remove_file(&file).unwrap();
     assert_eq!(icc().unwrap(), srgb, "files are assumed unchanged once read");
     // A missing file is the node's error, not a refused edit.
-    let missing = registry().build("output.tiff", params.clone()).unwrap();
+    let missing = registry().build("export-tiff", params.clone()).unwrap();
     let error = Definition::of(&*missing).unwrap().assets().err().unwrap();
     assert!(error.to_string().contains(&*file.to_string_lossy()), "{error}");
     assert_eq!(missing.parameters().unwrap(), params);
@@ -95,12 +95,12 @@ fn missing_raw_preserves_editable_parameters_and_reports_load_error() {
     let path = std::path::Path::new("/tmp/drip-deliberately-missing-raw-source.nef");
     assert!(!path.exists());
     let (mut dag, _) = drip::node::templates::raw_to_tiff().unwrap();
-    let raw = dag.nodes().find(|(_, n)| n.kind().id == "input.bayer-raw").unwrap().0;
+    let raw = dag.nodes().find(|(_, n)| n.kind().id == "bayer-raw").unwrap().0;
     dag.set_parameters(raw, json!({ "path": path })).unwrap();
     let text = Project { dag, ..Default::default() }.to_json().unwrap();
     let mut restored = Project::from_json(&text, &registry()).unwrap();
     assert_eq!(restored.to_json().unwrap(), text);
-    let sigmoid = restored.dag.nodes().find(|(_, n)| n.kind().id == "tone.sigmoid").unwrap().0;
+    let sigmoid = restored.dag.nodes().find(|(_, n)| n.kind().id == "sigmoid").unwrap().0;
     let target = restored.dag.output_port(sigmoid, "output").unwrap();
     let target = restored.dag.typed_output::<Rgb>(target).unwrap();
     let error = Evaluator::new(RuntimeContext::host())
@@ -108,7 +108,7 @@ fn missing_raw_preserves_editable_parameters_and_reports_load_error() {
         .err()
         .unwrap();
     assert!(error.to_string().contains("drip-deliberately-missing-raw-source.nef"));
-    let raw = restored.dag.nodes().find(|(_, n)| n.kind().id == "input.bayer-raw").unwrap().0;
+    let raw = restored.dag.nodes().find(|(_, n)| n.kind().id == "bayer-raw").unwrap().0;
     let values = Evaluator::new(RuntimeContext::host()).evaluate_inputs(
         &restored.dag,
         &Default::default(),
