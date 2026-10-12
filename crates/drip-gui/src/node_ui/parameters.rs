@@ -23,7 +23,13 @@ pub fn heading(ui: &mut Ui, cx: &mut NodeCx) {
     if let Some(name) = edit_text(ui, name_id, cx.graph().name(id).expect("existing node")) {
         cx.set_name(&name);
     }
-    ui.weak(cx.kind().id);
+    let kind = cx.kind();
+    ui.horizontal_wrapped(|ui| {
+        ui.weak(kind.id);
+        for tag in kind.tags {
+            ui.weak(tag.id).tip(tag.description);
+        }
+    });
 }
 
 pub fn focus_name(ctx: &egui::Context, id: crate::model::NodeId) {
