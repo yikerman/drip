@@ -7,8 +7,10 @@ node-specific controls, preparation and presentation live under `src/node_ui/`.
 
 The non-trivial files outside `node_ui/`:
 
-- `app.rs`: application state: the project, windows, menus, project commands
-  and shortcuts, the unsaved-edits prompt, undo/redo.
+- `app.rs`: application state: the project, windows, layout, evaluation
+  requests and node actions.
+- `app/commands.rs`: project commands shared by the menu and shortcuts, the
+  unsaved-edits prompt, opening and saving, undo/redo.
 - `history.rs`: undo history of whole-graph snapshots.
 - `editing.rs`: applies a frame's graph edits and reports their effects.
 - `editor.rs`, `editor/picker.rs`: the canvas (node frames, ports, wires, pan
