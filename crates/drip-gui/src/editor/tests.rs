@@ -333,7 +333,7 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
                 Some(h.state().output(source))
             );
             assert_eq!(h.state().edited, removed);
-            assert!(h.state().editor.picker.is_none(), "right-click opens no menu");
+            assert_eq!(h.state().editor.picker.is_some(), !removed);
         }
     }
 }
@@ -500,9 +500,7 @@ fn graph_point(h: &Harness<'_, Scene>, screen: Pos2) -> Vec2 {
 fn picker_searches_filters_by_tag_and_adds_where_it_opened() {
     let mut h = harness(1.0);
     let at = pos2(40.0, 40.0);
-    h.event(Event::PointerMoved(at));
-    h.key_press(egui::Key::Space);
-    h.run();
+    click(&mut h, at, Secondary);
     assert!(h.state().editor.picker.is_some());
     h.event(Event::Text("expo".into()));
     h.run();

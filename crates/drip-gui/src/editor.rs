@@ -43,7 +43,8 @@ pub struct Editor {
     zoom: f32,
     /// The port awaiting an opposite-direction endpoint on the next right-click.
     wire: Option<Port>,
-    /// Opened by Space over the canvas or from the menu.
+    /// Opened by a right-click on the background, Space over the canvas or
+    /// from the menu.
     picker: Option<picker::Picker>,
 }
 
@@ -198,6 +199,9 @@ impl Editor {
             && let Some(input) = disconnect
         {
             frame.edit(graph, Edit::Disconnect(input));
+        } else if background.secondary_clicked() {
+            let at = ui.ctx().pointer_latest_pos().map(|p| (to_global.inverse() * p).to_vec2());
+            self.picker = Some(picker::Picker::new(at));
         }
 
         if let Some(id) = *selected

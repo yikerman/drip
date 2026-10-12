@@ -4,6 +4,10 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Palette layout: a wgpu-rendered kittest capture (temporary, not committed)
+  showed the chosen `raw` chip dark, rows as boxes with wrapped first-sentence
+  summaries and the keyboard choice outlined. GUI tests open it by
+  right-click again; 99 GUI tests and strict Clippy pass.
 - Node palette: GUI tests open it with Space and from the editor's menu entry,
   search and click Exposure under the pointer, narrow by the demosaic chip,
   choose RCD with Enter at the visible centre, and close with Escape; a
