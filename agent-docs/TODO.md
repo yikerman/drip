@@ -25,7 +25,8 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Panic-time native teardown | Open | Investigate NVIDIA/Wayland segmentation fault during unwind after the fixed image-view panic. |
 | Worker startup failures | Open | Report thread-creation failures in `Worker::new` without losing the worker. |
 | Sensor calibration | Open | Expose sample conventions and sensor coordinates before dark/flat correction; see [DESIGN](DESIGN.md). |
-| Processing extensions | Deferred | Masks, pixel math, filtering, lens correction, gain fields, registration and multi-frame denoise/HDR/super-resolution/stitching. Add payloads with consumers. |
+| Everyday image nodes | Proposed | Implement in the order below under [Next image nodes](#next-image-nodes). This is a proposed follow-up, not an expansion of the packaged proof-of-concept gate. |
+| Later processing extensions | Deferred | Pixel math, general filtering, gain fields, registration and multi-frame denoise/HDR/super-resolution/stitching. Add payloads with consumers. |
 | Chart calibration | Deferred | Fit reusable transforms from separate chart images; see [DESIGN](DESIGN.md). |
 | Camera color / other CFAs | Deferred | Calibration beyond matrix/as-shot WB; X-Trans and other non-Bayer inputs. |
 | Windows RAW paths | Open | Use LibRaw's wide-path API. |
@@ -46,3 +47,74 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | LibRaw OpenMP | Deferred | Resolve runtime acquisition/bundling on all platforms, check upstream restrictions and measure decode gains. |
 | v0.1 release scope | Open | Set criteria after proof-of-concept feedback and portability/color verification. |
 | CPU-specific builds | Deferred | Measure x86-64-v3 gains before adding variants; keep Rust/native settings consistent, user overrides and ARM64 support. |
+
+## Next image nodes
+
+Proposed order for ordinary still-photo editing, based on the current registry.
+Exposure, CAT16 white balance, orientation, sigmoid contrast and TIFF export
+already exist. Node order here is implementation priority, not mandatory
+processing order. The first three nodes are refined below; dependency and
+filter defaults remain proposals until implementation.
+
+| Order | Node work | First use | Initial scope |
+|-------|-----------|-----------|---------------|
+| 1 | Perspective Transform | Crop, level a horizon or straighten a building. | Compose crop, rotation and four-point perspective correction into one inverse mapping and resample once. Normalized controls, output framing, explicit borders and filtering; direct preview handles belong in the GUI. |
+| 2 | Downsample | Deliver a photograph with a 2048-pixel long edge. | Reduction ratio or target bounds, aspect preservation and selectable filtering. Widen filter support with reduction ratio; preserve signed/HDR linear RGB. Share filter definitions with Perspective Transform. |
+| 3 | JPEG export | Share an edit without a TIFF conversion step. | Reuse output-profile conversion and node actions; propose jpeg-encoder 0.7.1, sRGB default, embedded ICC, quality and explicit chroma subsampling. Downsample supplies delivery dimensions. |
+| 4 | RGB image input | Edit a JPEG or bring in a TIFF reference. | RGB JPEG/PNG/TIFF sources with ICC and orientation handling, an explicit untagged-profile assumption and defined alpha handling. Decode into documented linear RGB coordinates without treating an already rendered image as unrendered scene data. |
+| 5 | Saturation/chroma | Make a landscape less dull or a portrait less colourful. | One global chroma adjustment with stated colour basis and luminance/hue behavior. Define signed/HDR handling; no implicit clipping into a display range. |
+| 6 | Tone curve | Lift midtones or adjust the toe without replacing the whole rendering. | Editable master curve with a defined luminance/per-channel policy, black and above-range behavior. Reuse existing exposure and sigmoid controls for their current jobs. |
+| 7 | Masks and blend | Brighten a face or darken the sky. | Add a Mask payload with its Blend consumer and linear/radial mask producers together. Blend base and adjusted RGB with explicit spatial, colour and weight contracts. Reuse existing adjustment nodes; add a mask view and direct manipulation. Brush and colour/luminance selections follow later. |
+| 8 | Denoise | Clean up a high-ISO photograph. | A documented starting algorithm with useful luminance/chroma controls and predictable behavior at preview scales. Verify detail retention and artifacts at full resolution; choose the input domain with the algorithm. |
+| 9 | Sharpen | Restore apparent detail, including after delivery resizing. | Amount, radius and threshold controls with declared radius units and border behavior. Document recommended placement without enforcing it as a graph restriction. |
+| 10 | Lens correction | Remove barrel distortion, dark corners and lateral colour fringes. | Separate lens-model loading from its application. Start with distortion and vignetting, then lateral CA; use capture metadata and explicit image-to-capture mapping, shared resampling and model-applicability checks. |
+
+Alongside these nodes, add temperature/tint and neutral sampling to the existing
+CAT16 controls; this is the white-balance-controls item above, not another
+adaptation node. Keep local edits compositional: an adjusted image and its base
+feed Blend, rather than embedding masking separately into every adjustment.
+
+### First implementation sequence
+
+1. **JPEG export:** add an encoding action beside TIFF using `jpeg-encoder`.
+   Reuse `profile::Output::convert(RGB_8, ...)`, profile assets and full-detail
+   evaluation. Expose quality and 4:4:4/4:2:2/4:2:0; explicitly use averaged
+   chroma reduction when subsampling. Validate dimensions before converting to
+   `u16`. The crate embeds ICC and EXIF bytes but does not construct EXIF from
+   capture fields: share the existing TIFF tag-writing logic to build the EXIF
+   TIFF directory separately, omitting stale orientation. Verify with an
+   independent decoder, including ICC reconstruction and optional metadata.
+2. **Downsample and shared filtering:** implement separable, scale-aware
+   convolution in CubeCL with normalized weights and declared pixel centres
+   and borders. Start with area/box, triangle, Mitchell and Lanczos3 choices;
+   keep filter definitions reusable and parameterizable. A nearest option can
+   be explicit unfiltered sampling. Resolve target-size preview semantics from
+   actual sampling/full-detail geometry; `extent * global.scale` is not exact
+   after rounded reductions. Retain existing serialized RGB reduction behavior.
+   Test constant preservation, odd extents, noninteger reductions, signed/HDR
+   samples and aliasing/ringing on synthetic patterns across CPU/GPU backends.
+3. **Perspective Transform:** solve/compose a homography on the host and
+   inverse-map output pixel centres in one CubeCL operation. Share filter
+   functions and border rules with Downsample; perspective minification needs
+   a local footprint, not the uniform separable resize implementation. Start
+   with footprint-aware sampling and measure whether mip/EWA optimization is
+   needed. Define out-of-bounds and projective-pole fill; reject undefined
+   transforms, not unconventional framing. Add crop/aspect/angle and quad
+   handles in the GUI. Test identity, exact integer crop, landmark mappings,
+   borders, minification and consistent preview/export framing.
+
+Research (2026-10-12):
+
+- [jpeg-encoder 0.7.1 API](https://docs.rs/jpeg-encoder/0.7.1/jpeg_encoder/struct.Encoder.html)
+  and [source](https://docs.rs/crate/jpeg-encoder/0.7.1/source/src/encoder.rs):
+  direct RGB encoding, selectable subsampling, ICC chunking and EXIF embedding.
+- [image JPEG encoder](https://docs.rs/image/0.25.10/image/codecs/jpeg/struct.JpegEncoder.html):
+  viable quality/ICC/EXIF alternative, without an exposed subsampling selector.
+- [fast_image_resize filters](https://docs.rs/fast_image_resize/6.0.0/src/fast_image_resize/convolution/filters.rs.html):
+  filter families and custom support; CPU resizer reference, not a replacement
+  for Drip's shared backend kernels.
+- [vkdt crop shader](https://github.com/hanatos/vkdt/blob/f0be6383fbf80bc58d58b991ded28bf3da01c1c3/src/pipe/modules/crop/main.comp):
+  combines crop, rotation and perspective in one inverse-map pass.
+- [OpenCV geometric transformations](https://docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html)
+  and [PBRT image filtering](https://pbr-book.org/4ed/Textures_and_Materials/Image_Texture):
+  inverse mapping and footprint-dependent filtering references.

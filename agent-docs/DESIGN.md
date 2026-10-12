@@ -144,6 +144,20 @@ Settled with the user on 2026-10-11 after a review against
 
 ## Processing
 
+- **Requirement:** Combine crop and straighten into Perspective Transform;
+  implement delivery resizing as Downsample with selectable filtering.
+- **Tentative:** Implement JPEG export first using `jpeg-encoder`, reusing
+  output profiles and actions; then Downsample's scale-aware CubeCL filtering,
+  then Perspective Transform's composed inverse mapping. Share filter math,
+  not the separable resize traversal for arbitrary perspective. Resolve preview
+  sampling and full-detail dimensions explicitly. See the researched
+  [implementation sequence](TODO.md#first-implementation-sequence).
+- **Tentative:** The proposed next-node order in [TODO](TODO.md#next-image-nodes)
+  prioritizes ordinary still-photo editing: framing and delivery first, then
+  colour/tone controls and reusable local adjustments, followed by noise,
+  sharpening and lens correction. Reuse existing exposure, CAT16 and sigmoid
+  operations; temperature/tint and neutral sampling extend the existing WB
+  interface. This proposal does not change the packaged proof-of-concept gate.
 - **Decided:** RAW metadata holds common capture/lens/GPS/sensor fields and native
   WB/color/black/white calibration (derived values move to consumers; see Model). Missing calibration does not hide descriptive metadata or mosaic
   data. Vendor maker notes are out of scope.

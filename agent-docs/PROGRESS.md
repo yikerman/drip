@@ -2,6 +2,32 @@
 
 Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
+## 2026-10-12
+
+- Researched JPEG crate APIs and read `jpeg-encoder` 0.7.1 encoding/ICC/EXIF
+  source, Drip's export/profile/reduction code and vkdt's crop/resize shaders.
+  Revised the proposed backlog to Perspective Transform, Downsample and JPEG
+  export; recorded an implementation sequence and filtering/preview contracts.
+  No dependencies or kernels changed; no runtime or quality measurements.
+- Reviewed the node registry, starting template, sigmoid, orientation, RGB
+  reduction and TIFF export for an ordinary still-image node backlog. Added a
+  proposed implementation order and initial scopes to TODO, with rationale
+  marked Tentative in DESIGN. Documentation only; algorithms and dependencies
+  remain unselected, and the packaged proof-of-concept gate is unchanged.
+- Compared Drip `7d3b450` with upstream vkdt `f0be638` (2026-10-12),
+  reading both core and GUI implementations. Held processing-node availability
+  equal when assessing extensibility: Drip's typed host/device values,
+  per-output descriptions and branch-local failures versus vkdt's Vulkan
+  scheduling, frame feedback, resident display images and production frontend.
+  Distinguished existing behavior from prospective calibration and temporal
+  workflows. Source review only; no runtime comparison or benchmarks, and no
+  implementation decisions.
+- Narrowed the comparison to concrete still-image workflows: simultaneous
+  looks/proofs, reusable chart calibration, full-resolution adjustment and
+  collection editing. Verified preview profiles are RGB-only; separated
+  prospective calibration contracts from implemented checks and avoided
+  assigning an architectural winner to HDR or focus stacking by node availability.
+
 ## 2026-10-11
 
 - Palette layout: a wgpu-rendered kittest capture (temporary, not committed)
