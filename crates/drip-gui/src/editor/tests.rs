@@ -505,6 +505,10 @@ fn picker_searches_filters_by_tag_and_adds_where_it_opened() {
     h.event(Event::Text("expo".into()));
     h.run();
     assert!(h.query_by_label("Export TIFF").is_some(), "both names start with the query");
+    h.ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    h.get_by_role_and_label(egui::accesskit::Role::Label, "encoding").hover();
+    h.run();
+    assert!(h.query_by_label(drip::registry::tag::ENCODING.description).is_some());
     h.get_by_label("Exposure").click();
     h.run();
     let s = h.state();
@@ -517,7 +521,7 @@ fn picker_searches_filters_by_tag_and_adds_where_it_opened() {
     // From the menu, the node goes to the centre of the visible canvas.
     h.state_mut().editor.add_node();
     h.run();
-    h.get_by_label("demosaic").click();
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "demosaic").click();
     h.run();
     assert!(h.query_by_label("Exposure").is_none());
     assert!(h.query_by_label("RCD demosaic").is_some());

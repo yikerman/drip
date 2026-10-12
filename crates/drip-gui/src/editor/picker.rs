@@ -109,8 +109,9 @@ fn row(ui: &mut Ui, kind: &Kind, current: bool) -> Response {
         ui.set_width(ui.available_width());
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(kind.name).strong());
-            let tags: Vec<_> = kind.tags.iter().map(|tag| tag.id).collect();
-            ui.weak(tags.join(" · "));
+            for tag in kind.tags {
+                ui.weak(tag.id).tip(tag.description);
+            }
         });
         ui.add(Label::new(RichText::new(summary(kind.help)).small()).wrap());
     });
