@@ -313,8 +313,9 @@ Settled with the user on 2026-10-11 after a review against
 - **Decided:** Scope overlays keep axes and compact color-space labels; no
   counts, dimensions or repeated settings. Waveforms default to logarithmic
   density, histograms to linear.
-- **Decided:** Text is set in Source Sans 3 at weight 400 and monospace in
-  Source Code Pro, both vendored variable fonts embedded in the binary.
+- **Decided:** Text is set in Source Sans 3 at weight 400, names (palette
+  results, the inspector's name field) at 600, and monospace in Source Code
+  Pro, both vendored variable fonts embedded in the binary.
   egui's bundled fonts are disabled, so glyphs outside these fonts render as
   `?`: no emoji, and node header buttons use `≡` (parameters) and `❒` (view).
   Every test harness installs the fonts, so text is measured as shipped.

@@ -108,7 +108,7 @@ fn row(ui: &mut Ui, kind: &Kind, current: bool) -> Response {
     let content = Frame::new().inner_margin(6.0).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal_wrapped(|ui| {
-            ui.label(RichText::new(kind.name).strong());
+            ui.label(RichText::new(kind.name).variation("wght", theme::NAME_WEIGHT));
             for tag in kind.tags {
                 ui.weak(tag.id).tip(tag.description);
             }

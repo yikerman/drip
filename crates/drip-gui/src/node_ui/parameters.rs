@@ -5,7 +5,7 @@ use egui::{PointerButton, Sense, Ui};
 use serde_json::{Value as Json, json};
 
 use crate::editing::NodeCx;
-use crate::theme::Tip;
+use crate::theme::{self, Tip};
 use crate::widgets::{dropdown, scroll_steps};
 
 /// A node's name, kind, parameters and actions, without inspector help.
@@ -286,12 +286,25 @@ fn reset_action(ui: &mut Ui, kind: &ParamKind) -> Option<Json> {
     })
 }
 
-/// A single-line text field whose edit is returned once the field stops having
-/// focus, however that happens; while editing, the draft lives in egui's memory.
+/// A single-line text field, in the name weight, whose edit is returned once
+/// the field stops having focus, however that happens; while editing, the
+/// draft lives in egui's memory.
 fn edit_text(ui: &mut Ui, id: egui::Id, current: &str) -> Option<String> {
     let editing = ui.data_mut(|d| d.get_temp::<String>(id));
     let mut draft = editing.clone().unwrap_or_else(|| current.to_owned());
-    let response = ui.add(egui::TextEdit::singleline(&mut draft).id(id).frame(egui::Frame::NONE));
+    // A text field takes a weight only through its layouter.
+    let mut layouter = |ui: &Ui, text: &dyn egui::TextBuffer, _: f32| {
+        let mut job = egui::text::LayoutJob::default();
+        egui::RichText::new(text.as_str()).variation("wght", theme::NAME_WEIGHT).append_to(
+            &mut job,
+            ui.style(),
+            egui::FontSelection::Default,
+            egui::Align::Center,
+        );
+        ui.fonts_mut(|fonts| fonts.layout_job(job))
+    };
+    let edit = egui::TextEdit::singleline(&mut draft).id(id).frame(egui::Frame::NONE);
+    let response = ui.add(edit.layouter(&mut layouter));
     if response.has_focus() {
         ui.data_mut(|d| d.insert_temp(id, draft));
         return None;

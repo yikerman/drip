@@ -22,6 +22,8 @@ pub const LINK: Color32 = Color32::from_rgb(0, 32, 80);
 
 pub const BODY_SIZE: f32 = 16.0;
 pub const SMALL_SIZE: f32 = 14.0;
+/// Semibold, the `wght` of names.
+pub const NAME_WEIGHT: f32 = 600.0;
 
 /// Hover text, dark so it reads as information rather than as a menu of actions.
 /// Use instead of egui's `on_hover_text`, whose tooltips look like menus.
