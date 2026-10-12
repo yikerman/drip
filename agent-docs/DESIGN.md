@@ -270,6 +270,8 @@ Settled with the user on 2026-10-11 after a review against
   shortcuts, which match modifiers exactly in every window: New Ctrl+N, Open
   Ctrl+O, Save Ctrl+S, Save as Ctrl+Shift+S, Save template Ctrl+Alt+S (Cmd on
   macOS). Button tooltips show them; New and Open wait for a running action.
+- **Decided:** New and Open ask to save, discard or cancel unsaved edits in
+  every window; a failed or canceled save keeps the project.
 - **Decided:** Ports show declared payload names and endpoint names; optional
   inputs are marked `?`. Long titles are elided with full names on hover.
   Unsaved edits are tracked separately from evaluation requests.

@@ -39,6 +39,9 @@ pub struct App {
     popped: BTreeSet<Popped>,
     /// Whether the windows need redrawing because what they show changed.
     redraw: bool,
+    /// A command that replaces the project, waiting until unsaved edits are
+    /// saved or discarded.
+    replacing: Option<fn(&mut App)>,
 }
 
 /// A popped-out window as the app wants it.
@@ -139,6 +142,7 @@ impl App {
             wide_gamut,
             popped: BTreeSet::new(),
             redraw: false,
+            replacing: None,
         };
         if let Some(file) = file {
             app.open(file);
@@ -160,6 +164,7 @@ impl App {
     pub fn ui(&mut self, ui: &mut Ui) {
         self.shortcuts(ui.ctx());
         ui.push_id(self.ui_generation, |ui| self.main_ui(ui));
+        self.unsaved_prompt(ui.ctx());
     }
 
     fn main_ui(&mut self, ui: &mut Ui) {
@@ -197,6 +202,7 @@ impl App {
         });
         let report = frame.report;
         self.apply(report);
+        self.unsaved_prompt(ui.ctx());
     }
 
     pub fn windows(&self) -> Vec<Window> {
@@ -208,12 +214,14 @@ impl App {
     }
 
     pub fn title(&self) -> String {
-        let name = self
-            .file
+        format!("{}{} · Drip", self.name(), if self.modified { " *" } else { "" })
+    }
+
+    fn name(&self) -> std::borrow::Cow<'_, str> {
+        self.file
             .as_ref()
             .and_then(|path| path.file_name())
-            .map_or_else(|| "Untitled".into(), |name| name.to_string_lossy());
-        format!("{name}{} · Drip", if self.modified { " *" } else { "" })
+            .map_or_else(|| "Untitled".into(), |name| name.to_string_lossy())
     }
 
     /// The size, in points, to open window `popped` at. egui has no pass
@@ -334,7 +342,7 @@ impl App {
                 let button = egui::Button::new(command.label);
                 let shortcut = ui.ctx().format_shortcut(&command.shortcut);
                 if ui.add_enabled(self.allows(command), button).tip(shortcut).clicked() {
-                    (command.run)(self);
+                    self.invoke(command);
                 }
             }
             ui.separator();
@@ -363,7 +371,44 @@ impl App {
     fn shortcuts(&mut self, ctx: &egui::Context) {
         if let Some(command) = COMMANDS.iter().find(|c| self.allows(c) && pressed(ctx, c.shortcut))
         {
+            self.invoke(command);
+        }
+    }
+
+    /// Runs `command`, after asking about unsaved edits if it replaces the project.
+    fn invoke(&mut self, command: &Command) {
+        if command.replaces && self.modified {
+            self.replacing = Some(command.run);
+            self.redraw = true;
+        } else {
             (command.run)(self);
+        }
+    }
+
+    /// Asks whether to save unsaved edits before a waiting command replaces
+    /// the project. Every window shows it; the first answer applies.
+    fn unsaved_prompt(&mut self, ctx: &egui::Context) {
+        let Some(replace) = self.replacing else { return };
+        let response = egui::Modal::new(egui::Id::new("unsaved edits")).show(ctx, |ui| {
+            ui.label(format!("{} has unsaved changes.", self.name()));
+            ui.horizontal(|ui| {
+                let save = ui.button("Save").clicked();
+                let discard = ui.button("Discard").clicked();
+                (save, discard, ui.button("Cancel").clicked())
+            })
+            .inner
+        });
+        let (save, discard, cancel) = response.inner;
+        if save {
+            self.save_project();
+        }
+        if save || discard || cancel || response.should_close() {
+            self.replacing = None;
+            self.redraw = true;
+            // A failed or canceled save keeps the project.
+            if discard || (save && !self.modified) {
+                replace(self);
+            }
         }
     }
 
@@ -942,6 +987,43 @@ mod tests {
         h.key_press_modifiers(Modifiers::COMMAND, Key::N);
         h.run();
         assert!(h.state().file.is_none());
+        std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    fn replacing_a_modified_project_asks_to_save_first() {
+        let file = std::env::temp_dir().join(format!("drip-unsaved-{}.drip", std::process::id()));
+        std::fs::write(&file, Project::default().to_json().unwrap()).unwrap();
+        let mut h = harness(App::new(Some(file.clone()), true, || {}));
+        h.run();
+        let add = |h: &mut Harness<'_, App>| {
+            let kind = drip::definition::kind("tone.exposure").unwrap();
+            h.state_mut().edit(Edit::Add(kind, Vec2::ZERO));
+        };
+        add(&mut h);
+        h.key_press_modifiers(Modifiers::COMMAND, Key::N);
+        h.run();
+        h.get_by_label("Cancel").click();
+        h.run();
+        assert!(h.query_by_label("Discard").is_none());
+        assert_eq!(h.state().file.as_ref(), Some(&file), "canceling keeps the project");
+        h.get_by_label("New").click();
+        h.run();
+        // The prompt's Save, above the menu's.
+        h.get_all_by_label("Save").last().unwrap().click();
+        h.run();
+        assert!(h.state().file.is_none(), "saving replaces the project");
+        let saved = Project::from_json(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert!(saved.graph.find("Exposure").is_some());
+        add(&mut h);
+        h.key_press_modifiers(Modifiers::COMMAND, Key::N);
+        h.run();
+        h.get_by_label("Discard").click();
+        h.run();
+        assert!(!h.state().modified, "discarding replaces the project");
+        h.key_press_modifiers(Modifiers::COMMAND, Key::N);
+        h.run();
+        assert!(h.query_by_label("Discard").is_none(), "unmodified projects are replaced");
         std::fs::remove_file(file).unwrap();
     }
 

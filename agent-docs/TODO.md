@@ -32,7 +32,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Drop the wgpu fork | Deferred | Upgrade when a compatible release supports passthrough; see [THIRD_PARTY](../THIRD_PARTY.md). |
 | CLI | Deferred | Template parameters, overwrite/collision policy and partial failures. |
 | Project-relative paths | Open | Resolve against the project location alongside CLI work. |
-| Save/close protection | Deferred | Failure-safe saves/exports, unsaved-close confirmation and in-flight export handling. |
+| Save/close protection | Deferred | Failure-safe saves/exports, confirmation when closing the app with unsaved edits (New and Open ask) and in-flight export handling. |
 | File changes | Idea | Detect changed RAW and ICC files; nodes assume them unchanged until chosen again. |
 | End-to-end latency | Measured | Device scopes reduce full-detail worker latency to 164–171 ms. Profile display upload/draw; remaining worker costs include about 64 ms of CPU preview packing and an 86 ms GPU-completion/readback span. Consider device RGBA packing; keep LittleCMS proofing on CPU. |
 | Memory and drawing cost | Deferred | Measure retained RAWs/export buffers, duplicate GPU uploads across windows and scope mesh copies before considering streaming TIFF/shared textures. |

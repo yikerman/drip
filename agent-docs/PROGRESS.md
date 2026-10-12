@@ -7,6 +7,9 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 - Project command shortcuts: a GUI test saves with Ctrl+S, ignores Ctrl+Shift+N
   and refuses New while an action runs. 87 GUI tests and strict GUI Clippy
   pass; not exercised in a desktop session.
+- Unsaved-edit prompt before New and Open: a GUI test cancels, saves then
+  replaces, discards, and replaces an unmodified project without asking. 88
+  GUI tests and strict GUI Clippy pass; not exercised in a desktop session.
 - Compacted the agent docs and removed entries the lazy model made stale or
   misleading, in DESIGN, PROGRESS, TODO, TYPE_SYSTEM, the README and three
   code comments. Workspace tests pass; documentation only.
