@@ -23,7 +23,6 @@ bytes = "1"
 bytemuck = "1"
 pollster = "1.0.1"
 drip-macros = { path = "../drip-macros" }
-linkme = "0.3.37"
 drip-raw.workspace = true
 lcms2.workspace = true
 log = "0.4.34"

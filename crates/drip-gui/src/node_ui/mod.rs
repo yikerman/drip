@@ -23,6 +23,14 @@ pub const WIDTH: f32 = 200.0;
 /// Space around a node's contents, in graph units.
 pub const PAD: f32 = 6.0;
 
+/// Nodes that only present their inputs; what they prepare is GUI-only.
+pub static VIEWS: &[&Kind] = &[
+    &preview::observe::KIND,
+    &scopes::histogram::observe::KIND,
+    &scopes::waveform::observe::KIND,
+    &scopes::vectorscope::observe::KIND,
+];
+
 #[linkme::distributed_slice]
 pub(super) static BINDINGS: [Binding];
 

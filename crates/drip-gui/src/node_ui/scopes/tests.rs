@@ -85,7 +85,7 @@ fn histogram_bins_by_stops() {
         pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]].into(),
     };
     let mut graph = Graph::default();
-    let id = graph.add_node(drip::definition::kind("view.histogram").unwrap()).unwrap();
+    let id = graph.add_node(&crate::node_ui::scopes::histogram::observe::KIND).unwrap();
     let context = context();
     let prepare = |graph: &Graph| {
         let p: Settings = serde_json::from_value(graph.node(id).unwrap().params).unwrap();

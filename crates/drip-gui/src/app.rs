@@ -892,7 +892,7 @@ mod tests {
 
         #[test]
         fn only_views_force_evaluation() {
-            let kind = drip::definition::kind("test.offscreen").unwrap();
+            let kind = &offscreen::KIND;
 
             let mut project = Project::default();
             let left = project.graph.add_node(kind).unwrap();
@@ -966,7 +966,7 @@ mod tests {
             let (release, resume) = mpsc::channel();
             *GATE.lock().unwrap() = Some((started, resume));
             let mut project = Project::default();
-            let id = project.graph.add_node(drip::definition::kind("test.slow").unwrap()).unwrap();
+            let id = project.graph.add_node(&slow::KIND).unwrap();
             let mut app = App::new(None, true, || {});
             app.set_project(project, None).unwrap();
             let mut h = harness(app);
@@ -1025,10 +1025,8 @@ mod tests {
         settle(&mut h);
         assert!(h.state().file.is_none());
         assert_eq!(h.state().title(), "Untitled · Drip");
-        h.state_mut().edit(crate::editing::Edit::Add(
-            drip::definition::kind("tone.exposure").unwrap(),
-            Vec2::ZERO,
-        ));
+        h.state_mut()
+            .edit(crate::editing::Edit::Add(&drip::node::exposure::compute::KIND, Vec2::ZERO));
         assert_eq!(h.state().title(), "Untitled * · Drip");
         h.state_mut().file = Some(destination.clone());
         h.run();
@@ -1054,7 +1052,7 @@ mod tests {
         std::fs::write(&file, Project::default().to_json().unwrap()).unwrap();
         let mut h = harness(App::new(Some(file.clone()), true, || {}));
         h.run();
-        h.state_mut().edit(Edit::Add(drip::definition::kind("tone.exposure").unwrap(), Vec2::ZERO));
+        h.state_mut().edit(Edit::Add(&drip::node::exposure::compute::KIND, Vec2::ZERO));
         // Extra modifiers select no command, so New keeps the edit.
         h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::N);
         h.run();
@@ -1083,7 +1081,7 @@ mod tests {
         let mut h = harness(App::new(Some(file.clone()), true, || {}));
         h.run();
         let add = |h: &mut Harness<'_, App>| {
-            let kind = drip::definition::kind("tone.exposure").unwrap();
+            let kind = &drip::node::exposure::compute::KIND;
             h.state_mut().edit(Edit::Add(kind, Vec2::ZERO));
         };
         add(&mut h);
@@ -1231,8 +1229,7 @@ mod tests {
 
     #[test]
     fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
-        let documentation =
-            drip::definition::kind("tone.sigmoid").unwrap().help.trim().replace('\n', " ");
+        let documentation = drip::node::sigmoid::apply::KIND.help.trim().replace('\n', " ");
         let mut app = App::new(None, true, || {});
         let id = app.project.graph.find("Sigmoid").unwrap();
         app.selected = Some(id);
@@ -1305,8 +1302,7 @@ mod tests {
         #[test]
         fn undocumented_nodes_show_generated_port_help() {
             let mut project = Project::default();
-            let id =
-                project.graph.add_node(drip::definition::kind("test.generic").unwrap()).unwrap();
+            let id = project.graph.add_node(&generic::KIND).unwrap();
             let mut app = App::new(None, true, || {});
             app.set_project(project, None).unwrap();
             app.selected = Some(id);
@@ -1368,8 +1364,8 @@ mod tests {
     #[test]
     fn scope_nodes_offer_popouts() {
         for kind in [
-            drip::definition::kind("view.waveform").unwrap(),
-            drip::definition::kind("view.vectorscope").unwrap(),
+            &crate::node_ui::scopes::waveform::observe::KIND,
+            &crate::node_ui::scopes::vectorscope::observe::KIND,
         ] {
             let mut project = Project::default();
             let id = project.graph.add_node(kind).unwrap();
@@ -1404,10 +1400,7 @@ mod tests {
         #[test]
         fn declared_gui_view_gets_a_popout_before_preparation_succeeds() {
             let mut project = Project::default();
-            let id = project
-                .graph
-                .add_node(drip::definition::kind("test.declared_view").unwrap())
-                .unwrap();
+            let id = project.graph.add_node(&view::KIND).unwrap();
             let mut app = App::new(None, true, || {});
             app.set_project(project, None).unwrap();
             let mut h = harness(app);
@@ -1458,10 +1451,7 @@ mod tests {
         #[test]
         fn custom_controls_keep_the_generic_view_and_popout() {
             let mut project = Project::default();
-            let id = project
-                .graph
-                .add_node(drip::definition::kind("test.custom_controls_view").unwrap())
-                .unwrap();
+            let id = project.graph.add_node(&view::KIND).unwrap();
             let mut app = App::new(None, true, || {});
             app.set_project(project, None).unwrap();
             app.selected = Some(id);

@@ -91,8 +91,11 @@ mod tests {
     #[test]
     fn concrete_outputs_are_known_before_inputs_are_connected() {
         let mut graph = Graph::default();
-        for (kind, label) in [("tone.sigmoid", "RGB · Rec.2020 / D65"), ("tone.exposure", "RGB")] {
-            let id = graph.add_node(drip::definition::kind(kind).unwrap()).unwrap();
+        for (kind, label) in [
+            (&drip::node::sigmoid::apply::KIND, "RGB · Rec.2020 / D65"),
+            (&drip::node::exposure::compute::KIND, "RGB"),
+        ] {
+            let id = graph.add_node(kind).unwrap();
             let ports = texts(graph.kind(id).unwrap());
             assert_eq!(ports[0].hover(), format!("Input · image: requires {label}"));
             assert_eq!(ports.last().unwrap().hover(), format!("Output: {label}"));
@@ -101,7 +104,7 @@ mod tests {
 
     #[test]
     fn every_registered_payload_has_a_color() {
-        for kind in drip::definition::kinds() {
+        for kind in crate::model::REGISTRY.kinds() {
             for spec in kind.inputs.iter().chain(kind.outputs) {
                 assert!(color(spec).is_some(), "{}.{}: {}", kind.id, spec.name, spec.payload);
             }

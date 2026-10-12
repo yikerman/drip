@@ -14,7 +14,7 @@ struct State {
 
 #[test]
 fn chromatic_adaptation_exposes_custom_white_and_as_shot() {
-    let node = drip::definition::kind("color.chromatic-adaptation").unwrap();
+    let node = &drip::node::chromatic_adaptation::compute::KIND;
     let param = node.param("illuminant").unwrap();
     let mut h = harness(param.kind, (node.defaults)()["illuminant"].clone());
     assert_eq!(h.state().value, "as_shot");
@@ -34,7 +34,7 @@ fn chromatic_adaptation_exposes_custom_white_and_as_shot() {
 
 #[test]
 fn orientation_dropdown_selects_override_and_returns_to_metadata() {
-    let node = drip::definition::kind("geometry.orientation").unwrap();
+    let node = &drip::node::orientation::compute::KIND;
     let param = node.param("orientation").unwrap();
     let mut h = harness(param.kind, (node.defaults)()["orientation"].clone());
     for (label, value) in

@@ -112,10 +112,6 @@ pub(super) fn node(
                 #contract
                 #run
             }
-
-            #[::drip::__private::linkme::distributed_slice(::drip::definition::NODES)]
-            #[linkme(crate = ::drip::__private::linkme)]
-            static REGISTRATION: &'static ::drip::definition::Kind = &KIND;
         }
     }
 }

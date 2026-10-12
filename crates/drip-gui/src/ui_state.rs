@@ -82,9 +82,8 @@ mod tests {
     #[test]
     fn layout_handles_invalid_saved_coordinates_without_losing_other_state() {
         let mut graph = crate::model::Graph::default();
-        let ids: Vec<_> = (0..7)
-            .map(|_| graph.add_node(drip::definition::kind("tone.exposure").unwrap()).unwrap())
-            .collect();
+        let ids: Vec<_> =
+            (0..7).map(|_| graph.add_node(&drip::node::exposure::compute::KIND).unwrap()).collect();
         let mut ui = json!({"pos": [1e300, 2], "size": [-1, 200], "other": {"keep": true}});
         assert_eq!(position(&ui, ids[6]), vec2(240.0, 180.0));
         assert_eq!(view_size(&ui), DEFAULT_VIEW_SIZE);

@@ -4,6 +4,10 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Explicit node registry: project round-trip, admission and GUI tests load
+  through `Registry`; a GUI test reopens a project holding a test-only kind
+  from the test list. Workspace tests and strict workspace Clippy pass. With
+  `DRIP_BACKEND=cpu`, the same 12 GUI tests fail before and after the change.
 - Undo/redo: GUI tests make a held slider drag one step that undoes and redoes,
   restore a removed node with its id, edges, name and layout while the RAW
   node stays the same `Arc`, and leave Ctrl+Z to a focused text field; history

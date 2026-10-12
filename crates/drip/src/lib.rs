@@ -49,7 +49,6 @@ mod error {
 
 #[doc(hidden)]
 pub mod __private {
-    pub use linkme;
     pub use serde;
     pub use serde_json;
 }

@@ -495,7 +495,7 @@ mod tests {
     #[test]
     fn backend_configuration_errors_reach_preview_results() {
         let mut graph = Graph::default();
-        let id = graph.add_node(drip::definition::kind("view.preview").unwrap()).unwrap();
+        let id = graph.add_node(&crate::node_ui::preview::observe::KIND).unwrap();
         let demand = preview(7, graph, 2, vec![id]);
         let error = NodeError::Runtime("DRIP_BACKEND=cpu requires --features drip/cpu".into());
         let Event::Evaluated { generation, views, failures } =
@@ -511,8 +511,8 @@ mod tests {
     fn graph(source: &'static Kind) -> (Graph, NodeId, NodeId, NodeId) {
         let mut graph = Graph::default();
         let source = graph.add_node(source).unwrap();
-        let preview = graph.add_node(drip::definition::kind("view.preview").unwrap()).unwrap();
-        let histogram = graph.add_node(drip::definition::kind("view.histogram").unwrap()).unwrap();
+        let preview = graph.add_node(&crate::node_ui::preview::observe::KIND).unwrap();
+        let histogram = graph.add_node(&crate::node_ui::scopes::histogram::observe::KIND).unwrap();
         for target in [preview, histogram] {
             graph
                 .connect(
@@ -624,7 +624,7 @@ mod tests {
             log::set_logger(&Capture).unwrap();
             log::set_max_level(log::LevelFilter::Trace);
 
-            let source_kind = drip::definition::kind("test.diagnostics").unwrap();
+            let source_kind = &diagnostics::KIND;
             let (mut graph, source, preview, histogram) = graph(source_kind);
             let mut worker = Worker::new(Arc::new(|| {}));
             let mut evaluate = |graph: &Graph| {
@@ -748,7 +748,7 @@ mod tests {
 
         #[test]
         fn latest_targets_win_and_a_replaced_worker_skips_queued_work() {
-            let source_kind = drip::definition::kind("test.blocking").unwrap();
+            let source_kind = &blocking::KIND;
 
             let (started, entered) = mpsc::channel();
             let (release, resume) = mpsc::channel();
@@ -788,7 +788,7 @@ mod tests {
 
             // A dropped worker finishes its current command, then skips its
             // queue: here an export that would evaluate the source again.
-            let tiff = graph.add_node(drip::definition::kind("output.tiff").unwrap()).unwrap();
+            let tiff = graph.add_node(&drip::node::export::tiff::KIND).unwrap();
             graph
                 .connect(
                     graph.dag.output_port(source, "image").unwrap(),
@@ -892,9 +892,8 @@ mod tests {
                 std::env::temp_dir().join(format!("drip-worker-input-{}", std::process::id()));
             let output = input.with_extension("out");
             std::fs::write(&input, "1").unwrap();
-            let (mut graph, source, preview, _) =
-                graph(drip::definition::kind("test.file").unwrap());
-            let export = graph.add_node(drip::definition::kind("test.write").unwrap()).unwrap();
+            let (mut graph, source, preview, _) = graph(&file::KIND);
+            let export = graph.add_node(&write::KIND).unwrap();
             graph
                 .connect(
                     graph.dag.output_port(source, "image").unwrap(),
@@ -950,7 +949,7 @@ mod tests {
         }
 
         #[drip::node(id="test.preparation_cache", category="test", name="Preparation", contract=empty_contract)]
-        fn probe(_: &KernelContext<'_>, _: &Settings) -> drip::Result<()> {
+        pub fn probe(_: &KernelContext<'_>, _: &Settings) -> drip::Result<()> {
             Ok(())
         }
         impl crate::node_ui::GuiNode for probe::Definition {
@@ -970,7 +969,7 @@ mod tests {
         use std::sync::atomic::Ordering;
 
         let mut graph = Graph::default();
-        let id = graph.add_node(drip::definition::kind("test.preparation_cache").unwrap()).unwrap();
+        let id = graph.add_node(&preparation_probe::probe::KIND).unwrap();
         let mut worker = Worker::new(Arc::new(|| {}));
         for _ in 0..2 {
             worker.request(&graph, 1, vec![id]).unwrap();
@@ -1005,7 +1004,7 @@ mod tests {
         #[test]
         fn panic_wakes_the_ui_and_ends_the_busy_state() {
             let mut graph = Graph::default();
-            let id = graph.add_node(drip::definition::kind("test.panic").unwrap()).unwrap();
+            let id = graph.add_node(&panic_node::KIND).unwrap();
             let (wake, woke) = mpsc::channel();
             let mut worker = Worker::new(Arc::new(move || {
                 let _ = wake.send(());

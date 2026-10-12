@@ -98,7 +98,8 @@ fn requirements_compare_spaces_exactly_and_parameters_at_admission() {
 }
 #[test]
 fn typed_macro_supplies_docs_ports_and_discovery() {
-    let n = drip::definition::registered("test-cpu-copy", serde_json::Value::Null).unwrap();
+    let registry = drip::definition::Registry::new(&[node::NODES, &[&cpu_copy::KIND]]);
+    let n = registry.build("test-cpu-copy", serde_json::Value::Null).unwrap();
     assert!(n.kind().help.contains("CPU identity"));
     assert_eq!(n.kind().references.len(), 1);
     assert_eq!(n.kind().inputs[0].name, "image");
@@ -109,9 +110,7 @@ fn typed_macro_supplies_docs_ports_and_discovery() {
     let sigmoid = node::sigmoid::apply::definition(Default::default()).unwrap();
     assert_eq!(sigmoid.kind().inputs[0].label(), "RGB · Rec.2020 / D65");
     assert!(n.kind().parameters.is_empty());
-    assert!(
-        drip::definition::registered("tone.exposure", serde_json::json!({"ev":"bad"})).is_err()
-    );
+    assert!(registry.build("tone.exposure", serde_json::json!({"ev":"bad"})).is_err());
 }
 #[test]
 fn parameter_schema_comes_from_the_function_parameter_type() {

@@ -1876,7 +1876,6 @@ dependencies = [
  "drip-macros",
  "drip-raw",
  "lcms2",
- "linkme",
  "log",
  "pollster 1.0.1",
  "rayon",

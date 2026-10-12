@@ -37,7 +37,7 @@ impl Project {
         project.to_json()
     }
     pub fn from_json(text: &str) -> Result<Self> {
-        let core = drip::project::Project::from_json(text)?;
+        let core = drip::project::Project::from_json(text, &super::REGISTRY)?;
         let mut graph = Graph { dag: core.dag, ..Default::default() };
         let mut missing = Vec::new();
         for (id, node) in graph.dag.nodes() {
@@ -79,8 +79,7 @@ mod tests {
         let mut project = Project::from_json(&core.to_json().unwrap()).unwrap();
         let names: Vec<_> = project.graph.nodes().map(|(_, node)| node.name).collect();
         assert_eq!(names, ["Exposure 2", "Exposure"]);
-        let added =
-            project.graph.add_node(drip::definition::kind("tone.exposure").unwrap()).unwrap();
+        let added = project.graph.add_node(&drip::node::exposure::compute::KIND).unwrap();
         assert_eq!(project.graph.node(added).unwrap().name, "Exposure 3");
     }
 }

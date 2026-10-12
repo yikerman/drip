@@ -6,11 +6,7 @@ use crate::{
     ports::{Data, Description, PortSpec},
     runtime::KernelContext,
 };
-use std::{
-    any::Any,
-    collections::BTreeMap,
-    sync::{Arc, LazyLock},
-};
+use std::{any::Any, sync::Arc};
 
 /// Everything about a node kind that does not depend on its parameters. One
 /// static per kind; graph checks, help and editors read the same declaration.
@@ -87,23 +83,26 @@ pub trait Typed: Node + Sized {
     }
 }
 
-#[linkme::distributed_slice]
-pub static NODES: [&'static Kind];
-
-static KINDS: LazyLock<BTreeMap<&'static str, &'static Kind>> = LazyLock::new(|| {
-    let mut kinds = BTreeMap::new();
-    for &kind in NODES {
-        assert!(kinds.insert(kind.id, kind).is_none(), "duplicate node ID {}", kind.id);
+/// The node kinds a frontend offers and loads, listed by hand in order. A
+/// frontend composes its lists, e.g. `drip::node::NODES` and its own views.
+pub struct Registry(Vec<&'static Kind>);
+impl Registry {
+    pub fn new(lists: &[&[&'static Kind]]) -> Self {
+        let kinds: Vec<_> = lists.concat();
+        for (i, kind) in kinds.iter().enumerate() {
+            assert!(kinds[..i].iter().all(|k| k.id != kind.id), "duplicate node ID {}", kind.id);
+        }
+        Self(kinds)
     }
-    kinds
-});
-pub fn kind(id: &str) -> Option<&'static Kind> {
-    KINDS.get(id).copied()
-}
-pub fn kinds() -> impl Iterator<Item = &'static Kind> {
-    KINDS.values().copied()
-}
-pub fn registered(id: &str, parameters: serde_json::Value) -> Result<Arc<dyn Node>> {
-    let kind = kind(id).ok_or_else(|| Error::Graph(format!("unknown node {id}")))?;
-    (kind.build)(parameters)
+    pub fn kind(&self, id: &str) -> Option<&'static Kind> {
+        self.0.iter().copied().find(|kind| kind.id == id)
+    }
+    pub fn kinds(&self) -> impl Iterator<Item = &'static Kind> + '_ {
+        self.0.iter().copied()
+    }
+    /// Admit persisted parameters for a listed kind.
+    pub fn build(&self, id: &str, parameters: serde_json::Value) -> Result<Arc<dyn Node>> {
+        let kind = self.kind(id).ok_or_else(|| Error::Graph(format!("unknown node {id}")))?;
+        (kind.build)(parameters)
+    }
 }

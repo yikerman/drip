@@ -24,6 +24,8 @@ mod model;
 mod node_ui;
 mod parent;
 mod render;
+#[cfg(test)]
+mod test_nodes;
 mod theme;
 mod ui_state;
 mod widgets;

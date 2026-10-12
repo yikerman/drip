@@ -121,6 +121,11 @@ Settled with the user on 2026-10-11 after a review against
   the kernel adapter and frontend extras bind through it, and
   `InputValues::bind::<N>()` checks the kind. Host and device buffers clone as
   shared immutable storage.
+- **Decided:** Kinds are listed by hand, without link-time registration:
+  `drip::node::NODES` in pipeline order. A frontend composes a `Registry`
+  from its lists (the GUI adds its views) and loads projects through it; an
+  unlisted kind cannot be added or loaded. Explicit lists are readable and
+  avoid linker-section portability risks.
 
 ### Parameters and GUI bindings
 

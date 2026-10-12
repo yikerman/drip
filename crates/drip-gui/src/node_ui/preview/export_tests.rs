@@ -3,13 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::model::NodeId;
-use drip::{
-    definition::Typed,
-    eval::Evaluator,
-    node::data::{Coordinates, Extent, REC2020_D65, Rgb, RgbDesc},
-    ports::{Cpu, Write},
-    runtime::{KernelContext, RuntimeContext},
-};
+use crate::test_nodes::display;
+use drip::{definition::Typed, eval::Evaluator, runtime::RuntimeContext};
 
 use crate::model::Project;
 use drip::node::profile;
@@ -17,20 +12,6 @@ use lcms2::{Intent, PixelFormat, Profile, Transform};
 use serde_json::json;
 use tiff::decoder::{Decoder, DecodingResult};
 use tiff::tags::Tag;
-
-const PIXELS: [[f32; 3]; 4] = [[1.0; 3], [0.18; 3], [0.0, 1.0, 0.0], [0.0; 3]];
-
-fn source_contract(_: &drip::runtime::GlobalContext, _: &()) -> drip::Result<(RgbDesc,)> {
-    Ok((RgbDesc {
-        extent: Extent { width: 2, height: 2 },
-        coordinates: Coordinates::Space(REC2020_D65),
-    },))
-}
-#[drip::node(id="test.proof-source", name="display", category="test", contract=source_contract)]
-fn display(_: &KernelContext<'_>, _: &(), image: Write<'_, Cpu<Rgb>>) -> drip::Result<()> {
-    image.data.copy_from_slice(&PIXELS);
-    Ok(())
-}
 
 struct Scratch(PathBuf);
 
@@ -73,9 +54,8 @@ fn export_depth_survives_reopening_and_encodes_expected_samples() {
     let scratch = Scratch::new("depth");
     let path = scratch.0.join("depth.tif");
     let mut project = Project::default();
-    let source =
-        project.graph.add_node(drip::definition::kind("test.proof-source").unwrap()).unwrap();
-    let export = project.graph.add_node(drip::definition::kind("output.tiff").unwrap()).unwrap();
+    let source = project.graph.add_node(&display::KIND).unwrap();
+    let export = project.graph.add_node(&drip::node::export::tiff::KIND).unwrap();
     project
         .graph
         .connect(
@@ -138,10 +118,9 @@ fn softproof_matches_bounded_export_across_profiles_and_intents() {
     let custom = scratch.profile("linear.icc", &profile::rec2020_linear());
     let path = scratch.0.join("proof.tif");
     let mut project = Project::default();
-    let source =
-        project.graph.add_node(drip::definition::kind("test.proof-source").unwrap()).unwrap();
-    let preview = project.graph.add_node(drip::definition::kind("view.preview").unwrap()).unwrap();
-    let tiff = project.graph.add_node(drip::definition::kind("output.tiff").unwrap()).unwrap();
+    let source = project.graph.add_node(&display::KIND).unwrap();
+    let preview = project.graph.add_node(&crate::node_ui::preview::observe::KIND).unwrap();
+    let tiff = project.graph.add_node(&drip::node::export::tiff::KIND).unwrap();
     for node in [preview, tiff] {
         project
             .graph

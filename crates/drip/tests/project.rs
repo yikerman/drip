@@ -1,7 +1,12 @@
 use drip::{
-    eval::Evaluator, node, node::data::*, ports::*, project::Project, runtime::RuntimeContext,
+    definition::Registry, eval::Evaluator, node, node::data::*, ports::*, project::Project,
+    runtime::RuntimeContext,
 };
 use serde_json::json;
+
+fn registry() -> Registry {
+    Registry::new(&[node::NODES])
+}
 #[test]
 fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     let mut p = Project::default();
@@ -11,7 +16,7 @@ fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     p.ui = json!({"retained":true});
     p.node_ui.insert(apply.node, json!({"pos":[12,34]}));
     let serialized = p.to_json().unwrap();
-    let restored = Project::from_json(&serialized).unwrap();
+    let restored = Project::from_json(&serialized, &registry()).unwrap();
     assert_eq!(restored.dag.edges().count(), 1);
     assert_eq!(restored.ui, p.ui);
     assert_eq!(restored.to_json().unwrap(), serialized);
@@ -24,33 +29,33 @@ fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     assert!(matches!(error, Some(drip::Error::MissingInput { port: "image", .. })));
     let mut data: serde_json::Value = serde_json::from_str(&serialized).unwrap();
     data["nodes"][0]["parameters"]["contrast"] = json!(-1.);
-    assert!(Project::from_json(&data.to_string()).is_err());
+    assert!(Project::from_json(&data.to_string(), &registry()).is_err());
     data = serde_json::from_str(&serialized).unwrap();
     data["edges"][0][0]["port"] = json!("missing");
-    assert!(Project::from_json(&data.to_string()).is_err());
+    assert!(Project::from_json(&data.to_string(), &registry()).is_err());
     data = serde_json::from_str(&serialized).unwrap();
     let major: u64 = env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap();
     assert_eq!(data["version"], major);
     data["version"] = json!(major + 1);
-    let error = Project::from_json(&data.to_string()).err().unwrap().to_string();
+    let error = Project::from_json(&data.to_string(), &registry()).err().unwrap().to_string();
     assert!(error.contains("not migrated"), "{error}");
 }
 #[test]
 fn export_reads_its_profile_file_when_first_used() {
-    use drip::definition::{Typed, registered};
+    use drip::definition::Typed;
     use drip::node::export::tiff::Definition;
     let file = std::env::temp_dir().join(format!("drip-profile-{}.icc", std::process::id()));
     let srgb = drip::node::profile::Output::load(&Default::default()).unwrap().icc;
     std::fs::write(&file, &srgb).unwrap();
     let mut params = serde_json::to_value(drip::node::export::Export::default()).unwrap();
     params["profile"] = json!({"file": {"path": file}});
-    let loaded = registered("output.tiff", params.clone()).unwrap();
+    let loaded = registry().build("output.tiff", params.clone()).unwrap();
     let icc = || Definition::of(&*loaded).unwrap().assets().map(|output| output.icc.clone());
     assert_eq!(icc().unwrap(), srgb);
     std::fs::remove_file(&file).unwrap();
     assert_eq!(icc().unwrap(), srgb, "files are assumed unchanged once read");
     // A missing file is the node's error, not a refused edit.
-    let missing = registered("output.tiff", params.clone()).unwrap();
+    let missing = registry().build("output.tiff", params.clone()).unwrap();
     let error = Definition::of(&*missing).unwrap().assets().err().unwrap();
     assert!(error.to_string().contains(&*file.to_string_lossy()), "{error}");
     assert_eq!(missing.parameters().unwrap(), params);
@@ -93,7 +98,7 @@ fn missing_raw_preserves_editable_parameters_and_reports_load_error() {
     let raw = dag.nodes().find(|(_, n)| n.kind().id == "input.bayer-raw").unwrap().0;
     dag.set_parameters(raw, json!({ "path": path })).unwrap();
     let text = Project { dag, ..Default::default() }.to_json().unwrap();
-    let mut restored = Project::from_json(&text).unwrap();
+    let mut restored = Project::from_json(&text, &registry()).unwrap();
     assert_eq!(restored.to_json().unwrap(), text);
     let sigmoid = restored.dag.nodes().find(|(_, n)| n.kind().id == "tone.sigmoid").unwrap().0;
     let target = restored.dag.output_port(sigmoid, "output").unwrap();
@@ -162,6 +167,6 @@ fn edits_and_project_open_do_not_depend_on_loaded_sources() {
         .unwrap();
         dag.set_parameters(t.raw.node, raw.clone()).unwrap();
         let project = Project { dag, ..Default::default() };
-        Project::from_json(&project.to_json().unwrap()).unwrap();
+        Project::from_json(&project.to_json().unwrap(), &registry()).unwrap();
     }
 }

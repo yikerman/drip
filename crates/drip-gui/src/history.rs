@@ -70,7 +70,7 @@ mod tests {
     fn graph(names: &[&str]) -> Graph {
         let mut graph = Graph::default();
         for name in names {
-            let id = graph.add_node(drip::definition::kind("tone.exposure").unwrap()).unwrap();
+            let id = graph.add_node(&drip::node::exposure::compute::KIND).unwrap();
             graph.set_name(id, name).unwrap();
         }
         graph

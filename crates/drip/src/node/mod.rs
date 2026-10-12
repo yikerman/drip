@@ -19,3 +19,21 @@ pub mod sigmoid;
 pub mod source;
 pub mod templates;
 pub use source::source;
+
+/// Every processing node kind, in pipeline order. A kind missing here cannot
+/// be added or loaded from a project.
+pub static NODES: &[&crate::definition::Kind] = &[
+    &raw::read::KIND,
+    &reduce::bayer::compute::KIND,
+    &bayer_gains::compute::KIND,
+    &highlights::reconstruct::KIND,
+    &bayer_2x2::compute::KIND,
+    &rcd::compute::KIND,
+    &camera_to_rgb::compute::KIND,
+    &chromatic_adaptation::compute::KIND,
+    &orientation::compute::KIND,
+    &reduce::rgb::compute::KIND,
+    &exposure::compute::KIND,
+    &sigmoid::apply::KIND,
+    &export::tiff::KIND,
+];

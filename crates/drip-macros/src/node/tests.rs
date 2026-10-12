@@ -316,10 +316,8 @@ fn preserves_public_bindings_and_metadata() {
         assert!(items.iter().any(|item| matches!(item, syn::Item::Fn(item)
             if item.sig.ident == expected && matches!(item.vis, syn::Visibility::Public(_)))));
     }
-    for expected in ["REGISTRATION", "KIND"] {
-        assert!(items.iter().any(|item| matches!(item, syn::Item::Static(item)
-            if item.ident == expected)));
-    }
+    assert!(items.iter().any(|item| matches!(item, syn::Item::Static(item)
+        if item.ident == "KIND" && matches!(item.vis, syn::Visibility::Public(_)))));
     for method in ["kind", "parameters", "contract", "run", "bind"] {
         generated_method(&module, method);
     }

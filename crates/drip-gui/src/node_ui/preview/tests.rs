@@ -211,7 +211,7 @@ fn active_modes_report_missing_profiles() {
 #[test]
 fn proof_settings_round_trip_as_ordinary_node_parameters() {
     let mut project = Project::default();
-    let id = project.graph.add_node(drip::definition::kind("view.preview").unwrap()).unwrap();
+    let id = project.graph.add_node(&crate::node_ui::preview::observe::KIND).unwrap();
     project.graph.set_param(id, "interpolation", json!(true)).unwrap();
     project
         .graph

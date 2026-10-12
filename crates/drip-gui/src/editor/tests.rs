@@ -52,7 +52,7 @@ const OUTPUT_X: f32 = 100.0 + node_ui::WIDTH;
 
 fn harness(zoom: f32) -> Harness<'static, Scene> {
     let mut graph = Graph::default();
-    let node = graph.add_node(drip::definition::kind("tone.exposure").unwrap()).unwrap();
+    let node = graph.add_node(&drip::node::exposure::compute::KIND).unwrap();
     graph.set_ui(node, json!({"pos": [100.0, 100.0]})).unwrap();
     let scene = Scene {
         editor: Editor { offset: Some(vec2(20.0, 20.0)), zoom, wire: None },
@@ -133,16 +133,9 @@ fn ports_connect_in_either_direction_and_preserve_sources_until_commit() {
         for start_at_input in [false, true] {
             let mut h = harness(zoom);
             let source = h.state().node;
-            let target = add_node(
-                &mut h,
-                drip::definition::kind("tone.exposure").unwrap(),
-                vec2(240.0, 180.0),
-            );
-            let previous = add_node(
-                &mut h,
-                drip::definition::kind("tone.exposure").unwrap(),
-                vec2(100.0, 240.0),
-            );
+            let target = add_node(&mut h, &drip::node::exposure::compute::KIND, vec2(240.0, 180.0));
+            let previous =
+                add_node(&mut h, &drip::node::exposure::compute::KIND, vec2(100.0, 240.0));
             h.state_mut().connect(previous, target);
             let before = h.state().graph.clone();
             let (start, end) = if start_at_input {
@@ -179,13 +172,8 @@ fn ports_connect_in_either_direction_and_preserve_sources_until_commit() {
 fn invalid_port_targets_keep_the_pending_connection_and_existing_source() {
     let mut h = harness(1.0);
     let source = h.state().node;
-    let target =
-        add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(400.0, 100.0));
-    let bayer = add_node(
-        &mut h,
-        drip::definition::kind("geometry.reduce-bayer").unwrap(),
-        vec2(100.0, 300.0),
-    );
+    let target = add_node(&mut h, &drip::node::exposure::compute::KIND, vec2(400.0, 100.0));
+    let bayer = add_node(&mut h, &drip::node::reduce::bayer::compute::KIND, vec2(100.0, 300.0));
     h.state_mut().connect(source, target);
     let before = h.state().graph.clone();
     click_port(&mut h, target, Direction::Input, Secondary);
@@ -210,8 +198,7 @@ fn pending_connections_cancel_without_opening_the_canvas_menu() {
     for direction in [Direction::Input, Direction::Output] {
         let mut h = harness(1.0);
         let source = h.state().node;
-        let target =
-            add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(400.0, 100.0));
+        let target = add_node(&mut h, &drip::node::exposure::compute::KIND, vec2(400.0, 100.0));
         h.state_mut().connect(source, target);
         let before = h.state().graph.clone();
         let start = if direction == Direction::Input { target } else { source };
@@ -256,10 +243,8 @@ fn port_drags_pan_only_with_the_left_button() {
 fn port_menus_navigate_to_connected_nodes_without_editing() {
     let mut h = harness(1.0);
     let source = h.state().node;
-    let near =
-        add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(400.0, 100.0));
-    let far =
-        add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(3000.0, 1000.0));
+    let near = add_node(&mut h, &drip::node::exposure::compute::KIND, vec2(400.0, 100.0));
+    let far = add_node(&mut h, &drip::node::exposure::compute::KIND, vec2(3000.0, 1000.0));
     for id in [near, far] {
         h.state_mut().connect(source, id);
     }
@@ -314,12 +299,12 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
             let source = h.state().node;
             let target = add_node(
                 &mut h,
-                drip::definition::kind("tone.exposure").unwrap(),
+                &drip::node::exposure::compute::KIND,
                 vec2(OUTPUT_X + 80.0, 118.0),
             );
             let branch = add_node(
                 &mut h,
-                drip::definition::kind("tone.exposure").unwrap(),
+                &drip::node::exposure::compute::KIND,
                 vec2(OUTPUT_X + 80.0, 230.0),
             );
             for id in [target, branch] {
@@ -351,18 +336,11 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
 fn crossing_wires_choose_the_nearest_curve() {
     let mut h = harness(1.0);
     let upper = h.state().node;
-    let lower =
-        add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), vec2(100.0, 202.0));
-    let upper_target = add_node(
-        &mut h,
-        drip::definition::kind("tone.exposure").unwrap(),
-        vec2(OUTPUT_X + 180.0, 118.0),
-    );
-    let lower_target = add_node(
-        &mut h,
-        drip::definition::kind("tone.exposure").unwrap(),
-        vec2(OUTPUT_X + 180.0, 220.0),
-    );
+    let lower = add_node(&mut h, &drip::node::exposure::compute::KIND, vec2(100.0, 202.0));
+    let upper_target =
+        add_node(&mut h, &drip::node::exposure::compute::KIND, vec2(OUTPUT_X + 180.0, 118.0));
+    let lower_target =
+        add_node(&mut h, &drip::node::exposure::compute::KIND, vec2(OUTPUT_X + 180.0, 220.0));
     h.state_mut().connect(upper, lower_target);
     h.state_mut().connect(lower, upper_target);
     let curve = bezier(
@@ -384,11 +362,8 @@ fn wires_leave_panning_and_overlapping_nodes_and_ports_interactive() {
     for over_port in [false, true] {
         let mut h = harness(1.0);
         let source = h.state().node;
-        let target = add_node(
-            &mut h,
-            drip::definition::kind("tone.exposure").unwrap(),
-            vec2(OUTPUT_X + 180.0, 118.0),
-        );
+        let target =
+            add_node(&mut h, &drip::node::exposure::compute::KIND, vec2(OUTPUT_X + 180.0, 118.0));
         h.state_mut().connect(source, target);
         let start = h.state().port_point(source, Direction::Output);
         let end = h.state().port_point(target, Direction::Input);
@@ -401,7 +376,7 @@ fn wires_leave_panning_and_overlapping_nodes_and_ports_interactive() {
         // Over the overlay's input port, or its header, at the wire's midpoint.
         let x = OUTPUT_X + 90.0;
         let position = if over_port { vec2(x, 109.0) } else { vec2(x - 20.0, 130.0) };
-        let overlay = add_node(&mut h, drip::definition::kind("tone.exposure").unwrap(), position);
+        let overlay = add_node(&mut h, &drip::node::exposure::compute::KIND, position);
         click(&mut h, midpoint + delta, Secondary);
         assert_eq!(h.state().graph.source(h.state().input(target)), Some(h.state().output(source)));
         assert!(!h.state().edited);
@@ -517,7 +492,7 @@ fn click_selection_and_node_menu_actions() {
     let names = ["Exposure", "Sigmoid"];
     let rows: Vec<_> = names.iter().map(|name| h.get_by_label(name).rect().top()).collect();
     assert!(rows.windows(2).all(|rows| rows[0] < rows[1]));
-    h.get_by_label(drip::definition::kind("tone.exposure").unwrap().name).click();
+    h.get_by_label(drip::node::exposure::compute::KIND.name).click();
     h.run();
     assert_eq!(h.state().graph.nodes().count(), 1);
     let added = h.state().graph.node(h.state().selected.unwrap()).unwrap();
@@ -535,7 +510,7 @@ fn port_names_fit_beside_the_opposite_port() {
     let ctx = egui::Context::default();
     ctx.run_ui(Default::default(), |ui| {
         let mut graph = Graph::default();
-        for kind in drip::definition::kinds() {
+        for kind in crate::model::REGISTRY.kinds() {
             let id = graph.add_node(kind).unwrap();
             let width = node_ui::size(&graph.node(id).unwrap()).x;
             for text in node_ui::ports::texts(kind) {
@@ -553,8 +528,8 @@ fn port_names_fit_beside_the_opposite_port() {
 #[test]
 fn downstream_error_rows_name_the_failed_node() {
     let mut graph = Graph::default();
-    let raw = graph.add_node(drip::definition::kind("tone.exposure").unwrap()).unwrap();
-    let below = graph.add_node(drip::definition::kind("tone.exposure").unwrap()).unwrap();
+    let raw = graph.add_node(&drip::node::exposure::compute::KIND).unwrap();
+    let below = graph.add_node(&drip::node::exposure::compute::KIND).unwrap();
     graph.set_name(raw, "RAW").unwrap();
     let source = Box::new(drip::Error::Runtime("select a RAW".into()));
     let error = drip::Error::Node { node: raw, kind: "input.bayer-raw", source };

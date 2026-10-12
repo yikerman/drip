@@ -3,10 +3,10 @@ use drip::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 pub(super) mod device;
-pub(super) mod histogram;
-pub(super) mod vectorscope;
+pub(crate) mod histogram;
+pub(crate) mod vectorscope;
 mod view;
-pub(super) mod waveform;
+pub(crate) mod waveform;
 pub use histogram::Histogram;
 #[cfg(test)]
 pub(super) mod tests;

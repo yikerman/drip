@@ -113,7 +113,7 @@ mod defaults {
 
     #[test]
     fn waveform_defaults_and_reset_are_log_but_saved_linear_is_retained() {
-        let definition = drip::definition::kind("view.waveform").unwrap();
+        let definition = &crate::node_ui::scopes::waveform::observe::KIND;
         assert_eq!((definition.defaults)()["scale"], "log");
         assert_eq!(definition.param("scale").unwrap().kind.default_value(), "log");
         let mut project = Project::default();
@@ -126,7 +126,7 @@ mod defaults {
             reopened.graph.node(node).unwrap().params,
             json!({"min_ev":-10,"max_ev":4,"scale":"linear"})
         );
-        let histogram = drip::definition::kind("view.histogram").unwrap();
+        let histogram = &crate::node_ui::scopes::histogram::observe::KIND;
         assert_eq!((histogram.defaults)()["scale"], "linear");
         assert_eq!(histogram.param("scale").unwrap().kind.default_value(), "linear");
     }

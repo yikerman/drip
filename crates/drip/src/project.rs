@@ -1,6 +1,7 @@
 //! Persist node kinds, parameters and named edges; loading repeats connection checks.
 use crate::{
-    Error, Result, definition,
+    Error, Result,
+    definition::Registry,
     graph::Dag,
     ports::{NodeId, PortId},
 };
@@ -78,11 +79,13 @@ impl Project {
         };
         serde_json::to_string_pretty(&document).map_err(|e| Error::Graph(e.to_string()))
     }
-    pub fn from_json(text: &str) -> Result<Self> {
-        Self::load(serde_json::from_str(text).map_err(|e| Error::Graph(e.to_string()))?)
+    /// Load a project whose node kinds are all in `registry`.
+    pub fn from_json(text: &str, registry: &Registry) -> Result<Self> {
+        let document = serde_json::from_str(text).map_err(|e| Error::Graph(e.to_string()))?;
+        Self::load(document, registry)
     }
 
-    fn load(document: Document) -> Result<Self> {
+    fn load(document: Document, registry: &Registry) -> Result<Self> {
         if document.version != VERSION {
             return Err(Error::Graph(format!(
                 "project version {} is not {VERSION}; projects are not migrated",
@@ -92,7 +95,7 @@ impl Project {
         let mut project = Self { ui: document.ui, ..Self::default() };
         let mut ids = Vec::new();
         for record in document.nodes {
-            let id = project.dag.add(definition::registered(&record.kind, record.parameters)?)?;
+            let id = project.dag.add(registry.build(&record.kind, record.parameters)?)?;
             ids.push(id);
             project.node_ui.insert(id, record.ui);
         }
