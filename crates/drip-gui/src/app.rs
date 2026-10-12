@@ -306,6 +306,10 @@ impl App {
                 }
             }
             ui.separator();
+            if ui.button("Add node…").tip("Space over the canvas").clicked() {
+                self.editor.add_node();
+            }
+            ui.separator();
             let label = |level| {
                 if level == 0 { "Full".to_owned() } else { format!("1/{}", 1u32 << level) }
             };

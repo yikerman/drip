@@ -1,20 +1,20 @@
-//! Node picker: search registered kinds by name, ID and tag, narrow by tags,
-//! and choose with the pointer or Up/Down/Enter. Independent of graph edits.
+//! Node picker: a palette over the window that searches registered kinds by
+//! name, ID and tag, narrows by tags, and chooses with the pointer or
+//! Up/Down/Enter. Independent of graph edits; the editor places the node.
 
 use crate::model::Kind;
 use crate::registry::REGISTRY;
 use crate::theme::Tip;
 use drip::definition::Tag;
-use egui::{Context, Id, Key, Modifiers, Order, Pos2, ScrollArea, TextEdit, Vec2};
+use egui::{Context, Id, Key, Label, Modifiers, RichText, ScrollArea, TextEdit, Vec2};
 
-const WIDTH: f32 = 260.0;
+const WIDTH: f32 = 420.0;
 const LIST_HEIGHT: f32 = 320.0;
 
 pub(super) struct Picker {
-    /// Where the chosen node goes, in graph units.
-    pub at: Vec2,
-    /// The picker's top-left corner on screen.
-    screen: Pos2,
+    /// Where the chosen node goes, in graph units; `None` is the centre of the
+    /// visible canvas.
+    pub at: Option<Vec2>,
     query: String,
     tags: Vec<&'static Tag>,
     /// The highlighted result, chosen by Enter.
@@ -27,70 +27,67 @@ pub(super) enum Picked {
 }
 
 impl Picker {
-    pub fn new(at: Vec2, screen: Pos2) -> Self {
-        Picker { at, screen, query: String::new(), tags: Vec::new(), cursor: 0 }
+    pub fn new(at: Option<Vec2>) -> Self {
+        Picker { at, query: String::new(), tags: Vec::new(), cursor: 0 }
     }
 
-    /// Draws the picker above the canvas; `None` keeps it open.
+    /// Draws the palette as a modal, which keeps input from the canvas and
+    /// closes on Escape or a click outside; `None` keeps it open.
     pub fn show(&mut self, ctx: &Context) -> Option<Picked> {
         let key = |key| ctx.input_mut(|i| i.consume_key(Modifiers::NONE, key));
-        let (down, up, enter, escape) =
-            (key(Key::ArrowDown), key(Key::ArrowUp), key(Key::Enter), key(Key::Escape));
+        let (down, up, enter) = (key(Key::ArrowDown), key(Key::ArrowUp), key(Key::Enter));
         let found = matches(&self.query, &self.tags);
         let last = found.len().saturating_sub(1);
         self.cursor = (self.cursor + usize::from(down)).saturating_sub(usize::from(up)).min(last);
         let mut clicked = None;
-        let area = egui::Area::new(Id::new("node picker"))
-            .order(Order::Foreground)
-            .fixed_pos(self.screen)
-            .show(ctx, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_width(WIDTH);
-                    let search = ui.add(
-                        TextEdit::singleline(&mut self.query)
-                            .hint_text("Search nodes")
-                            .desired_width(f32::INFINITY),
-                    );
-                    search.request_focus();
-                    ui.horizontal_wrapped(|ui| {
-                        for &tag in used_tags() {
-                            let on = self.tags.iter().any(|t| t.id == tag.id);
-                            if ui.selectable_label(on, tag.id).tip(tag.description).clicked() {
-                                self.tags.retain(|t| t.id != tag.id);
-                                if !on {
-                                    self.tags.push(tag);
-                                }
-                            }
+        let modal = egui::Modal::new(Id::new("node picker")).show(ctx, |ui| {
+            ui.set_width(WIDTH);
+            let search = ui.add(
+                TextEdit::singleline(&mut self.query)
+                    .hint_text("Search nodes")
+                    .desired_width(f32::INFINITY),
+            );
+            search.request_focus();
+            // The chips are every used tag, so wrapping keeps a constant height.
+            ui.horizontal_wrapped(|ui| {
+                for &tag in used_tags() {
+                    let on = self.tags.iter().any(|t| t.id == tag.id);
+                    if ui.selectable_label(on, tag.id).tip(tag.description).clicked() {
+                        self.tags.retain(|t| t.id != tag.id);
+                        if !on {
+                            self.tags.push(tag);
                         }
-                    });
-                    ui.separator();
-                    ScrollArea::vertical().max_height(LIST_HEIGHT).show(ui, |ui| {
-                        for (i, &kind) in found.iter().enumerate() {
-                            ui.horizontal(|ui| {
-                                let row = ui.selectable_label(i == self.cursor, kind.name);
-                                let tags: Vec<_> = kind.tags.iter().map(|tag| tag.id).collect();
-                                ui.weak(tags.join(" · "));
-                                if i == self.cursor && (down || up) {
-                                    row.scroll_to_me(None);
-                                }
-                                if row.clicked() {
-                                    clicked = Some(kind);
-                                }
-                            });
-                        }
-                        if found.is_empty() {
-                            ui.weak("No matching nodes");
-                        }
-                    });
-                    search.changed()
-                })
+                        self.cursor = 0;
+                    }
+                }
             });
-        if area.inner.inner {
-            self.cursor = 0;
-        }
+            ui.separator();
+            ScrollArea::vertical().max_height(LIST_HEIGHT).auto_shrink(false).show(ui, |ui| {
+                for (i, &kind) in found.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        let row = ui.selectable_label(i == self.cursor, kind.name);
+                        let tags: Vec<_> = kind.tags.iter().map(|tag| tag.id).collect();
+                        ui.weak(tags.join(" · "));
+                        if i == self.cursor && (down || up) {
+                            row.scroll_to_me(None);
+                        }
+                        if row.clicked() {
+                            clicked = Some(kind);
+                        }
+                    });
+                    let summary = kind.help.lines().next().unwrap_or_default();
+                    ui.add(Label::new(RichText::new(summary).small().weak()).truncate());
+                }
+                if found.is_empty() {
+                    ui.weak("No matching nodes");
+                }
+            });
+            if search.changed() {
+                self.cursor = 0;
+            }
+        });
         let chosen = clicked.or_else(|| enter.then(|| found.get(self.cursor).copied()).flatten());
-        let closed = escape || area.response.clicked_elsewhere();
-        chosen.map(Picked::Kind).or(closed.then_some(Picked::Closed))
+        chosen.map(Picked::Kind).or(modal.should_close().then_some(Picked::Closed))
     }
 }
 

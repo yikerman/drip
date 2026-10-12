@@ -4,6 +4,11 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Node palette: GUI tests open it with Space and from the editor's menu entry,
+  search and click Exposure under the pointer, narrow by the demosaic chip,
+  choose RCD with Enter at the visible centre, and close with Escape; a
+  right-click on the background opens nothing. 98 GUI tests and strict
+  Clippy pass; not exercised in a desktop session.
 - Canvas wheel zoom under overlays: a GUI test scrolls over the canvas with a
   modal open and then without; it failed before the fix (the modal's wheel
   zoomed the canvas) and passes after. 98 GUI tests and strict Clippy pass.

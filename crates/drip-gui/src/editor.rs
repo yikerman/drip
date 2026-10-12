@@ -43,7 +43,7 @@ pub struct Editor {
     zoom: f32,
     /// The port awaiting an opposite-direction endpoint on the next right-click.
     wire: Option<Port>,
-    /// Opened by a background right-click or Space over the canvas.
+    /// Opened by Space over the canvas or from the menu.
     picker: Option<picker::Picker>,
 }
 
@@ -123,6 +123,11 @@ impl CanvasLayout {
 }
 
 impl Editor {
+    /// Opens the node picker; the chosen node goes to the visible centre.
+    pub fn add_node(&mut self) {
+        self.picker = Some(picker::Picker::new(None));
+    }
+
     pub fn show(
         &mut self,
         ui: &mut Ui,
@@ -172,27 +177,27 @@ impl Editor {
         match self.picker.as_mut().and_then(|picker| picker.show(ui.ctx())) {
             Some(picker::Picked::Kind(kind)) => {
                 let at = self.picker.take().expect("open picker").at;
+                let at = at.unwrap_or(ui.clip_rect().center().to_vec2());
                 *selected = frame.edit(graph, Edit::Add(kind, at));
             }
             Some(picker::Picked::Closed) => self.picker = None,
             None => {}
         }
-        let space = self.picker.is_none()
+        if self.picker.is_none()
             && self.wire.is_none()
             && background.contains_pointer()
             && !ui.ctx().egui_wants_keyboard_input()
-            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+        {
+            let at = ui.ctx().pointer_latest_pos().map(|p| (to_global.inverse() * p).to_vec2());
+            self.picker = Some(picker::Picker::new(at));
+        }
         if background.secondary_clicked() && self.wire.is_some() {
             self.wire = None;
         } else if background.secondary_clicked()
             && let Some(input) = disconnect
         {
             frame.edit(graph, Edit::Disconnect(input));
-        } else if background.secondary_clicked() || space {
-            let screen =
-                ui.ctx().pointer_latest_pos().unwrap_or(to_global * background.rect.center());
-            let at = (to_global.inverse() * screen).to_vec2();
-            self.picker = Some(picker::Picker::new(at, screen));
         }
 
         if let Some(id) = *selected

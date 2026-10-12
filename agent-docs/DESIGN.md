@@ -277,13 +277,15 @@ Settled with the user on 2026-10-11 after a review against
   transform, look or output transform, or `encoding`. Exposure is a look;
   geometry and views have no stage. RAW decoding and chromatic adaptation
   (as-shot white by default) count as input transforms.
-- **Decided:** Nodes are added through a picker that opens where the canvas
-  background is right-clicked, or under the pointer on Space. Search matches
-  name, ID and tags, ranking name prefixes, then word prefixes, then other
-  matches; tag chips narrow to kinds carrying every chosen tag. One list sorted
-  by name, with each node's tags beside it, rather than a group per tag, which
-  would repeat nodes. Up/Down/Enter choose; Escape or a click elsewhere
-  closes. Filtering by a dragged wire's payload would read ports, not tags.
+- **Decided:** Nodes are added through a palette, an `egui::Modal` opened by
+  Space over the canvas (the node goes under the pointer) or "Add node…" in
+  the menu (the centre of the visible canvas). A modal keeps input from the
+  canvas, closes on Escape or a click outside and stays on screen at a fixed
+  size; right-click on the background opens nothing. Search matches name, ID
+  and tags, ranking name prefixes, then word prefixes, then other matches; tag
+  chips narrow to kinds carrying every chosen tag. One list sorted by name,
+  each row with its tags and the first line of its help. Filtering by a
+  dragged wire's payload would read ports, not tags.
 - **Decided:** Enum variants own their dependent parameter structs; Serde
   adapters and UI schemas are generated together, externally tagged. Only the
   selected variant's fields are shown and saved.

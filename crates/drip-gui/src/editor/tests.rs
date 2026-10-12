@@ -333,7 +333,7 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
                 Some(h.state().output(source))
             );
             assert_eq!(h.state().edited, removed);
-            assert_eq!(h.state().editor.picker.is_some(), !removed);
+            assert!(h.state().editor.picker.is_none(), "right-click opens no menu");
         }
     }
 }
@@ -500,7 +500,9 @@ fn graph_point(h: &Harness<'_, Scene>, screen: Pos2) -> Vec2 {
 fn picker_searches_filters_by_tag_and_adds_where_it_opened() {
     let mut h = harness(1.0);
     let at = pos2(40.0, 40.0);
-    click(&mut h, at, Secondary);
+    h.event(Event::PointerMoved(at));
+    h.key_press(egui::Key::Space);
+    h.run();
     assert!(h.state().editor.picker.is_some());
     h.event(Event::Text("expo".into()));
     h.run();
@@ -514,11 +516,9 @@ fn picker_searches_filters_by_tag_and_adds_where_it_opened() {
     assert_eq!(position(&s.graph.node(added).unwrap().ui, added), graph_point(&h, at));
     assert!(s.editor.picker.is_none());
 
-    let at = pos2(60.0, 400.0);
-    h.event(Event::PointerMoved(at));
-    h.key_press(egui::Key::Space);
+    // From the menu, the node goes to the centre of the visible canvas.
+    h.state_mut().editor.add_node();
     h.run();
-    assert!(h.state().editor.picker.is_some());
     h.get_by_label("demosaic").click();
     h.run();
     assert!(h.query_by_label("Exposure").is_none());
@@ -529,8 +529,10 @@ fn picker_searches_filters_by_tag_and_adds_where_it_opened() {
     let s = h.state();
     let added = s.selected.unwrap();
     assert_eq!(s.graph.node(added).unwrap().kind.id, "rcd-demosaic");
-    assert_eq!(position(&s.graph.node(added).unwrap().ui, added), graph_point(&h, at));
+    let centre = graph_point(&h, s.area.center());
+    assert_eq!(position(&s.graph.node(added).unwrap().ui, added), centre);
 
+    h.event(Event::PointerMoved(pos2(60.0, 400.0)));
     h.key_press(egui::Key::Space);
     h.run();
     let count = h.state().graph.nodes().count();
