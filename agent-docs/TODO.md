@@ -18,7 +18,6 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Auto exposure | Integration test pending | Runs on the worker queue. User will check real-photo response, repeated clicks, saved EV and preview/export agreement. |
 | Output-gamut rendering | Deferred | LittleCMS plus selected rendering intent is accepted for the prototype. Revisit explicit target-gamut rendering only when image evidence warrants it; distinguish source compression from output mapping. |
 | Editing UI/UX | Follow-up | Refine from tester feedback; current workflows suffice for the proof of concept. |
-| Wire readability | Open | Compare rounded orthogonal paths with capped Bézier handles; backward links and fan-out remain crowded. Consider obstacle avoidance and hover emphasis. Keep hit testing on the rendered path. |
 | Remaining frontend presentation | Open | Audit items outside the requested fixes: export-depth/intent terminology, explicit EV reference annotations, proof-mode badges, error elision and blank/stale pop-out views. |
 | RAW metadata extraction | Open | Canon EOS D30 (#1307): unusable as-shot WB. Samsung GX-1L (#8115): unusable WB and zero camera matrix. Excluded from the active corpus; IDs refer to raw.pixls.us. |
 | DNG matrix extraction | Open | Sigma fp 8-bit (#7280) and 14-bit (#7273): nonzero ColorMatrix1/2, but LibRaw returns zero `cam_xyz` after unpack. Excluded from the active corpus. |
