@@ -23,7 +23,13 @@ fn detail_dropdown_scroll_updates_the_project_and_stops_at_ends() {
         .with_size(egui::vec2(1600.0, 100.0))
         .with_step_dt(1.0 / 60.0)
         .with_max_steps(100)
-        .build_ui_state(|ui, app: &mut App| app.menu(ui), App::new(None, true, || {}));
+        .build_ui_state(
+            |ui, app: &mut App| {
+                crate::theme::fonts(ui.ctx());
+                app.menu(ui)
+            },
+            App::new(None, true, || {}),
+        );
     let pos = h.get_by_label("Preview detail").rect().center();
     for (delta, level) in [(-1.0, 2), (1.0, 1), (10.0, 0), (-20.0, MAX_LEVEL)] {
         h.state_mut().dirty = false;
@@ -55,6 +61,7 @@ fn fixture_project(name: &str) -> PathBuf {
 fn harness<'a>(app: App) -> Harness<'a, App> {
     Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).build_ui_state(
         |ui, app: &mut App| {
+            crate::theme::fonts(ui.ctx());
             app.poll();
             app.ui(ui)
         },
@@ -547,7 +554,10 @@ fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
 
     let popped = Popped { node: id, part: node_ui::Part::Parameters };
     let mut popup = Harness::builder().with_size(egui::vec2(360.0, 320.0)).build_ui_state(
-        move |ui, app: &mut App| app.window(ui, popped),
+        move |ui, app: &mut App| {
+            crate::theme::fonts(ui.ctx());
+            app.window(ui, popped)
+        },
         {
             let mut app = App::new(None, true, || {});
             app.project = h.state().project.clone();
@@ -629,13 +639,13 @@ fn nodes_with_parameters_and_views_pop_them_out() {
         graph.nodes().filter(|(_, n)| !n.kind.parameters.is_empty()).map(|(id, _)| id).collect();
     let viewers: Vec<_> =
         graph.nodes().filter(|(_, n)| crate::node_ui::has_view(n.kind)).map(|(id, _)| id).collect();
-    assert_eq!(h.get_all_by_label("⚙").count(), with_params.len());
-    assert_eq!(h.get_all_by_label("🗗").count(), viewers.len());
+    assert_eq!(h.get_all_by_label("≡").count(), with_params.len());
+    assert_eq!(h.get_all_by_label("❒").count(), viewers.len());
     // AccessKit bounds ignore the canvas transform, so clicks go by action.
     let index = |ids: &[NodeId]| ids.iter().position(|&id| id == histogram).unwrap();
-    h.get_all_by_label("⚙").nth(index(&with_params)).unwrap().click_accesskit();
+    h.get_all_by_label("≡").nth(index(&with_params)).unwrap().click_accesskit();
     h.run();
-    h.get_all_by_label("🗗").nth(index(&viewers)).unwrap().click_accesskit();
+    h.get_all_by_label("❒").nth(index(&viewers)).unwrap().click_accesskit();
     h.run();
     let parameters = Popped { node: histogram, part: Part::Parameters };
     let view = Popped { node: histogram, part: Part::View };
@@ -669,7 +679,7 @@ fn scope_nodes_offer_popouts() {
         app.set_project(project, None).unwrap();
         let mut h = harness(app);
         h.run();
-        h.get_by_label("🗗").click_accesskit();
+        h.get_by_label("❒").click_accesskit();
         h.run();
         let windows = h.state().windows();
         assert_eq!(windows.len(), 1);
@@ -690,7 +700,7 @@ mod declared_gui_view_gets_a_popout_before_preparation_succeeds_fixture {
         app.set_project(project, None).unwrap();
         let mut h = harness(app);
         h.run();
-        h.get_by_label("🗗").click_accesskit();
+        h.get_by_label("❒").click_accesskit();
         h.run();
         let windows = h.state().windows();
         assert_eq!(windows.len(), 1);
@@ -717,7 +727,7 @@ mod custom_controls_keep_the_generic_view_and_popout_fixture {
         h.get_by_role(egui::accesskit::Role::CheckBox).click();
         h.run();
         assert!(h.query_by_label("Typed enabled: true").is_some());
-        h.get_by_label("🗗").click_accesskit();
+        h.get_by_label("❒").click_accesskit();
         h.run();
         let popped = Popped { node: id, part: crate::node_ui::Part::View };
         assert_eq!(h.state().windows()[0].popped, popped);
@@ -747,9 +757,13 @@ fn parameter_windows_show_the_parameters_and_close_with_their_node() {
         // guess yet with every parameter inside.
         let size = app.window_size(popped, 1.25);
         assert!(size.x < 480.0 && size.y < 320.0, "{size:?}");
-        let mut h = Harness::builder()
-            .with_size(size)
-            .build_ui_state(move |ui, app: &mut App| app.window(ui, popped), app);
+        let mut h = Harness::builder().with_size(size).build_ui_state(
+            move |ui, app: &mut App| {
+                crate::theme::fonts(ui.ctx());
+                app.window(ui, popped)
+            },
+            app,
+        );
         h.run();
         let window = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
         for &label in labels {

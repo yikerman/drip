@@ -1,8 +1,14 @@
 //! Neutral UI on middle grey, the standard surround for judging color, with
 //! lighter menus, dark tooltips and no shadows, rounding or strokes beyond what is
-//! needed to tell elements apart.
+//! needed to tell elements apart. Text is set in Source Sans 3 and Source
+//! Code Pro, vendored under `vendor/`; egui's bundled fonts are disabled.
 
-use egui::{Color32, CornerRadius, FontId, Shadow, Stroke, TextStyle, Visuals};
+use egui::epaint::text::VariationCoords;
+use egui::{
+    Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, FontTweak, Shadow,
+    Stroke, TextStyle, Visuals,
+};
+use std::sync::Arc;
 
 /// sRGB 118 is 18% linear reflectance.
 pub const GREY: Color32 = Color32::from_gray(118);
@@ -79,6 +85,7 @@ pub fn apply(ctx: &egui::Context) {
     // Keep panel separators visible against the surround.
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, DARKER);
     ctx.set_visuals(v);
+    fonts(ctx);
     ctx.all_styles_mut(|style| {
         style.text_styles = [
             (TextStyle::Heading, FontId::proportional(22.0)),
@@ -89,4 +96,29 @@ pub fn apply(ctx: &egui::Context) {
         ]
         .into();
     });
+}
+
+/// Installs Drip's fonts, which `apply` also does; for contexts that keep
+/// egui's style, such as tests.
+pub fn fonts(ctx: &egui::Context) {
+    let mut fonts = FontDefinitions::empty();
+    for (family, name, data) in [
+        (
+            FontFamily::Proportional,
+            "Source Sans 3",
+            &include_bytes!("../../../vendor/source-sans/SourceSans3VF-Upright.ttf")[..],
+        ),
+        (
+            FontFamily::Monospace,
+            "Source Code Pro",
+            &include_bytes!("../../../vendor/source-code-pro/SourceCodeVF-Upright.ttf")[..],
+        ),
+    ] {
+        // Both variable fonts default to ExtraLight; text asks for other weights.
+        let tweak =
+            FontTweak { coords: VariationCoords::new([(b"wght", 400.0)]), ..Default::default() };
+        fonts.font_data.insert(name.into(), Arc::new(FontData::from_static(data).tweak(tweak)));
+        fonts.families.insert(family, vec![name.into()]);
+    }
+    ctx.set_fonts(fonts);
 }

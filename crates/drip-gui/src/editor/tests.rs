@@ -551,6 +551,7 @@ fn snapshot(graph: &Graph) -> String {
 #[test]
 fn port_names_fit_beside_the_opposite_port() {
     let ctx = egui::Context::default();
+    theme::fonts(&ctx);
     ctx.run_ui(Default::default(), |ui| {
         let mut graph = Graph::default();
         for kind in crate::registry::REGISTRY.kinds() {

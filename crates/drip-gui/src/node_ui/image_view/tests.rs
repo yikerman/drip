@@ -67,6 +67,7 @@ fn popup_controls_wheel_and_primary_drag_share_navigation_state() {
         .with_max_steps(100)
         .build_ui_state(
             move |ui, state: &mut ViewState| {
+                crate::theme::fonts(ui.ctx());
                 show(ui, &image, false);
                 *state = ui.data(|data| data.get_temp(ui.id().with("image view")).unwrap());
             },
@@ -146,6 +147,7 @@ fn pointer_leave_stops_image_scroll_zoom() {
             .with_step_dt(1.0 / 60.0)
             .build_ui_state(
                 move |ui, state: &mut ViewState| {
+                    crate::theme::fonts(ui.ctx());
                     show(ui, &image, false);
                     *state = ui.data(|data| data.get_temp(ui.id().with("image view")).unwrap());
                 },

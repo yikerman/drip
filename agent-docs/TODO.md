@@ -17,6 +17,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Photo orientation | Integration test pending | Metadata-driven RGB orientation, parameter override and template wiring are implemented. User will verify preview, override, project reopening and TIFF orientation interactively. |
 | Auto exposure | Integration test pending | Runs on the worker queue. User will check real-photo response, repeated clicks, saved EV and preview/export agreement. |
 | Output-gamut rendering | Deferred | LittleCMS plus selected rendering intent is accepted for the prototype. Revisit explicit target-gamut rendering only when image evidence warrants it; distinguish source compression from output mapping. |
+| CJK text | Deferred | Embedded fonts cover Latin, Greek and Cyrillic; CJK names and paths render as `?`. Prefer a system-font fallback at runtime over embedding Source Han Sans (several MB per region and weight). |
 | Editing UI/UX | Follow-up | Refine from tester feedback; current workflows suffice for the proof of concept. |
 | Remaining frontend presentation | Open | Audit items outside the requested fixes: export-depth/intent terminology, explicit EV reference annotations, proof-mode badges, error elision and blank/stale pop-out views. |
 | RAW metadata extraction | Open | Canon EOS D30 (#1307): unusable as-shot WB. Samsung GX-1L (#8115): unusable WB and zero camera matrix. Excluded from the active corpus; IDs refer to raw.pixls.us. |

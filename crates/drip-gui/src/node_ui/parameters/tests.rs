@@ -78,6 +78,7 @@ fn harness(kind: ParamKind, value: Json) -> Harness<'static, State> {
         .with_max_steps(100)
         .build_ui_state(
             |ui, state: &mut State| {
+                crate::theme::fonts(ui.ctx());
                 let scroll = egui::ScrollArea::vertical().show(ui, |ui| {
                     state.rect = ui
                         .horizontal(|ui| {

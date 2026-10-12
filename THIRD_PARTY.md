@@ -40,6 +40,7 @@ no darktable source code is copied.
 | [Tokio/bytes contributors](https://github.com/tokio-rs/bytes) (`bytes`) | Shared host allocation ownership passed to CubeCL's existing transfer controller | MIT; [license](https://github.com/tokio-rs/bytes/blob/master/LICENSE) |
 | [image-rs contributors](https://github.com/image-rs/image-tiff) (`tiff`) | TIFF encoding and GUI proof/export parity tests | MIT |
 | [Emil Ernerfeldt and egui contributors](https://github.com/emilk/egui) (`egui`, `egui-winit`, `egui-wgpu`) | GUI and renderer integration | MIT OR Apache-2.0 |
+| Adobe, [Source Sans 3](https://github.com/adobe-fonts/source-sans) and [Source Code Pro](https://github.com/adobe-fonts/source-code-pro) | GUI proportional and monospace fonts, embedded | OFL-1.1, Reserved Font Name 'Source'; [Source Sans license](https://github.com/adobe-fonts/source-sans/blob/ed1808970eb3c7301c9a523bee26473ba0bb62fa/LICENSE.md), [Source Code Pro license](https://github.com/adobe-fonts/source-code-pro/blob/d3f1a5962cde503f9409c21e58527611d4a19ef1/LICENSE.md) |
 | [gfx-rs contributors](https://github.com/gfx-rs/wgpu) (`wgpu`, patched below) | GPU rendering | MIT OR Apache-2.0 |
 | [rust-windowing contributors](https://github.com/rust-windowing/winit) (`winit`) | Windows and input events | Apache-2.0 |
 | [Smithay contributors](https://github.com/Smithay/wayland-rs) (`wayland-client`, `wayland-protocols`) | Wayland pop-out parenting and surface color descriptions | MIT |
@@ -60,6 +61,15 @@ exact commits; updating a tag upstream does not change a Drip checkout.
 | `vendor/libraw` | `0.22.2` | `b93f6e45c194f5df9b02a43b1af9a54b4f41f33f` |
 | `vendor/libjpeg-turbo` | `3.2.0` | `c85e6b905bf237038faa936dab160ebfc5da0344` |
 | `vendor/zlib` | `v1.3.2` | `da607da739fa6047df13e66a2af6b8bec7c2a498` |
+
+The GUI fonts are unmodified upright variable fonts copied from release tags,
+with upstream licenses beside them. `drip-gui` embeds them, so they are plain
+Git files rather than LFS objects.
+
+| Directory | Release tag | Commit |
+|-----------|-------------|--------|
+| `vendor/source-sans` | `3.052R` | `ed1808970eb3c7301c9a523bee26473ba0bb62fa` |
+| `vendor/source-code-pro` | `2.042R-u/1.062R-i/1.026R-vf` | `d3f1a5962cde503f9409c21e58527611d4a19ef1` |
 
 `drip-raw` uses LibRaw's upstream translation-unit list [18], reentrant settings
 and JPEG/zlib support, with no OpenMP, internal LittleCMS, RawSpeed or DNG SDK.

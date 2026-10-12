@@ -7,6 +7,7 @@ fn pointer_leave_stops_dropdown_scrolling() {
     for same_frame in [false, true] {
         let mut h = Harness::builder().with_step_dt(1.0 / 60.0).build_ui_state(
             |ui, state: &mut (usize, Rect)| {
+                crate::theme::fonts(ui.ctx());
                 state.1 = dropdown(
                     ui,
                     egui::ComboBox::from_id_salt("test"),
