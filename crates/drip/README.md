@@ -50,6 +50,74 @@ a new node is one more line.
 `drip-gui` keeps its own lists in `src/registry.rs`; see its
 [README](../drip-gui/README.md).
 
+## Adding a node
+
+A node that doubles every RGB sample, as `src/node/double.rs`:
+
+```rust
+use crate::{
+    Result,
+    node::data::*,
+    ports::*,
+    registry::tag,
+    runtime::{GlobalContext, KernelContext, dispatch_dims},
+};
+
+fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(RgbDesc,)> {
+    Ok((image.clone(),))
+}
+
+/// Double every RGB sample (+1 EV). Output keeps the input coordinates.
+#[crate::node(id = "double", name = "Double", tags = [tag::LOOK], contract = contract)]
+pub fn compute(
+    ctx: &KernelContext<'_>,
+    _: &(),
+    image: Read<'_, Device<Rgb>>,
+    output: Write<'_, Device<Rgb>>,
+) -> Result<()> {
+    let (count, dim) = dispatch_dims(image.desc.extent.pixels() * 3);
+    let (input, output) = (image.data.argument(), output.data.argument());
+    kernel::double::launch(ctx.client()?, count, dim, input, output);
+    Ok(())
+}
+
+mod kernel {
+    use cubecl::prelude::*;
+    #[cube(launch)]
+    pub fn double(input: &[f32], output: &mut [f32]) {
+        let i = ABSOLUTE_POS;
+        if i < input.len() {
+            output[i] = input[i] * 2.0;
+        }
+    }
+}
+```
+
+1. Declare the module: `pub mod double;` in `src/node/mod.rs`.
+2. List `&double::compute::KIND` in `registry::NODES`, at its pipeline
+   position. Without this the node cannot be added or loaded.
+3. Test it through a graph:
+
+   ```rust
+   let mut dag = Dag::new();
+   let source = node::source::<Rgb>(&mut dag, desc, vec![[0.1, -0.2, 2.0]; 2])?;
+   let double = node::double::compute::add(&mut dag, ())?;
+   dag.connect(source, double.image)?;
+   let result = Evaluator::new(RuntimeContext::from_env()?)
+       .evaluate::<Cpu<Rgb>>(&dag, &Default::default(), double.output)?;
+   assert_eq!(&**result.data, &[[0.2, -0.4, 4.0]; 2]);
+   ```
+
+`#[node]` generates the rest: the `Kind` (ID, help from the Rustdoc, ports,
+schema), `add`, typed `Ports` and `Inputs`. The contract runs at evaluation
+and states what the output describes; reject inputs it cannot handle there.
+The ID is the persistence key, so keep it once projects use it. Tags say what
+the node is for: at most one stage tag, then any others that help finding it.
+Parameters are a struct deriving `Parameters` in place of `()`; see
+`exposure.rs`. Credit adapted algorithms beside the code and in
+`THIRD_PARTY.md`. Every frontend now offers the node with schema controls; for
+GUI-specific presentation see the [drip-gui README](../drip-gui/README.md).
+
 ## Node metadata and parameters
 
 Declare operation names, tags, help and port contracts beside node functions.

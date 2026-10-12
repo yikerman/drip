@@ -18,3 +18,42 @@ node-specific controls, preparation and presentation live under `src/node_ui/`.
 
 Test builds append the lists in `src/test_nodes.rs`, which hold test-only kinds
 and bindings that project loading or prepared views must find.
+
+## Presenting a node
+
+A node listed in `drip::registry::NODES` needs no GUI code: the canvas, its
+ports, the inspector's help and the schema controls come from its
+declaration. Add GUI code only to override that. For the library's
+[`double` example](../drip/README.md#adding-a-node), a note under its
+controls goes in `src/node_ui/double.rs`:
+
+```rust
+use super::{ControlCx, GuiNode};
+use drip::node::double;
+use egui::Ui;
+
+impl GuiNode for double::compute::Definition {
+    type Presentation = ();
+    fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Parameters>) {
+        node.schema(ui);
+        ui.small("Equivalent to Exposure at +1 EV.");
+    }
+}
+```
+
+1. Declare the module: `mod double;` in `src/node_ui/mod.rs`.
+2. List `Binding::new::<drip::node::double::compute::Definition>()` in
+   `registry::BINDINGS`. Without this the override is ignored and the schema
+   controls remain.
+
+Other overrides use the same impl and entry:
+
+- `PREPARE` with a `Presentation` draws a view in the node and its pop-out,
+  from the node's typed inputs; see `scopes/histogram.rs`.
+- `ACTION` adds a frontend action whose result may become new parameters; see
+  `exposure.rs` (auto exposure). A kind has a frontend action or one declared
+  on the node, not both.
+
+A node that only presents its inputs and prepares GUI-only data, such as a
+scope, is declared here with `#[drip::node]` instead of in the library, listed
+in `registry::VIEWS` as well as `BINDINGS`, and tagged `view`.
