@@ -4,6 +4,11 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Node picker: GUI tests open it by right-click and by Space, search and click
+  Exposure, narrow by the demosaic chip, choose RCD with Enter, check nodes
+  land where the picker opened, and close with Escape; unit tests cover
+  ranking and tag filters. 97 GUI tests and strict workspace Clippy pass; not
+  exercised in a desktop session.
 - Tags replace categories: macro tests cover `tags = [...]` and reject a
   non-list; the interim Add node menu lists tags in registry order and adds
   Exposure from `look`. Workspace tests and strict workspace Clippy pass.

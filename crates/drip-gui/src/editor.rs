@@ -23,7 +23,7 @@ use egui::{
 
 use crate::theme::{self, Tip};
 
-mod node_menu;
+mod picker;
 
 const HEADER: f32 = 22.0;
 const ROW: f32 = 18.0;
@@ -43,11 +43,13 @@ pub struct Editor {
     zoom: f32,
     /// The port awaiting an opposite-direction endpoint on the next right-click.
     wire: Option<Port>,
+    /// Opened by a background right-click or Space over the canvas.
+    picker: Option<picker::Picker>,
 }
 
 impl Default for Editor {
     fn default() -> Self {
-        Editor { offset: None, zoom: 1.0, wire: None }
+        Editor { offset: None, zoom: 1.0, wire: None, picker: None }
     }
 }
 
@@ -167,23 +169,30 @@ impl Editor {
             ui.ctx().request_repaint();
         }
 
+        match self.picker.as_mut().and_then(|picker| picker.show(ui.ctx())) {
+            Some(picker::Picked::Kind(kind)) => {
+                let at = self.picker.take().expect("open picker").at;
+                *selected = frame.edit(graph, Edit::Add(kind, at));
+            }
+            Some(picker::Picked::Closed) => self.picker = None,
+            None => {}
+        }
+        let space = self.picker.is_none()
+            && self.wire.is_none()
+            && background.contains_pointer()
+            && !ui.ctx().egui_wants_keyboard_input()
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
         if background.secondary_clicked() && self.wire.is_some() {
             self.wire = None;
         } else if background.secondary_clicked()
             && let Some(input) = disconnect
         {
             frame.edit(graph, Edit::Disconnect(input));
-        } else {
-            egui::Popup::context_menu(&background).show(|ui| {
-                if let Some(kind) = node_menu::show(ui) {
-                    let pointer = ui
-                        .ctx()
-                        .pointer_interact_pos()
-                        .unwrap_or(to_global * background.rect.center());
-                    let pos = (to_global.inverse() * pointer).to_vec2();
-                    *selected = frame.edit(graph, Edit::Add(kind, pos));
-                }
-            });
+        } else if background.secondary_clicked() || space {
+            let screen =
+                ui.ctx().pointer_latest_pos().unwrap_or(to_global * background.rect.center());
+            let at = (to_global.inverse() * screen).to_vec2();
+            self.picker = Some(picker::Picker::new(at, screen));
         }
 
         if let Some(id) = *selected

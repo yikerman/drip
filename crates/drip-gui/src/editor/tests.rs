@@ -55,7 +55,7 @@ fn harness(zoom: f32) -> Harness<'static, Scene> {
     let node = graph.add_node(&drip::node::exposure::compute::KIND).unwrap();
     graph.set_ui(node, json!({"pos": [100.0, 100.0]})).unwrap();
     let scene = Scene {
-        editor: Editor { offset: Some(vec2(20.0, 20.0)), zoom, wire: None },
+        editor: Editor { offset: Some(vec2(20.0, 20.0)), zoom, wire: None, picker: None },
         graph,
         node,
         selected: None,
@@ -205,7 +205,7 @@ fn pending_connections_cancel_without_opening_the_canvas_menu() {
         click_port(&mut h, start, direction, Secondary);
         click(&mut h, pos2(40.0, 40.0), Secondary);
         assert!(h.state().editor.wire.is_none());
-        assert!(h.query_by_label("Tone ⏵").is_none());
+        assert!(h.state().editor.picker.is_none());
         click_port(&mut h, start, direction, Secondary);
         h.key_press(egui::Key::Escape);
         h.run();
@@ -327,7 +327,7 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
                 Some(h.state().output(source))
             );
             assert_eq!(h.state().edited, removed);
-            assert_eq!(h.query_by_label("look ⏵").is_some(), !removed);
+            assert_eq!(h.state().editor.picker.is_some(), !removed);
         }
     }
 }
@@ -443,7 +443,7 @@ fn right_drag_moves_only_nodes_without_opening_menus() {
         drag(&mut h, pos2(40.0, 40.0), Secondary, delta);
         assert_eq!(snapshot(&h.state().graph), snapshot(&graph));
         assert_eq!(h.state().editor.offset, offset);
-        assert!(h.query_by_label("Tone ⏵").is_none());
+        assert!(h.state().editor.picker.is_none());
     }
 }
 
@@ -481,21 +481,57 @@ fn click_selection_and_node_menu_actions() {
     assert_eq!(h.state().selected, None);
     assert!(h.state().edited);
 
-    pointer(&mut h, pos2(40.0, 40.0), Secondary, true);
-    pointer(&mut h, pos2(40.0, 40.0), Secondary, false);
-    let tags: Vec<_> = drip::registry::TAGS.iter().map(|tag| tag.id).collect();
-    let rows: Vec<_> =
-        tags.iter().map(|name| h.get_by_label(&format!("{name} ⏵")).rect().top()).collect();
-    assert!(rows.windows(2).all(|rows| rows[0] < rows[1]));
-    h.get_by_label("look ⏵").click();
-    h.run();
-    h.get_by_label(drip::node::exposure::compute::KIND.name).click();
-    h.run();
-    assert_eq!(h.state().graph.nodes().count(), 1);
-    let added = h.state().graph.node(h.state().selected.unwrap()).unwrap();
-    assert_eq!(added.kind.id, "exposure");
-    assert_eq!(added.name, "Exposure");
     assert!(!egui::Popup::is_any_open(&h.ctx));
+}
+
+/// Graph position under a screen point in the harness canvas.
+fn graph_point(h: &Harness<'_, Scene>, screen: Pos2) -> Vec2 {
+    let s = h.state();
+    (screen - s.area.min - s.editor.offset.unwrap()) / s.editor.zoom
+}
+
+#[test]
+fn picker_searches_filters_by_tag_and_adds_where_it_opened() {
+    let mut h = harness(1.0);
+    let at = pos2(40.0, 40.0);
+    click(&mut h, at, Secondary);
+    assert!(h.state().editor.picker.is_some());
+    h.event(Event::Text("expo".into()));
+    h.run();
+    assert!(h.query_by_label("Export TIFF").is_some(), "both names start with the query");
+    h.get_by_label("Exposure").click();
+    h.run();
+    let s = h.state();
+    let added = s.selected.unwrap();
+    assert_ne!(added, s.node);
+    assert_eq!(s.graph.node(added).unwrap().kind.id, "exposure");
+    assert_eq!(position(&s.graph.node(added).unwrap().ui, added), graph_point(&h, at));
+    assert!(s.editor.picker.is_none());
+
+    let at = pos2(60.0, 400.0);
+    h.event(Event::PointerMoved(at));
+    h.key_press(egui::Key::Space);
+    h.run();
+    assert!(h.state().editor.picker.is_some());
+    h.get_by_label("demosaic").click();
+    h.run();
+    assert!(h.query_by_label("Exposure").is_none());
+    assert!(h.query_by_label("RCD demosaic").is_some());
+    h.event(Event::Text("rcd".into()));
+    h.key_press(egui::Key::Enter);
+    h.run();
+    let s = h.state();
+    let added = s.selected.unwrap();
+    assert_eq!(s.graph.node(added).unwrap().kind.id, "rcd-demosaic");
+    assert_eq!(position(&s.graph.node(added).unwrap().ui, added), graph_point(&h, at));
+
+    h.key_press(egui::Key::Space);
+    h.run();
+    let count = h.state().graph.nodes().count();
+    h.key_press(egui::Key::Escape);
+    h.run();
+    assert!(h.state().editor.picker.is_none());
+    assert_eq!(h.state().graph.nodes().count(), count);
 }
 
 fn snapshot(graph: &Graph) -> String {
