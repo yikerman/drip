@@ -266,6 +266,10 @@ Settled with the user on 2026-10-11 after a review against
 - **Decided:** Projects use `.drip`, templates `.drip-template`. Opening a
   template creates an untitled project; exposed template parameters reset to
   their defaults when saving a template.
+- **Decided:** Project commands share one table for menu buttons and
+  shortcuts, which match modifiers exactly in every window: New Ctrl+N, Open
+  Ctrl+O, Save Ctrl+S, Save as Ctrl+Shift+S, Save template Ctrl+Alt+S (Cmd on
+  macOS). Button tooltips show them; New and Open wait for a running action.
 - **Decided:** Ports show declared payload names and endpoint names; optional
   inputs are marked `?`. Long titles are elided with full names on hover.
   Unsaved edits are tracked separately from evaluation requests.

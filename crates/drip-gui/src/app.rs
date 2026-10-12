@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::model::NodeId;
 use crate::model::Project;
 use crate::node_ui::templates;
-use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
+use egui::{CentralPanel, Key, KeyboardShortcut, Modifiers, Panel, RichText, Ui, Vec2};
 
 use crate::editing::{Edit, Frame, NodeCx, Report};
 use crate::editor::Editor;
@@ -57,6 +57,65 @@ struct ActionStatus {
     completed: String,
 }
 
+/// A project command, offered in the menu and by its shortcut.
+struct Command {
+    label: &'static str,
+    shortcut: KeyboardShortcut,
+    /// Whether it replaces the open project.
+    replaces: bool,
+    run: fn(&mut App),
+}
+
+const COMMANDS: [Command; 5] = {
+    const SHIFT: Modifiers = Modifiers::COMMAND.plus(Modifiers::SHIFT);
+    const ALT: Modifiers = Modifiers::COMMAND.plus(Modifiers::ALT);
+    [
+        Command {
+            label: "New",
+            shortcut: KeyboardShortcut::new(Modifiers::COMMAND, Key::N),
+            replaces: true,
+            run: App::new_project,
+        },
+        Command {
+            label: "Open…",
+            shortcut: KeyboardShortcut::new(Modifiers::COMMAND, Key::O),
+            replaces: true,
+            run: App::open_dialog,
+        },
+        Command {
+            label: "Save",
+            shortcut: KeyboardShortcut::new(Modifiers::COMMAND, Key::S),
+            replaces: false,
+            run: App::save_project,
+        },
+        Command {
+            label: "Save as…",
+            shortcut: KeyboardShortcut::new(SHIFT, Key::S),
+            replaces: false,
+            run: |app| app.save_as(false),
+        },
+        Command {
+            label: "Save template…",
+            shortcut: KeyboardShortcut::new(ALT, Key::S),
+            replaces: false,
+            run: |app| app.save_as(true),
+        },
+    ]
+};
+
+/// Takes a press of exactly `shortcut`. egui's own matching ignores extra
+/// Shift and Alt, so Save as would also be taken as Save.
+fn pressed(ctx: &egui::Context, shortcut: KeyboardShortcut) -> bool {
+    ctx.input_mut(|input| {
+        let before = input.events.len();
+        input.events.retain(|event| {
+            !matches!(event, egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. }
+                if *key == shortcut.logical_key && modifiers.matches_exact(shortcut.modifiers))
+        });
+        input.events.len() < before
+    })
+}
+
 impl App {
     pub fn new(
         file: Option<PathBuf>,
@@ -99,6 +158,7 @@ impl App {
 
     /// The main window: menu, status line, inspector and editor.
     pub fn ui(&mut self, ui: &mut Ui) {
+        self.shortcuts(ui.ctx());
         ui.push_id(self.ui_generation, |ui| self.main_ui(ui));
     }
 
@@ -126,6 +186,7 @@ impl App {
 
     /// A popped-out window.
     pub fn window(&mut self, ui: &mut Ui, popped: Popped) {
+        self.shortcuts(ui.ctx());
         let results = |id| self.worker.result(id);
         let mut frame = Frame::new(&results, &self.popped, self.actions_disabled());
         let graph = &mut self.project.graph;
@@ -269,36 +330,12 @@ impl App {
 
     fn menu(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            // A running action cannot be interrupted, and its result would be lost.
-            let idle = self.action.is_none();
-            if ui.add_enabled(idle, egui::Button::new("New")).clicked()
-                && let Err(error) = self.set_project(templates::raw_to_tiff(), None)
-            {
-                self.report(Err(error));
-            }
-            if ui.add_enabled(idle, egui::Button::new("Open…")).clicked()
-                && let Some(file) = rfd::FileDialog::new()
-                    .set_title("Open Drip project or template")
-                    .add_filter("Drip project or template", &["drip", "drip-template"])
-                    .pick_file()
-            {
-                self.open(file);
-            }
-            if ui.button("Save").clicked() {
-                match self.file.clone() {
-                    Some(file) => {
-                        if self.save(&file, self.project.clone()) {
-                            self.modified = false;
-                        }
-                    }
-                    None => self.save_as(false),
+            for command in &COMMANDS {
+                let button = egui::Button::new(command.label);
+                let shortcut = ui.ctx().format_shortcut(&command.shortcut);
+                if ui.add_enabled(self.allows(command), button).tip(shortcut).clicked() {
+                    (command.run)(self);
                 }
-            }
-            if ui.button("Save as…").clicked() {
-                self.save_as(false);
-            }
-            if ui.button("Save template…").clicked() {
-                self.save_as(true);
             }
             ui.separator();
             let label = |level| {
@@ -320,6 +357,47 @@ impl App {
                 self.dirty = true;
             }
         });
+    }
+
+    /// Runs the first project command whose shortcut was pressed in `ctx`.
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        if let Some(command) = COMMANDS.iter().find(|c| self.allows(c) && pressed(ctx, c.shortcut))
+        {
+            (command.run)(self);
+        }
+    }
+
+    /// A running action cannot be interrupted, and its result would be lost.
+    fn allows(&self, command: &Command) -> bool {
+        !command.replaces || self.action.is_none()
+    }
+
+    fn new_project(&mut self) {
+        if let Err(error) = self.set_project(templates::raw_to_tiff(), None) {
+            self.report(Err(error));
+        }
+    }
+
+    fn open_dialog(&mut self) {
+        if let Some(file) = rfd::FileDialog::new()
+            .set_title("Open Drip project or template")
+            .add_filter("Drip project or template", &["drip", "drip-template"])
+            .pick_file()
+        {
+            self.open(file);
+        }
+    }
+
+    /// Saves to the project's file, or asks for one.
+    fn save_project(&mut self) {
+        match self.file.clone() {
+            Some(file) => {
+                if self.save(&file, self.project.clone()) {
+                    self.modified = false;
+                }
+            }
+            None => self.save_as(false),
+        }
     }
 
     fn status_line(&self, ui: &mut Ui) {
@@ -837,6 +915,34 @@ mod tests {
         assert_eq!(h.state().title(), "Untitled · Drip");
         std::fs::remove_file(template).unwrap();
         std::fs::remove_file(destination).unwrap();
+    }
+
+    #[test]
+    fn shortcuts_run_project_commands_with_exact_modifiers() {
+        let file = std::env::temp_dir().join(format!("drip-shortcuts-{}.drip", std::process::id()));
+        std::fs::write(&file, Project::default().to_json().unwrap()).unwrap();
+        let mut h = harness(App::new(Some(file.clone()), true, || {}));
+        h.run();
+        h.state_mut().edit(Edit::Add(drip::definition::kind("tone.exposure").unwrap(), Vec2::ZERO));
+        // Extra modifiers select no command, so New keeps the edit.
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::N);
+        h.run();
+        assert!(h.state().project.graph.find("Exposure").is_some());
+        h.key_press_modifiers(Modifiers::COMMAND, Key::S);
+        h.run();
+        assert!(!h.state().modified);
+        let saved = Project::from_json(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert!(saved.graph.find("Exposure").is_some());
+        h.state_mut().action =
+            Some(ActionStatus { running: String::new(), completed: String::new() });
+        h.key_press_modifiers(Modifiers::COMMAND, Key::N);
+        h.run();
+        assert_eq!(h.state().file.as_ref(), Some(&file), "a running action keeps its project");
+        h.state_mut().action = None;
+        h.key_press_modifiers(Modifiers::COMMAND, Key::N);
+        h.run();
+        assert!(h.state().file.is_none());
+        std::fs::remove_file(file).unwrap();
     }
 
     #[test]
