@@ -19,7 +19,7 @@ fn rcd_contract(global: &GlobalContext, _: &(), image: &BayerDesc) -> Result<(Rg
 /// CFA phase plane; full detail preserves the input grid. Negative samples are
 /// clipped to zero, and a ten-pixel border uses bilinear interpolation.
 /// Adapted from darktable RCD; direction ties may differ slightly across backends.
-#[crate::node(id="rcd-demosaic", name="RCD demosaic", tags = [tag::INPUT_TRANSFORM, tag::RAW, tag::DEMOSAIC],contract=rcd_contract,references=[("RCD source", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/demosaicing/rcd.c")])]
+#[crate::node(id="rcd-demosaic", name="RCD demosaic", tags = [tag::INPUT_TRANSFORM, tag::BAYER_RAW, tag::DEMOSAIC],contract=rcd_contract,references=[("RCD source", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/demosaicing/rcd.c")])]
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),

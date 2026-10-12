@@ -12,8 +12,8 @@ use crate::{
 use std::sync::Arc;
 
 /// Tags nodes may carry, stages first. A node takes at most one of the ACES
-/// stages [1] (input transform, look, output transform) or `encoding`;
-/// geometry and views take none. Frontends declare no tags of their own.
+/// stages [1] (input transform, look, output transform); geometry, views and
+/// file writers take none. Frontends declare no tags of their own.
 ///
 /// [1] Academy Color Encoding System, "ACES overview."
 /// https://docs.acescentral.com/background/overview
@@ -30,8 +30,8 @@ pub mod tag {
         INPUT_TRANSFORM "input-transform" "Camera-native data to scene-linear color RGB, as an ACES Input Transform.";
         LOOK "look" "Technical or creative adjustment of scene-referred RGB, as an ACES Look Transform.";
         OUTPUT_TRANSFORM "output-transform" "Scene-referred to display-referred rendering, as an ACES Output Transform.";
-        ENCODING "encoding" "Writes images to files.";
-        RAW "raw" "Works on sensor data before demosaicing.";
+        IO "io" "Reads or writes image files.";
+        BAYER_RAW "bayer-raw" "Works on Bayer sensor data before demosaicing.";
         DEMOSAIC "demosaic" "Interpolates full RGB from a color filter array.";
         RECOVERY "recovery" "Restores what the capture lost or distorted, such as clipped highlights.";
         GEOMETRY "geometry" "Changes pixel positions or sampling.";

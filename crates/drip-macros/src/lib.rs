@@ -17,7 +17,7 @@ use documentation::documentation;
 /// unconnected) and returns a tuple of output descriptions. It is required
 /// exactly when the node has outputs. Evaluation calls it before running the node.
 /// Rustdoc and `references = [(label, url), ...]` become node help.
-/// Optional `name` defaults to the ID; optional `tags = [tag::RAW, ...]` names
+/// Optional `name` defaults to the ID; optional `tags = [tag::BAYER_RAW, ...]` names
 /// registered `Tag` statics (see `drip::registry`).
 /// The parameter type supplies its schema through `Parameters` (usually derived).
 /// Use `&()` for nodes without parameters.

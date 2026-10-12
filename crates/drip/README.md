@@ -58,7 +58,8 @@ a new node is one more line.
 - `drip::registry::NODES`: processing node kinds, in pipeline order.
 - `drip::registry::TAGS`: every tag a node may carry, with a one-sentence
   description; frontends add none. A node takes at most one stage tag, after
-  ACES: `input-transform`, `look` or `output-transform`, or `encoding`.
+  ACES: `input-transform`, `look` or `output-transform`. File readers and
+  writers carry `io`.
 - `drip::registry::Registry`: composes lists, rejects duplicate IDs and
   admits persisted parameters. `Project::from_json` loads through the registry
   it is given, so a frontend states which kinds it knows. A headless frontend

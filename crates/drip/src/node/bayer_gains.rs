@@ -33,7 +33,7 @@ fn total_balance(image: &BayerDesc, metadata: &drip_raw::Metadata) -> Result<[f3
 /// clipping levels. Outputs Bayer and BayerLevels in the same balanced
 /// coordinates; gains compose with a balance the input already carries. No
 /// gains or CFA are inferred: missing as-shot balance prevents evaluation.
-#[crate::node(id="bayer-site-gains", name="Bayer site gains", tags = [tag::INPUT_TRANSFORM, tag::RAW],contract=gain_contract)]
+#[crate::node(id="bayer-site-gains", name="Bayer site gains", tags = [tag::INPUT_TRANSFORM, tag::BAYER_RAW],contract=gain_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),

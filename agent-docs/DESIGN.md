@@ -293,9 +293,12 @@ Settled with the user on 2026-10-11 after a review against
   declare none of their own, so `view` and `scope` live there too. Tags say
   what a node is for; ports and payloads already say what it accepts. At most
   one stage per node, by convention rather than a check: the ACES input
-  transform, look or output transform, or `encoding`. Exposure is a look;
-  geometry and views have no stage. RAW decoding and chromatic adaptation
-  (as-shot white by default) count as input transforms.
+  transform, look or output transform. Exposure is a look; geometry, views and
+  file writers have no stage. RAW decoding and chromatic adaptation (as-shot
+  white by default) count as input transforms. `io` marks nodes that read or
+  write files, crossing stages (the RAW reader is also an input transform);
+  `bayer-raw` marks work on the undemosaiced Bayer mosaic, so X-Trans or
+  monochrome sensor data can later take tags of their own.
 - **Decided:** Nodes are added through a palette, an `egui::Modal` sized to
   the window (60% of its width, 85% of its height), opened by a
   right-click on the background or Space over the canvas (the node goes under

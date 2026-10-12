@@ -193,7 +193,10 @@ mod tests {
     #[test]
     fn selected_tags_must_all_be_carried() {
         assert_eq!(names("", &[&tag::LOOK]), ["Exposure"]);
-        assert_eq!(names("", &[&tag::RAW, &tag::DEMOSAIC]), ["Bayer 2×2 demosaic", "RCD demosaic"]);
+        assert_eq!(
+            names("", &[&tag::BAYER_RAW, &tag::DEMOSAIC]),
+            ["Bayer 2×2 demosaic", "RCD demosaic"]
+        );
         let all = names("", &[]);
         assert!(all.windows(2).all(|pair| pair[0] <= pair[1]), "an empty query sorts by name");
     }

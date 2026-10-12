@@ -87,7 +87,7 @@ impl Assets for Export {
 #[crate::node(
     id = "export-tiff",
     name = "Export TIFF",
-    tags = [tag::ENCODING],
+    tags = [tag::IO],
     action = export,
     assets
 )]
