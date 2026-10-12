@@ -4,6 +4,11 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Undo/redo: GUI tests make a held slider drag one step that undoes and redoes,
+  restore a removed node with its id, edges, name and layout while the RAW
+  node stays the same `Arc`, and leave Ctrl+Z to a focused text field; history
+  tests cover redo clearing and the depth cap. 93 GUI tests and strict GUI
+  Clippy pass; not exercised in a desktop session.
 - Project command shortcuts: a GUI test saves with Ctrl+S, ignores Ctrl+Shift+N
   and refuses New while an action runs. 87 GUI tests and strict GUI Clippy
   pass; not exercised in a desktop session.

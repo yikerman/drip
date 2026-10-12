@@ -12,11 +12,13 @@
 //! Logging goes to stderr. `RUST_LOG=warn,drip=debug,drip_gui=debug` shows
 //! processing diagnostics; `RUST_LOG=warn,drip_gui::frame=trace` shows frame timings.
 //! `RUST_LOG=warn,drip_gui::worker=trace` adds per-node host timings without
-//! additional GPU synchronization.
+//! additional GPU synchronization. `DRIP_HISTORY` sets how many undo steps are
+//! kept (default 100).
 
 mod app;
 mod editing;
 mod editor;
+mod history;
 mod inspector;
 mod model;
 mod node_ui;

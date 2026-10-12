@@ -268,8 +268,16 @@ Settled with the user on 2026-10-11 after a review against
   their defaults when saving a template.
 - **Decided:** Project commands share one table for menu buttons and
   shortcuts, which match modifiers exactly in every window: New Ctrl+N, Open
-  Ctrl+O, Save Ctrl+S, Save as Ctrl+Shift+S, Save template Ctrl+Alt+S (Cmd on
-  macOS). Button tooltips show them; New and Open wait for a running action.
+  Ctrl+O, Save Ctrl+S, Save as Ctrl+Shift+S, Save template Ctrl+Alt+S, Undo
+  Ctrl+Z, Redo Ctrl+Shift+Z (Cmd on macOS). Button tooltips show them; New and
+  Open wait for a running action. Focused text fields keep their keys.
+- **Decided:** Undo restores whole-graph snapshots: DAG, names, template
+  inputs and layout, not the preview level, selection or windows. Nodes are
+  shared `Arc`s, so a step copies entries and labels; a replaced node and its
+  loaded file stay in memory while a step refers to it, which is intended. A
+  step ends when the pointer is released in the window that edited; text
+  fields edit once on losing focus, and action results are steps of their own.
+  `DRIP_HISTORY` sets the depth (default 100). Undo marks the project modified.
 - **Decided:** New and Open ask to save, discard or cancel unsaved edits in
   every window; a failed or canceled save keeps the project.
 - **Decided:** Ports show declared payload names and endpoint names; optional

@@ -5,8 +5,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::model::NodeId;
+use crate::history::History;
 use crate::model::Project;
+use crate::model::{Graph, NodeId};
 use crate::node_ui::templates;
 use egui::{CentralPanel, Key, KeyboardShortcut, Modifiers, Panel, RichText, Ui, Vec2};
 
@@ -42,6 +43,10 @@ pub struct App {
     /// A command that replaces the project, waiting until unsaved edits are
     /// saved or discarded.
     replacing: Option<fn(&mut App)>,
+    history: History,
+    /// The window whose pointer gesture made edits not yet in the history;
+    /// `Some(None)` is the main window.
+    editing: Option<Option<Popped>>,
 }
 
 /// A popped-out window as the app wants it.
@@ -66,10 +71,11 @@ struct Command {
     shortcut: KeyboardShortcut,
     /// Whether it replaces the open project.
     replaces: bool,
+    available: fn(&App) -> bool,
     run: fn(&mut App),
 }
 
-const COMMANDS: [Command; 5] = {
+const COMMANDS: [Command; 7] = {
     const SHIFT: Modifiers = Modifiers::COMMAND.plus(Modifiers::SHIFT);
     const ALT: Modifiers = Modifiers::COMMAND.plus(Modifiers::ALT);
     [
@@ -77,31 +83,50 @@ const COMMANDS: [Command; 5] = {
             label: "New",
             shortcut: KeyboardShortcut::new(Modifiers::COMMAND, Key::N),
             replaces: true,
+            available: App::idle,
             run: App::new_project,
         },
         Command {
             label: "Open…",
             shortcut: KeyboardShortcut::new(Modifiers::COMMAND, Key::O),
             replaces: true,
+            available: App::idle,
             run: App::open_dialog,
         },
         Command {
             label: "Save",
             shortcut: KeyboardShortcut::new(Modifiers::COMMAND, Key::S),
             replaces: false,
+            available: |_| true,
             run: App::save_project,
         },
         Command {
             label: "Save as…",
             shortcut: KeyboardShortcut::new(SHIFT, Key::S),
             replaces: false,
+            available: |_| true,
             run: |app| app.save_as(false),
         },
         Command {
             label: "Save template…",
             shortcut: KeyboardShortcut::new(ALT, Key::S),
             replaces: false,
+            available: |_| true,
             run: |app| app.save_as(true),
+        },
+        Command {
+            label: "Undo",
+            shortcut: KeyboardShortcut::new(Modifiers::COMMAND, Key::Z),
+            replaces: false,
+            available: |app| app.editing.is_some() || app.history.can_undo(),
+            run: App::undo,
+        },
+        Command {
+            label: "Redo",
+            shortcut: KeyboardShortcut::new(SHIFT, Key::Z),
+            replaces: false,
+            available: |app| app.history.can_redo(),
+            run: App::redo,
         },
     ]
 };
@@ -126,8 +151,10 @@ impl App {
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
+        let project = templates::raw_to_tiff();
         let mut app = App {
-            project: templates::raw_to_tiff(),
+            history: History::new(project.graph.clone()),
+            project,
             worker: Worker::new(wake.clone()),
             wake,
             dirty: true,
@@ -143,6 +170,7 @@ impl App {
             popped: BTreeSet::new(),
             redraw: false,
             replacing: None,
+            editing: None,
         };
         if let Some(file) = file {
             app.open(file);
@@ -186,7 +214,9 @@ impl App {
             self.editor.show(ui, graph, &mut self.selected, &mut frame);
         });
         let report = frame.report;
+        let changed = report.changed;
         self.apply(report);
+        self.record(ui.ctx(), None, changed);
     }
 
     /// A popped-out window.
@@ -201,7 +231,9 @@ impl App {
             }
         });
         let report = frame.report;
+        let changed = report.changed;
         self.apply(report);
+        self.record(ui.ctx(), Some(popped), changed);
         self.unsaved_prompt(ui.ctx());
     }
 
@@ -292,7 +324,11 @@ impl App {
         let mut frame = Frame::new(&results, &self.popped, self.actions_disabled());
         frame.edit(&mut self.project.graph, edit);
         let report = frame.report;
+        let changed = report.changed;
         self.apply(report);
+        if changed {
+            self.commit();
+        }
     }
 
     /// Takes the worker's notices; called whenever the worker wakes the app.
@@ -368,7 +404,11 @@ impl App {
     }
 
     /// Runs the first project command whose shortcut was pressed in `ctx`.
+    /// Text fields keep their keys, including their own undo.
     fn shortcuts(&mut self, ctx: &egui::Context) {
+        if ctx.text_edit_focused() {
+            return;
+        }
         if let Some(command) = COMMANDS.iter().find(|c| self.allows(c) && pressed(ctx, c.shortcut))
         {
             self.invoke(command);
@@ -412,9 +452,53 @@ impl App {
         }
     }
 
-    /// A running action cannot be interrupted, and its result would be lost.
     fn allows(&self, command: &Command) -> bool {
-        !command.replaces || self.action.is_none()
+        (command.available)(self)
+    }
+
+    /// A running action cannot be interrupted, and its result would be lost.
+    fn idle(&self) -> bool {
+        self.action.is_none()
+    }
+
+    /// Notes edits a frame of `window` made, and makes them an undo step once
+    /// no pointer is held there, so that a drag is one step.
+    fn record(&mut self, ctx: &egui::Context, window: Option<Popped>, changed: bool) {
+        if changed {
+            self.editing.get_or_insert(window);
+        }
+        if self.editing == Some(window) && !ctx.input(|input| input.pointer.any_down()) {
+            self.commit();
+        }
+    }
+
+    fn commit(&mut self) {
+        self.editing = None;
+        self.history.commit(&self.project.graph);
+    }
+
+    /// Undoes the latest step, including edits of a gesture still in progress.
+    fn undo(&mut self) {
+        if self.editing.is_some() {
+            self.commit();
+        }
+        if let Some(graph) = self.history.undo() {
+            self.restore(graph);
+        }
+    }
+
+    fn redo(&mut self) {
+        if let Some(graph) = self.history.redo() {
+            self.restore(graph);
+        }
+    }
+
+    /// Shows a graph from the history as an edit: it is evaluated and redrawn,
+    /// and windows of nodes it lacks close.
+    fn restore(&mut self, graph: Graph) {
+        self.selected = self.selected.filter(|id| graph.kind(*id).is_some());
+        self.project.graph = graph;
+        self.apply(Report { changed: true, edited: true, ..Report::default() });
     }
 
     fn new_project(&mut self) {
@@ -471,6 +555,8 @@ impl App {
     fn set_project(&mut self, project: Project, file: Option<PathBuf>) -> Result<(), String> {
         let level = ui_state::preview_level(&project.ui)?;
         self.level = level;
+        self.history = History::new(project.graph.clone());
+        self.editing = None;
         self.project = project;
         self.ui_generation += 1;
         self.file = file;
@@ -1025,6 +1111,93 @@ mod tests {
         h.run();
         assert!(h.query_by_label("Discard").is_none(), "unmodified projects are replaced");
         std::fs::remove_file(file).unwrap();
+    }
+
+    fn undo(h: &mut Harness<'_, App>) {
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.run();
+    }
+
+    fn redo(h: &mut Harness<'_, App>) {
+        h.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+        h.run();
+    }
+
+    #[test]
+    fn a_slider_drag_is_one_undo_step() {
+        let mut h = harness(App::new(None, true, || {}));
+        let id = h.state().project.graph.find("Exposure").unwrap();
+        h.state_mut().selected = Some(id);
+        h.run();
+        let ev =
+            |h: &Harness<'_, App>| h.state().project.graph.node(id).unwrap().params["ev"].clone();
+        let before = ev(&h);
+        let slider = h.get_by_role(egui::accesskit::Role::Slider).rect();
+        let start = slider.center();
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        h.event(egui::Event::PointerMoved(start));
+        h.event(button(start, true));
+        h.step();
+        let end = egui::pos2(slider.right() - 2.0, start.y);
+        for step in 1..=3 {
+            h.event(egui::Event::PointerMoved(start.lerp(end, step as f32 / 3.0)));
+            h.step();
+        }
+        assert_ne!(ev(&h), before, "the drag edits while held");
+        assert!(!h.state().history.can_undo(), "a held drag is not yet a step");
+        h.event(button(end, false));
+        h.run();
+        let dragged = ev(&h);
+        assert_ne!(dragged, before);
+        undo(&mut h);
+        assert_eq!(ev(&h), before);
+        assert!(!h.state().history.can_undo(), "the drag was one step");
+        redo(&mut h);
+        assert_eq!(ev(&h), dragged);
+    }
+
+    #[test]
+    fn undo_restores_removed_nodes_and_shares_the_others() {
+        let mut h = harness(App::new(None, true, || {}));
+        h.run();
+        let graph = |h: &Harness<'_, App>| h.state().project.graph.clone();
+        let raw = graph(&h).find("RAW").unwrap();
+        let shared = |h: &Harness<'_, App>| {
+            std::ptr::from_ref(h.state().project.graph.dag.node(raw).unwrap()).cast::<()>()
+        };
+        let raw_node = shared(&h);
+        let id = graph(&h).find("Exposure").unwrap();
+        let edges: Vec<_> = graph(&h).edges().collect();
+        let ui = graph(&h).ui(id).unwrap().clone();
+        h.state_mut().edit(Edit::Remove(id));
+        assert!(graph(&h).kind(id).is_none());
+        undo(&mut h);
+        assert_eq!(graph(&h).edges().collect::<Vec<_>>(), edges);
+        assert_eq!(graph(&h).node(id).unwrap().name, "Exposure");
+        assert_eq!(graph(&h).ui(id), Some(&ui));
+        assert_eq!(shared(&h), raw_node, "unchanged nodes are shared, not copied");
+        redo(&mut h);
+        assert!(graph(&h).kind(id).is_none());
+        assert_eq!(shared(&h), raw_node);
+    }
+
+    #[test]
+    fn focused_text_fields_keep_the_undo_shortcut() {
+        let mut h = harness(App::new(None, true, || {}));
+        let id = h.state().project.graph.find("Exposure").unwrap();
+        h.state_mut().selected = Some(id);
+        h.run();
+        h.state_mut().edit(Edit::Param(id, "ev", json!(1.0)));
+        node_ui::parameters::focus_name(&h.ctx, id);
+        h.run();
+        assert!(h.ctx.text_edit_focused());
+        undo(&mut h);
+        assert_eq!(h.state().project.graph.node(id).unwrap().params["ev"], json!(1.0));
     }
 
     #[test]

@@ -41,7 +41,6 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Capture metadata | Deferred | Common capture/lens/GPS/calibration fields are available to nodes. Time zone and private maker-note passthrough remain unimplemented; extend TIFF EXIF export separately. |
 | HDR | Deferred | Define headroom/metadata and track Windows desktop SDR white. |
 | Native windows | Deferred | Windows/macOS parenting and pin control; cross-window pacing/occlusion. Retest hidden-window pacing and native dialogs after their fixes. |
-| Undo/redo | Deferred | Revisit with editing workflows. |
 | Deflate levels 1–9 | Blocked | TIFF encoder exposes only fast/balanced/best. |
 | Dedicated node picker | Deferred | Replace the canvas Add node menu using kind categories/names. |
 | RawSpeed evaluation | Deferred | Measure decoder coverage/speed and dependency cost; distinguish standalone support, LibRaw integration and Drip's CFA restrictions. |
