@@ -510,7 +510,7 @@ fn port_names_fit_beside_the_opposite_port() {
     let ctx = egui::Context::default();
     ctx.run_ui(Default::default(), |ui| {
         let mut graph = Graph::default();
-        for kind in crate::model::REGISTRY.kinds() {
+        for kind in crate::registry::REGISTRY.kinds() {
             let id = graph.add_node(kind).unwrap();
             let width = node_ui::size(&graph.node(id).unwrap()).x;
             for text in node_ui::ports::texts(kind) {

@@ -30,7 +30,7 @@ pub struct Action<G: Typed> {
     pub run: Run<G>,
 }
 
-/// Implemented on a node's generated `Definition` and listed in `BINDINGS`.
+/// Implemented on a node's generated `Definition` and listed in `registry::BINDINGS`.
 pub trait GuiNode: Typed {
     type Presentation: IntoDrawable;
     const PREPARE: Option<Prepare<Self>> = None;
@@ -92,5 +92,21 @@ impl Binding {
     }
     pub(super) fn action(&self) -> Option<(&'static str, ActionErased)> {
         self.action
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn listed_bindings_are_unique_and_never_double_a_node_action() {
+        let bindings: Vec<_> = crate::registry::BINDINGS.iter().copied().flatten().collect();
+        for (i, binding) in bindings.iter().enumerate() {
+            let id = binding.kind().id;
+            assert!(bindings[..i].iter().all(|b| b.kind().id != id), "duplicate node UI: {id}");
+            assert!(
+                binding.action().is_none() || binding.kind().action.is_none(),
+                "{id} has a frontend and a node action"
+            );
+        }
     }
 }

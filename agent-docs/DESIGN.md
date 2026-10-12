@@ -122,10 +122,11 @@ Settled with the user on 2026-10-11 after a review against
   `InputValues::bind::<N>()` checks the kind. Host and device buffers clone as
   shared immutable storage.
 - **Decided:** Kinds are listed by hand, without link-time registration:
-  `drip::node::NODES` in pipeline order. A frontend composes a `Registry`
+  `drip::registry::NODES` in pipeline order. A frontend composes a `Registry`
   from its lists (the GUI adds its views) and loads projects through it; an
   unlisted kind cannot be added or loaded. Explicit lists are readable and
-  avoid linker-section portability risks.
+  avoid linker-section portability risks. Registries live in each crate's
+  `registry` module and are documented in its README.
 
 ### Parameters and GUI bindings
 
@@ -136,7 +137,7 @@ Settled with the user on 2026-10-11 after a review against
   Flattened fields validate with their parent. File roles live in the schema;
   dialogs use its label and extensions.
 - **Decided:** `impl GuiNode for <node>::Definition`, listed in
-  `node_ui::BINDINGS` like kinds: optional `PREPARE` and `ACTION` receive the
+  `registry::BINDINGS` like kinds: optional `PREPARE` and `ACTION` receive the
   admitted node and typed `Inputs`; controls default to the schema. Kinds
   without an entry use the defaults. `PrepareContext` carries the demand's
   `GlobalContext`. Test-only kinds and bindings live in `test_nodes`.

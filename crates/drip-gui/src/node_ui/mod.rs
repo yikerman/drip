@@ -16,6 +16,7 @@ mod viewer;
 use crate::editing::NodeCx;
 use crate::model::Kind;
 use crate::model::{Node, NodeId};
+use crate::registry;
 use egui::{Rect, Ui, Vec2, vec2};
 
 /// Width of a node whose body does not set one, in graph units.
@@ -23,31 +24,9 @@ pub const WIDTH: f32 = 200.0;
 /// Space around a node's contents, in graph units.
 pub const PAD: f32 = 6.0;
 
-/// Nodes that only present their inputs; what they prepare is GUI-only.
-pub static VIEWS: &[&Kind] = &[
-    &preview::observe::KIND,
-    &scopes::histogram::observe::KIND,
-    &scopes::waveform::observe::KIND,
-    &scopes::vectorscope::observe::KIND,
-];
-
-/// Node-specific presentation; every other kind uses the schema controls.
-static BINDINGS: &[&[Binding]] = &[
-    &[
-        Binding::new::<drip::node::exposure::Definition>(),
-        Binding::new::<drip::node::sigmoid::apply::Definition>(),
-        Binding::new::<preview::observe::Definition>(),
-        Binding::new::<scopes::histogram::observe::Definition>(),
-        Binding::new::<scopes::waveform::observe::Definition>(),
-        Binding::new::<scopes::vectorscope::observe::Definition>(),
-    ],
-    #[cfg(test)]
-    crate::test_nodes::BINDINGS,
-];
-
 /// Whether this kind prepares a view alongside its controls.
 pub fn has_view(kind: &Kind) -> bool {
-    binding(kind).is_some_and(Binding::has_preparation)
+    registry::binding(kind).is_some_and(Binding::has_preparation)
 }
 
 pub fn size(node: &Node) -> Vec2 {
@@ -61,14 +40,10 @@ pub fn body(ui: &mut Ui, node: &mut NodeCx) {
 }
 
 pub fn controls(ui: &mut Ui, node: &mut NodeCx) {
-    match binding(node.kind()) {
+    match registry::binding(node.kind()) {
         Some(binding) => binding.controls(ui, node),
         None => parameters::schema(ui, node),
     }
-}
-
-pub fn binding(kind: &Kind) -> Option<&'static Binding> {
-    BINDINGS.iter().copied().flatten().find(|binding| std::ptr::eq(binding.kind(), kind))
 }
 
 /// A node kind's action: a frontend extra, or the action declared with the
@@ -84,7 +59,7 @@ enum Run {
     Node(fn(&dyn drip::definition::Node, &drip::eval::InputValues) -> drip::Result<()>),
 }
 pub fn action(kind: &'static Kind) -> Option<NodeAction> {
-    match binding(kind).and_then(Binding::action) {
+    match registry::binding(kind).and_then(Binding::action) {
         Some((name, run)) => Some(NodeAction { name, run: Run::Frontend(run) }),
         None => kind.action.map(|a| NodeAction { name: a.name, run: Run::Node(a.run) }),
     }
@@ -174,19 +149,3 @@ pub fn fitted(ctx: &egui::Context) -> Option<Vec2> {
 
 pub mod data;
 pub mod templates;
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn bindings_are_unique_and_never_double_a_node_action() {
-        let bindings: Vec<_> = super::BINDINGS.iter().copied().flatten().collect();
-        for (i, binding) in bindings.iter().enumerate() {
-            let id = binding.kind().id;
-            assert!(bindings[..i].iter().all(|b| b.kind().id != id), "duplicate node UI: {id}");
-            assert!(
-                binding.action().is_none() || binding.kind().action.is_none(),
-                "{id} has a frontend and a node action"
-            );
-        }
-    }
-}

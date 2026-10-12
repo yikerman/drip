@@ -15,6 +15,7 @@ pub mod param;
 pub mod payload;
 pub mod ports;
 pub mod project;
+pub mod registry;
 pub mod runtime;
 
 pub use drip_macros::{Choice, Parameters, node};

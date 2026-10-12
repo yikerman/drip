@@ -434,7 +434,7 @@ fn prepare_view(
     timings: Option<&mut Vec<NodeTiming>>,
 ) -> ViewResult {
     let kind = node.kind();
-    let Some(binding) = crate::node_ui::binding(kind).filter(|b| b.has_preparation()) else {
+    let Some(binding) = crate::registry::binding(kind).filter(|b| b.has_preparation()) else {
         return Ok(None);
     };
     let start = timings.as_ref().map(|_| Instant::now());

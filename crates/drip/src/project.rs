@@ -1,9 +1,9 @@
 //! Persist node kinds, parameters and named edges; loading repeats connection checks.
 use crate::{
     Error, Result,
-    definition::Registry,
     graph::Dag,
     ports::{NodeId, PortId},
+    registry::Registry,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -37,7 +37,7 @@ impl Project {
         project.to_json()
     }
     pub fn from_json(text: &str) -> Result<Self> {
-        let core = drip::project::Project::from_json(text, &super::REGISTRY)?;
+        let core = drip::project::Project::from_json(text, &crate::registry::REGISTRY)?;
         let mut graph = Graph { dag: core.dag, ..Default::default() };
         let mut missing = Vec::new();
         for (id, node) in graph.dag.nodes() {

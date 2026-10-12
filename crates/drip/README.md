@@ -13,6 +13,8 @@
   discovery, ports and payload interfaces, graph checks, scheduling, runtime
   access, parameter schemas, node file assets and generic project persistence. These
   modules must not depend on concrete image-processing nodes or payloads.
+- `src/registry.rs` is the one exception: the composition point that lists
+  every node kind by hand. See [Registries](#registries).
 
 The same ownership rule applies to `drip-gui`: node-specific declarations,
 contracts, controls, preparation and presentation belong under `src/node_ui/`.
@@ -29,6 +31,21 @@ Interpretations are typed values in descriptions (camera responses or numeric
 RGB spaces, compared exactly). Ports declare requirements as type arguments,
 `Read<'_, Device<Rgb>, Rec2020>`; the checker, help and editor read the same
 declaration. Do not flatten unrelated ports merely to make storage uniform.
+
+## Registries
+
+Everything a frontend discovers is listed by hand in a registry module, not
+collected at link time. A kind missing from a list cannot be added or loaded;
+a new node is one more line.
+
+- `drip::registry::NODES`: processing node kinds, in pipeline order.
+- `drip::registry::Registry`: composes lists, rejects duplicate IDs and
+  admits persisted parameters. `Project::from_json` loads through the registry
+  it is given, so a frontend states which kinds it knows. A headless frontend
+  passes `NODES`.
+
+`drip-gui` keeps its own lists in `src/registry.rs`; see its
+[README](../drip-gui/README.md).
 
 ## Node metadata and parameters
 

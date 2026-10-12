@@ -98,7 +98,7 @@ fn requirements_compare_spaces_exactly_and_parameters_at_admission() {
 }
 #[test]
 fn typed_macro_supplies_docs_ports_and_discovery() {
-    let registry = drip::definition::Registry::new(&[node::NODES, &[&cpu_copy::KIND]]);
+    let registry = drip::registry::Registry::new(&[drip::registry::NODES, &[&cpu_copy::KIND]]);
     let n = registry.build("test-cpu-copy", serde_json::Value::Null).unwrap();
     assert!(n.kind().help.contains("CPU identity"));
     assert_eq!(n.kind().references.len(), 1);

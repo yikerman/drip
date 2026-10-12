@@ -9,17 +9,6 @@ pub use project::Project;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::LazyLock;
-
-/// Kinds the editor offers and projects may contain.
-pub static REGISTRY: LazyLock<drip::definition::Registry> = LazyLock::new(|| {
-    drip::definition::Registry::new(&[
-        drip::node::NODES,
-        crate::node_ui::VIEWS,
-        #[cfg(test)]
-        crate::test_nodes::NODES,
-    ])
-});
 
 #[derive(Clone, Default)]
 pub struct Graph {
@@ -57,7 +46,7 @@ impl Graph {
         let mut graph = Self { dag, ..Self::default() };
         let ids: Vec<_> = graph.dag.nodes().map(|(id, _)| id).collect();
         for id in ids {
-            let kind = REGISTRY
+            let kind = crate::registry::REGISTRY
                 .kind(graph.dag.node(id)?.kind().id)
                 .ok_or_else(|| GraphError::Graph("unregistered editor node".into()))?;
             graph.initialize_state(id, kind);

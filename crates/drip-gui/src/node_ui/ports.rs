@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn every_registered_payload_has_a_color() {
-        for kind in crate::model::REGISTRY.kinds() {
+        for kind in crate::registry::REGISTRY.kinds() {
             for spec in kind.inputs.iter().chain(kind.outputs) {
                 assert!(color(spec).is_some(), "{}.{}: {}", kind.id, spec.name, spec.payload);
             }

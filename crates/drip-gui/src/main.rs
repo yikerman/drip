@@ -5,7 +5,8 @@
 //! `app.rs` owns the project, `editing.rs` applies edits and their effects, and
 //! `worker.rs` schedules background evaluation. `editor.rs`, `inspector.rs` and
 //! `node_ui/` handle interaction; `render/` prepares node views, draws images and
-//! presents each window. This module owns OS windows and the event loop.
+//! presents each window. `registry.rs` lists the node kinds and presentation
+//! the GUI discovers. This module owns OS windows and the event loop.
 //!
 //!     drip-gui [project.drip]
 //!
@@ -23,6 +24,7 @@ mod inspector;
 mod model;
 mod node_ui;
 mod parent;
+mod registry;
 mod render;
 #[cfg(test)]
 mod test_nodes;

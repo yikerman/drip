@@ -1,11 +1,11 @@
+use drip::registry::{NODES, Registry};
 use drip::{
-    definition::Registry, eval::Evaluator, node, node::data::*, ports::*, project::Project,
-    runtime::RuntimeContext,
+    eval::Evaluator, node, node::data::*, ports::*, project::Project, runtime::RuntimeContext,
 };
 use serde_json::json;
 
 fn registry() -> Registry {
-    Registry::new(&[node::NODES])
+    Registry::new(&[NODES])
 }
 #[test]
 fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
