@@ -44,7 +44,7 @@ impl Picker {
         let screen = ctx.content_rect().size();
         let mut clicked = None;
         let modal = egui::Modal::new(Id::new("node picker")).show(ctx, |ui| {
-            ui.set_width((screen.x * 0.4).clamp(360.0, 720.0));
+            ui.set_width((screen.x * 0.6).clamp(420.0, 1000.0));
             let search = ui.add(
                 TextEdit::singleline(&mut self.query)
                     .hint_text("Search nodes")
@@ -65,21 +65,27 @@ impl Picker {
                 }
             });
             ui.separator();
-            let height = screen.y * 0.5;
-            ScrollArea::vertical().max_height(height).auto_shrink(false).show(ui, |ui| {
-                for (i, &kind) in found.iter().enumerate() {
-                    let row = row(ui, kind, i == self.cursor);
-                    if i == self.cursor && (down || up) {
-                        row.scroll_to_me(None);
+            // The whole palette takes 85% of the height; the list gets what the
+            // search and chips leave.
+            let height = screen.y * 0.85 - ui.min_rect().height();
+            ScrollArea::vertical()
+                .min_scrolled_height(height)
+                .max_height(height)
+                .auto_shrink(false)
+                .show(ui, |ui| {
+                    for (i, &kind) in found.iter().enumerate() {
+                        let row = row(ui, kind, i == self.cursor);
+                        if i == self.cursor && (down || up) {
+                            row.scroll_to_me(None);
+                        }
+                        if row.clicked() {
+                            clicked = Some(kind);
+                        }
                     }
-                    if row.clicked() {
-                        clicked = Some(kind);
+                    if found.is_empty() {
+                        ui.weak("No matching nodes");
                     }
-                }
-                if found.is_empty() {
-                    ui.weak("No matching nodes");
-                }
-            });
+                });
             if search.changed() {
                 self.cursor = 0;
             }

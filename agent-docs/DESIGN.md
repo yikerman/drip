@@ -278,7 +278,7 @@ Settled with the user on 2026-10-11 after a review against
   geometry and views have no stage. RAW decoding and chromatic adaptation
   (as-shot white by default) count as input transforms.
 - **Decided:** Nodes are added through a palette, an `egui::Modal` sized to
-  the window (40% of its width, a list half its height), opened by a
+  the window (60% of its width, 85% of its height), opened by a
   right-click on the background or Space over the canvas (the node goes under
   the pointer) or "Add node…" in the menu (the centre of the visible canvas).
   The modal keeps input from the canvas and closes on Escape or a click
