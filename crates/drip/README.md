@@ -208,5 +208,6 @@ Camera conversion derives its matrix from `xyz_to_cam` and that balance,
 replacing it with D65 reference gains; CAT16 maps the as-shot camera neutral
 through the same matrix for its initial source white. As-shot conditioning
 remains in place through highlights and demosaic. The minimum lens focus
-distance describes the lens, not this exposure's focus. TIFF writes the selected
-EXIF subset and ICC profile.
+distance describes the lens, not this exposure's focus. TIFF and JPEG write the
+selected EXIF subset and ICC profile. JPEG converts to 8-bit output through the
+same profile settings; quality and chroma subsampling control its lossy encoding.

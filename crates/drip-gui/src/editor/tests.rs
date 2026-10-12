@@ -504,9 +504,10 @@ fn picker_searches_filters_by_tag_and_adds_where_it_opened() {
     assert!(h.state().editor.picker.is_some());
     h.event(Event::Text("expo".into()));
     h.run();
-    assert!(h.query_by_label("Export TIFF").is_some(), "both names start with the query");
+    assert!(h.query_by_label("Export TIFF").is_some());
+    assert!(h.query_by_label("Export JPEG").is_some());
     h.ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
-    h.get_by_role_and_label(egui::accesskit::Role::Label, "encoding").hover();
+    h.get_all_by_role_and_label(egui::accesskit::Role::Label, "encoding").next().unwrap().hover();
     h.run();
     assert!(h.query_by_label(drip::registry::tag::ENCODING.description).is_some());
     h.get_by_label("Exposure").click();

@@ -25,6 +25,7 @@ pollster = "1.0.1"
 drip-macros = { path = "../drip-macros" }
 drip-raw.workspace = true
 lcms2.workspace = true
+jpeg-encoder = "0.7.1"
 log = "0.4.34"
 rayon = "1.12"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -37,3 +38,5 @@ workspace = true
 
 [dev-dependencies]
 drip-raw = { workspace = true, features = ["reference"] }
+jpeg-decoder = { version = "0.3.2", default-features = false }
+kamadak-exif = "0.6.1"

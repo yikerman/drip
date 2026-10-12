@@ -146,11 +146,16 @@ Settled with the user on 2026-10-11 after a review against
 
 - **Requirement:** Combine crop and straighten into Perspective Transform;
   implement delivery resizing as Downsample with selectable filtering.
-- **Tentative:** Implement JPEG export first using `jpeg-encoder`, reusing
-  output profiles and actions; then Downsample's scale-aware CubeCL filtering,
-  then Perspective Transform's composed inverse mapping. Share filter math,
-  not the separable resize traversal for arbitrary perspective. Resolve preview
-  sampling and full-detail dimensions explicitly. See the researched
+- **Decided:** Implement JPEG export using `jpeg-encoder`, reusing output
+  profiles and actions. Default to sRGB, quality 95 and 4:4:4; quality and
+  chroma subsampling remain independent controls. Reduced chroma uses area
+  averaging. TIFF and JPEG share capture-tag writing and omit original
+  orientation because stored pixels already carry their geometry. The current
+  implementation scope is JPEG only; Downsample is deferred and Perspective
+  Transform needs discussion.
+- **Tentative:** For later geometry work, share filter math, not the separable
+  resize traversal for arbitrary perspective. Resolve preview sampling and
+  full-detail dimensions explicitly. See the researched
   [implementation sequence](TODO.md#first-implementation-sequence).
 - **Tentative:** The proposed next-node order in [TODO](TODO.md#next-image-nodes)
   prioritizes ordinary still-photo editing: framing and delivery first, then

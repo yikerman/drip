@@ -60,7 +60,7 @@ filter defaults remain proposals until implementation.
 |-------|-----------|-----------|---------------|
 | 1 | Perspective Transform | Crop, level a horizon or straighten a building. | Compose crop, rotation and four-point perspective correction into one inverse mapping and resample once. Normalized controls, output framing, explicit borders and filtering; direct preview handles belong in the GUI. |
 | 2 | Downsample | Deliver a photograph with a 2048-pixel long edge. | Reduction ratio or target bounds, aspect preservation and selectable filtering. Widen filter support with reduction ratio; preserve signed/HDR linear RGB. Share filter definitions with Perspective Transform. |
-| 3 | JPEG export | Share an edit without a TIFF conversion step. | Reuse output-profile conversion and node actions; propose jpeg-encoder 0.7.1, sRGB default, embedded ICC, quality and explicit chroma subsampling. Downsample supplies delivery dimensions. |
+| 3 | JPEG export (implemented) | Share an edit without a TIFF conversion step. | Uses jpeg-encoder 0.7.1, shared output-profile conversion and node actions. sRGB/quality 95/4:4:4 defaults, embedded ICC, optional capture EXIF and selectable averaged chroma subsampling. |
 | 4 | RGB image input | Edit a JPEG or bring in a TIFF reference. | RGB JPEG/PNG/TIFF sources with ICC and orientation handling, an explicit untagged-profile assumption and defined alpha handling. Decode into documented linear RGB coordinates without treating an already rendered image as unrendered scene data. |
 | 5 | Saturation/chroma | Make a landscape less dull or a portrait less colourful. | One global chroma adjustment with stated colour basis and luminance/hue behavior. Define signed/HDR handling; no implicit clipping into a display range. |
 | 6 | Tone curve | Lift midtones or adjust the toe without replacing the whole rendering. | Editable master curve with a defined luminance/per-channel policy, black and above-range behavior. Reuse existing exposure and sigmoid controls for their current jobs. |
@@ -76,14 +76,13 @@ feed Blend, rather than embedding masking separately into every adjustment.
 
 ### First implementation sequence
 
-1. **JPEG export:** add an encoding action beside TIFF using `jpeg-encoder`.
-   Reuse `profile::Output::convert(RGB_8, ...)`, profile assets and full-detail
-   evaluation. Expose quality and 4:4:4/4:2:2/4:2:0; explicitly use averaged
-   chroma reduction when subsampling. Validate dimensions before converting to
-   `u16`. The crate embeds ICC and EXIF bytes but does not construct EXIF from
-   capture fields: share the existing TIFF tag-writing logic to build the EXIF
-   TIFF directory separately, omitting stale orientation. Verify with an
-   independent decoder, including ICC reconstruction and optional metadata.
+JPEG export is implemented. Downsample is deferred; discuss Perspective
+Transform before implementing it. The geometry steps below remain proposals.
+
+1. **JPEG export (done):** registered an encoding action beside TIFF using
+   `jpeg-encoder`, shared output conversion and capture-tag writing. Independent
+   JPEG/EXIF decoder tests cover pixels, profiles, capture tags, averaged chroma,
+   dimension limits and export after project persistence.
 2. **Downsample and shared filtering:** implement separable, scale-aware
    convolution in CubeCL with normalized weights and declared pixel centres
    and borders. Start with area/box, triangle, Mitchell and Lanczos3 choices;

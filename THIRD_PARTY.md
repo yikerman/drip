@@ -39,6 +39,7 @@ no darktable source code is copied.
 | [Rayon contributors](https://github.com/rayon-rs/rayon) | Processing and GUI scope/proofing parallelism | MIT OR Apache-2.0 |
 | [Tokio/bytes contributors](https://github.com/tokio-rs/bytes) (`bytes`) | Shared host allocation ownership passed to CubeCL's existing transfer controller | MIT; [license](https://github.com/tokio-rs/bytes/blob/master/LICENSE) |
 | [image-rs contributors](https://github.com/image-rs/image-tiff) (`tiff`) | TIFF encoding and GUI proof/export parity tests | MIT |
+| [Volker Ströbel and jpeg-encoder contributors](https://github.com/vstroebel/jpeg-encoder) (`jpeg-encoder`) | JPEG export; this software is based in part on the work of the Independent JPEG Group | (MIT OR Apache-2.0) AND IJG; [MIT](https://github.com/vstroebel/jpeg-encoder/blob/master/LICENSE-MIT), [Apache-2.0](https://github.com/vstroebel/jpeg-encoder/blob/master/LICENSE-APACHE), [IJG](https://github.com/vstroebel/jpeg-encoder/blob/master/LICENSE-IJG) |
 | [Emil Ernerfeldt and egui contributors](https://github.com/emilk/egui) (`egui`, `egui-winit`, `egui-wgpu`) | GUI and renderer integration | MIT OR Apache-2.0 |
 | Adobe, [Source Sans 3](https://github.com/adobe-fonts/source-sans) and [Source Code Pro](https://github.com/adobe-fonts/source-code-pro) | GUI proportional and monospace fonts, embedded | OFL-1.1, Reserved Font Name 'Source'; [Source Sans license](https://github.com/adobe-fonts/source-sans/blob/ed1808970eb3c7301c9a523bee26473ba0bb62fa/LICENSE.md), [Source Code Pro license](https://github.com/adobe-fonts/source-code-pro/blob/d3f1a5962cde503f9409c21e58527611d4a19ef1/LICENSE.md) |
 | [gfx-rs contributors](https://github.com/gfx-rs/wgpu) (`wgpu`, patched below) | GPU rendering | MIT OR Apache-2.0 |
@@ -107,6 +108,8 @@ release with passthrough support.
 | [cmake-rs contributors](https://github.com/rust-lang/cmake-rs) (`cmake`) | Cargo integration for the upstream JPEG/zlib CMake builds | MIT OR Apache-2.0 |
 | [pkg-config-rs contributors](https://github.com/rust-lang/pkg-config-rs) | Find native libraries | MIT OR Apache-2.0 |
 | [egui contributors](https://github.com/emilk/egui) (`egui_kittest`) | Headless GUI tests | MIT OR Apache-2.0 |
+| [image-rs contributors](https://github.com/image-rs/jpeg-decoder) (`jpeg-decoder`) | Independent JPEG export decoding tests | MIT OR Apache-2.0; [MIT](https://github.com/image-rs/jpeg-decoder/blob/master/LICENSE-MIT), [Apache-2.0](https://github.com/image-rs/jpeg-decoder/blob/master/LICENSE-APACHE) |
+| [KAMADA Ken'ichi](https://github.com/kamadak/exif-rs) (`kamadak-exif`) | Independent exported capture-tag decoding tests | BSD-2-Clause; [license](https://github.com/kamadak/exif-rs/blob/master/LICENSE) |
 
 Test images in `fixtures/raw/pixls/` are from [raw.pixls.us](https://raw.pixls.us/),
 licensed [CC0](https://creativecommons.org/publicdomain/zero/1.0/).

@@ -59,6 +59,7 @@ pub static NODES: &[&Kind] = &[
     &exposure::compute::KIND,
     &sigmoid::apply::KIND,
     &export::tiff::KIND,
+    &export::jpeg::write::KIND,
 ];
 
 /// The node kinds a frontend offers and loads, in list order.

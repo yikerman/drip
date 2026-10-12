@@ -4,6 +4,14 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-12
 
+- Added Export JPEG with shared ICC conversion and TIFF capture-tag writing,
+  quality and independent chroma subsampling. Independent decoder tests cover
+  pixels, ICC/EXIF, averaged chroma, dimension limits and project/action round
+  trips. Updated the picker test for multiple encoding labels. All 171 workspace
+  tests pass with `DRIP_BACKEND=cpu` and `drip/cpu` (16 device tests ignored),
+  including 99 GUI tests; three doctests, formatting and strict workspace Clippy
+  pass. No desktop session exercised. Scope narrowed to JPEG only; Downsample
+  remains deferred and Perspective Transform needs discussion.
 - Researched JPEG crate APIs and read `jpeg-encoder` 0.7.1 encoding/ICC/EXIF
   source, Drip's export/profile/reduction code and vkdt's crop/resize shaders.
   Revised the proposed backlog to Perspective Transform, Downsample and JPEG

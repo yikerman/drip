@@ -1,4 +1,5 @@
-//! TIFF export: an output node whose action encodes and writes its input.
+//! Image exports: output nodes whose actions encode and write their inputs.
+pub mod jpeg;
 use crate::{
     Error, Result,
     definition::Assets,
@@ -187,11 +188,30 @@ where
     let ifd = encoder.encoder();
     ifd.write_tag(Tag::IccProfile, Undefined(icc))?;
     if let Some((m, exif)) = metadata.zip(exif) {
-        write_text(ifd, Tag::Make, &m.make)?;
-        write_text(ifd, Tag::Model, &m.model)?;
-        ifd.write_tag(Tag::ExifDirectory, exif)?;
+        write_capture(ifd, m, exif)?;
     }
     encoder.write_data(data)
+}
+
+/// TIFF header and directories for a JPEG Exif APP1 payload, without pixels.
+fn exif_bytes(metadata: &drip_raw::Metadata) -> ::tiff::TiffResult<Vec<u8>> {
+    let mut bytes = Cursor::new(Vec::new());
+    let mut encoder = TiffEncoder::new(&mut bytes)?;
+    let exif = write_exif(&mut encoder, metadata)?;
+    let mut ifd = encoder.image_directory()?;
+    write_capture(&mut ifd, metadata, exif)?;
+    ifd.finish()?;
+    Ok(bytes.into_inner())
+}
+
+fn write_capture<W: Write + Seek, K: TiffKind>(
+    ifd: &mut DirectoryEncoder<W, K>,
+    metadata: &drip_raw::Metadata,
+    exif: u32,
+) -> ::tiff::TiffResult<()> {
+    write_text(ifd, Tag::Make, &metadata.make)?;
+    write_text(ifd, Tag::Model, &metadata.model)?;
+    ifd.write_tag(Tag::ExifDirectory, exif)
 }
 
 /// Writes the capture settings to an Exif IFD \[10\] and returns its offset for

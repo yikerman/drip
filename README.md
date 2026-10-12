@@ -31,10 +31,10 @@ Cyan highlights show colors outside the selected proof profile's gamut.*
 
 ### Keep color in view
 
-Wide-gamut previews, ICC softproofing and color-managed TIFF export carry your
-edit from screen to file. Underneath, floating-point linear Rec.2020 processing
-and CAT16 white balance keep color handling explicit. Histograms, waveforms and
-vectorscopes let you see what each adjustment does.
+Wide-gamut previews, ICC softproofing and color-managed TIFF and JPEG export
+carry your edit from screen to file. Underneath, floating-point linear Rec.2020
+processing and CAT16 white balance keep color handling explicit. Histograms,
+waveforms and vectorscopes let you see what each adjustment does.
 
 ![Histogram, waveform and vectorscope on the canvas, with histogram settings in the inspector](fixtures/demos/scopes.png)
 
