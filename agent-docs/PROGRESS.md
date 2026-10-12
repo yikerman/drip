@@ -4,6 +4,9 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Canvas wheel zoom under overlays: a GUI test scrolls over the canvas with a
+  modal open and then without; it failed before the fix (the modal's wheel
+  zoomed the canvas) and passes after. 98 GUI tests and strict Clippy pass.
 - Node picker: GUI tests open it by right-click and by Space, search and click
   Exposure, narrow by the demosaic chip, choose RCD with Enter, check nodes
   land where the picker opened, and close with Escape; unit tests cover

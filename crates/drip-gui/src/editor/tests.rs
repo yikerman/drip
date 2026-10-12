@@ -17,6 +17,8 @@ struct Scene {
     area: Rect,
     edited: bool,
     refused: Option<String>,
+    /// Shows a modal over the canvas, like the unsaved-edits prompt.
+    modal: bool,
 }
 
 impl Scene {
@@ -62,6 +64,7 @@ fn harness(zoom: f32) -> Harness<'static, Scene> {
         area: Rect::NOTHING,
         edited: false,
         refused: None,
+        modal: false,
     };
     Harness::builder()
         .with_size(vec2(1000.0, 700.0))
@@ -84,6 +87,9 @@ fn harness(zoom: f32) -> Harness<'static, Scene> {
                     s.area = ui.available_rect_before_wrap();
                     s.editor.show(ui, &mut s.graph, &mut s.selected, &mut frame);
                 });
+                if s.modal {
+                    egui::Modal::new(egui::Id::new("modal")).show(ui.ctx(), |ui| ui.label("modal"));
+                }
                 s.edited |= frame.report.edited;
                 if let Some(refused) = frame.report.refused {
                     s.refused = Some(refused);
@@ -571,4 +577,27 @@ fn downstream_error_rows_name_the_failed_node() {
     let downstream = ErrorRow::new(&graph, below, &error);
     assert_eq!((downstream.text.as_str(), downstream.color), ("RAW failed", theme::WEAK));
     assert_eq!(downstream.hover, "RAW: select a RAW");
+}
+
+#[test]
+fn the_wheel_zooms_the_canvas_only_when_nothing_is_above_it() {
+    let mut h = harness(1.0);
+    let wheel = |h: &mut Harness<'_, Scene>| {
+        h.event(Event::PointerMoved(pos2(300.0, 300.0)));
+        h.event(Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, 100.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        h.run();
+    };
+    h.state_mut().modal = true;
+    h.run();
+    wheel(&mut h);
+    assert_eq!(h.state().editor.zoom, 1.0, "a modal keeps the wheel");
+    h.state_mut().modal = false;
+    h.run();
+    wheel(&mut h);
+    assert!(h.state().editor.zoom > 1.0);
 }

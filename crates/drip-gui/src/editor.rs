@@ -368,8 +368,11 @@ impl Editor {
         if background.clicked() {
             *selected = None;
         }
-        // The wheel zooms around the pointer, keeping the point under it fixed.
-        if let Some(pointer) = ui.ctx().pointer_hover_pos().filter(|p| area.contains(*p)) {
+        // The wheel zooms around the pointer, keeping the point under it fixed;
+        // a modal or popup above the canvas keeps its own scrolling.
+        if let Some(pointer) =
+            ui.ctx().pointer_hover_pos().filter(|_| ui.rect_contains_pointer(area))
+        {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll != 0.0 {
                 let zoom = (self.zoom * (scroll * 0.002).exp()).clamp(ZOOM.0, ZOOM.1);
