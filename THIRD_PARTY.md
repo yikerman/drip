@@ -36,7 +36,6 @@ no darktable source code is copied.
 | [Jean-loup Gailly, Mark Adler and zlib contributors](https://zlib.net/) | Static deflate codec for LibRaw | Zlib; [license](https://github.com/madler/zlib/blob/da607da739fa6047df13e66a2af6b8bec7c2a498/LICENSE) |
 | [Marti Maria and Little CMS contributors](https://github.com/mm2/Little-CMS) | ICC export, preview softproofing and gamut classification | MIT |
 | [Kornel Lesiński and rust-lcms2 contributors](https://github.com/kornelski/rust-lcms2) (`lcms2`, `lcms2-sys`) | Rust Little CMS bindings | MIT |
-| [David Tolnay and linkme contributors](https://github.com/dtolnay/linkme/tree/0.3.37) (`linkme` 0.3.37) | Linked node discovery and local custom GUI bindings | MIT OR Apache-2.0 ([MIT](https://github.com/dtolnay/linkme/blob/0.3.37/LICENSE-MIT), [Apache-2.0](https://github.com/dtolnay/linkme/blob/0.3.37/LICENSE-APACHE)) |
 | [Rayon contributors](https://github.com/rayon-rs/rayon) | Processing and GUI scope/proofing parallelism | MIT OR Apache-2.0 |
 | [Tokio/bytes contributors](https://github.com/tokio-rs/bytes) (`bytes`) | Shared host allocation ownership passed to CubeCL's existing transfer controller | MIT; [license](https://github.com/tokio-rs/bytes/blob/master/LICENSE) |
 | [image-rs contributors](https://github.com/image-rs/image-tiff) (`tiff`) | TIFF encoding and GUI proof/export parity tests | MIT |

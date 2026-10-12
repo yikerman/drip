@@ -5,7 +5,6 @@ use crate::theme;
 use drip::node::sigmoid;
 use egui::{Color32, Sense, Shape, Stroke, Ui, vec2};
 
-#[drip_macros::gui_node]
 impl GuiNode for sigmoid::apply::Definition {
     type Presentation = ();
     fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Parameters>) {

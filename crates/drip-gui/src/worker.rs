@@ -474,8 +474,6 @@ mod tests {
         Ok(())
     }
 
-    use drip::ports::Read;
-
     use super::*;
     use crate::model::Kind;
     use serde_json::json;
@@ -829,6 +827,7 @@ mod tests {
 
     mod exports_read_current_files_at_full_detail_fixture {
         use super::*;
+        use crate::test_nodes::write;
 
         #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
         struct FileKernel {
@@ -848,44 +847,6 @@ mod tests {
             image.data[0] = [text.parse().unwrap(), 1.0, 0.0];
             Ok(())
         }
-        #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
-        struct WriteKernel {
-            #[param(save = [])]
-            path: Option<std::path::PathBuf>,
-        }
-        fn sink_contract(
-            _: &drip::runtime::GlobalContext,
-            _: &WriteKernel,
-            _: &RgbDesc,
-        ) -> drip::Result<()> {
-            Ok(())
-        }
-        #[drip::node(id="test.write", category="test", name="write", contract=sink_contract)]
-        fn write(
-            _: &KernelContext<'_>,
-            _: &WriteKernel,
-            _image: Read<'_, Cpu<Rgb>>,
-        ) -> drip::Result<()> {
-            Ok(())
-        }
-        #[drip_macros::gui_node]
-        impl crate::node_ui::GuiNode for write::Definition {
-            type Presentation = ();
-            const ACTION: Option<crate::node_ui::Action<Self>> = Some(crate::node_ui::Action {
-                name: "write",
-                run: |node, inputs, ctx| {
-                    assert_eq!(ctx.global.scale, 1);
-                    let image = inputs.image.data;
-                    std::fs::write(
-                        node.parameters.path.as_ref().unwrap(),
-                        format!("{:?}", image[0]),
-                    )
-                    .map_err(|e| KernelError::Runtime(e.to_string()))?;
-                    Ok(None)
-                },
-            });
-        }
-
         #[test]
         fn exports_read_current_files_at_full_detail() {
             let input =
@@ -936,40 +897,13 @@ mod tests {
         }
     }
 
-    mod preparation_probe {
-        use super::*;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        pub static CALLS: AtomicUsize = AtomicUsize::new(0);
-
-        #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
-        pub struct Settings {
-            #[param(default = true)]
-            fail: bool,
-        }
-
-        #[drip::node(id="test.preparation_cache", category="test", name="Preparation", contract=empty_contract)]
-        pub fn probe(_: &KernelContext<'_>, _: &Settings) -> drip::Result<()> {
-            Ok(())
-        }
-        impl crate::node_ui::GuiNode for probe::Definition {
-            type Presentation = ();
-            const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|node, _, _| {
-                CALLS.fetch_add(1, Ordering::Relaxed);
-                if node.parameters.fail { Err("preparation failed".into()) } else { Ok(()) }
-            });
-        }
-        #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
-        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<probe::Definition>();
-    }
-
     #[test]
     fn preparation_retries_each_request_without_persistent_image_cache() {
-        use preparation_probe::CALLS;
+        use crate::test_nodes::{PROBE_CALLS as CALLS, probe};
         use std::sync::atomic::Ordering;
 
         let mut graph = Graph::default();
-        let id = graph.add_node(&preparation_probe::probe::KIND).unwrap();
+        let id = graph.add_node(&probe::KIND).unwrap();
         let mut worker = Worker::new(Arc::new(|| {}));
         for _ in 0..2 {
             worker.request(&graph, 1, vec![id]).unwrap();

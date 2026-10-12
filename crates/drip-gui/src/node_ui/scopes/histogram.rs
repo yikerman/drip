@@ -49,7 +49,6 @@ pub fn observe(
 ) -> drip::Result<()> {
     Ok(())
 }
-#[drip_macros::gui_node]
 impl crate::node_ui::GuiNode for observe::Definition {
     type Presentation = Arc<Histogram>;
     const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|node, inputs, ctx| {

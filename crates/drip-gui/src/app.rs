@@ -657,13 +657,13 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use drip::{Error as KernelError, runtime::KernelContext};
+    use drip::runtime::KernelContext;
     use serde::{Deserialize, Serialize};
     fn empty_contract<P>(_: &drip::runtime::GlobalContext, _: &P) -> drip::Result<()> {
         Ok(())
     }
 
-    use crate::node_ui::{preview::PreviewImage, scopes::Histogram};
+    use crate::node_ui::scopes::Histogram;
 
     use crate::node_ui::preview::ImageView;
     use crate::worker::view;
@@ -923,42 +923,9 @@ mod tests {
 
     mod evaluating_message_keeps_the_ui_and_previous_preview_available_fixture {
         use super::*;
-
-        use crate::node_ui::data::HostImage;
-
-        use std::sync::{Arc, Mutex, mpsc};
+        use crate::test_nodes::{SLOW_GATE as GATE, slow};
+        use std::sync::{Arc, mpsc};
         use std::time::{Duration, Instant};
-        static GATE: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>> = Mutex::new(None);
-        #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
-        struct SlowKernel {
-            #[param(default = false)]
-            block: bool,
-        }
-        #[drip::node(id="test.slow", name="slow", category="test", contract=empty_contract)]
-        fn slow(_: &KernelContext<'_>, _: &SlowKernel) -> drip::Result<()> {
-            Ok(())
-        }
-        impl crate::node_ui::GuiNode for slow::Definition {
-            type Presentation = PreviewImage;
-            const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|node, _, _| {
-                if node.parameters.block {
-                    let gate = GATE.lock().unwrap();
-                    let (started, release) = gate.as_ref().unwrap();
-                    started.send(()).unwrap();
-                    release.recv_timeout(Duration::from_secs(5)).unwrap();
-                }
-                Ok(PreviewImage::new(&Arc::new(HostImage {
-                    width: 1,
-                    height: 1,
-                    requested_scale: 1,
-                    color_space: "Rec.2020 / D65".into(),
-                    pixels: vec![[0.5; 3]].into(),
-                })))
-            });
-        }
-        #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
-        static SLOW_UI: crate::node_ui::Binding =
-            crate::node_ui::Binding::new::<slow::Definition>();
 
         #[test]
         fn evaluating_message_keeps_the_ui_and_previous_preview_available() {
@@ -1384,18 +1351,7 @@ mod tests {
 
     mod declared_gui_view_gets_a_popout_before_preparation_succeeds_fixture {
         use super::*;
-
-        #[drip::node(id="test.declared_view", category="test", name="Declared view", contract=empty_contract)]
-        fn view(_: &KernelContext<'_>, _: &()) -> drip::Result<()> {
-            Ok(())
-        }
-        impl crate::node_ui::GuiNode for view::Definition {
-            type Presentation = PreviewImage;
-            const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-                Some(|_, _, _| Err(KernelError::Contract("no view yet".into())));
-        }
-        #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
-        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<view::Definition>();
+        use crate::test_nodes::declared_view as view;
 
         #[test]
         fn declared_gui_view_gets_a_popout_before_preparation_succeeds() {
@@ -1416,37 +1372,7 @@ mod tests {
 
     mod custom_controls_keep_the_generic_view_and_popout_fixture {
         use super::*;
-
-        #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
-        pub struct Settings {
-            #[param(default = false)]
-            enabled: bool,
-        }
-        #[drip::node(id="test.custom_controls_view", category="test", name="Custom controls view", contract=empty_contract)]
-        fn view(_: &KernelContext<'_>, _: &Settings) -> drip::Result<()> {
-            Ok(())
-        }
-        fn controls(
-            ui: &mut egui::Ui,
-            cx: &mut crate::node_ui::ControlCx<'_, '_, '_, '_, Settings>,
-        ) {
-            cx.schema(ui);
-            ui.label("Custom view controls");
-            ui.label(format!("Typed enabled: {}", cx.parameters().enabled));
-        }
-        impl crate::node_ui::GuiNode for view::Definition {
-            type Presentation = PreviewImage;
-            const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-                Some(|_, _, _| Err(KernelError::Contract("no view yet".into())));
-            fn controls(
-                ui: &mut egui::Ui,
-                cx: &mut crate::node_ui::ControlCx<'_, '_, '_, '_, Self::Parameters>,
-            ) {
-                controls(ui, cx);
-            }
-        }
-        #[linkme::distributed_slice(crate::node_ui::BINDINGS)]
-        static UI: crate::node_ui::Binding = crate::node_ui::Binding::new::<view::Definition>();
+        use crate::test_nodes::custom_controls_view as view;
 
         #[test]
         fn custom_controls_keep_the_generic_view_and_popout() {

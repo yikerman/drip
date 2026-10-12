@@ -90,7 +90,6 @@ fn vector_counts(pixels: &[[f32; 3]], matrix: &color::Mat3) -> Vec<[u32; 3]> {
         )
 }
 
-#[drip_macros::gui_node]
 impl crate::node_ui::GuiNode for observe::Definition {
     type Presentation = Arc<Scope>;
     const PREPARE: Option<crate::node_ui::Prepare<Self>> =

@@ -4,7 +4,6 @@ use syn::parse_macro_input;
 
 mod choice;
 mod documentation;
-mod gui_node;
 mod node;
 mod parameters;
 
@@ -57,16 +56,6 @@ pub fn parameters(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(Choice, attributes(choice, label, default))]
 pub fn choice(input: TokenStream) -> TokenStream {
     choice::expand(parse_macro_input!(input as syn::DeriveInput))
-        .unwrap_or_else(syn::Error::into_compile_error)
-        .into()
-}
-
-/// Register a `GuiNode` implemented on a node's generated `Definition`, which
-/// supplies its kind, parameters and typed inputs. Runtime adapters belong to
-/// drip-gui; this emits only the local binding entry.
-#[proc_macro_attribute]
-pub fn gui_node(args: TokenStream, input: TokenStream) -> TokenStream {
-    gui_node::expand(args.into(), input.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

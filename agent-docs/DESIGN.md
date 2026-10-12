@@ -135,9 +135,11 @@ Settled with the user on 2026-10-11 after a review against
   `Default` and the schema; a const assertion checks field/schema agreement.
   Flattened fields validate with their parent. File roles live in the schema;
   dialogs use its label and extensions.
-- **Decided:** `#[gui_node] impl GuiNode for <node>::Definition`: optional
-  `PREPARE` and `ACTION` receive the admitted node and typed `Inputs`; controls
-  default to the schema. `PrepareContext` carries the demand's `GlobalContext`.
+- **Decided:** `impl GuiNode for <node>::Definition`, listed in
+  `node_ui::BINDINGS` like kinds: optional `PREPARE` and `ACTION` receive the
+  admitted node and typed `Inputs`; controls default to the schema. Kinds
+  without an entry use the defaults. `PrepareContext` carries the demand's
+  `GlobalContext`. Test-only kinds and bindings live in `test_nodes`.
 
 ## Processing
 

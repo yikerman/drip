@@ -31,8 +31,19 @@ pub static VIEWS: &[&Kind] = &[
     &scopes::vectorscope::observe::KIND,
 ];
 
-#[linkme::distributed_slice]
-pub(super) static BINDINGS: [Binding];
+/// Node-specific presentation; every other kind uses the schema controls.
+static BINDINGS: &[&[Binding]] = &[
+    &[
+        Binding::new::<drip::node::exposure::Definition>(),
+        Binding::new::<drip::node::sigmoid::apply::Definition>(),
+        Binding::new::<preview::observe::Definition>(),
+        Binding::new::<scopes::histogram::observe::Definition>(),
+        Binding::new::<scopes::waveform::observe::Definition>(),
+        Binding::new::<scopes::vectorscope::observe::Definition>(),
+    ],
+    #[cfg(test)]
+    crate::test_nodes::BINDINGS,
+];
 
 /// Whether this kind prepares a view alongside its controls.
 pub fn has_view(kind: &Kind) -> bool {
@@ -57,20 +68,7 @@ pub fn controls(ui: &mut Ui, node: &mut NodeCx) {
 }
 
 pub fn binding(kind: &Kind) -> Option<&'static Binding> {
-    use std::{collections::BTreeMap, sync::LazyLock};
-    static CUSTOM: LazyLock<BTreeMap<&'static str, &'static Binding>> = LazyLock::new(|| {
-        let mut bindings = BTreeMap::new();
-        for binding in BINDINGS {
-            let id = binding.kind().id;
-            assert!(bindings.insert(id, binding).is_none(), "duplicate node UI: {id}");
-            assert!(
-                binding.action().is_none() || binding.kind().action.is_none(),
-                "{id} has a frontend and a node action"
-            );
-        }
-        bindings
-    });
-    CUSTOM.get(kind.id).copied().filter(|binding| std::ptr::eq(binding.kind(), kind))
+    BINDINGS.iter().copied().flatten().find(|binding| std::ptr::eq(binding.kind(), kind))
 }
 
 /// A node kind's action: a frontend extra, or the action declared with the
@@ -176,3 +174,19 @@ pub fn fitted(ctx: &egui::Context) -> Option<Vec2> {
 
 pub mod data;
 pub mod templates;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn bindings_are_unique_and_never_double_a_node_action() {
+        let bindings: Vec<_> = super::BINDINGS.iter().copied().flatten().collect();
+        for (i, binding) in bindings.iter().enumerate() {
+            let id = binding.kind().id;
+            assert!(bindings[..i].iter().all(|b| b.kind().id != id), "duplicate node UI: {id}");
+            assert!(
+                binding.action().is_none() || binding.kind().action.is_none(),
+                "{id} has a frontend and a node action"
+            );
+        }
+    }
+}

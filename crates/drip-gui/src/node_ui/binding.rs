@@ -30,7 +30,7 @@ pub struct Action<G: Typed> {
     pub run: Run<G>,
 }
 
-/// Implemented on a node's generated `Definition` with `#[gui_node]`.
+/// Implemented on a node's generated `Definition` and listed in `BINDINGS`.
 pub trait GuiNode: Typed {
     type Presentation: IntoDrawable;
     const PREPARE: Option<Prepare<Self>> = None;

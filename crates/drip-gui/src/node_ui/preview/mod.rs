@@ -41,7 +41,6 @@ pub fn prepare(
     Ok(view)
 }
 
-#[drip_macros::gui_node]
 impl super::GuiNode for observe::Definition {
     type Presentation = PreviewImage;
     const PREPARE: Option<super::Prepare<Self>> = Some(|node, inputs, ctx| {

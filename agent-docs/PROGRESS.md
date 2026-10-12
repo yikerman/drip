@@ -4,6 +4,10 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Explicit GUI bindings: GUI tests for prepared views, custom controls, the
+  preparation probe and the write action run through the listed bindings; a
+  test checks entries are unique and never double a node action. 94 GUI tests,
+  workspace tests and strict workspace Clippy pass.
 - Explicit node registry: project round-trip, admission and GUI tests load
   through `Registry`; a GUI test reopens a project holding a test-only kind
   from the test list. Workspace tests and strict workspace Clippy pass. With

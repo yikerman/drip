@@ -10,7 +10,6 @@ use drip::{
     ports::Requirement,
 };
 
-#[drip_macros::gui_node]
 impl GuiNode for exposure::Definition {
     type Presentation = ();
     // Meter before sigmoid; bright or dark subjects may need a manual adjustment.
