@@ -51,7 +51,7 @@ fn detail_dropdown_scroll_updates_the_project_and_stops_at_ends() {
 fn fixture_project(name: &str) -> PathBuf {
     let raw = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw/sony-ilce-7rm3.arw");
     let mut p = templates::raw_to_tiff();
-    let read = p.graph.find("RAW").unwrap();
+    let read = p.graph.find("Bayer RAW").unwrap();
     p.graph.set_param(read, "path", json!(raw)).unwrap();
     let file = std::env::temp_dir().join(format!("drip-gui-{name}-{}.drip", std::process::id()));
     std::fs::write(&file, p.to_json().unwrap()).unwrap();
@@ -473,7 +473,7 @@ fn undo_restores_removed_nodes_and_shares_the_others() {
     let mut h = harness(App::new(None, true, || {}));
     h.run();
     let graph = |h: &Harness<'_, App>| h.state().project.graph.clone();
-    let raw = graph(&h).find("RAW").unwrap();
+    let raw = graph(&h).find("Bayer RAW").unwrap();
     let shared = |h: &Harness<'_, App>| {
         std::ptr::from_ref(h.state().project.graph.dag.node(raw).unwrap()).cast::<()>()
     };
@@ -529,7 +529,7 @@ fn inspector_shows_the_selected_node_and_the_inputs() {
         "Depth",
         "Export",
         "Output file (template)",
-        "RAW · RAW file",
+        "Bayer RAW · RAW file",
         "Export TIFF · Output file",
     ] {
         assert!(h.query_by_label(label).is_some(), "{label}");

@@ -5,7 +5,8 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 ## 2026-10-12
 
 - Replaced the `encoding` tag with `io`, carried by the RAW reader and both
-  exports, and renamed `raw` to `bayer-raw`. All 174 workspace tests pass
+  exports, renamed tag `raw` to `bayer-raw` and named the reader Bayer RAW,
+  leaving room for X-Trans and monochrome. All 174 workspace tests pass
   with `DRIP_BACKEND=cpu` and `drip/cpu`, including the GUI picker's tag
   tooltip; strict Clippy and formatting pass. No desktop session exercised.
 - Added Export JPEG with shared ICC conversion and TIFF capture-tag writing,

@@ -174,7 +174,7 @@ mod tests {
         let found = names("demosaic", &[]);
         assert_eq!(found[..2], ["Bayer 2×2 demosaic", "RCD demosaic"]);
         assert_eq!(names("rcd", &[])[0], "RCD demosaic");
-        assert_eq!(names("RAW", &[])[0], "RAW", "case-insensitive, prefix first");
+        assert_eq!(names("RAW", &[])[0], "Bayer RAW", "case-insensitive, words before tags");
         assert!(names("raw", &[]).contains(&"Opposed highlights"), "tags match");
         assert!(names("tiff", &[]).contains(&"Export TIFF"));
         assert!(names("export-tiff", &[]).contains(&"Export TIFF"), "IDs match");

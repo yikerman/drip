@@ -49,7 +49,7 @@ mod tests {
     #[test]
     fn raw_adjustments_are_shared_by_views_and_export_and_survive_reopening() {
         let mut project = raw_to_tiff();
-        let raw = project.graph.find("RAW").unwrap();
+        let raw = project.graph.find("Bayer RAW").unwrap();
         let orientation = project.graph.find("Orientation").unwrap();
         let color = project.graph.find("Camera RGB to color RGB").unwrap();
         let adaptation = project.graph.find("Chromatic adaptation").unwrap();
@@ -88,7 +88,7 @@ mod tests {
             .unwrap();
         let reopened = Project::from_json(&project.to_json().unwrap()).unwrap();
         let orientation = reopened.graph.find("Orientation").unwrap();
-        let raw = reopened.graph.find("RAW").unwrap();
+        let raw = reopened.graph.find("Bayer RAW").unwrap();
         let adaptation = reopened.graph.find("Chromatic adaptation").unwrap();
         assert_eq!(
             reopened.graph.node(adaptation).unwrap().params["illuminant"],

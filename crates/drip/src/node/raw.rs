@@ -20,7 +20,7 @@ pub struct Settings {
 /// Outputs Bayer camera responses and the decoded capture metadata, including
 /// native calibration. The file is decoded when first evaluated and kept with
 /// the node; choose it again to pick up changes. Calibration remains approximate.
-#[crate::node(id = "bayer-raw", name = "RAW", tags = [tag::INPUT_TRANSFORM, tag::BAYER_RAW, tag::IO], references = [(
+#[crate::node(id = "bayer-raw", name = "Bayer RAW", tags = [tag::INPUT_TRANSFORM, tag::BAYER_RAW, tag::IO], references = [(
     "LibRaw black normalization",
     "https://github.com/LibRaw/LibRaw/blob/0.22.0/src/utils/utils_libraw.cpp",
 )])]
