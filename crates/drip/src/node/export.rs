@@ -6,6 +6,7 @@ use crate::{
     node::profile,
     payload::Payload,
     ports::{Cpu, Read, Requirement},
+    registry::tag,
     runtime::KernelContext,
 };
 use ::tiff::encoder::colortype::{ColorType, RGB8, RGB16, RGB32Float};
@@ -85,7 +86,7 @@ impl Assets for Export {
 #[crate::node(
     id = "export-tiff",
     name = "Export TIFF",
-    category = "Output",
+    tags = [tag::ENCODING],
     action = export,
     assets
 )]

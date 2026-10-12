@@ -13,7 +13,9 @@ use std::{any::Any, sync::Arc};
 pub struct Kind {
     pub id: &'static str,
     pub name: &'static str,
-    pub category: &'static str,
+    /// What the node is for, from `registry::TAGS`; structure such as ports
+    /// and payloads stays in the declaration.
+    pub tags: &'static [&'static Tag],
     pub help: &'static str,
     pub references: &'static [(&'static str, &'static str)],
     pub parameters: &'static [ParamSpec],
@@ -26,6 +28,11 @@ pub struct Kind {
     /// An effect run on evaluated inputs, such as writing a file. Any frontend,
     /// headless or interactive, runs it the same way.
     pub action: Option<Action>,
+}
+/// A registered label for finding nodes by purpose, listed in `registry::TAGS`.
+pub struct Tag {
+    pub id: &'static str,
+    pub description: &'static str,
 }
 #[derive(Clone, Copy)]
 pub struct Action {

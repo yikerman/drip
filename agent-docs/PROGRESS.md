@@ -4,6 +4,9 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-11
 
+- Tags replace categories: macro tests cover `tags = [...]` and reject a
+  non-list; the interim Add node menu lists tags in registry order and adds
+  Exposure from `look`. Workspace tests and strict workspace Clippy pass.
 - Node IDs by operation alone: workspace tests, including project round trips
   and GUI help and error labels, pass with the new IDs; strict workspace Clippy
   passes.

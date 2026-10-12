@@ -327,7 +327,7 @@ fn wire_hit_band_stays_in_screen_points_and_removes_only_its_connection() {
                 Some(h.state().output(source))
             );
             assert_eq!(h.state().edited, removed);
-            assert_eq!(h.query_by_label("Tone ⏵").is_some(), !removed);
+            assert_eq!(h.query_by_label("look ⏵").is_some(), !removed);
         }
     }
 }
@@ -483,15 +483,12 @@ fn click_selection_and_node_menu_actions() {
 
     pointer(&mut h, pos2(40.0, 40.0), Secondary, true);
     pointer(&mut h, pos2(40.0, 40.0), Secondary, false);
-    let categories = ["Color", "Demosaic", "Geometry", "Input", "Output", "Sensor", "Tone", "View"];
+    let tags: Vec<_> = drip::registry::TAGS.iter().map(|tag| tag.id).collect();
     let rows: Vec<_> =
-        categories.iter().map(|name| h.get_by_label(&format!("{name} ⏵")).rect().top()).collect();
+        tags.iter().map(|name| h.get_by_label(&format!("{name} ⏵")).rect().top()).collect();
     assert!(rows.windows(2).all(|rows| rows[0] < rows[1]));
-    h.get_by_label("Tone ⏵").click();
+    h.get_by_label("look ⏵").click();
     h.run();
-    let names = ["Exposure", "Sigmoid"];
-    let rows: Vec<_> = names.iter().map(|name| h.get_by_label(name).rect().top()).collect();
-    assert!(rows.windows(2).all(|rows| rows[0] < rows[1]));
     h.get_by_label(drip::node::exposure::compute::KIND.name).click();
     h.run();
     assert_eq!(h.state().graph.nodes().count(), 1);

@@ -17,6 +17,7 @@ use crate::{
     node::color,
     node::data::*,
     ports::*,
+    registry::tag,
     runtime::{GlobalContext, KernelContext},
 };
 
@@ -85,7 +86,7 @@ fn apply_contract(_: &GlobalContext, _: &Settings, image: &RgbDesc) -> Result<(R
 /// channels use an achromatic projection; no output encoding is applied.
 #[crate::node(id="sigmoid",
 name="Sigmoid",
-category="Tone",
+tags = [tag::OUTPUT_TRANSFORM, tag::TONEMAP],
 contract=apply_contract,
 references=[("darktable sigmoid", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/sigmoid.c")])]
 pub fn apply(

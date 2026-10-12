@@ -39,6 +39,9 @@ collected at link time. A kind missing from a list cannot be added or loaded;
 a new node is one more line.
 
 - `drip::registry::NODES`: processing node kinds, in pipeline order.
+- `drip::registry::TAGS`: every tag a node may carry, with a one-sentence
+  description; frontends add none. A node takes at most one stage tag, after
+  ACES: `input-transform`, `look` or `output-transform`, or `encoding`.
 - `drip::registry::Registry`: composes lists, rejects duplicate IDs and
   admits persisted parameters. `Project::from_json` loads through the registry
   it is given, so a frontend states which kinds it knows. A headless frontend
@@ -49,7 +52,7 @@ a new node is one more line.
 
 ## Node metadata and parameters
 
-Declare operation names, categories, help and port contracts beside node functions.
+Declare operation names, tags, help and port contracts beside node functions.
 IDs name the operation in kebab case (`exposure`, `rcd-demosaic`) and are the
 persistence keys; display labels use sentence case and
 retain technical spellings such as RAW, RGB, ICC, sRGB and Rec.2020. Labels do

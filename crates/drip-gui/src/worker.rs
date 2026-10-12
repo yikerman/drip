@@ -580,7 +580,7 @@ mod tests {
             #[param]
             state: State,
         }
-        #[drip::node(id="test-diagnostics", category="test", name="diagnostics", contract=image_contract)]
+        #[drip::node(id="test-diagnostics", name="diagnostics", contract=image_contract)]
         fn diagnostics(
             _: &KernelContext<'_>,
             p: &Source,
@@ -727,7 +727,7 @@ mod tests {
             #[param(default = false)]
             block: bool,
         }
-        #[drip::node(id="test-blocking", category="test", name="blocking", contract=image_contract)]
+        #[drip::node(id="test-blocking", name="blocking", contract=image_contract)]
         fn blocking(
             _: &KernelContext<'_>,
             p: &SourceKernel,
@@ -835,7 +835,7 @@ mod tests {
             path: Option<std::path::PathBuf>,
         }
         // Reads on every run, unlike nodes that keep their files, to exercise worker ordering.
-        #[drip::node(id="test-file", category="test", name="file", contract=image_contract)]
+        #[drip::node(id="test-file", name="file", contract=image_contract)]
         fn file(
             _: &KernelContext<'_>,
             p: &FileKernel,
@@ -930,7 +930,7 @@ mod tests {
     mod panic_wakes_the_ui_and_ends_the_busy_state_fixture {
         use super::*;
 
-        #[drip::node(id="test-panic", category="test", name="panic", contract=empty_contract)]
+        #[drip::node(id="test-panic", name="panic", contract=empty_contract)]
         fn panic_node(_: &KernelContext<'_>, _: &()) -> drip::Result<()> {
             panic!("test worker failure")
         }

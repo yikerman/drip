@@ -6,6 +6,7 @@ use super::{ExposureRange, Scale, Scope, ScopeAxes, scope};
 use crate::node_ui::data::HostImage;
 use crate::node_ui::data::{DeviceRgb, PrepareContext};
 use drip::Error as KernelError;
+use drip::registry::tag;
 use drip::{node::data::*, ports::*, runtime::KernelContext};
 #[cfg(test)]
 use rayon::prelude::*;
@@ -26,7 +27,7 @@ pub struct Settings {
 /// Plot linear RGB channel exposure against horizontal image position, without a
 /// color conversion; camera RGB shows native channels. Exposure is measured
 /// relative to sample value 1; the density scale controls bin brightness.
-#[drip::node(id = "waveform", name = "Waveform", category = "View")]
+#[drip::node(id = "waveform", name = "Waveform", tags = [tag::VIEW, tag::SCOPE])]
 pub fn observe(
     _: &KernelContext<'_>,
     _: &Settings,

@@ -884,7 +884,7 @@ mod tests {
             #[param(default = false)]
             value: bool,
         }
-        #[drip::node(id="test-offscreen", name="offscreen", category="test", contract=empty_contract)]
+        #[drip::node(id="test-offscreen", name="offscreen", contract=empty_contract)]
         fn offscreen(_: &KernelContext<'_>, _: &OffscreenKernel) -> drip::Result<()> {
             CALLS.fetch_add(1, Ordering::SeqCst);
             Ok(())
@@ -1255,7 +1255,7 @@ mod tests {
         ) -> drip::Result<(RgbDesc,)> {
             Ok((image.clone(),))
         }
-        #[drip::node(id="test-generic", name="generic", category="test", contract=contract)]
+        #[drip::node(id="test-generic", name="generic", contract=contract)]
         fn generic(
             _: &KernelContext<'_>,
             _: &(),

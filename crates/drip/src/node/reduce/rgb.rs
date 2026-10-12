@@ -1,4 +1,5 @@
 use super::Settings;
+use crate::registry::tag;
 use crate::{
     Result,
     node::data::*,
@@ -16,7 +17,7 @@ fn contract(_: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(RgbDesc
 }
 /// Reduce RGB by box averaging without changing its coordinates. The factor
 /// applies to both dimensions; partial edge blocks use available samples.
-#[crate::node(id="reduce-rgb", name="RGB box reduction", category="Geometry", contract=contract)]
+#[crate::node(id="reduce-rgb", name="RGB box reduction", tags = [tag::GEOMETRY], contract=contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     p: &Settings,

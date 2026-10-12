@@ -14,10 +14,8 @@ fn rejects_invalid_options() {
         (quote!(id = "x", contract = c, parameters = Params::SPECS), "unknown node option"),
         (quote!(id = "x", id = "y", contract = c), "duplicate node option"),
         (quote!(id = "x", contract = c, name = "X", name = "Y"), "duplicate node option"),
-        (
-            quote!(id = "x", contract = c, category = "raw", category = "color"),
-            "duplicate node option",
-        ),
+        (quote!(id = "x", contract = c, tags = [], tags = []), "duplicate node option"),
+        (quote!(id = "x", contract = c, tags = tag::RAW), "expected tags = [tag, ...]"),
         (quote!(id = "x", contract = c, references = [], references = []), "duplicate node option"),
         (quote!(node::id = "x", contract = c), "expected option name"),
     ] {
@@ -341,23 +339,23 @@ fn generates_valid_rust_for_zero_and_multiple_ports() {
 
 #[test]
 fn supplies_default_and_explicit_display_metadata() {
-    for (options, expected_name, expected_category) in [
-        (quote!(id = "raw", contract = c), "raw", "processing"),
+    for (options, expected_name, expected_tags) in [
+        (quote!(id = "raw", contract = c), "raw", quote!(&[])),
         (
-            quote!(id = "raw", name = "RAW input", category = "input", contract = c),
+            quote!(id = "raw", name = "RAW input", tags = [tag::RAW, tag::INPUT], contract = c),
             "RAW input",
-            "input",
+            quote!(&[&tag::RAW, &tag::INPUT]),
         ),
     ] {
         let function = syn::parse_quote!(
             fn raw(context: &Context, parameters: &Params) {}
         );
         let module = generated_module(expand(options, function).unwrap());
-        for (name, expected) in
-            [("id", "raw"), ("name", expected_name), ("category", expected_category)]
-        {
+        for (name, expected) in [("id", "raw"), ("name", expected_name)] {
             assert_eq!(literal(&module, name), expected);
         }
+        let tags = kind_field(&module, "tags");
+        assert_eq!(quote!(#tags).to_string(), expected_tags.to_string());
     }
 }
 

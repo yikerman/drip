@@ -2,6 +2,7 @@ use crate::{
     Error, Result,
     node::{camera, color, data::*},
     ports::*,
+    registry::tag,
     runtime::{GlobalContext, KernelContext, dispatch_dims},
 };
 pub use compute::{Definition, Ports, add, definition};
@@ -24,7 +25,7 @@ fn camera_to_rgb_contract(
 /// camera neutral under D65 maps to white; scene white balance is a separate
 /// adaptation. No clipping or normalization is applied. The image must come
 /// from the same camera make and model as the metadata.
-#[crate::node(id = "camera-to-color-rgb", name="Camera RGB to color RGB", category="Color", contract = camera_to_rgb_contract)]
+#[crate::node(id = "camera-to-color-rgb", name="Camera RGB to color RGB", tags = [tag::INPUT_TRANSFORM, tag::COLOR], contract = camera_to_rgb_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),

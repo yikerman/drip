@@ -1,4 +1,5 @@
 use super::{Settings, bayer_extent, dispatch_bayer};
+use crate::registry::tag;
 use crate::{
     Error, Result,
     node::data::*,
@@ -18,7 +19,7 @@ fn bayer_contract(_: &GlobalContext, p: &Settings, input: &BayerDesc) -> Result<
 /// one Bayer cell for small inputs; factor 1 preserves incomplete edge cells too.
 /// The explicit factor is independent of requested preview detail. Apply sensor
 /// corrections before this spatial approximation when physical correspondence matters.
-#[crate::node(id="reduce-bayer", name="Bayer box reduction", category="Geometry", contract=bayer_contract)]
+#[crate::node(id="reduce-bayer", name="Bayer box reduction", tags = [tag::GEOMETRY, tag::RAW], contract=bayer_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     p: &Settings,

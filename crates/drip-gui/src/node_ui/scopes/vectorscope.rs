@@ -11,6 +11,7 @@ use super::{Scope, ScopeAxes, scope};
 use crate::node_ui::data::{DeviceRgb, PrepareContext};
 use drip::Error as KernelError;
 use drip::node::color::{self, D65, REC2020};
+use drip::registry::tag;
 use drip::{node::data::*, ports::*, runtime::KernelContext};
 #[cfg(test)]
 use rayon::prelude::*;
@@ -19,7 +20,7 @@ const RADIUS: f32 = 0.5;
 /// Plot linear Rec.2020/D65 RGB chromaticity in CIE 1976 u′v′. Negative channels
 /// are clipped for visualization; black has no chromaticity and is omitted.
 /// Density uses logarithmic counts.
-#[drip::node(id = "vectorscope", name = "Vectorscope", category = "View")]
+#[drip::node(id = "vectorscope", name = "Vectorscope", tags = [tag::VIEW, tag::SCOPE])]
 pub fn observe(
     _: &KernelContext<'_>,
     _: &(),

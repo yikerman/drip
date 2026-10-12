@@ -8,7 +8,7 @@ node-specific controls, preparation and presentation live under `src/node_ui/`.
 `src/registry.rs` lists, by hand, everything the GUI discovers:
 
 - `VIEWS`: node kinds declared in the GUI because what they prepare is GUI-only
-  (preview and scopes).
+  (preview and scopes). They use the library's `view` and `scope` tags.
 - `REGISTRY`: the kinds the editor offers and projects may contain,
   `drip::registry::NODES` followed by `VIEWS`.
 - `BINDINGS`: node-specific presentation, an `impl GuiNode` on a node's

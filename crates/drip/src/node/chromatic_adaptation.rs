@@ -6,6 +6,7 @@ use crate::{
         data::*,
     },
     ports::*,
+    registry::tag,
     runtime::{GlobalContext, KernelContext, dispatch_dims},
 };
 pub use compute::{Definition, Ports, add, definition};
@@ -113,7 +114,7 @@ fn contract(
 /// The RAW template cancels as-shot gains at camera conversion before this node.
 /// Place before rendering; on already-balanced RGB, a custom source white is a
 /// creative reinterpretation. Signed/HDR samples are preserved without clipping.
-#[crate::node(id="chromatic-adaptation", name="Chromatic adaptation", category="Color", contract=contract,
+#[crate::node(id="chromatic-adaptation", name="Chromatic adaptation", tags = [tag::INPUT_TRANSFORM, tag::COLOR], contract=contract,
     references=[("CAT16", "https://doi.org/10.1002/col.22131"),
         ("Colour full adaptation", "https://colour.readthedocs.io/en/v0.4.7/generated/colour.adaptation.matrix_chromatic_adaptation_VonKries.html")])]
 pub fn compute(

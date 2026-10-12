@@ -268,8 +268,15 @@ Settled with the user on 2026-10-11 after a review against
 - **Decided:** Sentence-case display labels independent of persisted keys. IDs
   name the operation alone in kebab case, qualified where it would be unclear
   (`rcd-demosaic`, `export-tiff`), without migration aliases; projects saved
-  with the earlier `category.operation` IDs do not load. Categories: Input,
-  Sensor, Demosaic, Color, Tone, Geometry, View, Output.
+  with the earlier `category.operation` IDs do not load.
+- **Decided:** Nodes carry tags from one list, `drip::registry::TAGS` (`id`,
+  `description`), named by path so a misspelling fails to compile; frontends
+  declare none of their own, so `view` and `scope` live there too. Tags say
+  what a node is for; ports and payloads already say what it accepts. At most
+  one stage per node, by convention rather than a check: the ACES input
+  transform, look or output transform, or `encoding`. Exposure is a look;
+  geometry and views have no stage. RAW decoding and chromatic adaptation
+  (as-shot white by default) count as input transforms.
 - **Decided:** Enum variants own their dependent parameter structs; Serde
   adapters and UI schemas are generated together, externally tagged. Only the
   selected variant's fields are shown and saved.

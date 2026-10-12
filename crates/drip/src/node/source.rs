@@ -28,7 +28,7 @@ impl<P: Payload> Source<P> {
     const KIND: Kind = Kind {
         id: "bound-source",
         name: "Bound source",
-        category: "Input",
+        tags: &[],
         help: "Immutable, validated source value.",
         references: &[],
         parameters: &[],

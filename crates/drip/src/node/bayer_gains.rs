@@ -2,6 +2,7 @@ use crate::{
     Error, Result,
     node::{camera, data::*},
     ports::*,
+    registry::tag,
     runtime::{GlobalContext, KernelContext, dispatch_dims},
 };
 pub use compute::{Definition, Ports, add, definition};
@@ -32,7 +33,7 @@ fn total_balance(image: &BayerDesc, metadata: &drip_raw::Metadata) -> Result<[f3
 /// clipping levels. Outputs Bayer and BayerLevels in the same balanced
 /// coordinates; gains compose with a balance the input already carries. No
 /// gains or CFA are inferred: missing as-shot balance prevents evaluation.
-#[crate::node(id="bayer-site-gains", name="Bayer site gains", category="Sensor",contract=gain_contract)]
+#[crate::node(id="bayer-site-gains", name="Bayer site gains", tags = [tag::INPUT_TRANSFORM, tag::RAW],contract=gain_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),

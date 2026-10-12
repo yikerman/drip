@@ -130,7 +130,7 @@ fn kind(
 ) -> TokenStream {
     let id = &options.id;
     let name = &options.name;
-    let category = &options.category;
+    let tags = &options.tags;
     let help = crate::documentation(&function.attrs);
     let references = &options.references;
     let parameters = &signature.parameters;
@@ -155,7 +155,7 @@ fn kind(
         #vis static KIND: ::drip::definition::Kind = ::drip::definition::Kind {
             id: #id,
             name: #name,
-            category: #category,
+            tags: &[#(&#tags),*],
             help: #help,
             references: &#references,
             parameters: <#parameters as ::drip::param::Parameters>::SPECS,

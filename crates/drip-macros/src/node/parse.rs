@@ -4,7 +4,8 @@ use syn::{parse::Parser, spanned::Spanned};
 pub(super) struct Options {
     pub id: syn::Expr,
     pub name: syn::Expr,
-    pub category: syn::Expr,
+    /// Paths to registered `Tag` statics, e.g. `[tag::LOOK]`.
+    pub tags: Vec<syn::Expr>,
     /// Required when the node has outputs; checked against the signature.
     pub contract: Option<syn::Expr>,
     pub references: syn::Expr,
@@ -21,7 +22,7 @@ impl Options {
             .parse2(tokens)?;
         let mut id = None;
         let mut display_name = None;
-        let mut category = None;
+        let mut tags = None;
         let mut contract = None;
         let mut references = None;
         let mut action = None;
@@ -42,7 +43,7 @@ impl Options {
             let option = match name.to_string().as_str() {
                 "id" => &mut id,
                 "name" => &mut display_name,
-                "category" => &mut category,
+                "tags" => &mut tags,
                 "contract" => &mut contract,
                 "references" => &mut references,
                 "action" => &mut action,
@@ -58,6 +59,11 @@ impl Options {
         }
 
         let id = id.ok_or_else(|| syn::Error::new(span, "missing id"))?;
+        let tags = match tags {
+            None => Vec::new(),
+            Some(syn::Expr::Array(tags)) => tags.elems.into_iter().collect(),
+            Some(other) => return Err(syn::Error::new(other.span(), "expected tags = [tag, ...]")),
+        };
         let action = action
             .map(|expr| match expr {
                 syn::Expr::Path(path) => Ok(path.path),
@@ -66,7 +72,7 @@ impl Options {
             .transpose()?;
         Ok(Self {
             name: display_name.unwrap_or_else(|| id.clone()),
-            category: category.unwrap_or_else(|| syn::parse_quote!("processing")),
+            tags,
             id,
             contract,
             references: references.unwrap_or_else(|| syn::parse_quote!([])),

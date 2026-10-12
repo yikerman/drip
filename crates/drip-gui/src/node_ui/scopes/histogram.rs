@@ -4,6 +4,7 @@ use super::{ExposureRange, Scale};
 use crate::node_ui::data::DeviceRgb;
 use crate::node_ui::data::PrepareContext;
 use drip::Error as KernelError;
+use drip::registry::tag;
 use drip::{node::data::*, ports::*, runtime::KernelContext};
 use serde::{Deserialize, Serialize};
 
@@ -41,7 +42,7 @@ pub struct Settings {
 /// Plot linear RGB channel counts by exposure, without a color conversion; camera
 /// RGB shows native channels. Exposure is measured relative to sample value 1;
 /// the density scale controls counts, not the exposure axis.
-#[drip::node(id = "histogram", name = "Histogram", category = "View")]
+#[drip::node(id = "histogram", name = "Histogram", tags = [tag::VIEW, tag::SCOPE])]
 pub fn observe(
     _: &KernelContext<'_>,
     _: &Settings,

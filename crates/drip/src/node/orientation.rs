@@ -2,6 +2,7 @@ use crate::{
     Result,
     node::data::*,
     ports::*,
+    registry::tag,
     runtime::{GlobalContext, KernelContext, dispatch_dims},
 };
 pub use compute::{Definition, Ports, add, definition};
@@ -82,7 +83,7 @@ fn orientation_contract(
 /// reflects across the other diagonal. Quarter turns and diagonal reflections
 /// exchange width and height. Samples and color interpretation are preserved,
 /// without resampling or clipping. Apply once after demosaic and color conversion.
-#[crate::node(id="orientation", name="Orientation", category="Geometry", contract=orientation_contract)]
+#[crate::node(id="orientation", name="Orientation", tags = [tag::GEOMETRY], contract=orientation_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
     p: &Settings,
