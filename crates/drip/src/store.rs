@@ -493,7 +493,15 @@ impl Disk {
         match decode(&mut BufReader::new(&file), codec) {
             Ok(image) => {
                 // The modification time records the last use for trimming.
-                let _ = file.set_modified(SystemTime::now());
+                // Setting it needs write access to the file on Windows, which
+                // the read handle lacks, so a second handle touches it.
+                let touched = fs::OpenOptions::new()
+                    .write(true)
+                    .open(&path)
+                    .and_then(|file| file.set_modified(SystemTime::now()));
+                if let Err(error) = touched {
+                    log::debug!("cannot touch stored {}: {error}", path.display());
+                }
                 Some(image)
             }
             Err(error) => {
