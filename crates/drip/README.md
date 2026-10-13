@@ -4,7 +4,7 @@
 
 - `src/node/` owns node-specific behavior. Each node has a file or directory
   containing its parameters, contracts, computation and private helpers/kernels.
-  RCD kernels belong in `node/rcd/`; sigmoid math belongs in `node/sigmoid.rs`.
+  RCD kernels belong in `node/rcd/`, sigmoid math in `node/sigmoid.rs`.
 - Shared image-processing code also lives under `node/`: payload implementations,
   color management and export encoding. `shared_kernel.rs`
   contains reusable operations such as matrix multiplication and Bayer reduction,
@@ -18,24 +18,18 @@
 
 The same ownership rule applies to `drip-gui`: node-specific declarations,
 contracts, controls, preparation and presentation belong under `src/node_ui/`.
-Each GUI node has its own module; shared helpers stay alongside them.
+Each GUI node has its own module, and code shared by GUI nodes stays beside
+them.
 Windowing, the graph editor, worker scheduling and shared rendering machinery
 remain outside. File organization does not justify splitting one algorithm
 into more DAG nodes or changing GUI interaction behavior.
 
-Payloads keep concrete Rust data types and a host description that contracts
-read. A port names a payload, not where its samples live: an input is a
-`Raster` that the node asks for `data.host()` or `data.device(ctx)`, and an
-output is materialized where the node writes it. A payload implements
-`DeviceLayout` only when a kernel reads it on the device; only then does
-`device` exist, and structured data stays on the host. Nodes flatten the
-numbers a kernel needs into `KernelContext::constants`. A map node computes no
-samples itself: its host function sees the mapped input and the output as
-`Point` descriptions and returns the constants its body reads, and evaluation
-runs a chain of maps as one kernel. Interpretations are typed values in
-descriptions (camera responses or numeric RGB spaces, compared exactly). Ports declare requirements as type arguments, `Read<'_, Rgb,
-Rec2020>`; the checker, help and editor read the same declaration. Do not
-flatten unrelated ports merely to make storage uniform.
+[ARCHITECTURE](../../agent-docs/ARCHITECTURE.md) describes ports, payloads,
+residency, shapes and evaluation. Keep a concrete Rust type per payload.
+Implement `DeviceLayout` only for payloads a kernel reads, keep structured
+data on the host, and flatten the numbers a kernel needs into
+`KernelContext::constants`. Do not flatten unrelated ports merely to make
+storage uniform.
 
 ## Files
 
@@ -60,7 +54,7 @@ The non-trivial files outside `node/`:
 - `payload.rs`: payload families, their host types and device byte layouts.
 - `param.rs`: parameter schemas, encoding and validation.
 - `project.rs`: `.drip` persistence, loaded through a `Registry`.
-- `runtime.rs`: one compute client per evaluator; `DRIP_BACKEND` selection.
+- `runtime.rs`: one compute client per evaluator and `DRIP_BACKEND` selection.
 
 ## Registries
 
@@ -70,7 +64,7 @@ a new node is one more line.
 
 - `drip::registry::NODES`: processing node kinds, in pipeline order.
 - `drip::registry::TAGS`: every tag a node may carry, with a one-sentence
-  description; frontends add none. A node takes at most one stage tag, after
+  description. Frontends add none. A node takes at most one stage tag, after
   ACES: `input-transform`, `look` or `output-transform`. File readers and
   writers carry `io`.
 - `drip::registry::Registry`: composes lists, rejects duplicate IDs and
@@ -78,7 +72,7 @@ a new node is one more line.
   it is given, so a frontend states which kinds it knows. A headless frontend
   passes `NODES`.
 
-`drip-gui` keeps its own lists in `src/registry.rs`; see its
+`drip-gui` keeps its own lists in `src/registry.rs`, described in its
 [README](../drip-gui/README.md).
 
 ## Adding a node
@@ -173,24 +167,24 @@ are `Read` and arrive materialized, as Camera RGB to color RGB reads its
 
 `#[node]` generates the rest: the `Kind` (ID, help from the Rustdoc, ports,
 schema, shape), `add`, typed `Ports` and `Inputs`. The contract runs at
-evaluation and states what the output describes; reject inputs it cannot
+evaluation and states what the output describes. Reject inputs it cannot
 handle there. A host node writes `output.host()` instead of `output.device(ctx)`
-and reads `image.data.host()?`; evaluation transfers what the next node asks
+and reads `image.data.host()?`. The raster transfers what the next node asks
 for. An output declared `Forward<'_, P>` instead of `Write` is set from samples
 the node already holds, `output.set(image.data)`, so a node that only changes
 the description copies nothing.
 The ID is the persistence key, so keep it once projects use it. Tags say what
 the node is for: at most one stage tag, then any others that help finding it.
-Parameters are a struct deriving `Parameters` in place of `()`; see
+Parameters are a struct deriving `Parameters` in place of `()`, as in
 `exposure.rs`. Credit adapted algorithms beside the code and in
-`THIRD_PARTY.md`. Every frontend now offers the node with schema controls; for
-GUI-specific presentation see the [drip-gui README](../drip-gui/README.md).
+`THIRD_PARTY.md`. Every frontend offers the node with schema controls. For
+GUI-specific presentation, see the [drip-gui README](../drip-gui/README.md).
 
 ## Node metadata and parameters
 
 Declare operation names, tags, help and port contracts beside node functions.
 IDs name the operation in kebab case (`exposure`, `rcd-demosaic`) and are the
-persistence keys; display labels use sentence case and
+persistence keys. Display labels use sentence case and
 retain technical spellings such as RAW, RGB, ICC, sRGB and Rec.2020. Labels do
 not determine compatibility or persistence keys.
 
@@ -198,30 +192,28 @@ not determine compatibility or persistence keys.
 declaration per field: `#[param(default = 1.5, range = 0.5..=4.0)]`, a choice
 default, `open`/`save` file extensions, or `flatten`. `Choice` generates Serde
 adapters, schemas and `Default` from its `#[default]` variant, for unit variants
-or variants containing a parameter struct. Unit variants serialize as strings; variants with settings use Serde's
-externally tagged object form. The GUI renders only the active variant. Keep
+or variants containing a parameter struct. Unit variants serialize as strings,
+and variants with settings use Serde's externally tagged object form. The GUI renders only the active variant. Keep
 profile-file paths, proof settings and compression levels in the variants that
 consume them, rather than independent inactive fields.
 
-File extensions are file-format facts in the schema; the GUI derives its
+File extensions are file-format facts in the schema, and the GUI derives its
 dialogs from them. Scope annotations belong to `drip-gui`. The library owns
-processing values and their interpretations. Sources use the same `#[node]`
-declaration with `Load` ports, `fn(&Settings, Load<'_, P>...)`: they load once,
-when first evaluated, and the node keeps the shared values or the failure.
-Files are assumed not to change while a node names them.
+processing values and their interpretations.
 
 ## Compute backends
 
-Cargo features include compute runtimes; `DRIP_BACKEND` selects one at startup.
+Cargo features include compute runtimes, and `DRIP_BACKEND` selects one at
+startup.
 An unset environment variable selects `metal-native` on macOS if that feature
-is enabled, or `vulkan` on Linux if enabled; otherwise it selects `wgpu`. An
+is enabled, or `vulkan` on Linux if enabled, and otherwise `wgpu`. An
 ordinary default-feature build uses wgpu. `cargo xtask dist` enables the native
 platform choice, using WGSL/D3D12 on Windows. CPU/LLVM is opt-in for development
 and is not shipped by xtask. These choices do not change the GUI renderer.
 
 | `DRIP_BACKEND` | Required `drip` feature | Execution |
 | --- | --- | --- |
-| `wgpu` or `wgsl` | `wgpu` (default) | WGSL through wgpu; D3D12 on Windows, automatic API elsewhere |
+| `wgpu` or `wgsl` | `wgpu` (default) | WGSL through wgpu, D3D12 on Windows, automatic API elsewhere |
 | `dx12` | `wgpu` | Explicit Windows spelling of the same D3D12/WGSL path |
 | `vulkan` | `vulkan` | Direct SPIR-V through wgpu on Vulkan |
 | `metal` | `metal` | Direct MSL through wgpu on macOS |
@@ -239,7 +231,7 @@ uses D3D12; PowerShell can explicitly select it with `$env:DRIP_BACKEND='dx12'`.
 Features are additive. Enabling `vulkan` or `metal` also includes wgpu, but never
 changes what `DRIP_BACKEND=wgsl` means. An unavailable selection fails instead of
 switching compiler or device runtime. Drivers and hardware support are still
-required. For library-only builds, `--no-default-features` removes wgpu; select
+required. For library-only builds, `--no-default-features` removes wgpu. Select
 an included backend explicitly if calling `RuntimeContext::from_env()`.
 
 Run the shared algorithm checks on any configured runtime with
@@ -256,9 +248,10 @@ included. It is a host-only value whose description is the shared value itself.
 Consumers derive what they apply (`node::camera`). `Bayer site gains` derives
 as-shot gains and clipping levels and records the balance in the Bayer response.
 Camera conversion derives its matrix from `xyz_to_cam` and that balance,
-replacing it with D65 reference gains; CAT16 maps the as-shot camera neutral
+replacing it with D65 reference gains. CAT16 maps the as-shot camera neutral
 through the same matrix for its initial source white. As-shot conditioning
 remains in place through highlights and demosaic. The minimum lens focus
 distance describes the lens, not this exposure's focus. TIFF and JPEG write the
 selected EXIF subset and ICC profile. JPEG converts to 8-bit output through the
-same profile settings; quality and chroma subsampling control its lossy encoding.
+same profile settings. Quality and chroma subsampling control its lossy
+encoding.

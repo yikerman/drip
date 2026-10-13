@@ -71,12 +71,12 @@ impl GuiNode for double::compute::Definition {
 Other overrides use the same impl and entry:
 
 - `PREPARE` with a `Presentation` draws a view in the node and its pop-out,
-  from the node's typed inputs; see `scopes/histogram.rs`.
-- `ACTION` adds a frontend action whose result may become new parameters; see
-  `exposure.rs` (auto exposure). A kind has a frontend action or one declared
+  from the node's typed inputs, as in `scopes/histogram.rs`.
+- `ACTION` adds a frontend action whose result may become new parameters, as
+  in `exposure.rs` (auto exposure). A kind has a frontend action or one declared
   on the node, not both.
 - A view whose window edits the node implements `Drawable::interact` and sets
-  parameters through `ControlCx::set`; see `perspective.rs` (Perspective
+  parameters through `ControlCx::set`, as in `perspective.rs` (Perspective
   Transform's handles).
 
 A node that only presents its inputs and prepares GUI-only data, such as a

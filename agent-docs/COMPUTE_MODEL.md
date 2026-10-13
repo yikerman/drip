@@ -3,8 +3,9 @@
 2026-10-12. Research for one question: what if the compiler that Drip,
 darktable and vkdt each embed implicitly became explicit, so a data structure
 describes the DAG of computations and evaluation compiles it into few, large
-kernels? Everything here is **Open** in [DESIGN](DESIGN.md) terms. The
+kernels? Everything here was **Open** in [DESIGN](DESIGN.md) terms. The
 existing design docs were read as drafts to question, not as settled facts.
+The [proposal](#proposal-for-drip) at the end was adopted on 2026-10-13.
 
 Sources: Drip `aec5201` (`continous`); vkdt `f0be638` and darktable
 `ddc0bc5`, both cloned and read at those commits; CubeCL 0.11.0 sources from
@@ -456,109 +457,72 @@ Falsifiable steps, in order, each a day or two:
 ## Proposal for Drip
 
 Added 2026-10-13 after the user asked how to put the model into this
-project, including foreign and expensive computations. Status: Open.
-Implementation status (2026-10-13): steps 1 and 2 landed. Decisions are in [DESIGN](DESIGN.md#compute).
+project, including foreign and expensive computations. Adopted on
+2026-10-13 ([DESIGN](DESIGN.md#compute)). [ARCHITECTURE](ARCHITECTURE.md)
+describes the steps that landed.
 
-### Decisions proposed
+### Decisions
 
 1. **A value is a computation with optional storage.** `Image` is the port
-   value: continuous semantics (a function of plane position), possibly
-   deferred, with a `Type` (lattice and pixel meaning). `Raster` is a
-   materialized `Image`: samples on a `Lattice`, held in a `Store` entry
-   that may have a host and a device representation. Residency leaves the
-   node signature; the consumer's shape decides where a materialization
-   lives and the store transfers lazily, as `Evaluator::materialize` does
-   today for ports.
-2. **A node is a shape plus a body.** The `#[node]` macro keeps the kind,
-   schema, help, tags, registry and project format and adds `shape`:
+   value, possibly deferred. `Raster` is a materialized `Image`: samples on
+   a `Lattice` with a host and a device representation. Residency leaves
+   the node signature, the consumer's shape decides where a materialization
+   lives, and the store transfers lazily.
+2. **A node is a shape plus a body.** `#[node]` keeps the kind, schema,
+   help, tags, registry and project format and adds `shape`. Existing nodes
+   start as `kernel` and adopt shapes one by one.
 
    | Shape | Body | What the compiler derives |
    |---|---|---|
-   | `map` | `#[cube] fn(&Consts, px: Rgb<A>) -> Rgb<B>` | fusion into the segment's kernel, output type, region identity, scale invariance |
-   | `stencil(radius, border)` | `#[cube] fn(&Consts, w: Window<Rgb<A>, R>) -> Rgb<B>` | halo, region growth, radius in plane units converted per scale, warning below one sample |
-   | `warp` | host `fn(&Params, &Type) -> Warp` (map, Jacobian, domain) | composition with neighbouring warps, one resampling at the next materialization |
-   | `resample(filter, size)` | none | explicit materialization; replaces `Sample`; `Interpolate` disappears |
-   | `reduce(monoid)` | `#[cube] fn(px) -> Acc` plus combine | partial sums, readback, a `Const` output usable by nodes and the GUI |
-   | `kernel(halo \| whole)` | today's `fn(ctx, &Params, In..., Out...)` with explicit launches | inputs materialized on the device, output materialized, region by halo, cache key |
-   | `meta` | `fn(&Params, &[Type]) -> SubGraph` | expansion before compilation (pyramids, iterations) |
-   | `foreign(cache = disk \| memory)` | `fn(&Params, &[HostValue]) -> Result<HostValue>` on a worker thread | inputs materialized on the host, always memoized, full detail only, cancellable, progress |
-   | `source` / `sink` | as now | file identity in the key; sinks demand regions |
+   | `map` | `#[cube]` function of one pixel | fusion into the segment's kernel, region identity, scale invariance |
+   | `stencil(radius, border)` | `#[cube]` function of a window | halo, region growth, radius converted per scale |
+   | `warp` | host function returning a map, its Jacobian and domain | composition with neighbouring warps, one resampling at the next materialization |
+   | `resample(filter, size)` | none | explicit materialization, replacing Sample and Interpolate |
+   | `reduce(monoid)` | `#[cube]` accumulator plus combine | partial sums, readback, a constant output for nodes and the GUI |
+   | `kernel(halo \| whole)` | a function with explicit launches | inputs and output materialized, region by halo, cache key |
+   | `meta` | host function returning a subgraph | expansion before compilation (pyramids, iterations) |
+   | `foreign(cache = disk \| memory)` | host function on a worker thread | host inputs, always memoized, full detail only, cancellable |
+   | `source` / `sink` | as now | file identity in the key, sinks demand regions |
 
-   Every existing node becomes `kernel` on day one with no behaviour
-   change; shapes are adopted node by node.
 3. **Evaluation compiles.** A demand is targets plus region plus scale.
-   Expand `meta`, compute types along edges, cut the subgraph into segments
-   at materialization points (stencil or kernel or foreign inputs,
-   reductions, views, sinks, cache checkpoints, instruction limits), key
-   each segment, run only the uncached ones. A segment of maps and warps is
-   one fused kernel; a stencil is its own kernel with a halo; a reduction
-   is a partial pass. The whole colour tail of the current pipeline, matrix
-   through CAT16, orientation, perspective, exposure, sigmoid and the view's
-   resampling, becomes one kernel.
+   Evaluation expands `meta`, computes types along edges, cuts the subgraph
+   into segments at materialization points, keys each segment and runs only
+   the uncached ones. A segment of maps and warps is one fused kernel.
 4. **One store, three tiers, one key space.** Keys are Merkle hashes of
-   (kind and version, canonical parameters, segment program, region, scale,
-   input keys). Device tier under a byte budget (the 4 GiB rule becomes the
-   budget), host tier, disk tier for `foreign` and kernels declared
-   expensive. Durability: sources and foreign outputs high, structural
-   parameters medium, look parameters low; checkpoints sit at durability
-   boundaries. Entries are immutable, so purity holds; the store is a memo,
-   never a project artifact, and may be deleted at any time.
-5. **Foreign work runs at full detail and is memoized on disk.** RAW decode
-   keys on path, size, modification time, decoder version and normalization;
-   reopening a project skips LibRaw. A 100-frame stack keys on the frame
-   keys and the method; a network denoise keys on its input segment key and
-   the model hash. Previews never run a network at preview scale; the
-   compiler reduces the cached full-detail output. A pending foreign value
-   yields "pending" to views instead of blocking the queue.
-6. **Regions and scale are compiler work.** A 100 % view requests a crop;
-   export tiles by budget; preview scale inserts one resampling at the first
-   materialization where the lattice is finer than requested. Demosaic's
-   internal reduction stays as an optimization its kernel may claim
-   (`scaled`), not a model element.
-7. **Types narrow rather than restart.** Descriptors stay and become
-   composable: `Type { lattice: Lattice { extent, phase, to_plane }, pixel:
-   Meaning }`, with `Meaning` = `Rgb(Coordinates) | Scalar(Quantity) | Mask
-   | Levels | Metadata`. Shapes compute output types from input types, so
-   edges are checked at connect time for every node but a source, which is
-   polymorphic until loaded. `Rec2020` and `CameraRgb` remain checks on
-   `Coordinates`; canonical spaces also exist as static pixel types for
-   bodies. Parameter schemas gain a unit (plane length, lattice samples,
-   none). Masks and gain maps are `Image` with `Scalar` meaning; no
-   `MonoField`.
-8. **Names.** `Image` for the value, `Raster` for materialized samples,
-   `Lattice` for the sampling grid, `Warp` for a deferred map, `Resample`
-   for explicit materialization, `Plan` for the compiled segment program.
+   kind and version, canonical parameters, segment program, region, scale
+   and input keys. The device tier has a byte budget. Durability separates
+   sources and foreign outputs, structural parameters and look parameters.
+   The store is a memo, never a project artifact.
+5. **Foreign work runs at full detail and is memoized on disk.** Reopening a
+   project skips LibRaw. Previews reduce the cached full-detail output, and
+   a pending foreign value yields "pending" to views.
+6. **Regions and scale are compiler work.** A 100 % view requests a crop,
+   export tiles by budget, and preview scale inserts one resampling at the
+   first materialization finer than requested. Demosaic's internal reduction
+   stays as an optimization its kernel may claim.
+7. **Types narrow rather than restart.** `Type { lattice, pixel }` with
+   `Meaning` = `Rgb(Coordinates) | Scalar(Quantity) | Mask | Levels |
+   Metadata`. Shapes compute output types, so edges are checked at connect
+   time for every node but a source. Masks and gain maps are scalar images.
+8. **Names.** `Image`, `Raster`, `Lattice`, `Warp`, `Resample` and `Plan`.
    Not "field" and not "functional".
 
-### Why a third type model is the last structural one
-
-Each iteration removed one wrong identification: values as cached results
-(Rayon), values as typed buffers (WGSL), values as placed buffers (CubeCL).
-This one identifies a value with its computation, which is the fixed point
-that the GPU model, the continuous-image model and the cache model all
-require. Later changes are additions of shapes, not changes of what a
-value is.
+Each earlier model identified values wrongly (cached results, typed buffers,
+placed buffers). This one identifies a value with its computation, so later
+changes add shapes without changing what a value is.
 
 ### Migration in the `drip` crate
 
-The GUI, registry, parameters, schemas, help and project format are
-untouched; `payload.rs`, `ports.rs`, `eval.rs`, `definition.rs` and the
-macro change.
-
-1. Introduce `Type`, `Image`, `Raster`, `Store`; make every node `kernel`;
-   drop `Cpu`/`Device` from signatures. Tests unchanged.
-2. Add `map` and the fused segment kernel (comptime op list first, IR
-   building if it is cleaner). Port Exposure, camera matrix, CAT16, Sigmoid.
-   Measure against four launches at full and half detail.
-3. Add `warp` and `resample`; fold `RgbField`, Interpolate, Perspective
-   Transform and Sample into them; Orientation becomes an exact warp.
-4. Add keys, durability and the device budget; show a Sigmoid-only edit
-   recomputes only the tail.
-5. Add `foreign` with the disk tier; move RAW decode; add one stacking or
-   model placeholder to prove the path end to end.
-6. Add regions: 100 % crop view and tiled export.
-7. Add `reduce`; move scopes and auto exposure out of GUI-owned kernels.
-8. Add `stencil` and `meta` with the first sharpen and pyramid nodes.
+| Step | Work | Status |
+|---|---|---|
+| 1 | `Image`, `Raster`, `Store` and `Shape`. Every node a kernel or source, no placement in signatures. | Landed 2026-10-13 |
+| 2 | `map` and the fused segment kernel. Exposure, camera matrix, CAT16 and Sigmoid as maps, measured against four launches. | Landed 2026-10-13 |
+| 3 | `warp` and `resample` replace `RgbField`, Interpolate, Perspective Transform and Sample. Orientation becomes an exact warp. | Next |
+| 4 | Keys, durability and the device budget. A Sigmoid-only edit recomputes only the tail. | Planned |
+| 5 | `foreign` with the disk tier. RAW decode moves to it, and one stacking or model placeholder proves the path. | Planned |
+| 6 | Regions: a 100 % crop view and tiled export. | Planned |
+| 7 | `reduce`. Scopes and auto exposure leave GUI-owned kernels. | Planned |
+| 8 | `stencil` and `meta` with the first sharpen and pyramid nodes. | Planned |
 
 ## References
 

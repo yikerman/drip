@@ -1,10 +1,10 @@
 # Type system: principles and mathematics
 
-The user's principles for nodes, ports and contracts, and the mathematics that
-bounds what contracts can establish. Design proposals and implementation
-records from the 2026-10-08 redesign were removed; the code is the current
-implementation, and open questions are in [DESIGN](DESIGN.md). General code
-principles are in `AGENTS.md`.
+Research reference: the user's principles for nodes, ports and contracts,
+paraphrased, and the colorimetry and mathematics that bound what contracts
+can establish. [ARCHITECTURE](ARCHITECTURE.md) describes the implementation
+and [DESIGN](DESIGN.md) the decisions. General code principles are in
+`AGENTS.md`.
 
 ## Principles
 
@@ -18,20 +18,21 @@ User statements, paraphrased.
   not that algorithms are split into their finest units.
 - Each algorithm does one thing. Distinct algorithms are distinct nodes (Bayer
   and X-Trans demosaic are two nodes). There is no guessing in a node: it
-  executes its declared contract; incompatible input never triggers algorithm
+  executes its declared contract. Incompatible input never triggers algorithm
   substitution. Minimize branching.
 - A node may produce several outputs. Independently usable values, such as a
   color matrix or LUT, are separate typed ports, not packed into one buffer or
-  into metadata. Outputs may be optionally reused; payloads are extensible.
+  into metadata. Outputs may be optionally reused. Payloads are extensible.
 - The global context passed to every node governs processing such as preview
-  scale. Demosaic performs the requested reduction internally; no hidden nodes.
+  scale. Demosaic performs the requested reduction internally, with no hidden
+  nodes.
 - View and action nodes are ordinary node declarations with an empty
   computation, declaring parameters and inputs like any other node.
 - GUI nodes are generated from node definitions, with overridden or extra
   behavior. Preserve universal node controls/views and per-node pop-outs.
 - The graph is acyclic and evaluated on demand: `eval(dag, global, target)`,
   requested by the GUI, export or other consumers.
-- No evaluation cache by default; large buffers can exhaust host/device memory
+- No evaluation cache by default: large buffers can exhaust host/device memory
   at a working scale of about 4 GB. Caching that preserves purity is allowed,
   such as a node keeping the file it read.
 
@@ -43,20 +44,17 @@ User statements, paraphrased.
   Rust types known at compile time, not abstract algebraic structures.
 - Port values still need interpretation, assumption and capability checks.
   Interpretation remains part of the design.
-- Reject only a practical subset of logically wrong graphs; catch ordinary
+- Reject only a practical subset of logically wrong graphs. Catch ordinary
   errors and leave algorithm nuances out. Creative processing stays allowed.
-  vkdt's buffer checks are too loose; check substantially more while staying
+  vkdt's buffer checks are too loose. Check substantially more while staying
   clean. Do not assume darktable or vkdt solved these problems correctly.
 - Failing connections are unconnectable at connect time, distinct from compile
   time and evaluation time. Where strict connect-time checking is impossible,
   move specific checks to evaluation.
 - DAG checks run on the CPU. Metadata, interpretations and constraints are
   logically grouped with a buffer but physically separate from image storage.
-- Placement is known at connect time; the evaluator owns CPU/GPU movement.
-  Superseded 2026-10-13: ports name payloads and a node chooses residency
-  when it runs; see [DESIGN](DESIGN.md#payloads-and-ports).
-- Same-placement edges and fan-out share immutable storage. Evaluation
-  materializes a missing representation once per output within a run.
+- Fan-out shares immutable storage. A missing representation is made once
+  per value.
 - Keep concrete Rust types: uniform movement does not mean homogeneous buffers
   or opaque bytes. Replace incompatible fields locally (UTF-8 text and ICC data
   can be byte vectors).
@@ -68,7 +66,7 @@ User statements, paraphrased.
   "Fraction of full-well capacity" may claim excessive physical accuracy.
 - Fully accurate physical information is generally unobtainable. Missing dark
   or flat fields, sensor profiles and other calibration must not prevent
-  ordinary processing; later nodes may work on a sufficient approximation,
+  ordinary processing. Later nodes may work on a sufficient approximation,
   including as-shot white balance and highlight recovery.
 
 ### Work order
@@ -94,7 +92,7 @@ The first two admit checks. The third often involves unobserved facts: an
 image cannot prove that its illuminant was uniform, that a surface was
 neutral, or that a profile fits the camera's spectra. The fourth belongs to the
 user. No complete classifier exists for arbitrary programs and semantic
-predicates; restricting the contract language makes particular questions
+predicates. Restricting the contract language makes particular questions
 decidable without making physical truth observable [8]. Checks therefore
 establish consistency with explicit contracts. Allocation, I/O and device
 failures are execution failures, not proofs of logical invalidity.
@@ -102,11 +100,11 @@ failures are execution failures, not proofs of logical invalidity.
 Three kinds of statement differ:
 
 - **Definition:** these numbers are linear Rec.2020 coordinates with a stated
-  scale. This assigns meaning; it does not prove scene accuracy.
+  scale. This assigns meaning but does not prove scene accuracy.
 - **Checkable fact:** shapes match, identifiers agree, denominators are nonzero.
 - **Modeling assumption:** a response is adequately linear in a region, an
   estimated illuminant is appropriate, a noise model is useful. An assumption
-  has a source and scope; it is not promoted to a measured fact.
+  has a source and scope. It is not promoted to a measured fact.
 
 Global tags such as `Linear`, `Calibrated` or `ValidColor` hide their
 arguments. Useful claims name them: "this profile consumes these sensor
@@ -133,10 +131,10 @@ r_p = (linearize(d_p) - B_p) / (W_p - B_p),   W_p > B_p,
 
 with `B` and `W` in the same linearized code coordinates. This defines zero and
 a clipping reference without claiming electron counts, radiance or a full-well
-fraction; EMVA distinguishes digital saturation capacity from full-well
+fraction. EMVA distinguishes digital saturation capacity from full-well
 capacity [4]. Samples need not lie in `[0, 1]`: noise, estimated levels and
 later gains produce values outside it. QE and noise do not prevent a linear
-model of the mean response in an unsaturated region; missing calibration
+model of the mean response in an unsaturated region. Missing calibration
 reduces confidence without making the representation undefined.
 
 The minimum useful raw interpretation is samples of named sensor responses on
@@ -157,7 +155,7 @@ for some perturbation `z`, the camera cannot distinguish spectra the observer
 distinguishes, and no annotation recovers that information (Luther condition
 [5]). A camera profile is a conversion model, usually approximate over an
 intended domain. Its output has well-defined coordinates while remaining an
-estimate of scene colorimetry; a type system need not certify a perfect camera
+estimate of scene colorimetry. A type system need not certify a perfect camera
 to permit it [6].
 
 Consequently, three sensor channels support gains, mixing and scalar curves
@@ -170,14 +168,14 @@ to camera numbers, but cannot claim to have calibrated the camera.
 
 Stored values are `v = E(c)` for coordinates `c` and encoding `E`. A nonlinear
 creative edit `c_new = G(c)` produces new coordinates with the same identity
-encoding; the storage interpretation does not become `E = G`. What may cease to
+encoding. The storage interpretation does not become `E = G`. What may cease to
 hold is a capture relation such as `c ≈ M q`, or proportionality to estimated
 scene light. Identity encoding does not assert that every preceding operation
 was linear.
 
 Scene-referred does not mean linearly encoded. CIE defines scene- and
 output-referred states by estimated scene coordinates versus rendered output
-for specified viewing conditions [1], [2]; ACEScct is a logarithmic
+for specified viewing conditions [1], [2], and ACEScct is a logarithmic
 scene-referred grading encoding [3]. Sigmoid can produce linearly encoded,
 display-referred output [D2]. The RGB reference white, the scene's estimated
 illuminant and the observer's adopted white are distinct, even when all are D65.
@@ -190,11 +188,11 @@ A = H^-1 diag((H W_destination) / (H W_source)) H,   x_out = A x_in.
 ```
 
 It needs defined coordinate/white conventions, invertible `H` and valid
-denominators. CATs predict corresponding colors under their models; they are
+denominators. CATs predict corresponding colors under their models. They are
 not spectral relighting [10], [11]. For an invertible camera model `x = M q`,
 the camera-coordinate equivalent is `M^-1 A M`, so adaptation before camera
 conversion is meaningful. For a nonlinear rendering `F`, generally
-`A F(x) != F(A x)`; transporting the same correction through `F` needs
+`A F(x) != F(A x)`. Transporting the same correction through `F` needs
 `F A F^-1`, which clipping can make unavailable. Adapting the rendered image is
 a different, definable operation. Color calibration combines adaptation,
 mixing and calibration, with documented valid exceptions to the usual order
@@ -210,7 +208,7 @@ Var(y | mu_y) = (k a) mu_y + k^2 b,
 ```
 
 so copied coefficients are wrong. Channel mixing transforms covariance as
-`Sigma_y = M Sigma_x M^T`, correlating independent channels; resampling
+`Sigma_y = M Sigma_x M^T`, correlating independent channels. Resampling
 introduces spatial correlation [7]. Likewise, clipping thresholds follow gains,
 a crop updates CFA phase, and a mask follows its image's geometry. A value
 alone does not reveal whether it was clipped earlier. Preserve the evidence a
@@ -218,11 +216,11 @@ consumer needs, or withdraw the corresponding guarantee.
 
 ### Representations and purity
 
-A CPU array and a padded GPU array need not be in bijection as byte strings;
-they can represent the same logical sample sequence. The required bijection is
+A CPU array and a padded GPU array need not be in bijection as byte strings.
+They can represent the same logical sample sequence. The required bijection is
 lossless transport between supported logical values. `f32` to `f16` is a
 precision-changing computation, not transport. Exact transport also does not
-imply bit-identical CPU/GPU kernel results; WGSL permits floating-point
+imply bit-identical CPU/GPU kernel results. WGSL permits floating-point
 behavior that must be considered explicitly [9].
 
 A matrix's layout and scalar type can be known at compile time while its
