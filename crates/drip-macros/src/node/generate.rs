@@ -141,6 +141,8 @@ fn kind(
         (None, Some(Deferred::Map(_))) => quote!(::drip::shape::Shape::Map(&BODY)),
         (None, Some(Deferred::Warp)) => quote!(::drip::shape::Shape::Warp),
         (None, Some(Deferred::Resample)) => quote!(::drip::shape::Shape::Resample),
+        (None, Some(Deferred::Reduce(body))) => quote!(::drip::shape::Shape::Reduce(&super::#body)),
+        (None, Some(Deferred::Bins(body))) => quote!(::drip::shape::Shape::Bins(&super::#body)),
         (None, None) => {
             let scaled = options.scaled;
             quote!(::drip::shape::Shape::Kernel { scaled: #scaled })
@@ -218,7 +220,8 @@ fn ports(signature: &Signature, vis: &TokenStream) -> TokenStream {
     }
 }
 
-/// Typed input views, bound once for both the kernel and frontend extras.
+/// Typed input and output views, bound once for both the kernel and
+/// frontend extras.
 fn inputs(signature: &Signature, vis: &TokenStream) -> TokenStream {
     let parameters = &signature.parameters;
     let mut fields = Vec::new();
@@ -241,9 +244,29 @@ fn inputs(signature: &Signature, vis: &TokenStream) -> TokenStream {
             });
         }
     }
+    let mut output_fields = Vec::new();
+    let mut output_binds = Vec::new();
+    for port in signature.outputs() {
+        let name = &port.name;
+        let index = port.index;
+        let payload = &port.payload;
+        let requirement = &port.requirement;
+        let port_name = name.to_string();
+        output_fields.push(quote!(#vis #name: ::drip::ports::Read<'a, #payload, #requirement>));
+        output_binds.push(quote! {
+            #name: ::drip::ports::Read::bind(outputs.get(#index)).ok_or_else(|| {
+                ::drip::Error::Contract(format!("{} has no output {}", KIND.id, #port_name))
+            })?
+        });
+    }
     quote! {
         #vis struct Inputs<'a> {
             #(#fields,)*
+            _lifetime: ::std::marker::PhantomData<&'a ()>,
+        }
+
+        #vis struct Outputs<'a> {
+            #(#output_fields,)*
             _lifetime: ::std::marker::PhantomData<&'a ()>,
         }
 
@@ -251,8 +274,12 @@ fn inputs(signature: &Signature, vis: &TokenStream) -> TokenStream {
             const KIND: &'static ::drip::definition::Kind = &KIND;
             type Parameters = #parameters;
             type Inputs<'a> = Inputs<'a>;
+            type Outputs<'a> = Outputs<'a>;
             fn bind(inputs: &[Option<::drip::image::Image>]) -> ::drip::Result<Inputs<'_>> {
                 Ok(Inputs { #(#binds,)* _lifetime: ::std::marker::PhantomData })
+            }
+            fn bind_outputs(outputs: &[::drip::image::Image]) -> ::drip::Result<Outputs<'_>> {
+                Ok(Outputs { #(#output_binds,)* _lifetime: ::std::marker::PhantomData })
             }
         }
     }
@@ -351,13 +378,15 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
     }
 }
 
-/// The adapter of a map, warp or resample: materialize the `Read` inputs,
-/// call the host function on descriptions, and publish the deferred input
-/// extended by what it returns.
+/// The adapter of a map, warp, resample, reduce or bins node: materialize
+/// the `Read` inputs, call the host function on descriptions, and publish
+/// the deferred input extended by what it returns, or, for a reduce or bins
+/// node, the host value its body computes from the input.
 fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -> TokenStream {
     let mut binds = Vec::new();
     let mut arguments = Vec::new();
     let mut point = None;
+    let mut output = None;
     for port in &signature.ports {
         let local = &port.name;
         let index = port.index;
@@ -374,9 +403,12 @@ fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -
                     );
                 }
             }
-            (View::Point, Direction::Output) => quote! {
-                let #local = ::drip::ports::Point::<#payload, #requirement>::new(&outputs[#index]);
-            },
+            (View::Point, Direction::Output) => {
+                output = Some(payload);
+                quote! {
+                    let #local = ::drip::ports::Point::<#payload, #requirement>::new(&outputs[#index]);
+                }
+            }
             _ => {
                 let image = quote!(inputs[#index].as_ref());
                 let read = quote!(::drip::ports::Read::<#payload, #requirement>::bind(#image));
@@ -390,6 +422,7 @@ fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -
         arguments.push(local);
     }
     let (input, payload) = point.expect("a deferred shape has a Point input");
+    let output = output.expect("a deferred shape has a Point output");
     let (result, publish) = match deferred {
         Deferred::Map(_) => (
             quote!(constants),
@@ -399,6 +432,20 @@ fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -
         Deferred::Resample => {
             (quote!(filter), quote!(image.resample::<#payload>(filter, outputs[0].clone())))
         }
+        Deferred::Reduce(body) => (
+            quote!(constants),
+            quote!(::drip::ports::reduced::<#output, _>(
+                &outputs[0],
+                image.fold::<#payload>(&super::#body, &constants, context)?,
+            )),
+        ),
+        Deferred::Bins(body) => (
+            quote!(constants),
+            quote!(::drip::ports::reduced::<#output, _>(
+                &outputs[0],
+                image.count::<#payload>(&super::#body, &constants, context)?,
+            )),
+        ),
     };
     quote! {
         fn run(

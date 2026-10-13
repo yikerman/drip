@@ -7,8 +7,11 @@
 //! function of one [`Pixel`]. A warp returns a [`Warp`], projective maps
 //! between planes, and a resample names a [`FilterBody`]. `plan` composes
 //! them into one kernel per segment instead of launching one per node, over
-//! the [`Lattice`] window a consumer asks for. The shape also says whether a
-//! kind's outputs depend on the requested scale ([`Shape::scaled`]).
+//! the [`Lattice`] window a consumer asks for. A reduce or bins node names a
+//! [`ReduceBody`] or [`BinsBody`], which `plan` runs over a segment's pixels
+//! without storing them and reads back as a small host value. The shape also
+//! says whether a kind's outputs depend on the requested scale
+//! ([`Shape::scaled`]).
 use crate::{
     Error, Result,
     image::{Image, Raster},
@@ -18,8 +21,9 @@ use cubecl::prelude::*;
 use std::io::{Read, Write};
 
 /// How evaluation runs a node kind. The segment compiler fuses maps, warps
-/// and resamples. `Kernel`, `Source` and `Foreign` stay opaque to it and
-/// receive and produce whole images.
+/// and resamples, and runs reductions and bins over the fused pixels.
+/// `Kernel`, `Source` and `Foreign` stay opaque to it and receive and produce
+/// whole images.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
     /// The node's function runs on every evaluation. Its inputs are
@@ -45,6 +49,13 @@ pub enum Shape {
     /// The node's host function returns a [`FilterBody`], and its output is
     /// its input resampled with that filter onto the output's lattice.
     Resample,
+    /// The node's host function returns constants for the body, and its
+    /// output is a host value: the body's accumulator over every pixel of its
+    /// input, computed in the input's segment without storing it.
+    Reduce(&'static ReduceBody),
+    /// As `Reduce`, with the output the number of pixels in each bin per
+    /// channel.
+    Bins(&'static BinsBody),
 }
 impl Shape {
     /// Whether the kind's contract reads the requested scale to choose its
@@ -52,6 +63,12 @@ impl Shape {
     /// keys such a node by the scale and hands every other node scale 1.
     pub fn scaled(self) -> bool {
         matches!(self, Self::Kernel { scaled: true } | Self::Warp | Self::Resample)
+    }
+
+    /// Whether the kind reduces its input to a host value, `Reduce` or
+    /// `Bins`. A frontend consumes such a node's outputs.
+    pub fn reduces(self) -> bool {
+        matches!(self, Self::Reduce(_) | Self::Bins(_))
     }
 }
 
@@ -280,23 +297,6 @@ pub struct FilterBody {
     pub interpolating: bool,
     pub expand: FilterExpand,
 }
-impl PartialEq for FilterBody {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
-}
-impl Eq for FilterBody {}
-impl std::hash::Hash for FilterBody {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-    }
-}
-impl std::fmt::Debug for FilterBody {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.name)
-    }
-}
-
 /// Support radius of [`box_filter`].
 pub const BOX_SUPPORT: f32 = 0.5;
 
@@ -320,3 +320,103 @@ pub fn box_filter(x: f32) -> f32 {
     }
     weight
 }
+
+/// The expansion of an accumulate body `#[cube] fn(px: Pixel, k: &[f32],
+/// acc: &mut [f32])`, which folds one pixel into the accumulator `acc`.
+pub type AccumulateExpand = fn(
+    &Scope,
+    <Pixel as CubeType>::ExpandType,
+    &<[f32] as CubeType>::ExpandType,
+    &mut <[f32] as CubeType>::ExpandType,
+);
+
+/// The expansion of a combine body `#[cube] fn(acc: &mut [f32], other:
+/// &[f32])`, which folds the accumulator `other` into `acc`.
+pub type CombineExpand =
+    fn(&Scope, &mut <[f32] as CubeType>::ExpandType, &<[f32] as CubeType>::ExpandType);
+
+/// A reduction as a reduce node or [`Image::fold`] runs it: a commutative
+/// monoid over accumulators of `identity.len()` f32 values. The compiler
+/// folds each pixel into a per-lane accumulator, then combines lanes in a
+/// fixed order, so equal inputs give equal bits on one runtime.
+#[derive(Clone, Copy)]
+pub struct ReduceBody {
+    /// Unique among reduce bodies. Kernel identity compares bodies by name.
+    pub name: &'static str,
+    /// How many constants `accumulate` reads from `k`.
+    pub constants: usize,
+    /// The accumulator before any pixel. `combine` with it changes nothing.
+    pub identity: &'static [f32],
+    pub accumulate: AccumulateExpand,
+    /// Associative and commutative: lanes combine in an order the compiler
+    /// chooses.
+    pub combine: CombineExpand,
+}
+
+/// Where a pixel sits in the window a bins pass covers: its offset from the
+/// window's first sample and the window's extent, in samples.
+#[derive(CubeType, Clone, Copy)]
+pub struct Position {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The bin one pixel counts in for each channel of the counts, `c0` first.
+/// A body with fewer than three channels leaves the rest unread. An index of
+/// [`BinsBody::bins`] or more counts nothing.
+#[derive(CubeType, Clone, Copy)]
+pub struct Bin {
+    pub c0: u32,
+    pub c1: u32,
+    pub c2: u32,
+}
+
+/// The expansion of a bin body `#[cube] fn(px: Pixel, at: Position, k:
+/// &[f32]) -> Bin`.
+pub type BinsExpand = fn(
+    &Scope,
+    <Pixel as CubeType>::ExpandType,
+    <Position as CubeType>::ExpandType,
+    &<[f32] as CubeType>::ExpandType,
+) -> <Bin as CubeType>::ExpandType;
+
+/// A histogram as a bins node or [`Image::count`] runs it: `bins` u32 counts
+/// for each of `channels` channels, 1 to 3, stored bin-major (count `i` of
+/// channel `c` at `i · channels + c`). Integer sums are exact, so the counts
+/// are independent of the order the compiler merges them in.
+#[derive(Clone, Copy)]
+pub struct BinsBody {
+    /// Unique among bins bodies. Kernel identity compares bodies by name.
+    pub name: &'static str,
+    /// How many constants `bin` reads from `k`.
+    pub constants: usize,
+    pub bins: usize,
+    pub channels: usize,
+    pub bin: BinsExpand,
+}
+
+/// Equality, hashing and debug output by `name`, which kernel identity
+/// compares.
+macro_rules! by_name {
+    ($($body:ident),*) => {$(
+        impl PartialEq for $body {
+            fn eq(&self, other: &Self) -> bool {
+                self.name == other.name
+            }
+        }
+        impl Eq for $body {}
+        impl std::hash::Hash for $body {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                self.name.hash(state);
+            }
+        }
+        impl std::fmt::Debug for $body {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.name)
+            }
+        }
+    )*};
+}
+by_name!(FilterBody, ReduceBody, BinsBody);

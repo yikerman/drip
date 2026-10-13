@@ -251,6 +251,41 @@ impl Requirement<Rgb> for CameraRgb {
     }
 }
 
+/// What a bins node counted: `bins` counts for each of `channels` channels
+/// of RGB samples in `coordinates`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CountsDesc {
+    pub bins: usize,
+    pub channels: usize,
+    pub coordinates: Coordinates,
+}
+/// Sample counts per bin and channel, bin-major: count `i` of channel `c` at
+/// `i · channels + c`, as [`BinsBody`](crate::shape::BinsBody) defines them.
+pub struct Counts;
+impl Payload for Counts {
+    const NAME: &'static str = "Counts";
+    type Desc = CountsDesc;
+    type Host = HostBuffer<u32>;
+    fn validate(d: &CountsDesc) -> Result<()> {
+        if d.bins == 0 || !(1..=3).contains(&d.channels) {
+            return Err(Error::Contract("counts need bins and 1 to 3 channels".into()));
+        }
+        Ok(())
+    }
+    fn check(d: &CountsDesc, host: &Self::Host) -> Result<()> {
+        if host.len() != d.bins * d.channels {
+            return Err(Error::Contract("counts/storage mismatch".into()));
+        }
+        Ok(())
+    }
+    fn allocate(d: &CountsDesc) -> Self::Host {
+        vec![0; d.bins * d.channels].into()
+    }
+    fn byte_len(d: &CountsDesc) -> usize {
+        d.bins * d.channels * size_of::<u32>()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BayerPhase {
     Rggb,

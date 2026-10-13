@@ -43,6 +43,12 @@ pub(super) enum Deferred {
     Warp,
     /// `resample`: the host function returns a `&'static FilterBody`.
     Resample,
+    /// `reduce = BODY`: a `ReduceBody` static, with the constants the host
+    /// function returns.
+    Reduce(syn::Path),
+    /// `bins = BODY`: a `BinsBody` static, with the constants the host
+    /// function returns.
+    Bins(syn::Path),
 }
 impl Deferred {
     /// The shape as messages name it.
@@ -51,6 +57,8 @@ impl Deferred {
             Self::Map(_) => "map",
             Self::Warp => "warp",
             Self::Resample => "resample",
+            Self::Reduce(_) => "reduce",
+            Self::Bins(_) => "bins",
         }
     }
 }
@@ -67,6 +75,8 @@ impl Options {
         let mut references = None;
         let mut action = None;
         let mut map = None;
+        let mut reduce = None;
+        let mut bins = None;
         let mut foreign = None;
         let mut flags = Vec::new();
 
@@ -93,6 +103,8 @@ impl Options {
                 "references" => &mut references,
                 "action" => &mut action,
                 "map" => &mut map,
+                "reduce" => &mut reduce,
+                "bins" => &mut bins,
                 "foreign" => &mut foreign,
                 _ => return Err(syn::Error::new(entry.span(), "unknown node option")),
             };
@@ -111,12 +123,14 @@ impl Options {
             Some(syn::Expr::Array(tags)) => tags.elems.into_iter().collect(),
             Some(other) => return Err(syn::Error::new(other.span(), "expected tags = [tag, ...]")),
         };
-        let function_path = |expr, role| match expr {
+        let path = |expr, expected: &str| match expr {
             syn::Expr::Path(path) => Ok(path.path),
-            other => Err(syn::Error::new(other.span(), format!("expected {role} function path"))),
+            other => Err(syn::Error::new(other.span(), format!("expected {expected}"))),
         };
-        let action = action.map(|expr| function_path(expr, "an action")).transpose()?;
-        let map = map.map(|expr| function_path(expr, "a #[cube] body")).transpose()?;
+        let action = action.map(|expr| path(expr, "an action function path")).transpose()?;
+        let map = map.map(|expr| path(expr, "a #[cube] body function path")).transpose()?;
+        let reduce = reduce.map(|expr| path(expr, "a ReduceBody static path")).transpose()?;
+        let bins = bins.map(|expr| path(expr, "a BinsBody static path")).transpose()?;
         let foreign = foreign
             .map(|expr| match &expr {
                 syn::Expr::Path(path) if path.path.is_ident("memory") => Ok(Foreign::Memory),
@@ -129,16 +143,18 @@ impl Options {
             map.map(Deferred::Map),
             flag("warp").then_some(Deferred::Warp),
             flag("resample").then_some(Deferred::Resample),
+            reduce.map(Deferred::Reduce),
+            bins.map(Deferred::Bins),
         ]
         .into_iter()
         .flatten();
         let deferred = shapes.next();
         if shapes.next().is_some() || deferred.is_some() && foreign.is_some() {
-            let message = "a node is at most one of map, warp, resample and foreign";
+            let message = "a node is at most one of map, warp, resample, reduce, bins and foreign";
             return Err(syn::Error::new(span, message));
         }
         if flag("scaled") && (deferred.is_some() || foreign.is_some()) {
-            let message = "only a kernel claims scaled; warps and resamples read the scale anyway";
+            let message = "only a kernel claims scaled";
             return Err(syn::Error::new(span, message));
         }
         Ok(Self {
@@ -172,7 +188,8 @@ pub(super) enum View {
     Forward,
     /// A foreign node's output, set with its description and host samples.
     Publish,
-    /// The input, then the output, of a map, warp or resample: descriptions only.
+    /// The input, then the output, of a map, warp, resample, reduce or bins
+    /// node: descriptions only.
     Point,
 }
 
@@ -197,7 +214,7 @@ pub(super) struct Signature {
     /// describes its outputs as it publishes them.
     pub foreign: bool,
     /// `fn(&Params, Point<In>, Read..., Point<Out>) -> Result<T>`: the host
-    /// function of a map, warp or resample.
+    /// function of a map, warp, resample, reduce or bins node.
     pub point: bool,
     /// `T` in the function's `-> Result<T>`, if it returns one.
     pub result: Option<syn::Type>,
@@ -237,14 +254,14 @@ impl Signature {
             }
             let mut port = Port::parse(argument)?;
             if point && matches!(port.view, View::Write | View::Forward) {
-                let message = "a map, warp or resample has its second Point as output";
+                let message = "a node with Point ports has its second Point as output";
                 return Err(syn::Error::new(argument.span(), message));
             }
             if port.view == View::Point {
                 // The first Point is the mapped input and the second the output.
                 points += 1;
                 if port.optional || points > 2 {
-                    let message = "a map, warp or resample has one input and one output Point";
+                    let message = "a node with Point ports has one input and one output Point";
                     return Err(syn::Error::new(argument.span(), message));
                 }
                 if points == 2 {
@@ -260,7 +277,7 @@ impl Signature {
             ports.push(port);
         }
         if point && points != 2 {
-            let message = "a map, warp or resample has one input and one output Point";
+            let message = "a node with Point ports has one input and one output Point";
             return Err(syn::Error::new(signature.span(), message));
         }
         let result = result_type(&signature.output);

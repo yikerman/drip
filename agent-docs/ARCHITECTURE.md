@@ -53,12 +53,15 @@ only a window of the image's lattice: a deferred image runs its plan on that
 window and on the part of its input the window reads, and a raster holding
 more copies the window in one launch. The result is a raster whose
 description states its window (see [Data model](#data-model)).
+`Image::fold` and `Image::count` reduce the samples an image holds to a few
+host values without storing them: a deferred image's plan runs per pixel
+inside the reduction's pass ([Reductions](#reductions)).
 
-A payload whose samples sit on a plane, today `Rgb`, sets
-`Payload::PLANE` to `Plane::of::<P>()`. The `Plane` holds the payload's
-lattice, byte length, reduction and crop as functions, so evaluation reduces
-and crops images it knows only as `Image`. Other payloads stay whole and at
-the detail their producer chose.
+A payload whose samples sit on a plane, today `Rgb`, sets `Payload::PLANE`
+to `Plane::of::<P>()`. The `Plane` holds the payload's lattice, byte length,
+box reduction and crop as functions, so evaluation reduces and crops images
+it knows only as `Image`. Other payloads stay whole and at the detail their
+producer chose.
 
 The `Store` (`store.rs`) is the evaluator's memo of materialized values. A
 value's key is a SHA-256 over its producer's kind ID and `Kind::version`,
@@ -102,17 +105,21 @@ has no disk tier.
 
 `Kind::shape` (`shape.rs`) declares how evaluation runs a kind. `#[node]`
 derives it from the declaration: `foreign = memory` or `foreign = disk` with
-`Publish` ports makes a foreign node, `map = body`, `warp` or `resample` with
-two `Point` ports make a map, warp or resample, and any other function is a
-kernel, `Shape::Kernel { scaled }`. `Source` is the shape of bound in-memory
-data, `node::source`, which hands each run its raster.
+`Publish` ports makes a foreign node, `map = body`, `warp`, `resample`,
+`reduce = BODY` or `bins = BODY` with two `Point` ports make a map, warp,
+resample, reduce or bins node, and any other function is a kernel,
+`Shape::Kernel { scaled }`. `Source` is the shape of bound in-memory data,
+`node::source`, which hands each run its raster.
 
 `Shape::scaled` is true for a kernel declared `#[node(scaled)]`, a warp and
 a resample. Their contracts and kernels receive the requested scale and
 produce their output at it: RCD and Bayer 2×2 demosaic reduce each CFA phase
 plane before demosaicing, and Perspective Transform and Resample store
 `div_ceil(full, scale)` samples. Every other node receives scale 1 and
-processes the samples it receives ([Evaluation](#evaluation)).
+processes the samples it receives ([Evaluation](#evaluation)). A reduction's
+output has no lattice, so its shape is not scaled. It still runs at the
+requested scale when it reads an image on a plane, whose key carries the
+scale (`Key::reduced`).
 
 | Shape | Function | Inputs | Outputs | Evaluation |
 |---|---|---|---|---|
@@ -121,6 +128,8 @@ processes the samples it receives ([Evaluation](#evaluation)).
 | `Map(&MapBody)` | `#[node(map = body)] fn(&Params, Point<In>, Read..., Point<Out>) -> Result<[f32; N]>`, with a contract | the first `Point` is the mapped input, a description only. Other inputs are `Read`, materialized | the second `Point`, a description only. The output is a deferred image | the function returns the constants of `body`, a `#[cube] fn(px: Pixel, k: &[f32]) -> Pixel`. The first consumer that needs samples runs the segment in one kernel |
 | `Warp` | `#[node(warp)] fn(&Params, Point<In>, Read..., Point<Out>) -> Result<Warp>`, with a contract | as for a map | as for a map | the function returns per-channel projective maps from the output plane to the input plane, in full-detail pixels, and a reconstruction filter, or none for a reindex. The maps compose into the segment's resampling stage |
 | `Resample` | `#[node(resample)] fn(&Params, Point<In>, Point<Out>) -> Result<&'static FilterBody>`, with a contract | as for a map | as for a map | the function returns the filter. The contract's description sets the output lattice, and the stage resamples onto it |
+| `Reduce(&ReduceBody)` | `#[node(reduce = BODY)] fn(&Params, Point<In>, Read..., Point<Out>) -> Result<[f32; N]>`, with a contract | as for a map | the second `Point`, a host value whose `Host` converts from the accumulator's `Vec<f32>` | the function returns the constants of `BODY`, and the node folds every pixel of its input with it ([Reductions](#reductions)) |
+| `Bins(&BinsBody)` | `#[node(bins = BODY)] fn(&Params, Point<In>, Read..., Point<Out>) -> Result<[f32; N]>`, with a contract | as for a map | the second `Point`, a host value whose `Host` converts from the counts' `Vec<u32>`, `Counts` for every bins node so far | as for `Reduce`, counting pixels into the bins of `BODY` |
 
 A `Write` allocates on first use: `host()` through `Payload::allocate`,
 `device(ctx)` as `byte_len` uninitialized bytes. After the function returns,
@@ -197,10 +206,49 @@ profiles, are assets: `#[node(assets)]` with `impl Assets for Params`, read
 when an action or a preparation first asks and kept with the node, error
 included.
 
-`eval.rs` reads the shape only to run foreign nodes as jobs and to find
-their codecs. The macro builds every other difference into
-`Node::identity`, `Node::contract` and `Node::run`, and `Image` carries the
-deferral.
+`eval.rs` reads the shape to run foreign nodes as jobs and find their
+codecs, to derive each node's scale (`Shape::scaled`, a claimed `scaled`
+kernel), and to hand frontends a reduction's outputs (`Shape::reduces`). The
+macro builds every other difference into `Node::identity`, `Node::contract`
+and `Node::run`, `Image` carries the deferral, and `plan.rs` runs
+reductions.
+
+### Reductions
+
+A reduce or bins node turns its input into a small host value inside the
+input's segment: the pass evaluates each pixel through the plan's stage and
+map bodies, the same `#[cube]` function the fused store kernel calls, and
+accumulates instead of storing. A histogram of the Sigmoid output therefore
+launches no fused kernel and writes no image. The node's body is its only
+device code. `plan.rs` derives the passes, so every reduction shares one
+set of rules:
+
+- A `ReduceBody` declares `identity`, the accumulator of
+  `identity.len()` f32 before any pixel, `accumulate`, a `#[cube] fn(px:
+  Pixel, k: &[f32], acc: &mut [f32])` that folds one pixel into `acc`, and
+  `combine`, a `#[cube] fn(acc: &mut [f32], other: &[f32])` that folds one
+  accumulator into another, associative and commutative. Each lane folds at
+  most 256 pixels, strided across the image, then passes combine at most 256
+  accumulators per lane until one remains, which is read back. The order is
+  fixed and no float atomics run, so equal inputs give equal bits on one
+  runtime.
+- A `BinsBody` declares `bins` and 1 to 3 `channels` and a `#[cube] fn(px:
+  Pixel, at: Position, k: &[f32]) -> Bin`, where `Position` is the pixel's
+  offset in the window the pass covers and that window's extent, and `Bin`
+  holds one bin index per channel. An index of `bins` or more counts
+  nothing. Counts are u32, bin-major. Up to 4096 counts accumulate per
+  workgroup in shared memory, one workgroup per 4096 pixels and at most 256
+  workgroups, and a merge pass sums the workgroups' copies. Larger counts go
+  to copies in global memory, at most 32 and together at most 2²⁰ counts,
+  each lane adding a run of its pixels in one bin at once.
+- Kernels with barriers take at most the runtime's lanes per workgroup,
+  since the CPU runtime runs a host worker per lane.
+
+The pass covers the samples the image holds: a deferred image's whole
+lattice, or a raster's window. A reduction reads a deferred input in place
+when it is the input's only consumer in the run. Otherwise evaluation
+materializes the input first, once for all consumers, and the pass reads
+the raster. Results are the same bits either way.
 
 ## Evaluation
 
@@ -210,20 +258,25 @@ at evaluation), and targets. `Evaluator::evaluate::<P>(dag, global, output)`
 forces one output. It returns the raster where its node produced it, a
 deferred target materialized on the device, and `Statistics`: nodes run,
 uploads, downloads, fused launches and the samples they wrote on the
-runtime, values the store served (`hits`), those of them read from disk
-(`reads`) and representations it dropped (`evictions`) during the call.
-`evaluate_inputs` forces several target nodes in one run and returns each
-target's `InputValues`, which a frontend binds to the node's typed `Inputs`
-with `bind::<N>()`. `evaluate_batch` takes `Target`s, each a node and an
-optional region, runs under a `Policy`, records host timings per node that
-runs and returns a `Batch` of the inputs and the call's `Statistics`.
+runtime, reduction passes (`reductions`), values the store served (`hits`),
+those of them read from disk (`reads`) and representations it dropped
+(`evictions`) during the call. `evaluate_inputs` forces several target nodes
+in one run and returns each target's `InputValues`, which a frontend binds
+to the node's typed `Inputs` with `bind::<N>()`. A reduce or bins target
+hands its outputs instead, bound to the node's typed `Outputs` with
+`bind_outputs::<N>()`. They are demanded like any value, so a stored one
+runs nothing. `evaluate_batch` takes `Target`s, each a node and an optional
+region, runs under a `Policy`, records host timings per node that runs and
+returns a `Batch` of the inputs and the call's `Statistics`.
 
 A region is a rectangle of the plane of the target's inputs in full-detail
 pixels (`shape::Rect`). Each input on a plane then holds only its samples
 whose cells meet the region, as a raster whose description states its
 window, and the fused kernels compute only those samples and what they
 read. A region covering the plane is the whole image. Other inputs are
-whole. Only a node without outputs, a view or an action, takes a region.
+whole. Only a node without outputs, a view or an action, takes a region, so
+a reduction target does not: its outputs would be keyed as the whole
+image's.
 Kernels, foreign nodes and sources run on whole images, so a region bounds
 the work of the segments between the last of them and the target.
 
@@ -240,21 +293,22 @@ scale)`, evaluation reduces it with the box filter `shape::BOX` as a
 resampling stage of the consumer's plan, unless a `scaled` kernel produced
 it or the consumer's shape is scaled. An RGB source feeding maps at scale 4
 is therefore box-reduced and mapped in one launch, and Orientation of a
-full-detail image is reduced after it. The reduction is a preview
+full-detail image is reduced after it. The box reduction is a preview
 approximation and never applies at scale 1.
 
 The call then keys every node it may run, in `Dag::order`, the topological
-order recomputed on every graph edit. Keying a foreign node stamps its
-files. It then walks back from the demanded values. A value stored in
-memory, or on disk for a `foreign = disk` node, is a hit, and a missing one
-demands the value it derives from, a reduction or a region, or schedules
-its node and the values that node reads. Target nodes always run, so their
-contracts check what they receive. The scheduled nodes run once each per
-scale in graph order. The run counts the consumers of each value and drops
-its reference after the last. The store then keeps the value if it has a
-key and samples. A Sigmoid-only edit therefore runs the five nodes of the
-tail segment and one fused launch from the stored demosaic output, and an
-unchanged demand runs no node. A target's inputs are materialized before
+order recomputed on every graph edit, which runs siblings by node index.
+Keying a foreign node stamps its files. It then walks back from the demanded
+values. A value stored in memory, or on disk for a `foreign = disk` node, is
+a hit, and a missing one demands the value it derives from, a box reduction
+or a region, or schedules its node and the values that node reads. Target
+nodes always run, so their contracts check what they receive, except reduce
+and bins targets, whose outputs are demanded. The scheduled nodes run once
+each per scale in graph order. The run counts the consumers of each value
+and drops its reference after the last. The store then keeps the value if it
+has a key and samples. A Sigmoid-only edit therefore runs the five nodes of
+the tail segment and one fused launch from the stored demosaic output, and
+an unchanged demand runs no node. A target's inputs are materialized before
 the run ends, so the store keeps them, except an input on a plane larger
 than the device budget, which `InputValues` materializes when bound or
 computes by region (`InputValues::region`, `InputValues::bands`).
@@ -343,6 +397,9 @@ Payloads and their interpretations live in `node/data.rs`.
   only. Description and value are one `Arc<drip_raw::Metadata>`, so
   contracts read the facts. Validation requires an EXIF orientation from 1
   to 8.
+- `Counts`: a bins node's u32 counts, bin-major, `HostBuffer<u32>`, host
+  only, described by `CountsDesc { bins, channels, coordinates }`, the
+  coordinates of the RGB samples counted.
 
 `Rgb`, `Bayer` and `CaptureMetadata` implement `Persist`, the stream the
 disk tier keeps: the description as length-prefixed JSON, then the samples'
@@ -398,6 +455,13 @@ alters what a kind computes for the same parameters and inputs, bump it with
 must be pure: a kernel that reads a file keeps returning the stored value
 until its parameters change, since only foreign nodes stamp their files.
 
+A measurement over every pixel is a reduction. Declare a `static ReduceBody`
+or `BinsBody` with a name unique among its kind and its `#[cube]` bodies
+beside the node, and a node `#[node(reduce = BODY)]` or `bins = BODY` whose
+host function returns the body's constants. Its contract describes the
+output. A frontend can also call `Image::fold` or `Image::count` directly,
+as `exposure::meter` does for auto exposure with its `MEAN_LUMINANCE` body.
+
 A geometric operation is a warp: its host function returns a `Warp` with a
 map per channel from the output plane to the input plane, both in
 full-detail pixels (`[0, full]`), and its contract describes the output's
@@ -428,8 +492,9 @@ Unit tests sit in the node's file. Graph tests in `crates/drip/tests/` build
 a `Dag`, bind inputs with `node::source` and evaluate. Device kernels belong
 in `tests/algorithms.rs`, with the resampling reference in
 `tests/algorithms/resample.rs`, segments in `tests/fusion.rs`, the store in
-`tests/store.rs`, foreign jobs and the disk tier in `tests/foreign.rs`, and
-regions, scale and tiled export in `tests/regions.rs`. A test that counts
+`tests/store.rs`, foreign jobs and the disk tier in `tests/foreign.rs`,
+regions, scale and tiled export in `tests/regions.rs`, and reductions in
+`tests/reduce.rs`. A test that counts
 the work of one evaluation uses a new `Evaluator`, whose store is empty. A
 test with a disk tier gives it a temporary directory. Each file runs its
 checks on the CPU runtime with `--features drip/cpu` and on the

@@ -5,6 +5,20 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
+- Explicit compute model, step 7: the reduce and bins shapes. `tests/reduce.rs`
+  checks on the CPU runtime and wgpu (RTX 3080) that `Image::count` matches
+  host counts for a ten-bin, three-channel body in shared memory and a
+  position-dependent 8192-bin body in global copies, over rasters of 1 × 1,
+  17 × 15, 300 × 300 and 1000 × 3 holding NaN, infinite and signed samples,
+  and over a crop, whose positions start at the crop. `Image::fold` sums
+  match f64 sums. A bins node after Exposure and Sigmoid counts the same as
+  the materialized tail with no fused launch, one reduction pass and no
+  download, and the same demand again runs nothing and hits the stored
+  counts. Two bins nodes on the tail materialize it once, as do a bins node
+  and a view. A reduce node folds the deferred tail to the same bits as its
+  samples, at scale 4 the counts equal those of the box-reduced tail, and a
+  region on a bins target is refused. The macro tests cover both forms.
+  The full workspace gate passes.
 - Explicit compute model, step 6: regions, windows and the scale rule.
   `tests/regions.rs` checks on the CPU runtime and wgpu (RTX 3080) that a
   13 × 9 crop of six chains over a 61 × 47 source (maps, a reindex, a

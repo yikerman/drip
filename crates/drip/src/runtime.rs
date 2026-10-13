@@ -1,7 +1,7 @@
 //! One explicit compute device per evaluator. Host nodes remain ordinary Rust.
 //! The runtime counts image transfers, fused launches and the samples they
-//! write, which `eval::Statistics` reports, and states the byte budgets of
-//! the evaluator's store.
+//! write, and reduction passes, which `eval::Statistics` reports, and states
+//! the byte budgets of the evaluator's store.
 use crate::{
     Error, Result,
     payload::{DeviceBuffer, DeviceLayout},
@@ -66,6 +66,7 @@ struct Counts {
     downloads: AtomicUsize,
     fused: AtomicUsize,
     samples: AtomicUsize,
+    reductions: AtomicUsize,
 }
 
 impl RuntimeContext {
@@ -125,6 +126,15 @@ impl RuntimeContext {
         self.counts.samples.fetch_add(samples, Relaxed);
     }
 
+    /// Reduction passes over a plan's pixels on this runtime so far.
+    pub(crate) fn reductions(&self) -> usize {
+        self.counts.reductions.load(Relaxed)
+    }
+
+    pub(crate) fn count_reduction(&self) {
+        self.counts.reductions.fetch_add(1, Relaxed);
+    }
+
     pub(crate) fn upload(&self, bytes: Bytes) -> Result<Handle> {
         let handle = self.client()?.create(bytes);
         self.counts.uploads.fetch_add(1, Relaxed);
@@ -133,9 +143,15 @@ impl RuntimeContext {
 
     /// Waits for the queued work that writes `handle`.
     pub(crate) fn download(&self, handle: Handle) -> Result<Bytes> {
-        let bytes = self.client()?.read_one(handle).map_err(|e| Error::Runtime(e.to_string()))?;
+        let bytes = self.read(handle)?;
         self.counts.downloads.fetch_add(1, Relaxed);
         Ok(bytes)
+    }
+
+    /// As [`download`](Self::download), for scratch such as a reduction's
+    /// result, which is not counted.
+    pub(crate) fn read(&self, handle: Handle) -> Result<Bytes> {
+        self.client()?.read_one(handle).map_err(|e| Error::Runtime(e.to_string()))
     }
 
     pub(crate) fn finish(&self) -> Result<()> {

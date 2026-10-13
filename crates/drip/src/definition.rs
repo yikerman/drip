@@ -173,14 +173,19 @@ pub trait Node: Any + Send + Sync {
     ) -> Result<Vec<Image>>;
 }
 
-/// A declared node type: its kind, typed parameters and typed input views.
-/// Frontends bind presentation and actions through this, not through strings.
+/// A declared node type: its kind, typed parameters and typed input and
+/// output views. Frontends bind presentation and actions through this, not
+/// through strings.
 pub trait Typed: Node + Sized {
     const KIND: &'static Kind;
     type Parameters: Parameters + serde::Serialize + serde::de::DeserializeOwned;
     type Inputs<'a>;
+    type Outputs<'a>;
     /// View erased input values in this node's input order and types.
     fn bind(inputs: &[Option<Image>]) -> Result<Self::Inputs<'_>>;
+    /// View erased, materialized output values in this node's output order
+    /// and types.
+    fn bind_outputs(outputs: &[Image]) -> Result<Self::Outputs<'_>>;
     /// View an admitted node as this type.
     fn of(node: &dyn Node) -> Result<&Self> {
         (node as &dyn Any)

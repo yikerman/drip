@@ -9,15 +9,17 @@
 //! composes, and materializes a deferred image into a raster when a consumer
 //! first needs samples, whole or only a window of it ([`Image::crop`]). A
 //! payload's [`Plane`] lets evaluation reduce and crop images without their
-//! type. A materialized image reports its bytes per side to the store, which
-//! may keep it without one side.
+//! type. [`Image::fold`] and [`Image::count`] reduce an image to a few host
+//! values, running a deferred image's plan per pixel without storing it. A
+//! materialized image reports its bytes per side to the store, which may keep
+//! it without one side.
 use crate::{
     Error, Result,
     payload::{DeviceBuffer, DeviceLayout, Payload},
     plan::{self, Plan},
     ports::typed,
     runtime::{KernelContext, RuntimeContext},
-    shape::{self, FilterBody, Lattice, MapBody, MapPayload, Rect, Warp},
+    shape::{self, BinsBody, FilterBody, Lattice, MapBody, MapPayload, Rect, ReduceBody, Warp},
 };
 use cubecl::bytes::Bytes;
 use std::{
@@ -192,12 +194,7 @@ impl Image {
         constants: &[f32],
         desc: Description,
     ) -> Result<Image> {
-        if constants.len() != body.constants {
-            return Err(Error::Contract(format!(
-                "{} reads {} constants",
-                body.name, body.constants
-            )));
-        }
+        reads(body.name, body.constants, constants)?;
         if P::lattice(&typed(&self.desc)) != P::lattice(&typed(&desc)) {
             return Err(Error::Contract(format!("a map keeps its input's {} lattice", P::NAME)));
         }
@@ -224,6 +221,54 @@ impl Image {
     ) -> Result<Image> {
         let (from, to) = (P::lattice(&typed(&self.desc)), P::lattice(&typed(&desc)));
         Ok(self.defer::<P>(desc, |plan| plan.resample(filter, from, to)))
+    }
+
+    /// Fold the samples this image holds with `body`. A deferred image's
+    /// samples are computed per pixel and never stored. Returns the
+    /// accumulator, `body.identity.len()` values. Fails when `constants` is
+    /// not `body.constants` long.
+    pub fn fold<P: MapPayload>(
+        &self,
+        body: &ReduceBody,
+        constants: &[f32],
+        ctx: &KernelContext<'_>,
+    ) -> Result<Vec<f32>> {
+        reads(body.name, body.constants, constants)?;
+        let (input, plan, to) = self.computation::<P>(ctx)?;
+        plan.fold(&input, to, body, constants, ctx)
+    }
+
+    /// Count the samples this image holds into the bins of `body`. A
+    /// deferred image's samples are computed per pixel and never stored.
+    /// Returns `body.bins · body.channels` counts, bin-major. Fails when
+    /// `constants` is not `body.constants` long.
+    pub fn count<P: MapPayload>(
+        &self,
+        body: &BinsBody,
+        constants: &[f32],
+        ctx: &KernelContext<'_>,
+    ) -> Result<Vec<u32>> {
+        reads(body.name, body.constants, constants)?;
+        let (input, plan, to) = self.computation::<P>(ctx)?;
+        plan.count(&input, to, body, constants, ctx)
+    }
+
+    /// What computes this image's samples on its lattice: a deferred image's
+    /// plan and the part of its input the plan reads, or the empty plan over
+    /// the raster.
+    fn computation<P: MapPayload>(
+        &self,
+        ctx: &KernelContext<'_>,
+    ) -> Result<(Raster<P>, Plan, Lattice)> {
+        let to = P::lattice(&typed(&self.desc));
+        let pending = self.value.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        let deferred = pending.as_ref().map(|d| (d.input.clone(), d.plan.clone()));
+        drop(pending);
+        let Some((input, plan)) = deferred else {
+            return Ok((self.raster(ctx)?, Plan::default(), to));
+        };
+        let from = P::lattice(&typed(&input.desc));
+        Ok((input.covering::<P>(plan.input_window(from, to)?, ctx)?, plan, to))
     }
 
     /// A deferred image described by `desc`: this image's plan extended by
@@ -300,6 +345,14 @@ impl Deferred {
         let input = self.input.covering::<P>(self.plan.input_window(from, to)?, ctx)?;
         self.plan.run(&input, Arc::new(P::on(&desc, to)), ctx)
     }
+}
+
+/// Fails unless `constants` holds the `expected` values body `name` reads.
+fn reads(name: &str, expected: usize, constants: &[f32]) -> Result<()> {
+    if constants.len() != expected {
+        return Err(Error::Contract(format!("{name} reads {expected} constants")));
+    }
+    Ok(())
 }
 
 fn lattice<P: MapPayload>(desc: &Description) -> Lattice {

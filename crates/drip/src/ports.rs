@@ -5,8 +5,9 @@
 //! `host()` or `device(ctx)`. `Write` creates the output where the node writes
 //! it; `Forward` publishes samples the node already holds; a foreign node
 //! describes and fills each output through `Publish`. The host function of a
-//! map, warp or resample sees its input and output as `Point`, a description
-//! without samples. Type erasure is confined to the generated node adapter.
+//! map, warp, resample, reduce or bins node sees its input and output as
+//! `Point`, a description without samples. Type erasure is confined to the
+//! generated node adapter.
 use crate::{
     Error, Result,
     image::{Description, Image, Raster},
@@ -31,7 +32,8 @@ impl<P: Payload> Requirement<P> for Any {
     }
 }
 
-/// An evaluated input. `desc` is `data.desc()`, checked against `R`.
+/// An evaluated input, or an output a frontend binds. `desc` is
+/// `data.desc()`, checked against `R`.
 pub struct Read<'a, P: Payload, R = Any> {
     pub desc: &'a P::Desc,
     pub data: &'a Raster<P>,
@@ -48,9 +50,10 @@ impl<'a, P: Payload, R> Read<'a, P, R> {
     }
 }
 
-/// The input or the output of a map, warp or resample, as its host function
-/// sees them: the description only. The samples exist once a consumer
-/// materializes the output. `desc` is checked against `R`.
+/// The input or the output of a map, warp, resample, reduce or bins node, as
+/// its host function sees them: the description only. The samples exist once
+/// a consumer materializes the output, or for a reduce or bins node once its
+/// body has run. `desc` is checked against `R`.
 pub struct Point<'a, P: Payload, R = Any> {
     pub desc: &'a P::Desc,
     requirement: PhantomData<R>,
@@ -175,6 +178,18 @@ impl<'a, P: Payload> Publish<'a, P> {
         *self.slot = Some(Raster::<P>::from_host(desc, host)?.into());
         Ok(())
     }
+}
+
+/// The output of a reduce or bins node: `values`, the body's result, as the
+/// host value of `P` under the contract's description `desc`.
+#[doc(hidden)]
+pub fn reduced<P: Payload, T>(desc: &Description, values: T) -> Result<Image>
+where
+    P::Host: TryFrom<T>,
+{
+    let host = P::Host::try_from(values)
+        .map_err(|_| Error::Contract(format!("a reduction's result is not {}", P::NAME)))?;
+    Ok(Raster::<P>::from_host(typed::<P::Desc>(desc), host)?.into())
 }
 
 /// Check a connected input against its port requirement before the contract.

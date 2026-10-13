@@ -281,8 +281,8 @@ Settled with the user on 2026-10-11 and revised by the compute model
   declare a shape, evaluation fuses segments between materialization points,
   derives regions and preview scale from shapes, and memoizes in one store.
   It is executed in eight steps. Step 4 replaced the no-cache requirement
-  under Performance with the store, step 5 added its disk tier, and step 6
-  regions and the scale rule.
+  under Performance with the store, step 5 added its disk tier, step 6
+  regions and the scale rule, and step 7 reductions.
 - **Decided (2026-10-13):** Step 1. `Kind::shape` declares how evaluation runs
   a kind, `Kernel` or `Source`, and later shapes are added beside them. A
   run's values lived in a `Store`, which step 4 grew into the memo.
@@ -492,6 +492,53 @@ Settled with the user on 2026-10-11 and revised by the compute model
   the target platform. These are performance candidates, not measured winners.
 - **Decided:** RCD scratch is allocated before its first pass and released after
   its last dispatch. CubeCL owns queued bindings. No host waits.
+- **Decided (2026-10-13):** Step 7. A reduce node (`#[node(reduce =
+  BODY)]`) names a `ReduceBody` static: an identity of N f32, an
+  `accumulate` body that folds one pixel into the accumulator and a
+  `combine` body that folds one accumulator into another. A bins node
+  (`#[node(bins = BODY)]`) names a `BinsBody`: a bin count, 1 to 3
+  channels and a `bin` body that maps a pixel and its `Position` to one
+  bin per channel. Both host functions return the body's constants, as a
+  map's does, and both outputs are host values the store keeps. Bodies are
+  declared statics, as filters are, because they have several parts and
+  sizes the signature does not state. Reduce bodies fold in place over
+  `&mut [f32]`: an accumulator `CubeType` of the node's own would need a
+  generic kernel per accumulator, with load and store code beside it.
+  Waveforms need the pixel's position, so bin bodies receive it. Reduce
+  bodies have no user that needs it and do not.
+- **Decided (2026-10-13):** `plan.rs` owns the reduction rules once. A pass
+  evaluates each pixel through the plan's stage and map bodies with the
+  `#[cube]` function the fused store kernel calls, then accumulates, so a
+  reduction of a deferred image never stores it. Folds run in a fixed order
+  without float atomics: lanes of at most 256 strided pixels, then combine
+  passes of at most 256 accumulators, so `combine` must be associative and
+  commutative. Counts up to 4096 accumulate per workgroup in shared memory
+  and merge in order. Larger counts go to global copies with integer
+  atomics, at most 32 and 2²⁰ counts in all, each lane adding a run of its
+  pixels in one bin at once. In 32 copies a level-1 waveform's 196 608
+  counts spread atomics over 25 MB and took 6.1 ms on the RTX 3080, and in
+  five copies, within its L2 cache, 2.0 ms. Kernels with barriers cap
+  their lanes at the runtime's limit, since the CPU runtime needs a host
+  worker per lane.
+- **Decided (2026-10-13):** A reduction reads a deferred input in place
+  when it is the input's only consumer in the run, and otherwise
+  materializes it first, once for every consumer, and the store keeps it.
+  Results are bit-identical either way. Maps after a fan-out still
+  recompute, since materializing would cut their segment.
+- **Decided (2026-10-13):** A frontend consumes a reduce or bins target's
+  outputs instead of its inputs. Evaluation demands the outputs like any
+  value, so stored counts run nothing, and `InputValues::bind_outputs`
+  binds them to `Typed::Outputs`, which `#[node]` generates for every node.
+  A reduction target takes no region, under the rule that only nodes
+  without outputs do. A reduction's shape is not scaled: its output has no
+  lattice. It runs at the requested scale when it reads an image on a
+  plane, and its key carries the scale through its input's
+  (`Key::reduced`).
+- **Decided (2026-10-13):** Auto exposure is `node::exposure::meter`, a
+  library function over an `Image` that folds `MEAN_LUMINANCE` with
+  `Image::fold` and returns `Exposure` parameters, so a headless frontend
+  can meter. It keeps the exact Y = 0.18 target and the darktable
+  reference.
 - **Decided:** Reductions use fixed-order partial sums without float atomics.
   Exposure reductions cap lanes at the runtime limit, since CPU barrier kernels
   need a host worker per lane. Scopes compare uploaded f32 thresholds to keep

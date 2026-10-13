@@ -6,8 +6,10 @@
 //! coarser scale is box-reduced in its consumer's kernel. A run keys every
 //! value, takes what the store holds, runs the other nodes in graph order and
 //! materializes each deferred image at its first consumer that needs samples,
-//! over a target's region only. Foreign nodes run as store jobs, waited for
-//! under [`Policy::Wait`] and reported pending under [`Policy::Defer`].
+//! over a target's region only. A reduce or bins node computes a deferred
+//! input per pixel instead, unless other consumers read it too. Foreign nodes
+//! run as store jobs, waited for under [`Policy::Wait`] and reported pending
+//! under [`Policy::Defer`].
 use crate::{
     Error, Result,
     definition::{Kind, Typed},
@@ -53,6 +55,10 @@ pub struct Statistics {
     pub fused: usize,
     /// Output samples the fused kernels wrote.
     pub samples: usize,
+    /// Reduction passes over a plan's pixels, one per [`Image::fold`] or
+    /// [`Image::count`], by reduce and bins nodes or frontends. A pass over a
+    /// deferred image computes its pixels without a fused launch.
+    pub reductions: usize,
     /// Demanded values the store served.
     pub hits: usize,
     /// Values among `hits` read from the disk tier.
@@ -72,7 +78,8 @@ pub enum Policy {
     Defer,
 }
 
-/// A node whose inputs a frontend consumes, a view or an action.
+/// A node whose values a frontend consumes: the inputs of a view, an
+/// action or any other node, or the outputs of a reduce or bins node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Target {
     pub node: NodeId,
@@ -147,7 +154,8 @@ impl Evaluator {
     /// Prepare declared inputs for several external consumers in one run.
     /// Shared ancestors execute once; an incomplete branch does not prevent
     /// unrelated consumers from receiving their inputs. Each target node runs,
-    /// so its contract checks the inputs it receives.
+    /// so its contract checks the inputs it receives, except a reduce or bins
+    /// node, whose outputs the store may hold.
     pub fn evaluate_inputs(
         &self,
         dag: &Dag,
@@ -191,9 +199,13 @@ impl Evaluator {
         run.timings = timings;
         for target in &valid {
             let at = run.scale_of(target.node.index, global.scale);
-            run.schedule(target.node.index, at);
-            // Collecting the target's inputs reads each once more.
-            for slot in run.inputs(target.node, at).into_iter().flatten() {
+            // A reduction's outputs are demanded like any value, so a stored
+            // one runs nothing.
+            if !run.reduces(target.node.index) {
+                run.schedule(target.node.index, at);
+            }
+            // Collecting the target's values reads each once more.
+            for slot in run.consumed(target.node, at).into_iter().flatten() {
                 run.demand(slot);
             }
         }
@@ -260,10 +272,15 @@ fn target_error(dag: &Dag, global: &GlobalContext, target: &Target) -> Option<Er
 struct Counts {
     transfers: (usize, usize),
     fused: (usize, usize),
+    reductions: usize,
 }
 impl Counts {
     fn of(runtime: &RuntimeContext) -> Self {
-        Self { transfers: runtime.transfers(), fused: runtime.fused() }
+        Self {
+            transfers: runtime.transfers(),
+            fused: runtime.fused(),
+            reductions: runtime.reductions(),
+        }
     }
 
     /// The call's statistics from the run's own counts.
@@ -275,6 +292,7 @@ impl Counts {
             downloads: downloads - self.transfers.1,
             fused: fused - self.fused.0,
             samples: samples - self.fused.1,
+            reductions: runtime.reductions() - self.reductions,
             hits: run.hits,
             reads: run.reads,
             evictions: run.evictions,
@@ -426,6 +444,10 @@ impl<'a, 't> Run<'a, 't> {
         matches!(entry.node.kind().shape, Shape::Foreign(_))
     }
 
+    fn reduces(&self, index: usize) -> bool {
+        self.entry(index).node.kind().shape.reduces()
+    }
+
     /// Whether `port` carries images on a plane, which evaluation reduces
     /// and cuts.
     fn planar(&self, port: PortId) -> bool {
@@ -507,6 +529,17 @@ impl<'a, 't> Run<'a, 't> {
             .iter()
             .map(|from| from.map(|from| self.edge(Some(entry), scale, from)))
             .collect()
+    }
+
+    /// The values a frontend consumes of target `node` running at `scale`:
+    /// a reduction's outputs, any other node's inputs.
+    fn consumed(&self, node: NodeId, scale: u32) -> Vec<Option<Slot>> {
+        if !self.reduces(node.index) {
+            return self.inputs(node, scale);
+        }
+        let outputs = self.entry(node.index).node.kind().outputs.len();
+        let output = |port| Slot { port: output_id(node, port), scale, reduce: None, region: None };
+        (0..outputs).map(|port| Some(output(port))).collect()
     }
 
     fn slot_key(&self, slot: Slot) -> Option<Key> {
@@ -600,17 +633,18 @@ impl<'a, 't> Run<'a, 't> {
         failures
     }
 
-    /// The inputs of target `node`, or why they are missing, then release
-    /// them. Inputs are materialized here, so the store keeps them, except an
-    /// image on a plane larger than the device budget, which the store would
-    /// not keep.
+    /// The values target `node` hands its frontend, or why they are missing,
+    /// then release them. Values are materialized here, so the store keeps
+    /// them, except an image on a plane larger than the device budget, which
+    /// the store would not keep.
     fn collect(
         &mut self,
         node: NodeId,
         failures: &HashMap<(usize, u32), Error>,
     ) -> Result<InputValues> {
         let scale = self.scale_of(node.index, self.scale);
-        let slots = self.inputs(node, scale);
+        let slots = self.consumed(node, scale);
+        let kind = self.entry(node.index).node.kind();
         let budget = self.runtime.budget().device;
         let result = match failures.get(&(node.index, scale)) {
             Some(error) => Err(error.clone()),
@@ -627,10 +661,13 @@ impl<'a, 't> Run<'a, 't> {
                     .transpose()
                 })
                 .collect::<Result<Vec<_>>>()
-                .map(|values| InputValues {
-                    kind: self.entry(node.index).node.kind(),
-                    values,
-                    runtime: self.runtime.clone(),
+                .map(|values| {
+                    let (values, outputs) = if self.reduces(node.index) {
+                        (vec![None; kind.inputs.len()], values.into_iter().flatten().collect())
+                    } else {
+                        (values, Vec::new())
+                    };
+                    InputValues { kind, values, outputs, runtime: self.runtime.clone() }
                 }),
         };
         for slot in slots.into_iter().flatten() {
@@ -685,12 +722,26 @@ impl<'a, 't> Run<'a, 't> {
     }
 
     fn compute(&mut self, e: &Entry, scale: u32) -> Result<()> {
+        let slots = self.inputs(e.id, scale);
         let mut inputs = Vec::with_capacity(e.inputs.len());
-        for slot in self.inputs(e.id, scale) {
+        for slot in &slots {
             inputs.push(slot.map(|slot| self.resolve(slot)).transpose()?);
         }
         let descs: Vec<_> = inputs.iter().map(|v| v.as_ref().map(|i| i.desc().clone())).collect();
         let shape = e.node.kind().shape;
+        // A reduction computes a deferred input per pixel without storing
+        // it. When another consumer of the run reads the input too,
+        // computing it once for all of them costs less, and the store keeps
+        // it.
+        if shape.reduces() {
+            for (slot, image) in slots.iter().zip(&inputs) {
+                if let (Some(slot), Some(image)) = (slot, image)
+                    && self.live[slot].uses > 1
+                {
+                    image.materialize(&self.kernels())?;
+                }
+            }
+        }
         // Only a scaled shape reads the scale, which keys it.
         let global = GlobalContext { scale: if shape.scaled() { scale } else { 1 } };
         let outputs = e.node.contract(&global, &descs)?;
@@ -802,12 +853,16 @@ fn cut(image: &Image, region: Rect, kernels: &KernelContext<'_>) -> Result<Image
     image.crop(window, kernels)
 }
 
-/// A node's evaluated inputs, in its input order. An input on a plane
-/// larger than the device budget stays deferred until it is bound or cut, so
-/// an action can compute it in bands.
+/// A target's evaluated inputs, in its input order, or a reduce or bins
+/// target's outputs in their place. An input on a plane larger than the
+/// device budget stays deferred until it is bound or cut, so an action can
+/// compute it in bands.
 pub struct InputValues {
     kind: &'static Kind,
+    /// `None` throughout for a reduction, whose inputs only its body reads.
     values: Vec<Option<Image>>,
+    /// A reduction's outputs, otherwise empty.
+    outputs: Vec<Image>,
     /// The runtime that materializes deferred inputs.
     runtime: RuntimeContext,
 }
@@ -815,18 +870,30 @@ impl InputValues {
     /// Typed views as declared by node type `N`; these must be `N`'s inputs.
     /// Deferred inputs are materialized whole first.
     pub fn bind<N: Typed>(&self) -> Result<N::Inputs<'_>> {
-        if !std::ptr::eq(self.kind, N::KIND) {
-            return Err(Error::Contract(format!(
-                "inputs of {} cannot bind as {}",
-                self.kind.id,
-                N::KIND.id
-            )));
-        }
+        self.check::<N>()?;
         let kernels = KernelContext::new(&FULL, &self.runtime);
         for image in self.values.iter().flatten() {
             image.materialize(&kernels)?;
         }
         N::bind(&self.values)
+    }
+
+    /// Typed views of a reduce or bins target's outputs as declared by node
+    /// type `N`. Fails for any other target.
+    pub fn bind_outputs<N: Typed>(&self) -> Result<N::Outputs<'_>> {
+        self.check::<N>()?;
+        N::bind_outputs(&self.outputs)
+    }
+
+    fn check<N: Typed>(&self) -> Result<()> {
+        if !std::ptr::eq(self.kind, N::KIND) {
+            return Err(Error::Contract(format!(
+                "values of {} cannot bind as {}",
+                self.kind.id,
+                N::KIND.id
+            )));
+        }
+        Ok(())
     }
 
     /// The device budget of the evaluator's store, which bounds what
@@ -876,6 +943,11 @@ impl InputValues {
 }
 impl Clone for InputValues {
     fn clone(&self) -> Self {
-        Self { kind: self.kind, values: self.values.clone(), runtime: self.runtime.clone() }
+        Self {
+            kind: self.kind,
+            values: self.values.clone(),
+            outputs: self.outputs.clone(),
+            runtime: self.runtime.clone(),
+        }
     }
 }

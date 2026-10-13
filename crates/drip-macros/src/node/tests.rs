@@ -89,7 +89,7 @@ fn foreign_nodes_publish_host_outputs_without_a_contract() {
         (quote!(id = "raw", foreign = cloud), "expected foreign = memory or disk"),
         (
             quote!(id = "raw", foreign = disk, warp),
-            "at most one of map, warp, resample and foreign",
+            "at most one of map, warp, resample, reduce, bins and foreign",
         ),
     ] {
         let error = expand(options, function.clone()).unwrap_err();
@@ -396,10 +396,12 @@ fn a_kernel_claims_the_scale_with_scaled() {
         quote!(#shape).to_string(),
         quote!(::drip::shape::Shape::Kernel { scaled: true }).to_string()
     );
-    let message = "only a kernel claims scaled; warps and resamples read the scale anyway";
-    for options in
-        [quote!(id = "x", contract = c, warp, scaled), quote!(id = "x", foreign = memory, scaled)]
-    {
+    let message = "only a kernel claims scaled";
+    for options in [
+        quote!(id = "x", contract = c, warp, scaled),
+        quote!(id = "x", foreign = memory, scaled),
+        quote!(id = "x", contract = c, bins = BODY, scaled),
+    ] {
         let function = syn::parse_quote! {
             fn x(p: &Params, image: Point<Rgb>, output: Point<Rgb>) -> Result<Warp> { Ok(()) }
         };
@@ -712,6 +714,47 @@ fn warps_and_resamples_publish_what_their_host_function_returns() {
 }
 
 #[test]
+fn reductions_publish_the_host_value_their_body_computes() {
+    for (options, shape, publish) in [
+        (
+            quote!(id = "x", contract = c, reduce = kernel::MEAN),
+            quote!(::drip::shape::Shape::Reduce(&super::kernel::MEAN)),
+            "image . fold :: < Rgb > (& super :: kernel :: MEAN , & constants , context) ?",
+        ),
+        (
+            quote!(id = "x", contract = c, bins = kernel::LEVELS),
+            quote!(::drip::shape::Shape::Bins(&super::kernel::LEVELS)),
+            "image . count :: < Rgb > (& super :: kernel :: LEVELS , & constants , context) ?",
+        ),
+    ] {
+        let function = syn::parse2(quote! {
+            fn x(p: &P, image: Point<'_, Rgb>, metadata: Option<Read<'_, Facts>>, _out: Point<'_, Counts>) -> Result<[f32; 2]> {
+                unimplemented!()
+            }
+        })
+        .unwrap();
+        let module = generated_module(expand(options, function).unwrap());
+        let kind = kind_field(&module, "shape");
+        assert_eq!(quote!(#kind).to_string(), shape.to_string());
+        let run = generated_method(&module, "run");
+        let run = quote!(#run).to_string();
+        // Only the Read input is materialized. The reduced input stays deferred.
+        assert_eq!(run.matches("materialize").count(), 1);
+        assert!(run.contains(publish), "{run}");
+        assert!(
+            run.contains(":: drip :: ports :: reduced :: < Counts , _ > (& outputs [0]"),
+            "{run}"
+        );
+        let outputs = generated_struct(&module, "Outputs");
+        let fields: Vec<_> = outputs.fields.iter().map(|f| quote!(#f).to_string()).collect();
+        assert_eq!(
+            fields[0],
+            quote!(pub(super) out: ::drip::ports::Read<'a, Counts, ::drip::ports::Any>).to_string()
+        );
+    }
+}
+
+#[test]
 fn rejects_malformed_maps() {
     for (options, declaration, message) in [
         (
@@ -719,7 +762,7 @@ fn rejects_malformed_maps() {
             quote!(
                 fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "Point ports declare a map = body, warp or resample",
+            "Point ports declare map = body, warp, resample, reduce = BODY or bins = BODY",
         ),
         (
             quote!(id = "x", contract = c, map = body),
@@ -733,21 +776,21 @@ fn rejects_malformed_maps() {
             quote!(
                 fn x(p: &P, a: Point<A>, b: Write<A>) -> Result<[f32; 1]> {}
             ),
-            "a map, warp or resample has its second Point as output",
+            "a node with Point ports has its second Point as output",
         ),
         (
             quote!(id = "x", contract = c, map = body),
             quote!(
                 fn x(p: &P, a: Point<A>, b: Point<A>, d: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "a map, warp or resample has one input and one output Point",
+            "a node with Point ports has one input and one output Point",
         ),
         (
             quote!(id = "x", contract = c, map = body),
             quote!(
                 fn x(p: &P, a: Option<Point<A>>, b: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "a map, warp or resample has one input and one output Point",
+            "a node with Point ports has one input and one output Point",
         ),
         (
             quote!(id = "x", contract = c, map = body),
@@ -775,7 +818,7 @@ fn rejects_malformed_maps() {
             quote!(
                 fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "a node is at most one of map, warp, resample and foreign",
+            "a node is at most one of map, warp, resample, reduce, bins and foreign",
         ),
         (
             quote!(id = "x", contract = c, warp, warp),
@@ -790,6 +833,27 @@ fn rejects_malformed_maps() {
                 fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
             ),
             "expected a #[cube] body function path",
+        ),
+        (
+            quote!(id = "x", contract = c, reduce = "BODY"),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
+            ),
+            "expected a ReduceBody static path",
+        ),
+        (
+            quote!(id = "x", contract = c, bins = BODY),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Point<A>) {}
+            ),
+            "a reduce or bins node returns Result<[f32; N]>, the constants of its body",
+        ),
+        (
+            quote!(id = "x", contract = c, reduce = A, bins = B),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
+            ),
+            "a node is at most one of map, warp, resample, reduce, bins and foreign",
         ),
     ] {
         let error = expand(options, syn::parse2(declaration).unwrap()).unwrap_err();

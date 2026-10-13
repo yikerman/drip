@@ -40,12 +40,13 @@ The non-trivial files outside `node/`:
   `Node`/`Typed` traits, `Action`, `Assets`, and the `Identity` and
   `Durability` the store keys and evicts by.
 - `shape.rs`: how evaluation runs a kind (`Shape`: kernel, bound source,
-  foreign, map, warp or resample, and whether it reads the scale), where a
-  foreign node's outputs are kept (`Cache`, `Codec`), and what the segment
-  compiler composes: `MapBody` and the `Pixel` it maps, `Warp`,
-  `FilterBody` and the `BOX` filter that reduces to the requested scale,
-  and the `Lattice` of a `MapPayload` with the window a raster holds, in
-  `Rect`s.
+  foreign, map, warp, resample, reduce or bins, and whether it reads the
+  scale), where a foreign node's outputs are kept (`Cache`, `Codec`), and
+  what the segment compiler composes: `MapBody` and the `Pixel` it maps,
+  `Warp`, `FilterBody` and the `BOX` filter that reduces to the requested
+  scale, `ReduceBody` and `BinsBody` with the `Position` and `Bin` a bin
+  body sees and returns, and the `Lattice` of a `MapPayload` with the window
+  a raster holds, in `Rect`s.
 - `registry.rs`: the hand-maintained `NODES`, `TAGS` and `Registry`.
 - `graph.rs`: `Dag` and transactional edits, checked on ports only.
 - `eval.rs`: `Evaluator`, demand-driven evaluation of the requested subgraph;
@@ -54,15 +55,17 @@ The non-trivial files outside `node/`:
   node runs at, reduces full-detail images to the requested scale and cuts a
   `Target`'s inputs to its region. `Policy` says whether a run waits for a
   foreign job or reports it pending, and `InputValues` hands frontends and
-  actions the inputs, whole or in bands.
+  actions the inputs, whole or in bands, or a reduction's outputs.
 - `image.rs`: `Image`, the value on an edge, a raster or the deferred output of
   a map, warp or resample, materialized on first need, whole or by window
-  (`Image::crop`), `Raster`, samples with lazy host and device residency and
-  counted transfers, and `Plane`, what evaluation does to an image on a
-  plane without its type.
+  (`Image::crop`), or reduced to host values without storing it
+  (`Image::fold`, `Image::count`), `Raster`, samples with lazy host and
+  device residency and counted transfers, and `Plane`, what evaluation does
+  to an image on a plane without its type.
 - `plan.rs`: the segment compiler: a `Plan` of one resampling stage and map
   bodies, the rules for composing steps into it, the input window a window of
-  its output reads, and the fused kernel that runs it on a window.
+  its output reads, the fused kernel that runs it on a window, and the
+  passes that fold or count its pixels.
 - `store.rs`: the evaluator's memo of materialized values across demands:
   content keys, eviction by durability and recency within per-side byte
   budgets, foreign jobs, and the `Disk` tier.
@@ -192,6 +195,50 @@ pub fn compute(_: &(), image: Read<'_, Rgb>, output: Publish<'_, Rgb>) -> Result
 process reads them instead of running the node, as `node/raw.rs` does for
 RAW decode. A foreign node's key includes the path, length and modification
 time of the input files its `Path` parameters name.
+
+A measurement over every pixel is a reduce or bins node. Its body counts or
+accumulates inside the input's segment, so measuring a chain of maps stores
+no image. A node that counts samples by tenths of each channel:
+
+```rust
+use crate::{Result, node::data::*, ports::*, runtime::GlobalContext, shape::BinsBody};
+
+fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(CountsDesc,)> {
+    Ok((CountsDesc { bins: 10, channels: 3, coordinates: image.coordinates.clone() },))
+}
+
+/// Count RGB samples in `[0, 1)` per tenth of each channel.
+#[crate::node(id = "tenths", name = "Tenths", contract = contract, bins = TENTHS)]
+pub fn compute(_: &(), _image: Point<'_, Rgb>, _counts: Point<'_, Counts>) -> Result<[f32; 0]> {
+    Ok([])
+}
+
+static TENTHS: BinsBody =
+    BinsBody { name: "tenths", constants: 0, bins: 10, channels: 3, bin: kernel::tenths::expand };
+
+mod kernel {
+    use crate::shape::{Bin, Pixel, Position};
+    use cubecl::prelude::*;
+    #[cube]
+    fn tenth(v: f32) -> u32 {
+        let mut bin = 10u32; // counts nothing
+        if v >= 0.0f32 && v < 1.0f32 {
+            bin = u32::cast_from(v * 10.0f32);
+        }
+        bin
+    }
+    #[cube]
+    pub fn tenths(px: Pixel, _at: Position, _k: &[f32]) -> Bin {
+        Bin { c0: tenth(px.r), c1: tenth(px.g), c2: tenth(px.b) }
+    }
+}
+```
+
+`reduce = BODY` names a `ReduceBody` instead, which folds pixels into an
+accumulator of f32. A frontend that targets the node receives its outputs
+and binds them with `InputValues::bind_outputs`. One that wants a
+measurement without a node calls `Image::fold` or `Image::count`, as
+`exposure::meter` does.
 
 1. Declare the module: `pub mod double;` in `src/node/mod.rs`.
 2. List `&double::compute::KIND` in `registry::NODES`, at its pipeline

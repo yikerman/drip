@@ -33,7 +33,10 @@ use crate::{
     Error, Result,
     image::Raster,
     runtime::{KernelContext, dispatch_dims},
-    shape::{FilterBody, Lattice, MapBody, MapPayload, Pixel, Projective, Rect, Warp},
+    shape::{
+        Bin, BinsBody, FilterBody, Lattice, MapBody, MapPayload, Pixel, Position, Projective, Rect,
+        ReduceBody, Warp,
+    },
 };
 use cubecl::prelude::*;
 use std::sync::Arc;
@@ -44,6 +47,22 @@ use std::sync::Arc;
 pub const MAX_FOOTPRINT: f32 = 16.0;
 
 const IDENTITY: Projective = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+/// Values one lane of a fold or combine pass reads, so a pass takes the
+/// count down by this factor.
+const FAN_IN: usize = 256;
+/// Bin counts per workgroup that fit in shared memory: 16 KiB of u32.
+const SHARED_COUNTS: usize = 4096;
+/// Pixels each workgroup counts into shared memory, at least. Each
+/// workgroup's counts are one more copy for the merge to read.
+const GROUP_PIXELS: usize = 4096;
+/// Copies of counts too large for shared memory, at most.
+const SHARDS: usize = 32;
+/// Counts all copies hold together, at most: 4 MiB, within the L2 cache of
+/// current GPUs, where scattered atomics stay cheap. A level-1 waveform of
+/// the Sony fixture, 196 608 counts, takes 6.1 ms on an RTX 3080 in 32
+/// copies and 2.0 ms in five.
+const SHARD_COUNTS: usize = 1 << 20;
 
 /// A resampling stage followed by map bodies, with the bodies' constants
 /// concatenated.
@@ -128,10 +147,161 @@ impl Plan {
         ctx: &KernelContext<'_>,
     ) -> Result<Raster<P>> {
         let (from, to) = (P::lattice(input.desc()), P::lattice(&desc));
-        let (stage, maps) = self.stage(from, to)?;
-        if stage == Stage::Load && self.bodies.is_empty() && from.window == to.window {
+        let (kernel, constants) = self.compile(from, to)?;
+        if kernel.stage == Stage::Load && self.bodies.is_empty() && from.window == to.window {
             return input.share_as(desc);
         }
+        let constants = ctx.constants(&constants)?;
+        let output = Raster::from_device(desc.clone(), ctx.device_buffer::<P>(&desc)?, ctx)?;
+        let (count, dim) = dispatch_dims(to.window.cells());
+        kernel::fused::launch(
+            ctx.client()?,
+            count,
+            dim,
+            input.device(ctx)?.argument(),
+            constants.argument(),
+            output.device(ctx)?.argument(),
+            window(from),
+            domain(to),
+            kernel,
+        );
+        ctx.runtime.count_fused(to.window.cells());
+        Ok(output)
+    }
+
+    /// Fold the plan's output over the window of lattice `to` with `body`,
+    /// from `input`, which holds [`input_window`](Self::input_window). Returns
+    /// the accumulator. `constants` holds `body.constants` values.
+    pub fn fold<P: MapPayload>(
+        &self,
+        input: &Raster<P>,
+        to: Lattice,
+        body: &ReduceBody,
+        constants: &[f32],
+        ctx: &KernelContext<'_>,
+    ) -> Result<Vec<f32>> {
+        let from = P::lattice(input.desc());
+        let (kernel, mut k) = self.compile(from, to)?;
+        k.extend_from_slice(body.identity);
+        k.extend_from_slice(constants);
+        let client = ctx.client()?;
+        let width = body.identity.len();
+        // Each lane folds at most `FAN_IN` pixels, then each pass combines
+        // at most `FAN_IN` accumulators per lane, until one remains.
+        let mut len = to.window.cells().div_ceil(FAN_IN);
+        let mut partial = ctx.scratch_32(len * width)?;
+        let dim = lanes(client);
+        kernel::fold::launch(
+            client,
+            grid(len, dim),
+            dim,
+            input.device(ctx)?.argument(),
+            ctx.constants(&k)?.argument(),
+            partial.argument(),
+            window(from),
+            domain(to),
+            kernel,
+            *body,
+        );
+        ctx.runtime.count_reduction();
+        while len > 1 {
+            let next = len.div_ceil(FAN_IN);
+            let output = ctx.scratch_32(next * width)?;
+            kernel::combine::launch(
+                client,
+                grid(next, dim),
+                dim,
+                partial.argument(),
+                output.argument(),
+                *body,
+            );
+            (partial, len) = (output, next);
+        }
+        let bytes = ctx.runtime.read(partial.handle)?;
+        Ok(bytes.as_chunks::<4>().0.iter().map(|&v| f32::from_ne_bytes(v)).collect())
+    }
+
+    /// Count the plan's output over the window of lattice `to` into the bins
+    /// of `body`, from `input`, which holds
+    /// [`input_window`](Self::input_window). Returns `body.bins ·
+    /// body.channels` counts, bin-major. `constants` holds `body.constants`
+    /// values.
+    pub fn count<P: MapPayload>(
+        &self,
+        input: &Raster<P>,
+        to: Lattice,
+        body: &BinsBody,
+        constants: &[f32],
+        ctx: &KernelContext<'_>,
+    ) -> Result<Vec<u32>> {
+        if !(1..=3).contains(&body.channels) || body.bins == 0 {
+            return Err(Error::Contract(format!("{} needs bins and 1 to 3 channels", body.name)));
+        }
+        let from = P::lattice(input.desc());
+        let (kernel, mut k) = self.compile(from, to)?;
+        k.extend_from_slice(constants);
+        let client = ctx.client()?;
+        let (input, k) = (input.device(ctx)?.argument(), ctx.constants(&k)?);
+        let len = body.bins * body.channels;
+        let dim = lanes(client);
+        // Counts that fit in shared memory accumulate per workgroup without
+        // global atomics. Larger ones go to copies in global memory, so lanes
+        // counting the same bin, such as neutral pixels in a vectorscope,
+        // rarely touch the same address.
+        let (parts, partial) = if len <= SHARED_COUNTS {
+            let groups = to.window.cells().div_ceil(GROUP_PIXELS).clamp(1, 256);
+            let partial = ctx.scratch_32(groups * len)?;
+            kernel::count_groups::launch(
+                client,
+                CubeCount::Static(groups as u32, 1, 1),
+                dim,
+                input,
+                k.argument(),
+                partial.argument(),
+                window(from),
+                domain(to),
+                kernel,
+                *body,
+            );
+            (groups, partial)
+        } else {
+            let shards = (SHARD_COUNTS / len).clamp(1, SHARDS);
+            let partial = ctx.scratch_32(shards * len)?;
+            kernel::clear::launch(client, grid(shards * len, dim), dim, partial.argument());
+            kernel::count_shards::launch(
+                client,
+                CubeCount::Static(256, 1, 1),
+                dim,
+                input,
+                k.argument(),
+                partial.argument(),
+                window(from),
+                domain(to),
+                shards,
+                kernel,
+                *body,
+            );
+            (shards, partial)
+        };
+        ctx.runtime.count_reduction();
+        let output = ctx.scratch_32(len)?;
+        kernel::merge::launch(
+            client,
+            grid(len, dim),
+            dim,
+            partial.argument(),
+            output.argument(),
+            parts,
+        );
+        let bytes = ctx.runtime.read(output.handle)?;
+        Ok(bytes.as_chunks::<4>().0.iter().map(|&v| u32::from_ne_bytes(v)).collect())
+    }
+
+    /// The kernel identity and constants that compute the window of lattice
+    /// `to` from lattice `from`: the stage's index maps, unless it loads,
+    /// then the bodies' constants.
+    fn compile(&self, from: Lattice, to: Lattice) -> Result<(Kernel, Vec<f32>)> {
+        let (stage, maps) = self.stage(from, to)?;
         let mut constants: Vec<f32> = match stage {
             Stage::Load => Vec::new(),
             Stage::Gather | Stage::Filter(_) => {
@@ -142,28 +312,7 @@ impl Plan {
             return Err(Error::Contract("warp maps do not fit f32".into()));
         }
         constants.extend_from_slice(&self.constants);
-        let constants = ctx.constants(&constants)?;
-        let output = Raster::from_device(desc.clone(), ctx.device_buffer::<P>(&desc)?, ctx)?;
-        let [x, y] = from.window.origin.map(|v| v as usize);
-        let [width, height] = from.window.extent.map(|v| v as usize);
-        let [lattice_width, lattice_height] = from.extent.map(|v| v as usize);
-        let [out_x, out_y] = to.window.origin.map(|v| v as usize);
-        let (count, dim) = dispatch_dims(to.window.cells());
-        kernel::fused::launch(
-            ctx.client()?,
-            count,
-            dim,
-            input.device(ctx)?.argument(),
-            constants.argument(),
-            output.device(ctx)?.argument(),
-            kernel::WindowLaunch::new(x, y, width, height, lattice_width, lattice_height),
-            out_x,
-            out_y,
-            to.window.extent[0] as usize,
-            Kernel { stage, bodies: self.bodies.clone() },
-        );
-        ctx.runtime.count_fused(to.window.cells());
-        Ok(output)
+        Ok((Kernel { stage, bodies: self.bodies.clone() }, constants))
     }
 
     /// The window of the input lattice `from` that computing the window of
@@ -295,6 +444,35 @@ fn footprint(m: &Projective, axis: usize) -> f64 {
     m[axis][0].hypot(m[axis][1]).clamp(1.0, max)
 }
 
+/// The input's stored samples as the kernels address them.
+fn window(from: Lattice) -> kernel::WindowLaunch {
+    let [x, y] = from.window.origin.map(|v| v as usize);
+    let [width, height] = from.window.extent.map(|v| v as usize);
+    let [lattice_width, lattice_height] = from.extent.map(|v| v as usize);
+    kernel::WindowLaunch::new(x, y, width, height, lattice_width, lattice_height)
+}
+
+/// The output samples a kernel computes: `to`'s window.
+fn domain(to: Lattice) -> kernel::DomainLaunch {
+    let [x, y] = to.window.origin.map(|v| v as usize);
+    let [width, height] = to.window.extent.map(|v| v as usize);
+    kernel::DomainLaunch::new(x, y, width, height)
+}
+
+/// Lanes per workgroup of the reduction kernels. The CPU runtime runs a
+/// host worker per lane for kernels with barriers, so the runtime's limit
+/// caps the 256 the GPUs take.
+fn lanes(client: &Client) -> CubeDim {
+    CubeDim::new_1d(client.properties().hardware.max_units_per_cube.min(256))
+}
+
+/// Workgroups of `dim` that cover `len` lanes.
+fn grid(len: usize, dim: CubeDim) -> CubeCount {
+    let groups = len.div_ceil(dim.num_elems() as usize);
+    let x = groups.min(65535);
+    CubeCount::Static(x as u32, groups.div_ceil(x) as u32, 1)
+}
+
 fn compose(a: &[Projective; 3], b: &[Projective; 3]) -> [Projective; 3] {
     std::array::from_fn(|c| mul(&a[c], &b[c]))
 }
@@ -329,36 +507,330 @@ struct Kernel {
     stage: Stage,
     bodies: Vec<MapBody>,
 }
+impl Kernel {
+    /// Constants the stage and the map bodies read, ahead of a reduction's.
+    fn constants(&self) -> usize {
+        self.stage.constants() + self.bodies.iter().map(|body| body.constants).sum::<usize>()
+    }
+}
 
 mod kernel {
     use super::*;
 
     /// One output pixel per invocation: resample, then apply the bodies.
-    /// The output holds `out_width` samples per row from `(out_x, out_y)`
-    /// of its lattice. Positions are whole-lattice indices, so a window
-    /// computes the same values as the whole image.
+    /// Positions are whole-lattice indices, so a window computes the same
+    /// values as the whole image.
     #[cube(launch)]
-    #[allow(clippy::too_many_arguments)]
     pub fn fused(
         input: &[f32],
         k: &[f32],
         output: &mut [f32],
         window: Window,
-        out_x: usize,
-        out_y: usize,
-        out_width: usize,
+        domain: Domain,
         #[comptime] kernel: Kernel,
     ) {
         let p = ABSOLUTE_POS;
         if p * 3 < output.len() {
-            let x = p % out_width + out_x;
-            let y = p / out_width + out_y;
-            let px = sample(input, k, x, y, &window, comptime!(kernel.stage));
-            let px = apply(px, k, &kernel);
+            let px = evaluate(input, k, p, &window, &domain, &kernel);
             output[p * 3] = px.r;
             output[p * 3 + 1] = px.g;
             output[p * 3 + 2] = px.b;
         }
+    }
+
+    /// Lane `i` folds pixels `i`, `i + lanes`, … of the domain into an
+    /// accumulator that starts at `body.identity`, read from `k` after the
+    /// plan's constants, and writes it to `partial[i]`.
+    #[cube(launch)]
+    pub fn fold(
+        input: &[f32],
+        k: &[f32],
+        partial: &mut [f32],
+        window: Window,
+        domain: Domain,
+        #[comptime] kernel: Kernel,
+        #[comptime] body: ReduceBody,
+    ) {
+        let width = comptime!(body.identity.len());
+        let start = comptime!(kernel.constants());
+        let lanes = partial.len() / width;
+        let i = ABSOLUTE_POS;
+        if i < lanes {
+            let mut acc = Array::<f32>::new(width);
+            for j in 0..width {
+                acc[j] = k[start + j];
+            }
+            let constants = k.slice(start + width, k.len());
+            let cells = domain.width * domain.height;
+            let mut p = i;
+            while p < cells {
+                let px = evaluate(input, k, p, &window, &domain, &kernel);
+                accumulate(px, constants, acc.as_mut_slice(), body);
+                p += lanes;
+            }
+            for j in 0..width {
+                partial[i * width + j] = acc[j];
+            }
+        }
+    }
+
+    /// Lane `i` combines accumulators `i`, `i + lanes`, … of `partial` in
+    /// that order into `output[i]`.
+    #[cube(launch)]
+    pub fn combine(partial: &[f32], output: &mut [f32], #[comptime] body: ReduceBody) {
+        let width = comptime!(body.identity.len());
+        let lanes = output.len() / width;
+        let count = partial.len() / width;
+        let i = ABSOLUTE_POS;
+        if i < lanes {
+            let mut acc = Array::<f32>::new(width);
+            for j in 0..width {
+                acc[j] = partial[i * width + j];
+            }
+            let mut p = i + lanes;
+            while p < count {
+                merge_body(acc.as_mut_slice(), partial.slice(p * width, p * width + width), body);
+                p += lanes;
+            }
+            for j in 0..width {
+                output[i * width + j] = acc[j];
+            }
+        }
+    }
+
+    /// Workgroup `g` counts every pixel of the domain it strides over into
+    /// shared counts, then writes them to `partial[g]`.
+    #[cube(launch)]
+    pub fn count_groups(
+        input: &[f32],
+        k: &[f32],
+        partial: &mut [u32],
+        window: Window,
+        domain: Domain,
+        #[comptime] kernel: Kernel,
+        #[comptime] body: BinsBody,
+    ) {
+        let len = comptime!(body.bins * body.channels);
+        let mut counts = Shared::<[Atomic<u32>]>::new_slice(len);
+        let mut i = UNIT_POS as usize;
+        while i < len {
+            counts[i].store(0u32);
+            i += CUBE_DIM as usize;
+        }
+        sync_cube();
+        let cells = domain.width * domain.height;
+        let mut p = ABSOLUTE_POS;
+        while p < cells {
+            let bin = bin_of(input, k, p, &window, &domain, &kernel, body);
+            tally(&mut counts, bin.c0, 0usize, body);
+            if comptime!(body.channels > 1) {
+                tally(&mut counts, bin.c1, 1usize, body);
+            }
+            if comptime!(body.channels > 2) {
+                tally(&mut counts, bin.c2, 2usize, body);
+            }
+            p += CUBE_COUNT * (CUBE_DIM as usize);
+        }
+        sync_cube();
+        let mut i = UNIT_POS as usize;
+        while i < len {
+            partial[CUBE_POS * len + i] = counts[i].load();
+            i += CUBE_DIM as usize;
+        }
+    }
+
+    #[cube]
+    fn tally(
+        counts: &mut [Atomic<u32>],
+        bin: u32,
+        #[comptime] c: usize,
+        #[comptime] body: BinsBody,
+    ) {
+        let bin = usize::cast_from(bin);
+        if bin < comptime!(body.bins) {
+            counts[bin * comptime!(body.channels) + c].fetch_add(1u32);
+        }
+    }
+
+    /// Lane `l` counts the pixels of the domain it strides over into shard
+    /// `l % shards` of `counts`, which starts at zero. Consecutive pixels of
+    /// a lane in one bin add once, as a run.
+    #[cube(launch)]
+    pub fn count_shards(
+        input: &[f32],
+        k: &[f32],
+        counts: &mut [Atomic<u32>],
+        window: Window,
+        domain: Domain,
+        shards: usize,
+        #[comptime] kernel: Kernel,
+        #[comptime] body: BinsBody,
+    ) {
+        let shard = (UNIT_POS as usize % shards) * comptime!(body.bins * body.channels);
+        // Per channel, the bin of the current run and its length.
+        let mut previous = Array::<u32>::new(3usize);
+        let mut run = Array::<u32>::new(3usize);
+        for c in 0..3usize {
+            previous[c] = u32::MAX;
+            run[c] = 0u32;
+        }
+        let cells = domain.width * domain.height;
+        let mut p = ABSOLUTE_POS;
+        while p < cells {
+            let bin = bin_of(input, k, p, &window, &domain, &kernel, body);
+            extend(
+                counts,
+                shard,
+                previous.as_mut_slice(),
+                run.as_mut_slice(),
+                bin.c0,
+                0usize,
+                body,
+            );
+            if comptime!(body.channels > 1) {
+                extend(
+                    counts,
+                    shard,
+                    previous.as_mut_slice(),
+                    run.as_mut_slice(),
+                    bin.c1,
+                    1usize,
+                    body,
+                );
+            }
+            if comptime!(body.channels > 2) {
+                extend(
+                    counts,
+                    shard,
+                    previous.as_mut_slice(),
+                    run.as_mut_slice(),
+                    bin.c2,
+                    2usize,
+                    body,
+                );
+            }
+            p += CUBE_COUNT * (CUBE_DIM as usize);
+        }
+        flush(counts, shard, previous.as_mut_slice(), run.as_mut_slice(), 0usize, body);
+        if comptime!(body.channels > 1) {
+            flush(counts, shard, previous.as_mut_slice(), run.as_mut_slice(), 1usize, body);
+        }
+        if comptime!(body.channels > 2) {
+            flush(counts, shard, previous.as_mut_slice(), run.as_mut_slice(), 2usize, body);
+        }
+    }
+
+    /// Count channel `c` of a pixel in `bin`, ending the channel's run when
+    /// the bin changes.
+    #[cube]
+    fn extend(
+        counts: &mut [Atomic<u32>],
+        shard: usize,
+        previous: &mut [u32],
+        run: &mut [u32],
+        bin: u32,
+        #[comptime] c: usize,
+        #[comptime] body: BinsBody,
+    ) {
+        if bin != previous[c] {
+            flush(counts, shard, previous, run, c, body);
+            previous[c] = bin;
+            run[c] = 0u32;
+        }
+        run[c] += 1u32;
+    }
+
+    /// Add channel `c`'s run to its bin, unless the bin counts nothing.
+    #[cube]
+    fn flush(
+        counts: &mut [Atomic<u32>],
+        shard: usize,
+        previous: &mut [u32],
+        run: &mut [u32],
+        #[comptime] c: usize,
+        #[comptime] body: BinsBody,
+    ) {
+        let bin = usize::cast_from(previous[c]);
+        if run[c] > 0u32 && bin < comptime!(body.bins) {
+            counts[shard + bin * comptime!(body.channels) + c].fetch_add(run[c]);
+        }
+    }
+
+    #[cube(launch)]
+    pub fn clear(output: &mut [u32]) {
+        if ABSOLUTE_POS < output.len() {
+            output[ABSOLUTE_POS] = 0u32;
+        }
+    }
+
+    /// `output[i]` is the sum of element `i` of each of the `parts` arrays
+    /// of `output.len()` counts in `partial`.
+    #[cube(launch)]
+    pub fn merge(partial: &[u32], output: &mut [u32], parts: usize) {
+        let i = ABSOLUTE_POS;
+        if i < output.len() {
+            let mut sum = 0u32;
+            for part in 0..parts {
+                sum += partial[part * output.len() + i];
+            }
+            output[i] = sum;
+        }
+    }
+
+    /// Pixel `p` of the domain, row-major, as the plan computes it: resample
+    /// at its whole-lattice index, then apply the bodies. Every kernel of a
+    /// plan evaluates pixels through this.
+    #[cube]
+    fn evaluate(
+        input: &[f32],
+        k: &[f32],
+        p: usize,
+        window: &Window,
+        domain: &Domain,
+        #[comptime] kernel: &Kernel,
+    ) -> Pixel {
+        let x = p % domain.width + domain.x;
+        let y = p / domain.width + domain.y;
+        let px = sample(input, k, x, y, window, comptime!(kernel.stage));
+        apply(px, k, kernel)
+    }
+
+    /// The bins of pixel `p` of the domain under `body`, whose constants
+    /// follow the plan's in `k`.
+    #[cube]
+    fn bin_of(
+        input: &[f32],
+        k: &[f32],
+        p: usize,
+        window: &Window,
+        domain: &Domain,
+        #[comptime] kernel: &Kernel,
+        #[comptime] body: BinsBody,
+    ) -> Bin {
+        let px = evaluate(input, k, p, window, domain, kernel);
+        let at = Position {
+            x: u32::cast_from(p % domain.width),
+            y: u32::cast_from(p / domain.width),
+            width: u32::cast_from(domain.width),
+            height: u32::cast_from(domain.height),
+        };
+        let constants = k.slice(comptime!(kernel.constants()), k.len());
+        bin(px, at, constants, body)
+    }
+
+    #[cube]
+    fn accumulate(px: Pixel, k: &[f32], acc: &mut [f32], #[comptime] body: ReduceBody) {
+        intrinsic!(|scope| (body.accumulate)(scope, px, k, acc))
+    }
+
+    #[cube]
+    fn merge_body(acc: &mut [f32], other: &[f32], #[comptime] body: ReduceBody) {
+        intrinsic!(|scope| (body.combine)(scope, acc, other))
+    }
+
+    #[cube]
+    fn bin(px: Pixel, at: Position, k: &[f32], #[comptime] body: BinsBody) -> Bin {
+        intrinsic!(|scope| (body.bin)(scope, px, at, k))
     }
 
     /// Where the input's samples sit: `width × height` stored from `(x, y)`
@@ -371,6 +843,16 @@ mod kernel {
         height: usize,
         lattice_width: usize,
         lattice_height: usize,
+    }
+
+    /// The samples a kernel computes: `width × height` from `(x, y)` of the
+    /// output lattice.
+    #[derive(CubeType, CubeLaunch)]
+    pub struct Domain {
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
     }
 
     #[cube]
