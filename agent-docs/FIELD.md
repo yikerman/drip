@@ -386,7 +386,11 @@ Each step is one self-contained commit series.
 4. `RgbField`, Interpolate and Sample with identity chains: delivers Resample.
    Test constant preservation, identity within tolerance, odd extents,
    signed/HDR samples, zone-plate aliasing and preview/export geometry on CPU
-   and WGPU.
+   and WGPU. Done (`node/field/`): one kernel with a composed 3×3 map per
+   channel (output index → source index), footprints from the map's
+   derivative clamped to 16 source samples, exact identity for interpolating
+   filters (signed zeros included), tests against an independent f64
+   resampler with per-channel projective maps on CPU, WGPU and Vulkan.
 5. Projective stage and Perspective Transform: quad and aspect, the DLT
    solve, validation, borders, and Fit as a host function. Then the editing
    view as a separate GUI commit series.

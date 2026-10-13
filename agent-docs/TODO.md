@@ -60,7 +60,7 @@ filter defaults remain proposals until implementation.
 
 | Order | Node work | First use | Initial scope |
 |-------|-----------|-----------|---------------|
-| 1 | Fields, Interpolate and Sample (Resample) | Deliver a photograph with a 2048-pixel long edge. | `RgbField`, Interpolate and Sample per [FIELD](FIELD.md): a factor or long-edge size, selectable filters scaled by the footprint, signed/HDR linear RGB. Needs `RgbDesc::full` and pass-through outputs first. |
+| 1 | Fields, Interpolate and Sample (implemented) | Deliver a photograph with a 2048-pixel long edge. | `RgbField`, Interpolate and Sample per [FIELD](FIELD.md): a factor or long-edge size, five filters scaled by the footprint (Lanczos-3 default), signed/HDR linear RGB. Footprints clamp at 16 source samples; strong reductions need a pyramid or EWA. |
 | 2 | Perspective Transform | Crop, level a horizon or straighten a building. | `RgbField -> RgbField`: one four-point quad plus aspect covers crop, rotation and keystone as one projective map stage ([FIELD](FIELD.md#perspective-transform)). Its own editing view with Frame and Perspective tools, Keep inside and Fit. |
 | 3 | JPEG export (implemented) | Share an edit without a TIFF conversion step. | Uses jpeg-encoder 0.7.1, shared output-profile conversion and node actions. sRGB/quality 95/4:4:4 defaults, embedded ICC, optional capture EXIF and selectable averaged chroma subsampling. |
 | 4 | RGB image input | Edit a JPEG or bring in a TIFF reference. | RGB JPEG/PNG/TIFF sources with ICC and orientation handling, an explicit untagged-profile assumption and defined alpha handling. Decode into documented linear RGB coordinates without treating an already rendered image as unrendered scene data. |
@@ -85,11 +85,11 @@ JPEG export is implemented. Geometry follows the sequence in
    `jpeg-encoder`, shared output conversion and capture-tag writing. Independent
    JPEG/EXIF decoder tests cover pixels, profiles, capture tags, averaged chroma,
    dimension limits and export after project persistence.
-2. **Geometry foundations:** `RgbDesc::full` with the pixel-centre convention,
+2. **Geometry foundations (done):** `RgbDesc::full` with the pixel-centre convention,
    then pass-through outputs in `#[node]`, then shared `#[cube]` filters (box,
    triangle, Mitchell–Netravali, Lanczos-3). Retain existing serialized RGB
    reduction behavior.
-3. **Resample:** `RgbField`, Interpolate and Sample with identity maps; the
+3. **Resample (done):** `RgbField`, Interpolate and Sample with identity maps; the
    footprint-scaled kernel replaces a separable Downsample. Test constant
    preservation, identity within tolerance, odd extents, noninteger factors,
    signed/HDR samples, zone-plate aliasing and preview/export geometry on CPU

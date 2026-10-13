@@ -2,6 +2,8 @@ use drip::{eval::Evaluator, graph::Dag, node, node::data::*, ports::*, runtime::
 
 #[path = "algorithms/rgb_reduction.rs"]
 mod rgb_reduction;
+#[path = "algorithms/sample.rs"]
+mod sample;
 
 fn algorithms(runtime: RuntimeContext) {
     let descriptor = RgbDesc::new(Extent { width: 2, height: 1 }, Coordinates::Space(REC2020_D65));
@@ -14,6 +16,7 @@ fn algorithms(runtime: RuntimeContext) {
     let evaluator = Evaluator::new(runtime);
     bayer_reduction(&evaluator);
     rgb_reduction::check(&evaluator);
+    sample::check(&evaluator);
     resident_highlights(&evaluator);
     bayer_host_island(&evaluator);
     context_driven_demosaic(&evaluator);

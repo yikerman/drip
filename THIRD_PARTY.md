@@ -308,6 +308,11 @@ at the support edge, and `sin(πx)` uses range reduction and a Taylor series
 because WGSL bounds `sin` only on `[−π, π]` [25]. Tests compare both against
 f64 evaluations of the original formulas.
 
+`node/field/sample.rs` resamples after Heckbert [26]: inverse mapping, one
+reconstruction/prefilter kernel scaled by the map's local derivative.
+Original implementation; it scales the filter per source axis by the length
+of each Jacobian row instead of fitting Heckbert's elliptical (EWA) footprint.
+
 [23] D. P. Mitchell and A. N. Netravali, “Reconstruction filters in computer
 graphics,” *Comput. Graph. (Proc. SIGGRAPH)*, vol. 22, no. 4, pp. 221–228,
 Aug. 1988, doi: [10.1145/378456.378514](https://doi.org/10.1145/378456.378514).
@@ -318,3 +323,8 @@ doi: [10.1175/1520-0450(1979)018<1016:LFIOAT>2.0.CO;2](https://doi.org/10.1175/1
 
 [25] W3C, *WebGPU Shading Language*, sec. 15.7.4, “Floating point accuracy.”
 [Online]. Available: <https://www.w3.org/TR/WGSL/>. Accessed: Oct. 12, 2026.
+
+[26] P. S. Heckbert, “Fundamentals of texture mapping and image warping,”
+M.S. thesis, Univ. of California, Berkeley, Tech. Rep. UCB/CSD-89-516,
+Jun. 1989. [Online]. Available:
+<https://www2.eecs.berkeley.edu/Pubs/TechRpts/1989/5504.html>

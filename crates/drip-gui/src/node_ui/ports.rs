@@ -4,6 +4,7 @@
 
 use crate::model::Kind;
 use drip::node::data::{Bayer, BayerLevels, CaptureMetadata, Rgb};
+use drip::node::field::RgbField;
 use drip::ports::PortSpec;
 use egui::Color32;
 
@@ -59,6 +60,7 @@ impl PortText {
 pub fn color(spec: &PortSpec) -> Option<Color32> {
     [
         (spec.is::<Rgb>(), Color32::from_rgb(172, 166, 146)),
+        (spec.is::<RgbField>(), Color32::from_rgb(178, 158, 150)),
         (spec.is::<Bayer>(), Color32::from_rgb(150, 164, 150)),
         (spec.is::<BayerLevels>(), Color32::from_rgb(148, 156, 170)),
         (spec.is::<CaptureMetadata>(), Color32::from_rgb(164, 150, 166)),

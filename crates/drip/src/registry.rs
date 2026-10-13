@@ -5,8 +5,8 @@ use crate::{
     Error, Result,
     definition::{Kind, Node},
     node::{
-        bayer_2x2, bayer_gains, camera_to_rgb, chromatic_adaptation, export, exposure, highlights,
-        orientation, raw, rcd, reduce, sigmoid,
+        bayer_2x2, bayer_gains, camera_to_rgb, chromatic_adaptation, export, exposure, field,
+        highlights, orientation, raw, rcd, reduce, sigmoid,
     },
 };
 use std::sync::Arc;
@@ -55,6 +55,8 @@ pub static NODES: &[&Kind] = &[
     &camera_to_rgb::compute::KIND,
     &chromatic_adaptation::compute::KIND,
     &orientation::compute::KIND,
+    &field::interpolate::lift::KIND,
+    &field::sample::realize::KIND,
     &reduce::rgb::compute::KIND,
     &exposure::compute::KIND,
     &sigmoid::apply::KIND,
