@@ -37,20 +37,23 @@ The non-trivial files outside `node/`:
 
 - `definition.rs`: what `#[node]` generates against: `Kind`, `Tag`, the
   `Node`/`Typed` traits, `Action`, `Assets`.
-- `shape.rs`: how evaluation runs a kind (`Shape`: kernel, source or map) and
-  what a map registers: `MapBody`, the `Pixel` its body maps.
+- `shape.rs`: how evaluation runs a kind (`Shape`: kernel, source, map, warp
+  or resample) and what the segment compiler composes: `MapBody` and the
+  `Pixel` it maps, `Warp`, `FilterBody`, and the `Lattice` of a
+  `MapPayload`.
 - `registry.rs`: the hand-maintained `NODES`, `TAGS` and `Registry`.
 - `graph.rs`: `Dag` and transactional edits, checked on ports only.
 - `eval.rs`: `Evaluator`, demand-driven evaluation of the requested subgraph;
   contracts run here, and results are materialized for their consumers.
-- `image.rs`: `Image`, the value on an edge, a raster or a deferred map output
-  materialized on first need, and `Raster`, samples with lazy host and device
-  residency and counted transfers.
-- `plan.rs`: the segment compiler: a `Plan` of map bodies and the fused kernel
-  that runs it.
+- `image.rs`: `Image`, the value on an edge, a raster or the deferred output of
+  a map, warp or resample, materialized on first need, and `Raster`, samples
+  with lazy host and device residency and counted transfers.
+- `plan.rs`: the segment compiler: a `Plan` of one resampling stage and map
+  bodies, the rules for composing steps into it, and the fused kernel that
+  runs it.
 - `store.rs`: the values of one evaluation, kept until their last consumer.
-- `ports.rs`: port views (`Read`, `Write`, `Forward`, `Load`, a map's
-  `Point`) and interpretation requirements.
+- `ports.rs`: port views (`Read`, `Write`, `Forward`, `Load`, and `Point` for
+  maps, warps and resamples) and interpretation requirements.
 - `payload.rs`: payload families, their host types and device byte layouts.
 - `param.rs`: parameter schemas, encoding and validation.
 - `project.rs`: `.drip` persistence, loaded through a `Registry`.
@@ -149,6 +152,9 @@ mod kernel {
 The first `Point` is the mapped input and the second the output. Other inputs
 are `Read` and arrive materialized, as Camera RGB to color RGB reads its
 `metadata`. A map has no `KernelContext` because it launches nothing.
+Geometry is a warp declared the same way, `#[node(warp, ...)]`, whose host
+function returns a `Warp` of projective maps from the output plane to the
+input plane, as in `node/orientation.rs` and `node/perspective.rs`.
 
 1. Declare the module: `pub mod double;` in `src/node/mod.rs`.
 2. List `&double::compute::KIND` in `registry::NODES`, at its pipeline

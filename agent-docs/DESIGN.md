@@ -154,20 +154,20 @@ Settled with the user on 2026-10-11 and revised by the compute model
   chroma subsampling remain independent controls. Reduced chroma uses area
   averaging. TIFF and JPEG share capture-tag writing and omit original
   orientation because stored pixels already carry their geometry.
-- **Decided (2026-10-12):** Geometry is deferred and filtered once: geometry
-  nodes compose coordinate maps, and one explicit node resamples, choosing the
-  filter and output size. One footprint-scaled kernel serves interpolation and
-  antialiasing. Per-pixel value operations stay on `Rgb`: linear ones commute
-  with interpolation, and deferring nonlinear ones is Open. Today this is
-  `RgbField` with Interpolate and Sample ([FIELD](FIELD.md)). Step 3 of the
-  compute model turns it into warps and Resample.
+- **Decided (2026-10-13):** Geometry is deferred and filtered once: geometry
+  nodes are warps whose projective maps compose, and Resample chooses the
+  filter and output size where it materializes. One footprint-scaled
+  resampling stage serves interpolation and antialiasing ([FIELD](FIELD.md)).
+  When geometry and per-pixel operations compose is under Compute. This
+  replaces `RgbField` with Interpolate and Sample (2026-10-12).
 - **Decided (2026-10-12):** Perspective Transform's geometry is one ordered
   four-point quad plus output aspect, in bijection with projective maps. The
   output is the quad's content, so crop and rotation are quads and have no
   parameters of their own. See [FIELD](FIELD.md#perspective-transform).
 - **Decided (2026-10-12):** Points mapped outside the source are black, and
   edge taps repeat the edge. Auto-crop is a GUI constraint (Keep inside, on)
-  plus a Fit action, not a stored mode. Sample defaults to Lanczos-3, accepting
+  plus a Fit action, not a stored mode. Resample defaults to Lanczos-3, and
+  Perspective Transform resamples with it unless a Resample follows, accepting
   signed halos around HDR highlights. See
   [FIELD](FIELD.md#borders-and-auto-crop).
 - **Decided (2026-10-12):** Perspective Transform has its own editing view,
@@ -267,6 +267,38 @@ Settled with the user on 2026-10-11 and revised by the compute model
   fan-out each recompute the shared plan in their own kernel instead of
   cutting the segment, which trades arithmetic for bandwidth and keeps
   results independent of evaluation order.
+- **Decided (2026-10-13):** Step 3. A warp node (`#[node(warp)]`) returns
+  per-channel projective maps from its output plane to its input plane in
+  full-detail pixels, and the filter that reconstructs the input where the
+  maps leave the sample lattice, or none for a reindex, which evaluation
+  checks. Its contract describes ordinary `Rgb` on the output's lattice, so
+  a domain origin folds into the maps and no field payload exists. A
+  resample node (`#[node(resample)]`) returns its filter, and its contract
+  sets the lattice from the size, the input's full extent and the global
+  scale. Perspective Transform is a warp with Lanczos-3, Orientation a
+  reindex warp, and Resample replaces Sample. Filters register as bodies, so
+  the kernel names no node code.
+- **Decided (2026-10-13):** A plan has one resampling stage before its map
+  bodies, and a step composes into it only where the result is exact, so
+  users never see the grouping. A reindex (Orientation, an integer crop)
+  commutes with per-pixel maps and joins the stage wherever it sits. A
+  filtering warp or Resample after a map cuts the segment: the maps
+  materialize on their own lattice and the resampling runs as its own
+  launch, because a weighted average of sigmoid values is not the sigmoid of
+  the average. The compiler does not special-case linear maps. Before any
+  map, warps and a Resample compose into one stage. A Resample fixes its
+  lattice, so a filtering step after it resamples again. Preview scale
+  reduces samples early, in demosaic. That is a preview-only approximation:
+  export runs at full detail, and a Resample sets its lattice from
+  full-detail extents instead of reducing. Step 6 moves the reduction to the
+  first materialization finer than requested.
+- **Decided (2026-10-13):** The stage loads samples when the composed map is
+  the identity on an equal lattice and the filter interpolates, copies them
+  when only reindexes composed, and filters otherwise. Its kind and filter
+  are comptime, so a plan without geometry compiles to step 2's kernel. A
+  plan that neither moves nor maps samples launches nothing and shares its
+  input. An interpolating filter at factor one reproduces a reindex bit for
+  bit, which Orientation's tests check with Lanczos-3 and Box.
 - **Decided (2026-10-13):** The fused kernel is one `#[cube(launch)]` shell
   whose comptime argument is the body sequence, so each sequence compiles once
   and other constant values reuse it. Bodies keep the expression order of the

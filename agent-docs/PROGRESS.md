@@ -5,6 +5,28 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
+## 2026-10-13
+
+- Explicit compute model, step 3: warps, Resample and the resampling stage
+  replace `RgbField`, Interpolate and Sample. Orientation's permutations
+  pass bit for bit through the graph on the CPU runtime and wgpu (RTX 3080),
+  from metadata and explicit, on a source whose `full` exceeds its extent,
+  and followed by Resample at factor one with Lanczos-3 and with Box. The
+  step 2 fusion test now also runs with each of the eight orientations ahead
+  of the colour maps against the previous orientation kernel: bit identical,
+  one launch. The template tail with Orientation between CAT16 and exposure
+  launches once instead of twice. A new test covers each composition rule:
+  Resample or a rotating Perspective Transform after a sigmoid takes two
+  launches with the bits of a materialization between them, Resample before
+  the sigmoid takes one, an integer crop after it takes one, adjacent warps
+  and a Resample take one, and the identity or two cancelling quarter turns
+  take none. The resampling reference tests (identity, constants under
+  per-channel maps, box halving, Nyquist antialiasing, preview framing and a
+  keystone against an independent f64 resampler) pass through Resample and
+  the image API. Perspective Transform alone equals Perspective Transform
+  followed by Resample with Lanczos-3 at factor one, bit for bit. The
+  workspace gate passes, including the `selected_backend` tests on wgpu. No
+  benchmarks were run (see [TODO](TODO.md)).
 - Explicit compute model, step 2: the map shape and fused segment kernels.
   Exposure, Camera RGB to color RGB, Chromatic adaptation and Sigmoid are
   maps. `tests/fusion.rs` compares the fused chain against the replaced

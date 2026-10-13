@@ -3,12 +3,17 @@
 Research reference for resampling, perspective and later lens correction,
 settled with the user on 2026-10-12: the mathematics of fields, maps and
 footprint-scaled filters, the Perspective Transform parameterization, border
-rules and prior art. `node/field/` and `node/filter.rs` implement it with
-`RgbField`, Interpolate, Perspective Transform and Sample
-([ARCHITECTURE](ARCHITECTURE.md#data-model)). Step 3 of the compute model
-turns geometry into deferred warps with one explicit Resample
-([COMPUTE_MODEL](COMPUTE_MODEL.md#migration-in-the-drip-crate)), keeping the
-mathematics here. Decisions are in [DESIGN](DESIGN.md#processing).
+rules and prior art.
+
+Status (2026-10-13): the `RgbField` payload, Interpolate and Sample were
+folded into the value model. Geometry nodes are warps that return projective
+maps, Resample is the explicit materialization, and the fused kernel's
+resampling stage (`plan.rs`) implements the mathematics below
+([ARCHITECTURE](ARCHITECTURE.md#shapes)). The mathematics, border rules,
+Perspective Transform parameterization, editing view, prior art and open
+questions remain the reference. Where this file speaks of a field, read a
+deferred image. Decisions, including when warps compose across per-pixel
+maps, are in [DESIGN](DESIGN.md#compute).
 
 ## Mathematics
 
@@ -29,7 +34,7 @@ of nodes `t_1, …, t_n` (in graph order) gives
 F_c(y) = f_c(m_c(y)),   m_c = t_1 ∘ t_2 ∘ … ∘ t_n
 ```
 
-Sample evaluates `t_n` first. Maps run from output to source, the direction
+The resampling stage evaluates `t_n` first. Maps run from output to source, the direction
 inverse mapping needs. Lensfun's distortion and TCA models are stated in this
 direction (undistorted → distorted) for the same reason [L1].
 
@@ -78,24 +83,28 @@ equals applying it to the field when `g` commutes with the weighted sum:
   the field semantics amount to applying `g` at the higher of the two
   resolutions.
 
-Linear operations therefore gain nothing from living inside a field: place them
-before Interpolate or after Sample. Deferring nonlinear `g` needs per-pixel
-bodies composed into the resampling kernel (as fused maps compose, or
-Burn-style fusion [7]) and evaluated under the footprint. **Open**, revisit
-with a concrete quality case.
+Drip does not reorder by these cases: a filtering warp or Resample after a
+per-pixel map resamples the map's output, so results match the graph as
+drawn ([DESIGN](DESIGN.md#compute)). Evaluating nonlinear `g` under the
+footprint (supersampling inside the resampling stage, or Burn-style fusion
+[7]) is **Open**, to revisit with a concrete quality case.
 
-### Sampling a field
+### The resampling stage
 
-Sample's full-detail output extent is `N = round(domain.size · factor)`, or
-fits a long edge. The stored extent is `div_ceil(N, global.scale)`, so
-preview and export framing agree. Per output pixel and channel the kernel
-maps the sample centre through the channel's composed map, scales the
-filter by the footprint, and sums normalized taps. Footprints clamp at 16
-source samples per output sample, so stronger reductions alias until a
-prefiltered pyramid or EWA lifts the bound. Lanczos-3 is the default: its
-negative lobes leave signed halos beside bright highlights in scene-linear
-HDR, which Sample keeps rather than clamping. Minifying by `k` costs `(6k)²`
-taps per channel and pixel.
+Resample's full-detail output extent is `N = round(full · factor)`, or fits
+a long edge. A warp's is its output rectangle rounded to whole pixels, and
+its maps are scaled onto that extent. The stored extent is
+`div_ceil(N, global.scale)`, so preview and export framing agree. Per output
+pixel and channel the stage maps the sample centre through the channel's
+composed map, scales the filter by the footprint, and sums normalized taps.
+Footprints clamp at 16 source samples per output sample, so stronger
+reductions alias until a prefiltered pyramid or EWA lifts the bound.
+Lanczos-3 is the default: its negative lobes leave signed halos beside
+bright highlights in scene-linear HDR, which the stage keeps rather than
+clamping. Minifying by `k` costs `(6k)²` taps per channel and pixel. An
+interpolating filter reproduces samples at sample positions, so the stage
+loads samples for an identity map and copies them for a reindex such as
+Orientation.
 
 ## Geometry
 
@@ -123,7 +132,7 @@ taps per channel and pixel.
   three constraints meet. *Largest area* scans aspects from 1:10 to 10:1 on a
   log scale and refines the best by golden section, since the area need not
   be unimodal in the aspect.
-- The valid region is the input domain mapped forward through the input's
+- The valid region is the input plane mapped forward through the input's
   whole chain, so upstream lens correction is accounted for. For projective
   chains it is a convex polygon, or unbounded when the map's vanishing line
   crosses the input. Fit then has no largest rectangle and reports so. Radial
@@ -133,17 +142,17 @@ taps per channel and pixel.
 
 The parameters are an ordered quad `q_0..q_3`
 (top-left, top-right, bottom-right, bottom-left of the output), normalized to
-the input field's domain, and the output aspect `a = width / height`. The
+the input's full-detail extent, and the output aspect `a = width / height`. The
 output is the quad's content: the projective map `M` takes the output
 rectangle's corners `(0, 0), (a, 0), (a, 1), (0, 1)` to `q_0..q_3`, scaled to
-plane units. Default: the input domain's corners and aspect (identity).
+plane units. Default: the input's corners and aspect (identity).
 
 - **Bijection.** Four points with no three collinear determine exactly one
   projective map of the plane taking a given four such points to them (the
   fundamental theorem of projective geometry, with the map given by the
   8-unknown DLT solve) [12, Ch. 2, 4]. So ordered quads in general position and an aspect
   correspond one-to-one to (projective map, output rectangle) pairs up to
-  output translation and uniform scale, which Sample's size fixes. Both sides
+  output translation and uniform scale, which the output extent fixes. Both sides
   have nine degrees of freedom. Rotation and crop are quads (a rotated or
   inset rectangle), so no separate angle or crop parameter exists: one would
   give several parameter sets for one result.
@@ -151,7 +160,7 @@ plane units. Default: the input domain's corners and aspect (identity).
   undefined. Concave or self-intersecting quads are valid maps whose vanishing
   line crosses the output. Points beyond it (`w ≤ 0`) are black. The GUI keeps
   quads convex while Keep inside is on.
-- **Direction.** `M` is already output → source, the stage's direction, so the
+- **Direction.** `M` is already output → source, the warp's direction, so the
   kernel needs no inverse, and GUI handles need `M⁻¹` (closed form, 3×3).
 - **Aspect.** It is the ninth degree of freedom and is stored explicitly.
   Corner edits keep it and the user sets it (*original format* or a value).
@@ -214,9 +223,10 @@ Read at pinned revisions on 2026-10-12.
   matrix and scales an isotropic filter by them.
 
 Fixed pipelines get single filtering by construction. Drip gets it from the
-graph when geometry nodes are adjacent. A discrete node between them forces a
-Sample there, as a non-concatenating node does in Nuke. Help and templates
-should say so. The graph does not forbid it.
+graph when geometry nodes are adjacent. A kernel node, or a per-pixel map
+before a filtering warp, forces a resampling there, as a non-concatenating
+node does in Nuke. Help and templates should say so. The graph does not
+forbid it.
 
 ## Applications
 
@@ -227,9 +237,9 @@ Transform):
 - lens distortion and lateral CA, and projection changes (fisheye to rectilinear,
   cylindrical/equirectangular for panoramas).
 - mesh warps (liquify), as a coarse-grid stage kind.
-- registration for multi-frame work: map frame B onto frame A, then Sample on
-  A's grid for HDR merge, focus stacking or burst denoise. Needs a Sample input
-  that supplies the target grid.
+- registration for multi-frame work: map frame B onto frame A, then Resample
+  on A's grid for HDR merge, focus stacking or burst denoise. Needs a
+  Resample input that supplies the target grid.
 
 Single-channel geometry: masks drawn in source coordinates follow the
 image's geometry by passing through the same maps, and coarse calibration
@@ -243,7 +253,9 @@ with no samples are deferred until masks exist.
 - Automatic perspective (structure detection, fitting lines, estimating a
   rectified rectangle's aspect from focal length): not planned for now. The
   user places the quad and sets the aspect.
-- EWA versus the scaled-filter footprint, after measuring extreme keystones.
+- EWA versus the scaled-filter footprint, after measuring extreme keystones,
+  and a prefiltered pyramid for reductions beyond 16 samples per output
+  sample.
 - Lens correction coordinates: capture geometry, orientation and crop.
 - One map shared by an image and its mask.
 - Deferred nonlinear value operations (above).
