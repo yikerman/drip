@@ -467,7 +467,8 @@ fn legacy_camera(
     output: Write<'_, Rgb>,
 ) -> Result<()> {
     let (input, out) = (described(image.desc), described(output.desc));
-    let k = node::camera_to_rgb::compute(&(), Point::new(&input), metadata, Point::new(&out))?;
+    let k =
+        node::camera_to_rgb::compute(&(), adapter::point(&input), metadata, adapter::point(&out))?;
     launch(ctx, &image, &output, &k, image.desc.extent.pixels(), legacy::matrix::launch)
 }
 fn same_with_metadata(
@@ -487,7 +488,12 @@ fn legacy_cat16(
     output: Write<'_, Rgb>,
 ) -> Result<()> {
     let (input, out) = (described(image.desc), described(output.desc));
-    let k = chromatic_adaptation::compute(p, Point::new(&input), Some(metadata), Point::new(&out))?;
+    let k = chromatic_adaptation::compute(
+        p,
+        adapter::point(&input),
+        Some(metadata),
+        adapter::point(&out),
+    )?;
     launch(ctx, &image, &output, &k, image.desc.extent.pixels(), legacy::matrix::launch)
 }
 fn same<P>(_: &GlobalContext, _: &P, image: &RgbDesc) -> Result<(RgbDesc,)> {
@@ -501,7 +507,7 @@ fn legacy_exposure(
     output: Write<'_, Rgb>,
 ) -> Result<()> {
     let (input, out) = (described(image.desc), described(output.desc));
-    let [gain] = exposure::compute(p, Point::new(&input), Point::new(&out))?;
+    let [gain] = exposure::compute(p, adapter::point(&input), adapter::point(&out))?;
     let elements = image.desc.extent.pixels() * 3;
     let groups = elements.div_ceil(256) as u32;
     legacy::exposure::launch(
@@ -522,7 +528,7 @@ fn legacy_sigmoid(
     output: Write<'_, Rgb>,
 ) -> Result<()> {
     let (input, out) = (described(image.desc), described(output.desc));
-    let k = sigmoid::apply(p, Point::new(&input), Point::new(&out))?;
+    let k = sigmoid::apply(p, adapter::point(&input), adapter::point(&out))?;
     launch(ctx, &image, &output, &k, image.desc.extent.pixels(), legacy::sigmoid::launch)
 }
 

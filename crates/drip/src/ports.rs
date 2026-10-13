@@ -10,10 +10,11 @@
 //! | map, warp, resample, reduce, bins, stencil | [`Point`], then [`Read`] | [`Point`] |
 //! | meta | [`Inlet`] | [`Outlet`] |
 //!
-//! Type erasure is confined to the generated node adapter.
+//! Type erasure is confined to `ports::adapter`, which only the code
+//! `#[node]` generates calls.
 use crate::{
     Error, Result,
-    image::{Description, Image, Raster},
+    image::{Image, Raster},
     payload::{DeviceBuffer, DeviceLayout, Payload},
     runtime::KernelContext,
 };
@@ -46,11 +47,6 @@ impl<'a, P: Payload, R> Read<'a, P, R> {
     pub fn new(data: &'a Raster<P>) -> Self {
         Self { desc: data.desc(), data, requirement: PhantomData }
     }
-    /// View a materialized input ([`Image::materialize`]).
-    #[doc(hidden)]
-    pub fn bind(image: Option<&'a Image>) -> Option<Self> {
-        image.map(|image| Self::new(image.downcast().expect("typed node adapter invariant")))
-    }
 }
 
 /// The input or the output of a map, warp, resample, reduce, bins or stencil
@@ -61,12 +57,6 @@ pub struct Point<'a, P: Payload, R = Any> {
     pub desc: &'a P::Desc,
     requirement: PhantomData<R>,
 }
-impl<'a, P: Payload, R> Point<'a, P, R> {
-    #[doc(hidden)]
-    pub fn new(desc: &'a Description) -> Self {
-        Self { desc: downcast(desc), requirement: PhantomData }
-    }
-}
 
 /// An input of a meta node as its expansion sees it: the description of the
 /// value it receives, checked against `R`, and the port that
@@ -76,12 +66,6 @@ pub struct Inlet<'a, P: Payload, R = Any> {
     pub desc: &'a P::Desc,
     pub(crate) index: usize,
     requirement: PhantomData<R>,
-}
-impl<'a, P: Payload, R> Inlet<'a, P, R> {
-    #[doc(hidden)]
-    pub fn new(index: usize, desc: &'a P::Desc) -> Self {
-        Self { desc, index, requirement: PhantomData }
-    }
 }
 impl<P: Payload, R> Clone for Inlet<'_, P, R> {
     fn clone(&self) -> Self {
@@ -96,12 +80,6 @@ impl<P: Payload, R> Copy for Inlet<'_, P, R> {}
 pub struct Outlet<P> {
     pub(crate) index: usize,
     payload: PhantomData<fn() -> P>,
-}
-impl<P> Outlet<P> {
-    #[doc(hidden)]
-    pub fn new(index: usize) -> Self {
-        Self { index, payload: PhantomData }
-    }
 }
 
 /// An output under construction, described by the contract. The node writes
@@ -140,31 +118,6 @@ impl<P: DeviceLayout, R> Write<'_, P, R> {
     }
 }
 
-/// Output storage owned by the generated node adapter until publication.
-#[doc(hidden)]
-pub struct OutputSlot<P: Payload> {
-    desc: Arc<P::Desc>,
-    pending: Pending<P>,
-}
-impl<P: Payload> OutputSlot<P> {
-    pub fn new(desc: impl Into<Arc<P::Desc>>) -> Self {
-        Self { desc: desc.into(), pending: Pending { host: None, device: OnceCell::new() } }
-    }
-    pub fn write<R>(&mut self) -> Write<'_, P, R> {
-        Write { desc: &self.desc, pending: &mut self.pending, requirement: PhantomData }
-    }
-    pub fn finish(self) -> Result<Image> {
-        match (self.pending.host, self.pending.device.into_inner()) {
-            (Some(host), None) => Ok(Raster::<P>::from_host(self.desc, host)?.into()),
-            (None, Some(raster)) => Ok(raster.into()),
-            (None, None) => Err(Error::Contract("node did not write its output".into())),
-            (Some(_), Some(_)) => {
-                Err(Error::Contract("node wrote its output on both host and device".into()))
-            }
-        }
-    }
-}
-
 /// An output published from samples the node already holds, typically an
 /// input under the contract's new description. Published rasters are never
 /// written again, so sharing them keeps nodes pure.
@@ -181,37 +134,13 @@ impl<P: DeviceLayout, R> Forward<'_, P, R> {
     }
 }
 
-/// A forwarded output held by the generated node adapter until publication.
-#[doc(hidden)]
-pub struct ForwardSlot<P: Payload> {
-    desc: Arc<P::Desc>,
-    raster: Option<Raster<P>>,
-}
-impl<P: Payload> ForwardSlot<P> {
-    pub fn new(desc: impl Into<Arc<P::Desc>>) -> Self {
-        Self { desc: desc.into(), raster: None }
-    }
-    pub fn forward<R>(&mut self) -> Forward<'_, P, R> {
-        Forward { desc: &self.desc, slot: &mut self.raster, requirement: PhantomData }
-    }
-    pub fn finish(self) -> Result<Image> {
-        let raster =
-            self.raster.ok_or_else(|| Error::Contract("node did not set its output".into()))?;
-        Ok(raster.into())
-    }
-}
-
 /// An output of a foreign node, which has no contract: the node sets it once
 /// with its description and host samples. Setting it validates both.
 pub struct Publish<'a, P> {
     slot: &'a mut Option<Image>,
     payload: PhantomData<P>,
 }
-impl<'a, P: Payload> Publish<'a, P> {
-    #[doc(hidden)]
-    pub fn new(slot: &'a mut Option<Image>) -> Self {
-        Self { slot, payload: PhantomData }
-    }
+impl<P: Payload> Publish<'_, P> {
     pub fn set(self, desc: P::Desc, host: P::Host) -> Result<()> {
         P::validate(&desc)?;
         *self.slot = Some(Raster::<P>::from_host(desc, host)?.into());
@@ -219,50 +148,109 @@ impl<'a, P: Payload> Publish<'a, P> {
     }
 }
 
-/// The output of a reduce or bins node: `values`, the body's result, as the
-/// host value of `P` under the contract's description `desc`.
+/// What the code `#[node]` generates calls to view erased values through a
+/// node's typed ports. Nothing else names it.
 #[doc(hidden)]
-pub fn reduced<P: Payload, T>(desc: &Description, values: T) -> Result<Image>
-where
-    P::Host: TryFrom<T>,
-{
-    let host = P::Host::try_from(values)
-        .map_err(|_| Error::Contract(format!("a reduction's result is not {}", P::NAME)))?;
-    Ok(Raster::<P>::from_host(typed::<P::Desc>(desc), host)?.into())
-}
+pub mod adapter {
+    use super::*;
+    use crate::image::{Description, downcast, typed};
 
-/// Check a connected input against its port requirement before the contract.
-#[doc(hidden)]
-pub fn input<'a, P: Payload, R: Requirement<P>>(
-    port: &str,
-    desc: Option<&'a Description>,
-) -> Result<Option<&'a P::Desc>> {
-    desc.map(|desc| {
-        let desc = downcast(desc);
-        R::check(desc).map_err(|e| requirement_error(port, R::LABEL, e))?;
-        Ok(desc)
-    })
-    .transpose()
-}
-/// Validate a contract's output and its guaranteed interpretation.
-#[doc(hidden)]
-pub fn output<P: Payload, R: Requirement<P>>(port: &str, desc: P::Desc) -> Result<Description> {
-    P::validate(&desc)?;
-    R::check(&desc).map_err(|e| requirement_error(port, R::LABEL, e))?;
-    Ok(Arc::new(desc))
-}
-fn requirement_error(port: &str, label: &str, error: Error) -> Error {
-    Error::Contract(format!("{port} requires {label}: {error}"))
-}
+    /// View a materialized input.
+    pub fn read<P: Payload, R>(image: Option<&Image>) -> Option<Read<'_, P, R>> {
+        image.map(|image| Read::new(image.downcast().expect("a bound input holds its payload")))
+    }
 
-#[doc(hidden)]
-pub fn downcast<T: std::any::Any>(desc: &Description) -> &T {
-    desc.downcast_ref().expect("typed node adapter invariant")
-}
-/// A contract's output description as the typed `Arc` an output slot shares.
-#[doc(hidden)]
-pub fn typed<T: std::any::Any + Send + Sync>(desc: &Description) -> Arc<T> {
-    desc.clone().downcast().expect("typed node adapter invariant")
+    pub fn point<P: Payload, R>(desc: &Description) -> Point<'_, P, R> {
+        Point { desc: downcast(desc), requirement: PhantomData }
+    }
+
+    pub fn inlet<P: Payload, R>(index: usize, desc: &P::Desc) -> Inlet<'_, P, R> {
+        Inlet { desc, index, requirement: PhantomData }
+    }
+
+    pub fn outlet<P>(index: usize) -> Outlet<P> {
+        Outlet { index, payload: PhantomData }
+    }
+
+    pub fn publish<P: Payload>(slot: &mut Option<Image>) -> Publish<'_, P> {
+        Publish { slot, payload: PhantomData }
+    }
+
+    /// Output storage the adapter owns until publication.
+    pub struct OutputSlot<P: Payload> {
+        desc: Arc<P::Desc>,
+        pending: Pending<P>,
+    }
+    impl<P: Payload> OutputSlot<P> {
+        pub fn new(desc: &Description) -> Self {
+            Self { desc: typed(desc), pending: Pending { host: None, device: OnceCell::new() } }
+        }
+        pub fn write<R>(&mut self) -> Write<'_, P, R> {
+            Write { desc: &self.desc, pending: &mut self.pending, requirement: PhantomData }
+        }
+        pub fn finish(self) -> Result<Image> {
+            match (self.pending.host, self.pending.device.into_inner()) {
+                (Some(host), None) => Ok(Raster::<P>::from_host(self.desc, host)?.into()),
+                (None, Some(raster)) => Ok(raster.into()),
+                (None, None) => Err(Error::Contract("node did not write its output".into())),
+                (Some(_), Some(_)) => {
+                    Err(Error::Contract("node wrote its output on both host and device".into()))
+                }
+            }
+        }
+    }
+
+    /// A forwarded output the adapter holds until publication.
+    pub struct ForwardSlot<P: Payload> {
+        desc: Arc<P::Desc>,
+        raster: Option<Raster<P>>,
+    }
+    impl<P: Payload> ForwardSlot<P> {
+        pub fn new(desc: &Description) -> Self {
+            Self { desc: typed(desc), raster: None }
+        }
+        pub fn forward<R>(&mut self) -> Forward<'_, P, R> {
+            Forward { desc: &self.desc, slot: &mut self.raster, requirement: PhantomData }
+        }
+        pub fn finish(self) -> Result<Image> {
+            let raster =
+                self.raster.ok_or_else(|| Error::Contract("node did not set its output".into()))?;
+            Ok(raster.into())
+        }
+    }
+
+    /// The output of a reduce or bins node: `values`, the body's result, as the
+    /// host value of `P` under the contract's description `desc`.
+    pub fn reduced<P: Payload, T>(desc: &Description, values: T) -> Result<Image>
+    where
+        P::Host: TryFrom<T>,
+    {
+        let host = P::Host::try_from(values)
+            .map_err(|_| Error::Contract(format!("a reduction's result is not {}", P::NAME)))?;
+        Ok(Raster::<P>::from_host(typed::<P::Desc>(desc), host)?.into())
+    }
+
+    /// Check a connected input against its port requirement before the contract.
+    pub fn input<'a, P: Payload, R: Requirement<P>>(
+        port: &str,
+        desc: Option<&'a Description>,
+    ) -> Result<Option<&'a P::Desc>> {
+        desc.map(|desc| {
+            let desc = downcast(desc);
+            R::check(desc).map_err(|e| requirement_error(port, R::LABEL, e))?;
+            Ok(desc)
+        })
+        .transpose()
+    }
+    /// Validate a contract's output and its guaranteed interpretation.
+    pub fn output<P: Payload, R: Requirement<P>>(port: &str, desc: P::Desc) -> Result<Description> {
+        P::validate(&desc)?;
+        R::check(&desc).map_err(|e| requirement_error(port, R::LABEL, e))?;
+        Ok(Arc::new(desc))
+    }
+    fn requirement_error(port: &str, label: &str, error: Error) -> Error {
+        Error::Contract(format!("{port} requires {label}: {error}"))
+    }
 }
 
 #[derive(Clone, Copy)]

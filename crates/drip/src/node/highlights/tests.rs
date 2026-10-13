@@ -1,5 +1,9 @@
 use super::*;
-use crate::{image::Raster, runtime::RuntimeContext};
+use crate::{
+    image::{Description, Raster},
+    runtime::RuntimeContext,
+};
+use std::sync::Arc;
 
 const PHASES: [BayerPhase; 4] =
     [BayerPhase::Rggb, BayerPhase::Grbg, BayerPhase::Gbrg, BayerPhase::Bggr];
@@ -25,7 +29,7 @@ fn evaluate(
     let levels = std::array::from_fn(|i| clips[reference::color(phase, i / 2, i % 2)]);
     let input = Raster::<Bayer>::from_host(desc.clone(), samples.to_vec().into()).unwrap();
     let levels = Raster::<BayerLevels>::from_host(levels_desc, levels).unwrap();
-    let mut output = OutputSlot::<Bayer>::new(desc);
+    let mut output = adapter::OutputSlot::<Bayer>::new(&(Arc::new(desc) as Description));
     let ctx = KernelContext { global: &GlobalContext::default(), runtime };
     reconstruct(
         &ctx,

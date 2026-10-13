@@ -238,7 +238,7 @@ fn inputs(signature: &Signature, vis: &TokenStream) -> TokenStream {
         let payload = &port.payload;
         let requirement = &port.requirement;
         let read = quote!(::drip::ports::Read<'a, #payload, #requirement>);
-        let bind = quote!(::drip::ports::Read::bind(inputs[#index].as_ref()));
+        let bind = quote!(::drip::ports::adapter::read(inputs[#index].as_ref()));
         if port.optional {
             fields.push(quote!(#vis #name: Option<#read>));
             binds.push(quote!(#name: #bind));
@@ -260,7 +260,7 @@ fn inputs(signature: &Signature, vis: &TokenStream) -> TokenStream {
         let port_name = name.to_string();
         output_fields.push(quote!(#vis #name: ::drip::ports::Read<'a, #payload, #requirement>));
         output_binds.push(quote! {
-            #name: ::drip::ports::Read::bind(outputs.get(#index)).ok_or_else(|| {
+            #name: ::drip::ports::adapter::read(outputs.get(#index)).ok_or_else(|| {
                 ::drip::Error::Contract(format!("{} has no output {}", KIND.id, #port_name))
             })?
         });
@@ -304,7 +304,7 @@ fn input_checks(signature: &Signature) -> Vec<TokenStream> {
             let payload = &port.payload;
             let requirement = &port.requirement;
             let check = quote!(
-                ::drip::ports::input::<#payload, #requirement>(#name, inputs[#index].as_ref())?
+                ::drip::ports::adapter::input::<#payload, #requirement>(#name, inputs[#index].as_ref())?
             );
             if port.optional {
                 quote!(let #local = #check;)
@@ -326,7 +326,7 @@ fn contract(options: &Options, signature: &Signature) -> TokenStream {
         let index = syn::Index::from(port.index);
         let payload = &port.payload;
         let requirement = &port.requirement;
-        quote!(::drip::ports::output::<#payload, #requirement>(#name, described.#index)?)
+        quote!(::drip::ports::adapter::output::<#payload, #requirement>(#name, described.#index)?)
     });
     let call = match &options.contract {
         Some(contract) => {
@@ -366,9 +366,7 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
                     (quote!(OutputSlot), quote!(write))
                 };
                 slots.push(quote! {
-                    let mut #slot = ::drip::ports::#kind::<#payload>::new(
-                        ::drip::ports::typed(&outputs[#index]),
-                    );
+                    let mut #slot = ::drip::ports::adapter::#kind::<#payload>::new(&outputs[#index]);
                 });
                 arguments.push(quote!(#slot.#view::<#requirement>()));
                 results.push(quote!(#slot.finish()?));
@@ -413,7 +411,7 @@ fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -
             (View::Point, Direction::Input) => {
                 point = Some((index, payload));
                 quote! {
-                    let #local = ::drip::ports::Point::<#payload, #requirement>::new(
+                    let #local = ::drip::ports::adapter::point::<#payload, #requirement>(
                         inputs[#index].as_ref().ok_or(#missing)?.desc(),
                     );
                 }
@@ -421,12 +419,12 @@ fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -
             (View::Point, Direction::Output) => {
                 output = Some(payload);
                 quote! {
-                    let #local = ::drip::ports::Point::<#payload, #requirement>::new(&outputs[#index]);
+                    let #local = ::drip::ports::adapter::point::<#payload, #requirement>(&outputs[#index]);
                 }
             }
             _ => {
                 let image = quote!(inputs[#index].as_ref());
-                let read = quote!(::drip::ports::Read::<#payload, #requirement>::bind(#image));
+                let read = quote!(::drip::ports::adapter::read::<#payload, #requirement>(#image));
                 let read = if port.optional { read } else { quote!(#read.ok_or(#missing)?) };
                 quote! {
                     #image.map(|image| image.materialize(context)).transpose()?;
@@ -449,14 +447,14 @@ fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -
         }
         Deferred::Reduce(body) => (
             quote!(constants),
-            quote!(::drip::ports::reduced::<#output, _>(
+            quote!(::drip::ports::adapter::reduced::<#output, _>(
                 &outputs[0],
                 image.fold::<#payload>(&super::#body, &constants, context)?,
             )),
         ),
         Deferred::Bins(body) => (
             quote!(constants),
-            quote!(::drip::ports::reduced::<#output, _>(
+            quote!(::drip::ports::adapter::reduced::<#output, _>(
                 &outputs[0],
                 image.count::<#payload>(&super::#body, &constants, context)?,
             )),
@@ -497,11 +495,11 @@ fn meta(name: &syn::Ident, signature: &Signature) -> TokenStream {
         let index = port.index;
         let payload = &port.payload;
         let requirement = &port.requirement;
-        let inlet = quote!(::drip::ports::Inlet::<#payload, #requirement>::new);
+        let inlet = quote!(::drip::ports::adapter::inlet::<#payload, #requirement>);
         match port.direction {
             Direction::Input if port.optional => quote!(#local.map(|desc| #inlet(#index, desc))),
             Direction::Input => quote!(#inlet(#index, #local)),
-            Direction::Output => quote!(::drip::ports::Outlet::<#payload>::new(#index)),
+            Direction::Output => quote!(::drip::ports::adapter::outlet::<#payload>(#index)),
         }
     });
     quote! {
@@ -570,7 +568,7 @@ fn foreign_run(name: &syn::Ident, signature: &Signature) -> TokenStream {
                 let payload = &port.payload;
                 let name = local.to_string();
                 slots.push(quote!(let mut #slot = None;));
-                arguments.push(quote!(::drip::ports::Publish::<#payload>::new(&mut #slot)));
+                arguments.push(quote!(::drip::ports::adapter::publish::<#payload>(&mut #slot)));
                 results.push(quote! {
                     #slot.ok_or_else(|| ::drip::Error::Contract(format!("node did not publish {}", #name)))?
                 });

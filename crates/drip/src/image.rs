@@ -20,7 +20,6 @@ use crate::{
     Error, Result,
     payload::{DeviceBuffer, DeviceLayout, Payload},
     plan::{self, Plan},
-    ports::typed,
     runtime::{KernelContext, RuntimeContext},
     shape::{
         self, BinsBody, FilterBody, Lattice, MapBody, MapPayload, Rect, ReduceBody, StencilBody,
@@ -35,6 +34,16 @@ use std::{
 
 /// A type-erased payload description, as contracts receive and return it.
 pub type Description = Arc<dyn Any + Send + Sync>;
+
+/// `desc` as the description of the payload its port or image declares.
+pub(crate) fn downcast<T: Any>(desc: &Description) -> &T {
+    desc.downcast_ref().expect("a description of the declared payload")
+}
+
+/// [`downcast`] as a shared `Arc`, for a raster that keeps the description.
+pub(crate) fn typed<T: Any + Send + Sync>(desc: &Description) -> Arc<T> {
+    desc.clone().downcast().expect("a description of the declared payload")
+}
 
 /// The value an output publishes. Clones share it, including a deferred
 /// image's materialization.
@@ -231,7 +240,7 @@ impl Image {
 
     /// Fails unless `desc` states this image's lattice.
     fn keeps_lattice<P: MapPayload>(&self, desc: &Description, shape: &str) -> Result<()> {
-        if P::lattice(&typed(&self.desc)) != P::lattice(&typed(desc)) {
+        if lattice::<P>(&self.desc) != lattice::<P>(desc) {
             return Err(Error::Contract(format!(
                 "a {shape} keeps its input's {} lattice",
                 P::NAME
@@ -243,7 +252,7 @@ impl Image {
     /// This image through `warp` onto the lattice `desc` states. Fails when
     /// a warp declared as a reindex moves samples off the lattice.
     pub fn warp<P: MapPayload>(&self, warp: &Warp, desc: Description) -> Result<Image> {
-        let (from, to) = (P::lattice(&typed(&self.desc)), P::lattice(&typed(&desc)));
+        let (from, to) = (lattice::<P>(&self.desc), lattice::<P>(&desc));
         if !warp.maps.as_flattened().as_flattened().iter().all(|v| v.is_finite()) {
             return Err(Error::Contract("warp maps must be finite".into()));
         }
@@ -258,7 +267,7 @@ impl Image {
         filter: &'static FilterBody,
         desc: Description,
     ) -> Result<Image> {
-        let (from, to) = (P::lattice(&typed(&self.desc)), P::lattice(&typed(&desc)));
+        let (from, to) = (lattice::<P>(&self.desc), lattice::<P>(&desc));
         Ok(self.defer::<P>(desc, |plan| plan.resample(filter, from, to)))
     }
 
@@ -299,14 +308,14 @@ impl Image {
         &self,
         ctx: &KernelContext<'_>,
     ) -> Result<(Raster<P>, Plan, Lattice)> {
-        let to = P::lattice(&typed(&self.desc));
+        let to = lattice::<P>(&self.desc);
         let pending = self.value.pending.lock().unwrap_or_else(PoisonError::into_inner);
         let deferred = pending.as_ref().map(|d| (d.input.clone(), d.plan.clone()));
         drop(pending);
         let Some((input, plan)) = deferred else {
             return Ok((self.raster(ctx)?, Plan::default(), to));
         };
-        let from = P::lattice(&typed(&input.desc));
+        let from = lattice::<P>(&input.desc);
         Ok((input.covering::<P>(plan.input_window(from, to)?, ctx)?, plan, to))
     }
 
@@ -335,7 +344,7 @@ impl Image {
     /// image is deferred, otherwise the raster itself. Fails when the image
     /// is a raster without `window`.
     fn covering<P: MapPayload>(&self, window: Rect, ctx: &KernelContext<'_>) -> Result<Raster<P>> {
-        let lattice = P::lattice(&typed(&self.desc));
+        let lattice = lattice::<P>(&self.desc);
         if lattice.with(window).is_whole() {
             return self.raster(ctx);
         }
@@ -366,7 +375,7 @@ impl Deferred {
         desc: &Description,
         ctx: &KernelContext<'_>,
     ) -> Result<Box<dyn Stored>> {
-        let window = P::lattice(&typed(desc)).window;
+        let window = lattice::<P>(desc).window;
         Ok(Box::new(self.run::<P>(desc, window, ctx)?))
     }
 
@@ -378,11 +387,11 @@ impl Deferred {
         window: Rect,
         ctx: &KernelContext<'_>,
     ) -> Result<Raster<P>> {
-        let desc: Arc<P::Desc> = typed(desc);
-        let to = P::lattice(&desc).with(window);
-        let from = P::lattice(&typed(&self.input.desc));
+        let desc: &P::Desc = downcast(desc);
+        let to = P::lattice(desc).with(window);
+        let from = lattice::<P>(&self.input.desc);
         let input = self.input.covering::<P>(self.plan.input_window(from, to)?, ctx)?;
-        self.plan.run(&input, Arc::new(P::on(&desc, to)), ctx)
+        self.plan.run(&input, Arc::new(P::on(desc, to)), ctx)
     }
 }
 
@@ -395,25 +404,25 @@ fn reads(name: &str, expected: usize, constants: &[f32]) -> Result<()> {
 }
 
 fn lattice<P: MapPayload>(desc: &Description) -> Lattice {
-    P::lattice(&typed(desc))
+    P::lattice(downcast(desc))
 }
 
 fn bytes<P: MapPayload>(desc: &Description) -> usize {
-    P::byte_len(&typed(desc))
+    P::byte_len(downcast(desc))
 }
 
 fn reduce<P: MapPayload>(image: &Image, scale: u32) -> Result<Image> {
-    let lattice = P::lattice(&typed(&image.desc));
+    let lattice = lattice::<P>(&image.desc);
     let reduced = lattice.full.map(|side| side.div_ceil(scale));
     if (0..2).all(|axis| lattice.extent[axis] <= reduced[axis]) {
         return Ok(image.clone());
     }
-    let desc = P::on(&typed(&image.desc), Lattice::whole(reduced, lattice.full));
+    let desc = P::on(downcast(&image.desc), Lattice::whole(reduced, lattice.full));
     image.resample::<P>(&shape::BOX, Arc::new(desc))
 }
 
 fn crop<P: MapPayload>(image: &Image, window: Rect, ctx: &KernelContext<'_>) -> Result<Image> {
-    let lattice = P::lattice(&typed(&image.desc));
+    let lattice = lattice::<P>(&image.desc);
     let whole = Rect { origin: [0; 2], extent: lattice.extent };
     if !whole.contains(&window) || window.cells() == 0 {
         return Err(Error::Contract(format!("window lies outside the {} lattice", P::NAME)));

@@ -130,7 +130,7 @@ fn foreign_nodes_download_their_inputs_before_the_call() {
     let arguments: Vec<_> = call.args.iter().map(|arg| quote!(#arg).to_string()).collect();
     assert_eq!(
         arguments[3],
-        quote!(::drip::ports::Publish::<Bayer>::new(&mut output_0)).to_string()
+        quote!(::drip::ports::adapter::publish::<Bayer>(&mut output_0)).to_string()
     );
 }
 
@@ -538,8 +538,8 @@ fn optional_execution_is_nullable_and_contracts_keep_one_description_per_input()
     let bind = generated_method(&module, "bind");
     let bind = quote!(#bind).to_string();
     let (image, metadata) = bind.split_once("metadata :").unwrap();
-    assert!(image.contains(":: bind") && image.contains("ok_or"), "{image}");
-    assert!(metadata.contains(":: bind") && !metadata.contains("ok_or"), "{metadata}");
+    assert!(image.contains("adapter :: read") && image.contains("ok_or"), "{image}");
+    assert!(metadata.contains("adapter :: read") && !metadata.contains("ok_or"), "{metadata}");
 
     let contract = generated_method(&module, "contract");
     assert_eq!(contract.sig.inputs.len(), 3);
@@ -551,8 +551,12 @@ fn optional_execution_is_nullable_and_contracts_keep_one_description_per_input()
     // Requirement checks bind each input before the contract call; only a
     // required input rejects an absent description.
     let checks: Vec<_> = contract.block.stmts[..2].iter().map(|s| quote!(#s).to_string()).collect();
-    assert!(checks[0].contains(":: drip :: ports :: input") && checks[0].contains("ok_or"));
-    assert!(checks[1].contains(":: drip :: ports :: input") && !checks[1].contains("ok_or"));
+    assert!(
+        checks[0].contains(":: drip :: ports :: adapter :: input") && checks[0].contains("ok_or")
+    );
+    assert!(
+        checks[1].contains(":: drip :: ports :: adapter :: input") && !checks[1].contains("ok_or")
+    );
     let syn::Stmt::Local(described) = &contract.block.stmts[2] else {
         panic!("expected contract call")
     };
@@ -576,10 +580,8 @@ fn forwarded_outputs_publish_storage_the_node_sets() {
     let statements: Vec<_> = run.block.stmts.iter().map(|s| quote!(#s).to_string()).collect();
     // Inputs are materialized and bound before the output slots.
     assert!(statements[0].contains("image . materialize (context)"));
-    assert!(statements[2].contains("ForwardSlot :: < B > :: new"));
-    assert!(statements[2].contains("typed (& outputs [0usize])"));
-    assert!(statements[3].contains("OutputSlot :: < C > :: new"));
-    assert!(statements[3].contains("typed (& outputs [1usize])"));
+    assert!(statements[2].contains("ForwardSlot :: < B > :: new (& outputs [0usize])"));
+    assert!(statements[3].contains("OutputSlot :: < C > :: new (& outputs [1usize])"));
     let call = kernel_call(run, "x");
     let arguments: Vec<_> = call.args.iter().skip(3).map(|a| quote!(#a).to_string()).collect();
     assert_eq!(
@@ -742,7 +744,7 @@ fn reductions_publish_the_host_value_their_body_computes() {
         assert_eq!(run.matches("materialize").count(), 1);
         assert!(run.contains(publish), "{run}");
         assert!(
-            run.contains(":: drip :: ports :: reduced :: < Counts , _ > (& outputs [0]"),
+            run.contains(":: drip :: ports :: adapter :: reduced :: < Counts , _ > (& outputs [0]"),
             "{run}"
         );
         let outputs = generated_struct(&module, "Outputs");
@@ -797,12 +799,13 @@ fn meta_nodes_expand_through_their_function_and_neither_describe_nor_run() {
     let expansion = generated_method(&module, "expand");
     let expansion = quote!(#expansion).to_string();
     for part in [
-        ":: drip :: ports :: input :: < Rgb , Rec2020 > (\"image\" , inputs [0usize] . as_ref ()) ?",
+        ":: drip :: ports :: adapter :: input :: < Rgb , Rec2020 > (\"image\" , inputs [0usize] . \
+         as_ref ()) ?",
         "let mut graph = :: drip :: expand :: SubGraph :: new (& KIND)",
-        "super :: expand (& self . parameters , & mut graph , :: drip :: ports :: Inlet :: < Rgb , \
-         Rec2020 > :: new (0usize , image) , mask . map (| desc | :: drip :: ports :: Inlet :: < \
-         Mask , :: drip :: ports :: Any > :: new (1usize , desc)) , :: drip :: ports :: Outlet :: < \
-         Rgb > :: new (0usize)) ?",
+        "super :: expand (& self . parameters , & mut graph , :: drip :: ports :: adapter :: inlet \
+         :: < Rgb , Rec2020 > (0usize , image) , mask . map (| desc | :: drip :: ports :: adapter \
+         :: inlet :: < Mask , :: drip :: ports :: Any > (1usize , desc)) , :: drip :: ports :: \
+         adapter :: outlet :: < Rgb > (0usize)) ?",
         "graph . finish ()",
     ] {
         assert!(expansion.contains(part), "{part}\n{expansion}");
