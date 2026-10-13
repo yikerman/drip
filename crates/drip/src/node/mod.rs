@@ -8,6 +8,7 @@ pub mod color;
 pub mod data;
 pub mod export;
 pub mod exposure;
+pub mod filter;
 pub mod highlights;
 pub mod orientation;
 pub mod profile;

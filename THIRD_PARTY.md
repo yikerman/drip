@@ -298,3 +298,23 @@ and “Input color profile,” `src/iop/colorin.c`, `commit_params()`.
 <https://github.com/darktable-org/darktable/blob/master/src/iop/colorin.c>.
 Accessed: Oct. 10, 2026. Algorithm reference; source is GPL-3.0-or-later
 ([license](https://github.com/darktable-org/darktable/blob/master/LICENSE)).
+
+## Resampling filters
+
+`node/filter.rs` implements the Mitchell–Netravali cubic family [23] and
+Lanczos-3 [24] from the published formulas; no upstream implementation is
+copied. The outer Mitchell–Netravali piece is factored around its double root
+at the support edge, and `sin(πx)` uses range reduction and a Taylor series
+because WGSL bounds `sin` only on `[−π, π]` [25]. Tests compare both against
+f64 evaluations of the original formulas.
+
+[23] D. P. Mitchell and A. N. Netravali, “Reconstruction filters in computer
+graphics,” *Comput. Graph. (Proc. SIGGRAPH)*, vol. 22, no. 4, pp. 221–228,
+Aug. 1988, doi: [10.1145/378456.378514](https://doi.org/10.1145/378456.378514).
+
+[24] C. E. Duchon, “Lanczos filtering in one and two dimensions,” *J. Appl.
+Meteorol.*, vol. 18, no. 8, pp. 1016–1022, Aug. 1979,
+doi: [10.1175/1520-0450(1979)018<1016:LFIOAT>2.0.CO;2](https://doi.org/10.1175/1520-0450(1979)018%3C1016:LFIOAT%3E2.0.CO;2).
+
+[25] W3C, *WebGPU Shading Language*, sec. 15.7.4, “Floating point accuracy.”
+[Online]. Available: <https://www.w3.org/TR/WGSL/>. Accessed: Oct. 12, 2026.

@@ -4,6 +4,14 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-12
 
+- Added Mitchell–Netravali and Lanczos-3 as shared `#[cube]` filter kernels
+  (`node/filter.rs`), not yet used by a node. The outer Mitchell piece is
+  factored around its double root to avoid f32 cancellation; Lanczos uses a
+  range-reduced Taylor `sin(πx)` because WGSL bounds `sin` only on `[−π, π]`.
+  Host results match f64 evaluations of the published formulas within 2e-7
+  and 3e-7; device results match host within 1e-6 on CPU, WGPU and Vulkan
+  backends. All 178 workspace tests pass with `DRIP_BACKEND=cpu` and
+  `drip/cpu`; strict Clippy and formatting pass.
 - Designed geometry and resampling through continuous fields
   ([FIELD](FIELD.md)) with the user: explicit Interpolate, map-only
   `RgbField -> RgbField` nodes with per-channel maps, one footprint-scaled
