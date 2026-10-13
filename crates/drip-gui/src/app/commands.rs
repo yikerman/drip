@@ -20,7 +20,6 @@ pub(super) type Replace = Box<dyn FnOnce(&mut App)>;
 pub(super) struct Command {
     pub(super) label: &'static str,
     pub(super) shortcut: KeyboardShortcut,
-    /// Whether it replaces the open project.
     replaces: bool,
     available: fn(&App) -> bool,
     run: fn(&mut App),

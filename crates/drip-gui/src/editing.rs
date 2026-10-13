@@ -18,7 +18,6 @@ pub struct Frame<'a> {
     /// The full-detail crop of a node's view that belongs to its shown
     /// result, if the worker holds one.
     pub details: &'a dyn Fn(NodeId) -> Option<&'a Arc<dyn Drawable>>,
-    /// The windows popped out.
     pub popped: &'a BTreeSet<Popped>,
     /// Disables actions while one runs.
     pub actions_disabled: bool,
@@ -176,12 +175,10 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
         self.frame.edit(self.graph, Edit::Ui(self.id, field, value));
     }
 
-    /// Runs the node's action.
     pub fn run(&mut self) {
         self.frame.report.action = Some(self.id);
     }
 
-    /// Whether actions are disabled while one runs.
     pub fn actions_disabled(&self) -> bool {
         self.frame.actions_disabled
     }

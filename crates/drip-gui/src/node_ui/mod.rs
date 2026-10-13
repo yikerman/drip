@@ -92,7 +92,6 @@ pub struct Popped {
 pub enum Part {
     /// The node's parameters, the same for every kind.
     Parameters,
-    /// The prepared view.
     View,
 }
 
@@ -118,7 +117,6 @@ impl Popped {
         }
     }
 
-    /// Draws the window's content.
     pub fn show(self, ui: &mut Ui, node: &mut NodeCx) {
         match self.part {
             Part::Parameters => {

@@ -1,9 +1,9 @@
-//! Photographic scopes: spatial RGB exposure and exposure-independent chromaticity.
+//! Vectorscope: chromaticity in CIE 1976 u′v′ \[1\], independent of exposure.
+//! It uses u′v′ directly, not darktable's lightness-scaled u\*v\*, and clips
+//! negative RGB components only for the plot.
 //!
-//! \[1\] CIE, "CIE 1976 uniform-chromaticity-scale diagram," e-ILV,
-//!     term 17-23-073. <https://cie.co.at/eilvterm/17-23-073>
-//! The vectorscope uses u′v′ directly, not darktable's lightness-scaled u*v*.
-//! Negative RGB components are clipped only for chromaticity visualization.
+//! \[1\] CIE, “CIE 1976 uniform-chromaticity-scale diagram,” e-ILV,
+//! term 17-23-073. \[Online\]. Available: <https://cie.co.at/eilvterm/17-23-073>
 
 use super::{SIZE, Scope, ScopeAxes, scope};
 use crate::node_ui::{GuiNode, Prepare};

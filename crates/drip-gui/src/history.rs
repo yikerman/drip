@@ -1,5 +1,5 @@
 //! Undo history of whole-graph snapshots. Nodes are immutable and shared by
-//! `Arc`, so a snapshot copies entries, edges and labels; a node a later step
+//! `Arc`, so a snapshot copies entries, edges and labels. A node a later step
 //! replaced, with any file it loaded, lives while a step refers to it.
 
 use std::collections::VecDeque;

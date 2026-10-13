@@ -149,7 +149,6 @@ impl App {
         self.record(ui.ctx(), None, changed);
     }
 
-    /// A popped-out window.
     pub fn window(&mut self, ui: &mut Ui, popped: Popped) {
         self.shortcuts(ui.ctx());
         let results = |id| self.worker.result(id);

@@ -1,13 +1,13 @@
-//! One sequential queue per project: previews and node actions run in order
-//! with one evaluator, which keeps materialized values for later demands, and
-//! the outputs of disk-cached foreign nodes such as RAW decode across
-//! projects and sessions. A preview does not wait for a foreign job: views
-//! that need it keep what they showed, the status names the node, and the
-//! preview runs again when the job ends. A view's window magnified beyond its
-//! preview asks for a detail: the visible region of its input at full
-//! detail, evaluated after the preview and shown over it once both belong to
-//! the same graph. The app replaces the worker with its project, discarding
-//! queued work, late replies and the memory store.
+//! One sequential queue per project: previews, details and node actions run
+//! in order on one evaluator, so later demands reuse what it stored, and
+//! decoded RAWs persist in its disk tier across sessions.
+//!
+//! A preview does not wait for a foreign job: views that need it keep what
+//! they showed, the status names the node, and the preview runs again when
+//! the job ends. A detail is the visible region of a magnified view's input
+//! at full detail, evaluated after the preview and shown over it once both
+//! belong to the same graph. The app replaces the worker with its project,
+//! discarding queued work, late replies and the memory store.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};

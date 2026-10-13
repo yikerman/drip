@@ -1,20 +1,34 @@
-//! Interactive frontend for building and tuning node graphs: winit windows,
-//! wgpu output and egui widgets over the drip library. The main window holds
-//! the editor; popped-out nodes get windows of their own.
+//! Drip's interactive frontend: a node canvas, pop-out windows and
+//! colour-managed previews over the drip library, on winit, wgpu and egui.
 //!
-//! `app.rs` owns the project, `editing.rs` applies edits and their effects, and
-//! `worker.rs` schedules background evaluation. `editor.rs`, `inspector.rs` and
-//! `node_ui/` handle interaction; `render/` prepares node views, draws images and
-//! presents each window. `registry.rs` lists the node kinds and presentation
-//! the GUI discovers. This module owns OS windows and the event loop.
+//! An edit changes the graph on the UI thread. Each edit asks the worker to
+//! evaluate the nodes that show a view, and the worker prepares those views
+//! on its own thread, so the UI never waits for the device:
 //!
-//!     drip-gui [project.drip]
+//! ```text
+//! input ─► editor, inspector, node_ui ─► editing: Graph edit ─► app ─► worker queue
+//!                                                                         │ one Evaluator
+//!                                                                         ▼
+//! window ◄── render: draw, present ◄── prepared views ◄── node_ui: Prepare
+//! ```
 //!
-//! Logging goes to stderr. `RUST_LOG=warn,drip=debug,drip_gui=debug` shows
-//! processing diagnostics; `RUST_LOG=warn,drip_gui::frame=trace` shows frame timings.
+//! The parts and their modules:
+//!
+//! - **Project.** `app` owns the project, its windows and evaluation
+//!   requests, `model` the graph with names and layout, and `history` undo.
+//! - **Editing.** `editor` draws the canvas, `inspector` the selected node,
+//!   and `editing` applies what they changed.
+//! - **Evaluation.** `worker` runs previews, full-detail crops and actions in
+//!   order on one evaluator per project.
+//! - **Nodes.** `node_ui` holds node-specific controls, preparation and
+//!   views, listed in `registry`.
+//! - **Presentation.** `render` draws prepared views and presents each
+//!   window colour-managed. This module owns the OS windows and the event
+//!   loop.
+//!
+//! Run `drip-gui [project.drip]`. Logs go to stderr:
 //! `RUST_LOG=warn,drip_gui::worker=trace` adds per-node host timings without
-//! additional GPU synchronization. `DRIP_HISTORY` sets how many undo steps are
-//! kept (default 100).
+//! extra GPU synchronization, and `DRIP_HISTORY` sets the undo depth (100).
 
 mod app;
 mod editing;

@@ -25,8 +25,8 @@ fn contract(_: &GlobalContext, _: &Settings, image: &RgbDesc) -> Result<(CountsD
     Ok((super::counts(SIZE * SIZE, 3, image),))
 }
 /// Plot linear RGB channel exposure against horizontal image position, without a
-/// color conversion; camera RGB shows native channels. Exposure is measured
-/// relative to sample value 1; the density scale controls bin brightness.
+/// color conversion, so camera RGB shows native channels. Exposure is measured
+/// relative to sample value 1. The density scale controls bin brightness.
 #[drip::node(id = "waveform", name = "Waveform", tags = [tag::VIEW, tag::SCOPE], contract = contract, bins = WAVEFORM)]
 pub fn observe(
     p: &Settings,

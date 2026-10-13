@@ -60,7 +60,6 @@ impl ViewState {
 
 /// Where `show` drew the image, for overlays.
 pub(super) struct Shown {
-    /// The navigation area.
     pub area: Rect,
     /// The whole image on screen, possibly beyond `area`.
     pub image: Rect,

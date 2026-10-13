@@ -1,5 +1,5 @@
-//! Inspector help: the node's documentation, then its port
-//! declared concrete port contracts.
+//! Inspector help: the node's Rustdoc, its ports' payloads and requirements,
+//! then its references.
 
 use super::ports;
 use crate::model::Kind;
