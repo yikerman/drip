@@ -6,6 +6,7 @@
 use drip::{
     Error, Result,
     eval::{Evaluator, Policy, Statistics, Target},
+    expand::SubGraph,
     graph::Dag,
     image::Description,
     lattice::Rect,
@@ -29,6 +30,34 @@ fn blurred(dag: &mut Dag, input: Output<Rgb>, levels: i64) -> Output<Rgb> {
 #[drip::node(id = "test-sink")]
 fn sink(_: &KernelContext<'_>, _: &(), _image: Read<'_, Rgb>) -> Result<()> {
     Ok(())
+}
+
+fn refuse(_: &GlobalContext, _: &(), _: &RgbDesc) -> Result<(RgbDesc,)> {
+    Err(Error::Contract("refused".into()))
+}
+
+/// A kernel whose contract always fails.
+#[drip::node(id = "test-refuse", contract = refuse)]
+fn refuser(
+    _: &KernelContext<'_>,
+    _: &(),
+    _image: Read<'_, Rgb>,
+    _output: Write<'_, Rgb>,
+) -> Result<()> {
+    Ok(())
+}
+
+/// A meta node whose sub-graph is one `test-refuse` node.
+#[drip::node(id = "test-refusing-meta", meta)]
+fn refusing(
+    _: &(),
+    graph: &mut SubGraph,
+    image: Inlet<'_, Rgb>,
+    output: Outlet<Rgb>,
+) -> Result<()> {
+    let node = refuser::add(&mut graph.dag, ())?;
+    graph.input(image, node.image)?;
+    graph.output(node.output, output)
 }
 
 /// The expansion holds a Resample and a Sharpen per level and the Resample
@@ -131,10 +160,65 @@ fn a_crop_through_the_pyramid_equals_the_whole_output(runtime: RuntimeContext) {
     assert!(part.samples < all.samples / 2, "{part:?} against {all:?}");
 }
 
+/// Each node of a sub-graph reports its own timing, and a failure inside a
+/// sub-graph names the node it happened on.
+fn sub_graph_nodes_report_their_timings_and_failures(runtime: RuntimeContext) {
+    let mut dag = Dag::new();
+    let input = node::source::<Rgb>(&mut dag, rgb(16, 12), vec![[0.5; 3]; 16 * 12]).unwrap();
+    let blur = blurred(&mut dag, input, 2);
+    let shown = sink::add(&mut dag, ()).unwrap();
+    dag.connect(blur, shown.image).unwrap();
+    let meta = refusing::add(&mut dag, ()).unwrap();
+    dag.connect(input, meta.image).unwrap();
+    let refused = sink::add(&mut dag, ()).unwrap();
+    dag.connect(meta.output, refused.image).unwrap();
+    let targets = [shown.node.into(), refused.node.into()];
+    let mut timings = Vec::new();
+    let evaluator = Evaluator::new(runtime);
+    let global = GlobalContext::default();
+    let mut batch =
+        evaluator.evaluate_batch(&dag, &global, &targets, Policy::Wait, Some(&mut timings));
+    let count = |kind| timings.iter().filter(|timing| timing.kind == kind).count();
+    assert_eq!((count("resample"), count("sharpen"), count("pyramid-blur")), (3, 2, 1));
+    assert!(timings.iter().any(|timing| timing.kind == "test-refuse" && !timing.success));
+    assert!(batch.inputs.remove(&shown.node).unwrap().is_ok());
+    let error = batch.inputs.remove(&refused.node).unwrap().err().unwrap();
+    let Error::Node { kind: "test-refusing-meta", source, .. } = error else { panic!("{error}") };
+    assert!(matches!(*source, Error::Node { kind: "test-refuse", .. }), "{source}");
+}
+
+/// Two meta nodes with equal keys in one demand expand to the same
+/// sub-graph, and both receive its output.
+fn equal_meta_nodes_share_their_expansion(runtime: RuntimeContext) {
+    let mut dag = Dag::new();
+    let pixels = (0..20 * 14).map(|i| [i as f32 * 0.01, 0.5, 1.0]).collect::<Vec<_>>();
+    let input = node::source::<Rgb>(&mut dag, rgb(20, 14), pixels).unwrap();
+    let sinks: Vec<NodeId> = (0..2)
+        .map(|_| {
+            let shown = sink::add(&mut dag, ()).unwrap();
+            let blur = blurred(&mut dag, input, 2);
+            dag.connect(blur, shown.image).unwrap();
+            shown.node
+        })
+        .collect();
+    let targets: Vec<Target> = sinks.iter().map(|&node| node.into()).collect();
+    let evaluator = Evaluator::new(runtime);
+    let global = GlobalContext::default();
+    let mut batch = evaluator.evaluate_batch(&dag, &global, &targets, Policy::Wait, None);
+    let mut pixels = sinks.iter().map(|node| {
+        let values = batch.inputs.remove(node).unwrap().unwrap();
+        let image = values.bind::<sink::Definition>().unwrap().image;
+        image.data.host().unwrap().iter().flat_map(|px| px.map(f32::to_bits)).collect::<Vec<_>>()
+    });
+    assert_eq!(pixels.next(), pixels.next());
+}
+
 fn all(runtime: RuntimeContext) {
     the_expansion_has_two_nodes_per_level_and_one_more();
     a_flat_image_passes_unchanged(runtime.clone());
-    a_crop_through_the_pyramid_equals_the_whole_output(runtime);
+    a_crop_through_the_pyramid_equals_the_whole_output(runtime.clone());
+    sub_graph_nodes_report_their_timings_and_failures(runtime.clone());
+    equal_meta_nodes_share_their_expansion(runtime);
 }
 #[cfg(feature = "cpu")]
 #[test]

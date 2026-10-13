@@ -1,83 +1,87 @@
-//! The expansion of a meta node: its sub-graph's nodes keyed from the meta
-//! node's inputs and run in its place.
-use super::run::{Run, Slot, descriptions, output_id};
-use crate::{Result, expand::Source, graph::Entry, image::Image, ports::NodeId, store::Key};
-use std::collections::{HashMap, HashSet};
+//! A meta node's sub-graph, spliced into the run while the meta node runs.
+//!
+//! Its nodes are keyed from what they read, demanded from the meta node's
+//! outputs, executed in sub-graph order and released after their last
+//! consumer, through the same slots as the graph's nodes. They report their
+//! own timings and failures. A sub-graph holds no meta node, so at most one
+//! expansion is active at a time.
+use super::run::{Run, Slot, descriptions};
+use crate::{
+    Result,
+    expand::{Source, SubGraph},
+    graph::Entry,
+    image::Image,
+    ports::NodeId,
+};
+use std::sync::Arc;
+
+/// The sub-graph of the meta node running now.
+pub(super) struct Expansion {
+    pub graph: Arc<SubGraph>,
+    /// The slots the meta node's inputs read, in its input order.
+    feeds: Vec<Option<Slot>>,
+}
+impl Expansion {
+    pub fn holds(&self, id: NodeId) -> bool {
+        id.graph == self.graph.dag.id
+    }
+
+    /// The values sub-graph node `entry` reads at `scale`: outputs of other
+    /// sub-graph nodes as published, and the meta node's inputs as the meta
+    /// node read them.
+    pub fn inputs(&self, entry: &Entry, scale: u32) -> Vec<Option<Slot>> {
+        (0..entry.inputs.len())
+            .map(|port| match self.graph.source(entry, port)? {
+                Source::Node(from) => Some(Slot::output(from, scale)),
+                Source::Meta(index) => self.feeds[index],
+            })
+            .collect()
+    }
+}
 
 impl Run<'_, '_> {
-    /// Expand meta node `e`, running at `scale` on `inputs` read from
-    /// `slots`, then run the nodes of its sub-graph whose demanded outputs
-    /// the store does not hold, at `scale`. Returns the sub-graph's outputs
-    /// in the meta node's port order. The sub-graph's nodes are keyed from
-    /// the keys of the meta node's inputs, as if they were in the graph.
-    pub(super) fn meta(
+    /// Run meta node `e` at `scale` through its sub-graph, expanded from
+    /// `inputs`, which it read from `feeds`. Returns the sub-graph's outputs
+    /// in the meta node's port order, which the meta node's key keeps.
+    pub(super) fn expand(
         &mut self,
         e: &Entry,
         scale: u32,
-        slots: &[Option<Slot>],
+        feeds: &[Option<Slot>],
         inputs: &[Option<Image>],
     ) -> Result<Vec<Image>> {
-        let key = self.keys[&(e.id.index, scale)].clone()?;
+        let key = self.keys[&(e.id, scale)].clone()?;
         let graph = self.store.expansion(key, || e.node.expand(&descriptions(inputs)))?;
-        let outer: Vec<_> = slots.iter().map(|slot| slot.and_then(|s| self.slot_key(s))).collect();
-        let mut keys: HashMap<NodeId, Key> = HashMap::new();
+        self.expansion = Some(Expansion { graph: graph.clone(), feeds: feeds.to_vec() });
+        let outputs = self.run_expansion(&graph, scale);
+        // The sub-graph's nodes belong to this execution. Another meta node
+        // with an equal key expands to the same sub-graph and runs it again.
+        self.running.retain(|(id, _)| id.graph != graph.dag.id);
+        self.keys.retain(|(id, _), _| id.graph != graph.dag.id);
+        self.expansion = None;
+        outputs
+    }
+
+    fn run_expansion(&mut self, graph: &SubGraph, scale: u32) -> Result<Vec<Image>> {
         for entry in graph.entries() {
-            let inputs: Vec<_> = (0..entry.inputs.len())
-                .map(|port| match graph.source(entry, port)? {
-                    Source::Node(from) => Some(keys[&from.node].output(from.index)),
-                    Source::Meta(index) => outer[index],
-                })
-                .collect();
-            let key = Key::node(entry.node.kind(), &entry.node.identity()?, scale, &inputs);
-            keys.insert(entry.id, key);
+            let key = self.key(entry.id, scale);
+            self.keys.insert((entry.id, scale), key);
         }
-        // Walk back from the outputs as `demand` does: a stored value is a
-        // hit, and a missing one runs its node.
-        let mut values = HashMap::new();
-        let mut running = HashSet::new();
-        let mut demanded: Vec<_> = graph.outputs().collect();
-        while let Some(port) = demanded.pop() {
-            if values.contains_key(&port) || running.contains(&port.node) {
-                continue;
-            }
-            if let Some(image) = self.store.get(keys[&port.node].output(port.index)) {
-                self.hits += 1;
-                values.insert(port, image);
-                continue;
-            }
-            running.insert(port.node);
-            let entry = graph.dag.entry(port.node)?;
-            demanded.extend((0..entry.inputs.len()).filter_map(|port| {
-                match graph.source(entry, port)? {
-                    Source::Node(from) => Some(from),
-                    Source::Meta(_) => None,
+        let outputs: Vec<_> = graph.outputs().map(|port| Slot::output(port, scale)).collect();
+        for &slot in &outputs {
+            self.demand(slot);
+        }
+        let failures = self.execute_all(self.order(&graph.dag));
+        let mut images = Vec::with_capacity(outputs.len());
+        for slot in outputs {
+            images.push(match failures.get(&(slot.port.node, scale)) {
+                Some(error) => {
+                    self.release(slot);
+                    Err(error.clone())
                 }
-            }));
+                None => self.take(slot),
+            });
         }
-        for entry in graph.entries().filter(|entry| running.contains(&entry.id)) {
-            let reads: Vec<_> = (0..entry.inputs.len())
-                .map(|port| match graph.source(entry, port)? {
-                    Source::Node(from) => Some(values[&from].clone()),
-                    Source::Meta(index) => inputs[index].clone(),
-                })
-                .collect();
-            let images = self.run(entry.node.as_ref(), scale, &reads)?;
-            self.nodes += 1;
-            for (port, image) in images.into_iter().enumerate() {
-                values.insert(output_id(entry.id, port), image);
-            }
-        }
-        let outputs: Vec<_> = graph.outputs().collect();
-        // The run stores the meta node's outputs under its own key.
-        for (port, image) in &values {
-            if running.contains(&port.node)
-                && !outputs.contains(port)
-                && image.footprint().is_some()
-            {
-                let durability = graph.dag.entry(port.node)?.node.kind().durability();
-                self.store.insert(keys[&port.node].output(port.index), image.clone(), durability);
-            }
-        }
-        Ok(outputs.iter().map(|port| values[port].clone()).collect())
+        images.into_iter().collect()
     }
 }

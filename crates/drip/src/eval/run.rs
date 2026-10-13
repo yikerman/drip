@@ -2,6 +2,7 @@
 //! values on live edges and the order nodes run in.
 use super::{
     Evaluator, NodeTiming, Policy,
+    meta::Expansion,
     values::{InputValues, cut},
 };
 use crate::{
@@ -45,6 +46,11 @@ enum Derivation {
     Cut(Rect),
 }
 impl Slot {
+    /// Output `port` as its node publishes it at `scale`.
+    pub fn output(port: PortId, scale: u32) -> Self {
+        Self { port, scale, reduce: None, region: None }
+    }
+
     /// The value this one derives from, and how.
     fn parent(self) -> Option<(Slot, Derivation)> {
         match self {
@@ -61,24 +67,27 @@ impl Slot {
 
 /// One call's evaluation: the scale each needed node runs at, the keys of
 /// the values it may read, the nodes it runs and the values on its live
-/// edges. It holds the evaluator's store for its duration.
+/// edges. It holds the evaluator's store for its duration. While a meta
+/// node runs, the nodes of its sub-graph are nodes of the run too.
 pub(super) struct Run<'a, 't> {
     dag: &'a Dag,
     runtime: &'a RuntimeContext,
     scale: u32,
     pub store: MutexGuard<'a, Store>,
     policy: Policy,
-    /// Indices of the nodes whose outputs at the requested scale differ from
-    /// their outputs at full detail. The others run at scale 1.
-    scaled: HashSet<usize>,
+    /// The nodes whose outputs at the requested scale differ from their
+    /// outputs at full detail. The others run at scale 1.
+    scaled: HashSet<NodeId>,
     regions: HashMap<NodeId, Rect>,
-    /// Per node index and the scale it runs at, the key its output keys
-    /// derive from, or why the node or an input has none.
-    pub keys: HashMap<(usize, u32), Result<Key>>,
+    /// Per node and the scale it runs at, the key its output keys derive
+    /// from, or why the node or an input has none.
+    pub keys: HashMap<(NodeId, u32), Result<Key>>,
     /// Demanded values, with the consumers still to read each.
     live: HashMap<Slot, Live>,
-    /// The nodes this run executes, by index and scale.
-    running: HashSet<(usize, u32)>,
+    /// The nodes this run executes, at the scale each runs at.
+    pub running: HashSet<(NodeId, u32)>,
+    /// The sub-graph of the meta node running now.
+    pub expansion: Option<Expansion>,
     pub nodes: usize,
     pub hits: usize,
     /// The store's read and eviction counts when the run began.
@@ -143,6 +152,7 @@ impl<'a, 't> Run<'a, 't> {
             keys: HashMap::new(),
             live: HashMap::new(),
             running: HashSet::new(),
+            expansion: None,
             nodes: 0,
             hits: 0,
             reads,
@@ -152,42 +162,48 @@ impl<'a, 't> Run<'a, 't> {
         // The scales each node is read at: the request's from the roots, and
         // full detail from a foreign node up.
         let mut requested = HashSet::new();
-        let mut stack: Vec<_> = roots.into_iter().map(|id| (id.index, global.scale)).collect();
-        while let Some((index, scale)) = stack.pop() {
-            if requested.insert((index, scale)) {
-                let entry = run.entry(index);
+        let mut stack: Vec<_> = roots.into_iter().map(|id| (id, global.scale)).collect();
+        while let Some((id, scale)) = stack.pop() {
+            if requested.insert((id, scale)) {
+                let entry = run.entry(id);
                 let read = if entry.node.kind().shape.reads_full_detail() { 1 } else { scale };
-                stack.extend(entry.inputs.iter().flatten().map(|from| (from.node.index, read)));
+                stack.extend(entry.inputs.iter().flatten().map(|from| (from.node, read)));
             }
         }
-        for &index in &dag.order {
-            let entry = run.entry(index);
-            if requested.contains(&(index, run.scale)) && run.depends(entry) {
-                run.scaled.insert(index);
+        for entry in dag.order.iter().filter_map(|&index| dag.entries[index].as_ref()) {
+            let id = entry.id;
+            if requested.contains(&(id, run.scale)) && run.depends(entry) {
+                run.scaled.insert(id);
             }
             for read in [1, run.scale] {
-                let scale = run.scale_of(index, read);
-                if requested.contains(&(index, read)) && !run.keys.contains_key(&(index, scale)) {
-                    let key = run.key(entry, scale);
-                    run.keys.insert((index, scale), key);
+                let scale = run.scale_of(id, read);
+                if requested.contains(&(id, read)) && !run.keys.contains_key(&(id, scale)) {
+                    let key = run.key(id, scale);
+                    run.keys.insert((id, scale), key);
                 }
             }
         }
         run
     }
 
-    fn entry(&self, index: usize) -> &'a Entry {
-        self.dag.entries[index].as_ref().expect("needed nodes exist")
+    /// Node `id` of the graph, or of the sub-graph of the meta node running
+    /// now.
+    fn entry(&self, id: NodeId) -> &Entry {
+        let dag = match &self.expansion {
+            Some(expansion) if expansion.holds(id) => &expansion.graph.dag,
+            _ => self.dag,
+        };
+        dag.entries[id.index].as_ref().expect("needed nodes exist")
     }
 
-    pub(super) fn reduces(&self, index: usize) -> bool {
-        self.entry(index).node.kind().shape.reduces()
+    pub(super) fn reduces(&self, id: NodeId) -> bool {
+        self.entry(id).node.kind().shape.reduces()
     }
 
     /// Whether `port` carries images on a plane, which evaluation reduces
     /// and cuts.
     fn planar(&self, port: PortId) -> bool {
-        self.entry(port.node.index).node.kind().outputs[port.index].planar
+        self.entry(port.node).node.kind().outputs[port.index].planar
     }
 
     /// Whether `entry`'s outputs at the requested scale differ from its
@@ -204,34 +220,30 @@ impl<'a, 't> Run<'a, 't> {
                     .inputs
                     .iter()
                     .flatten()
-                    .any(|from| self.scaled.contains(&from.node.index) || self.planar(*from)))
+                    .any(|from| self.scaled.contains(&from.node) || self.planar(*from)))
     }
 
-    /// The scale node `index` runs at when read at `scale`.
-    pub(super) fn scale_of(&self, index: usize, scale: u32) -> u32 {
-        if scale > 1 && self.scaled.contains(&index) { scale } else { 1 }
+    /// The scale node `id` runs at when read at `scale`.
+    pub(super) fn scale_of(&self, id: NodeId, scale: u32) -> u32 {
+        if scale > 1 && self.scaled.contains(&id) { scale } else { 1 }
     }
 
-    /// The key of `entry` running at `scale`: its identity, the scale for a
-    /// scaled shape, and the keys of the values it reads.
-    fn key(&self, entry: &Entry, scale: u32) -> Result<Key> {
+    /// The key of node `id` running at `scale`: its identity, the scale for
+    /// a scaled shape, and the keys of the values it reads.
+    pub(super) fn key(&self, id: NodeId, scale: u32) -> Result<Key> {
         // A connected input without a key leaves the node without one.
-        let inputs = entry
-            .inputs
-            .iter()
-            .map(|from| {
-                from.map(|from| {
-                    let slot = self.edge(Some(entry), scale, from);
-                    self.slot_key(slot).ok_or_else(|| self.key_error(slot))
-                })
-                .transpose()
-            })
+        let inputs = self
+            .inputs(id, scale)
+            .into_iter()
+            .map(|slot| slot.map(|slot| self.slot_key(slot).ok_or_else(|| self.key_error(slot))))
+            .map(Option::transpose)
             .collect::<Result<Vec<_>>>()?;
-        Ok(Key::node(entry.node.kind(), &entry.node.identity()?, scale, &inputs))
+        let node = &self.entry(id).node;
+        Ok(Key::node(node.kind(), &node.identity()?, scale, &inputs))
     }
 
     fn key_error(&self, slot: Slot) -> Error {
-        match self.keys.get(&(slot.port.node.index, slot.scale)) {
+        match self.keys.get(&(slot.port.node, slot.scale)) {
             Some(Err(error)) => error.clone(),
             _ => Error::Runtime("an input was not keyed".into()),
         }
@@ -246,9 +258,9 @@ impl<'a, 't> Run<'a, 't> {
     pub(super) fn edge(&self, consumer: Option<&Entry>, scale: u32, port: PortId) -> Slot {
         let full_detail = consumer.is_some_and(|entry| entry.node.kind().shape.reads_full_detail());
         let read = if full_detail { 1 } else { scale };
-        let at = self.scale_of(port.node.index, read);
+        let at = self.scale_of(port.node, read);
         let planar = self.planar(port);
-        let claimed = self.entry(port.node.index).node.kind().shape.produces_at_scale();
+        let claimed = self.entry(port.node).node.kind().shape.produces_at_scale();
         let scaled = consumer.is_some_and(|entry| entry.node.kind().shape.scaled());
         // A warp's output can be finer than the scale: Orientation keeps the
         // sampling of a full-detail input.
@@ -257,29 +269,31 @@ impl<'a, 't> Run<'a, 't> {
         Slot { port, scale: at, reduce, region: region.copied() }
     }
 
-    /// The values `node`, running at `scale`, reads, in input order.
-    fn inputs(&self, node: NodeId, scale: u32) -> Vec<Option<Slot>> {
-        let entry = self.entry(node.index);
-        entry
-            .inputs
-            .iter()
-            .map(|from| from.map(|from| self.edge(Some(entry), scale, from)))
-            .collect()
+    /// The values node `id`, running at `scale`, reads, in input order.
+    fn inputs(&self, id: NodeId, scale: u32) -> Vec<Option<Slot>> {
+        let entry = self.entry(id);
+        match &self.expansion {
+            Some(expansion) if expansion.holds(id) => expansion.inputs(entry, scale),
+            _ => entry
+                .inputs
+                .iter()
+                .map(|from| from.map(|from| self.edge(Some(entry), scale, from)))
+                .collect(),
+        }
     }
 
     /// The values a frontend consumes of target `node` running at `scale`:
     /// a reduction's outputs, any other node's inputs.
     pub(super) fn consumed(&self, node: NodeId, scale: u32) -> Vec<Option<Slot>> {
-        if !self.reduces(node.index) {
+        if !self.reduces(node) {
             return self.inputs(node, scale);
         }
-        let outputs = self.entry(node.index).node.kind().outputs.len();
-        let output = |port| Slot { port: output_id(node, port), scale, reduce: None, region: None };
-        (0..outputs).map(|port| Some(output(port))).collect()
+        let outputs = self.entry(node).node.kind().outputs.len();
+        (0..outputs).map(|port| Some(Slot::output(output_id(node, port), scale))).collect()
     }
 
     pub(super) fn slot_key(&self, slot: Slot) -> Option<Key> {
-        let key = self.keys.get(&(slot.port.node.index, slot.scale))?.as_ref().ok()?;
+        let key = self.keys.get(&(slot.port.node, slot.scale))?.as_ref().ok()?;
         let key = key.output(slot.port.index);
         let key = slot.reduce.map_or(key, |scale| key.reduced(scale));
         Some(slot.region.map_or(key, |region| key.region(region)))
@@ -288,7 +302,7 @@ impl<'a, 't> Run<'a, 't> {
     /// How the disk tier stores `slot`, when it is an output of a `foreign =
     /// disk` node.
     fn codec(&self, slot: Slot) -> Option<&'static Codec> {
-        let codecs = self.entry(slot.port.node.index).node.kind().shape.codecs();
+        let codecs = self.entry(slot.port.node).node.kind().shape.codecs();
         codecs.get(slot.port.index).filter(|_| slot.parent().is_none())
     }
 
@@ -315,51 +329,57 @@ impl<'a, 't> Run<'a, 't> {
                 live.state = State::Deriving;
                 self.demand(parent);
             }
-            (None, None) => self.schedule(slot.port.node.index, slot.scale),
+            (None, None) => self.schedule(slot.port.node, slot.scale),
         }
     }
 
-    /// Run node `index` at `scale` in this call, demanding what it reads.
-    pub(super) fn schedule(&mut self, index: usize, scale: u32) {
-        if self.running.insert((index, scale)) {
-            for slot in self.inputs(self.entry(index).id, scale).into_iter().flatten() {
+    /// Run node `id` at `scale` in this call, demanding what it reads.
+    pub(super) fn schedule(&mut self, id: NodeId, scale: u32) {
+        if self.running.insert((id, scale)) {
+            for slot in self.inputs(id, scale).into_iter().flatten() {
                 self.demand(slot);
             }
         }
     }
 
-    /// The scheduled nodes in graph order, each at its scale.
-    pub(super) fn order(&self) -> Vec<(usize, u32)> {
+    /// The scheduled nodes of `dag` in its order, each at its scale.
+    pub(super) fn order(&self, dag: &Dag) -> Vec<(NodeId, u32)> {
         let scales = if self.scale > 1 { vec![1, self.scale] } else { vec![1] };
-        let dag = self.dag;
         dag.order
             .iter()
-            .flat_map(|&index| scales.iter().map(move |&scale| (index, scale)))
+            .filter_map(|&index| dag.entries[index].as_ref())
+            .flat_map(|entry| scales.iter().map(|&scale| (entry.id, scale)))
             .filter(|at| self.running.contains(at))
             .collect()
     }
 
-    pub(super) fn execute_batch(&mut self) -> HashMap<(usize, u32), Error> {
+    /// Execute the scheduled nodes `order` in that order. A node whose
+    /// input failed does not run and fails with that input's error, so each
+    /// failure names the node it happened on.
+    pub(super) fn execute_all(
+        &mut self,
+        order: Vec<(NodeId, u32)>,
+    ) -> HashMap<(NodeId, u32), Error> {
         let mut failures = HashMap::new();
-        for (index, scale) in self.order() {
-            let entry = self.entry(index);
+        for (id, scale) in order {
             let upstream = self
-                .inputs(entry.id, scale)
+                .inputs(id, scale)
                 .into_iter()
                 .flatten()
-                .find_map(|slot| failures.get(&(slot.port.node.index, slot.scale)).cloned());
+                .find_map(|slot| failures.get(&(slot.port.node, slot.scale)).cloned());
             let result = if let Some(error) = upstream {
-                self.release_inputs(index, scale);
+                self.release_inputs(id, scale);
                 Err(error)
             } else {
-                self.execute(index, scale).map_err(|source| Error::Node {
-                    node: entry.id,
-                    kind: entry.node.kind().id,
+                let kind = self.entry(id).node.kind().id;
+                self.execute(id, scale).map_err(|source| Error::Node {
+                    node: id,
+                    kind,
                     source: Box::new(source),
                 })
             };
             if let Err(error) = result {
-                failures.insert((index, scale), error);
+                failures.insert((id, scale), error);
             }
         }
         failures
@@ -372,13 +392,13 @@ impl<'a, 't> Run<'a, 't> {
     pub(super) fn collect(
         &mut self,
         node: NodeId,
-        failures: &HashMap<(usize, u32), Error>,
+        failures: &HashMap<(NodeId, u32), Error>,
     ) -> Result<InputValues> {
-        let scale = self.scale_of(node.index, self.scale);
+        let scale = self.scale_of(node, self.scale);
         let slots = self.consumed(node, scale);
-        let kind = self.entry(node.index).node.kind();
+        let kind = self.entry(node).node.kind();
         let budget = self.runtime.budget().device;
-        let result = match failures.get(&(node.index, scale)) {
+        let result = match failures.get(&(node, scale)) {
             Some(error) => Err(error.clone()),
             None => slots
                 .iter()
@@ -394,7 +414,7 @@ impl<'a, 't> Run<'a, 't> {
                 })
                 .collect::<Result<Vec<_>>>()
                 .map(|values| {
-                    let (values, outputs) = if self.reduces(node.index) {
+                    let (values, outputs) = if self.reduces(node) {
                         (vec![None; kind.inputs.len()], values.into_iter().flatten().collect())
                     } else {
                         (values, Vec::new())
@@ -435,11 +455,23 @@ impl<'a, 't> Run<'a, 't> {
         Ok(image)
     }
 
-    pub(super) fn execute(&mut self, index: usize, scale: u32) -> Result<()> {
-        let e = self.entry(index);
+    /// The value of `slot` for a consumer that publishes it under a key of
+    /// its own, as a meta node publishes its sub-graph's outputs, then
+    /// release it without storing it under its own.
+    pub(super) fn take(&mut self, slot: Slot) -> Result<Image> {
+        let image = self.resolve(slot);
+        if let Some(Live { state: State::Ready { shared, .. }, .. }) = self.live.get_mut(&slot) {
+            *shared = true;
+        }
+        self.release(slot);
+        image
+    }
+
+    pub(super) fn execute(&mut self, id: NodeId, scale: u32) -> Result<()> {
+        let e = self.entry(id).clone();
         let start = self.timings.as_ref().map(|_| Instant::now());
-        let result = self.compute(e, scale);
-        self.release_inputs(index, scale);
+        let result = self.compute(&e, scale);
+        self.release_inputs(id, scale);
         if let (Some(start), Some(timings)) = (start, self.timings.as_mut()) {
             timings.push(NodeTiming {
                 node: e.id,
@@ -478,7 +510,7 @@ impl<'a, 't> Run<'a, 't> {
                 e.node.contract(&FULL, &descriptions(&inputs))?;
                 self.run_foreign(e, cache, inputs)?
             }
-            Shape::Meta => self.meta(e, scale, &slots, &inputs)?,
+            Shape::Meta => self.expand(e, scale, &slots, &inputs)?,
             _ => self.run(e.node.as_ref(), scale, &inputs)?,
         };
         if result.len() != specs.len() {
@@ -486,7 +518,7 @@ impl<'a, 't> Run<'a, 't> {
         }
         self.nodes += 1;
         for (port, image) in result.into_iter().enumerate() {
-            let slot = Slot { port: output_id(e.id, port), scale, reduce: None, region: None };
+            let slot = Slot::output(output_id(e.id, port), scale);
             match self.live.get_mut(&slot) {
                 Some(live) => live.state = State::Ready { image, shared: false },
                 None => self.keep(slot, image),
@@ -497,12 +529,7 @@ impl<'a, 't> Run<'a, 't> {
 
     /// Run `node`'s contract on its inputs' descriptions, then `node`, at
     /// `scale` when its shape is scaled and at scale 1 otherwise.
-    pub(super) fn run(
-        &self,
-        node: &dyn Node,
-        scale: u32,
-        inputs: &[Option<Image>],
-    ) -> Result<Vec<Image>> {
+    fn run(&self, node: &dyn Node, scale: u32, inputs: &[Option<Image>]) -> Result<Vec<Image>> {
         let shape = node.kind().shape;
         // Only a scaled shape reads the scale, which keys it.
         let global = GlobalContext { scale: if shape.scaled() { scale } else { 1 } };
@@ -525,7 +552,7 @@ impl<'a, 't> Run<'a, 't> {
         cache: Cache,
         inputs: Vec<Option<Image>>,
     ) -> Result<Vec<Image>> {
-        let key = self.keys[&(e.id.index, 1)].clone()?;
+        let key = self.keys[&(e.id, 1)].clone()?;
         let kernels = self.kernels();
         for image in inputs.iter().flatten() {
             image.materialize(&kernels)?;
@@ -536,8 +563,8 @@ impl<'a, 't> Run<'a, 't> {
         self.store.foreign(key, cache, wait, compute).unwrap_or(Err(Error::Pending))
     }
 
-    fn release_inputs(&mut self, index: usize, scale: u32) {
-        for slot in self.inputs(self.entry(index).id, scale).into_iter().flatten() {
+    fn release_inputs(&mut self, id: NodeId, scale: u32) {
+        for slot in self.inputs(id, scale).into_iter().flatten() {
             self.release(slot);
         }
     }
@@ -570,7 +597,7 @@ impl<'a, 't> Run<'a, 't> {
             return;
         }
         if let Some(key) = self.slot_key(slot) {
-            let kind = self.entry(slot.port.node.index).node.kind();
+            let kind = self.entry(slot.port.node).node.kind();
             self.store.insert(key, image, kind.durability());
         }
     }

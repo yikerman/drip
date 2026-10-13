@@ -12,7 +12,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Stencil load fusion | Idea | Maps before a stencil run in a launch of their own. Fusing them into the taps recomputes them `(2R + 1)²` times, so measure first. |
 | Separable stencils | Idea | Sharpen reads 121 taps per sample at its default reach, 14 ms over the tail at full detail. A row and a column pass would read `2(2R + 1)`, as a stencil shape or a meta node of two stencils. |
 | Two-image maps | Open | A map reads one image, so Pyramid blur cannot blend its blur with its input, which local contrast and masked edits need. A body over a pixel of several images on one lattice would fuse such a blend. |
-| Meta expansion | Follow-up | Sub-graph nodes are absent from `Dag::order`, so their time counts as the meta node's and a frontend cannot target them. Revisit when a meta node needs foreign or meta nodes inside, or when contracts run before evaluation. |
+| Meta expansion | Follow-up | Sub-graph nodes are absent from `Dag::order`, so a frontend cannot target them. Revisit when a meta node needs foreign or meta nodes inside, or when contracts run before evaluation. |
 | Bayer stencils | Open | Hot pixels and demosaic passes as stencils need windows aligned to CFA cells and a lattice per phase. |
 | Tiled export | Follow-up | Whole kernels upstream still allocate the whole image on the device, and the TIFF encoder takes one host buffer because tiff 0.11.3's `write_strip` ignores compression. Stream strips when the encoder allows it, and band JPEG export too. |
 | Foreign job cancellation | Open | A job no demand needs runs to its end. Add a cooperative check when a foreign node can stop early, such as a denoiser. |

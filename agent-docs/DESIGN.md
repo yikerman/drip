@@ -334,6 +334,11 @@ decisions from the compute-model migration and later.
   inputs resolve, because expansion reads input descriptions that exist only
   once upstream nodes have run. Expanding before keying would need a
   describing pass that foreign nodes cannot join.
+- **Decided (2026-10-13):** Sub-graph nodes join the run that reaches
+  their meta node: they share its keys, demand, lifetimes, timings and
+  failure attribution, and run while the meta node runs. A second, smaller
+  evaluator had duplicated the keying and store lookups and held every
+  sub-graph value until the expansion ended.
 - **Decided (2026-10-13):** The store memoizes the 64 expansions used last
   by the meta node's key. Equal input keys mean equal descriptions. Failed
   expansions are not kept.

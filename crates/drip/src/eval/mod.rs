@@ -46,9 +46,10 @@
 //!   pixel when it is the input's only consumer in the run. Otherwise the
 //!   input materializes once for every consumer.
 //! - **Meta nodes.** A meta node expands when it runs, once its inputs'
-//!   descriptions exist. Its sub-graph's nodes are keyed from the meta node's
-//!   input keys as if they were in the graph, served from the store walking
-//!   back from the outputs, and run at the meta node's scale.
+//!   descriptions exist. Its sub-graph's nodes then join the run at the meta
+//!   node's scale: keyed from what they read, demanded from the meta node's
+//!   outputs and run, timed and released like the graph's nodes. A failure
+//!   among them names the sub-graph node inside the meta node's error.
 //! - **Foreign nodes.** The run materializes a foreign node's inputs and
 //!   takes the store's job for its key. [`Policy::Wait`] blocks on a running
 //!   job. [`Policy::Defer`] fails the node and its consumers with
@@ -234,11 +235,12 @@ impl Evaluator {
     /// inside the `Error::Node` of that job's node.
     ///
     /// `timings` receives host timings for attempted nodes in execution order.
-    /// Shared ancestors appear once per scale they run at. Nodes skipped after
-    /// upstream failure, and nodes whose values the store held, do not appear.
-    /// Recording adds no device waits. Existing readback waits are charged to
-    /// the consuming node, and the terminal device wait is outside these
-    /// measurements.
+    /// Shared ancestors appear once per scale they run at. A meta node's
+    /// sub-graph nodes appear before it, and its time includes theirs. Nodes
+    /// skipped after upstream failure, and nodes whose values the store held,
+    /// do not appear. Recording adds no device waits. Existing readback waits
+    /// are charged to the consuming node, and the terminal device wait is
+    /// outside these measurements.
     pub fn evaluate_batch(
         &self,
         dag: &Dag,
@@ -260,18 +262,18 @@ impl Evaluator {
         let mut run = Run::new(self, dag, global, policy, valid.iter().map(|t| t.node), regions);
         run.timings = timings;
         for target in &valid {
-            let at = run.scale_of(target.node.index, global.scale);
+            let at = run.scale_of(target.node, global.scale);
             // A reduction's outputs are demanded like any value, so a stored
             // one runs nothing.
-            if !run.reduces(target.node.index) {
-                run.schedule(target.node.index, at);
+            if !run.reduces(target.node) {
+                run.schedule(target.node, at);
             }
             // Collecting the target's values reads each once more.
             for slot in run.consumed(target.node, at).into_iter().flatten() {
                 run.demand(slot);
             }
         }
-        let failures = run.execute_batch();
+        let failures = run.execute_all(run.order(dag));
         for target in &valid {
             inputs.insert(target.node, run.collect(target.node, &failures));
         }
@@ -298,8 +300,8 @@ impl Evaluator {
         let mut run = Run::new(self, dag, global, Policy::Wait, [target.node()], HashMap::new());
         let slot = run.edge(None, global.scale, target.id);
         run.demand(slot);
-        for (index, scale) in run.order() {
-            run.execute(index, scale)?;
+        for (id, scale) in run.order(dag) {
+            run.execute(id, scale)?;
         }
         let image = run.resolve(slot)?;
         image.materialize(&run.kernels())?;
