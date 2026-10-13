@@ -4,69 +4,69 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 
 | Work | Status | Remaining scope |
 |------|--------|-----------------|
-| Explicit compute model | Landed | All eight steps of the [migration](COMPUTE_MODEL.md#migration-in-the-drip-crate) landed on 2026-10-13. Map, warp, resample, reduce, bins and stencil bodies read only `Rgb`. Other payloads and non-projective warps (lens distortion) wait for a node that needs them, and maps with several inputs have a row below. Foreign nodes have fixed arity, so stacking many frames needs its own input design. |
-| Waveform pass | Follow-up | The generic bins pass counts a level-1 waveform in 2.3 ms against 1.6 ms for the per-column kernel it replaced, in five global copies of 196 608 counts. Counts that a body confines to a column of position could accumulate per workgroup in shared memory, as that kernel did, if a bins body can declare it. |
-| Scope output ports | Open | Histogram, Waveform and Vectorscope show their `Counts` output as a port that no node accepts. Decide whether the canvas hides outputs nothing consumes or keeps them for future consumers. |
-| Reduction readback | Follow-up | Each reduce or bins pass reads its result back before the next node runs, so a preview with three scopes waits three times. Keep results on the device until a consumer reads them, and measure. |
-| Kernel halos | Open | Opaque kernels run whole, so a 100 % crop computes the whole RCD once per scale-1 graph. A `#[node(halo = N)]` kernel needs its output region before it runs, which warps between it and the target describe only after it runs, so it needs lazily run kernels or a describing pass, and Bayer windows aligned to CFA cells. Stencils grow regions by their reach without either. See [DESIGN](DESIGN.md#compute). |
-| Stencil load fusion | Idea | A stencil's input materializes, so maps before it run in a launch of their own. Fusing them into the stencil's taps recomputes them per tap, `(2R + 1)²` times for Sharpen. Measure against the materialized input before adding a declaration for it. |
-| Separable stencils | Idea | Sharpen reads `(2R + 1)²` taps per sample, 121 at its default reach and 14 ms over the tail at full detail on the Sony fixture. A Gaussian separates into two passes of `2R + 1` taps with one intermediate image. A stencil shape with a row and a column pass, or a meta node of two stencils, could express it. |
-| Two-image maps | Open | A map reads one image per pixel, so Pyramid blur cannot blend its blur with its input, which local contrast and masked edits (Blend) need. A body over a pixel of each of several images on one lattice would fuse such a blend into the segment of its first input. |
-| Meta expansion | Follow-up | A meta node expands when it runs, so its sub-graph's nodes are absent from `Dag::order`: their time counts in the meta node's timing, and a frontend cannot target one of them. Sub-graphs hold no foreign or meta node. Revisit when a meta node needs either, or when contracts run before evaluation. |
-| Bayer stencils | Open | Stencils read `MapPayload`s only. Hot pixels and demosaic passes on Bayer data need windows aligned to CFA cells and a lattice per phase. |
-| Tiled export | Follow-up | Export TIFF computes an image over the device budget in bands of the fused tail, equal byte for byte. Whole kernels upstream (RCD) still allocate the whole image on the device, and the encoder takes the converted image in one host buffer, since tiff 0.11.3's `write_strip` writes uncompressed strips unless `write_data` set the compression. Stream strips when the encoder allows it. JPEG export binds its image whole. |
-| Foreign job cancellation | Open | A job no demand needs runs to its end. Add a cooperative cancellation check when a foreign node can stop early, such as a denoiser or a solver. RAW decode is one LibRaw call and cannot. |
-| Disk tier reads | Follow-up | A disk hit reads on the evaluating thread: 89 ms for the Sony mosaic from the page cache, more from a cold disk. Measure a cold read before moving reads onto the job thread. A disk node with inputs still demands them when its outputs are on disk, which no node does yet. |
-| Store accounting | Follow-up | The store charges each entry its payload's `byte_len` per side. Entries that share storage (`Forward` outputs, no-op plans) are charged twice. Budgets do not bound the values a running evaluation holds, nor the outputs of a foreign job no run has taken yet. Measure device memory over a long editing session before refining. |
-| Benchmark protocol | Open | The ±0.1 EV alternation returns to stored values from its third sample. The step 4 run added five requests with a new EV each. Confirm with the user whether the protocol adopts that scenario. |
-| Step 3 measurement | Follow-up | Time the template tail with Orientation (one launch instead of two) and a geometry-free tail against 17142d6 on the Sony fixture, extending the harness in `../drip-benchmark-results/2026-10-13-fusion/`. Not run in step 3. |
-| Raster runtime identity | Follow-up | A raster's device representation belongs to the runtime that made it, and `Raster::device` does not check that a later caller uses the same runtime. The store lives in one evaluator, so its entries share the evaluator's runtime. Check or key it if a store ever serves several runtimes. `Statistics` counts per runtime, so concurrent evaluations on one runtime mix their counts. |
-| Remaining simplifications | Follow-up | Revisit shared preparation/kernel context, colorimetry functions and derived shader matrices, evaluation-loop consolidation and preview-context ownership separately. Presentation-only edits need a drawing/preparation path: a scope's density scale is a parameter, so changing it counts again. `InputValues` also carries a reduction target's outputs, and could be renamed. |
-| Packaged proof of concept | Next | Verify saved edits and full-detail RAW-to-TIFF use, plus installation/launch on clean desktops. Record supported environments and known limitations. |
-| Portable artifacts | Next | Add Linux `.tar.xz`/Flatpak and macOS `.app` bundles. Choose Linux minimum systems, macOS deployment target and Windows runtime packaging. Audit runtime-loaded dependencies. Preserve executable permissions, bundle submodule sources, and include build provenance/notices. |
-| Build portability | Open | Verify Rust 1.95 and full native Windows/macOS builds and staging. |
-| Display portability | Open | Verify Windows/macOS tagging, reference white, monitor/profile transitions and Advanced Color on/off. Legacy Windows needs ICC output. Exercise NVIDIA, other compositors and HDR white. |
-| Image/color validation | Follow-up | Review detail, highlights and color against measured targets. Measure the display path with SpyderX. Not a proof-of-concept gate. |
-| Scene-illuminant white balance | Integration test pending | Implemented. A user check verifies it: saved overrides reopen unchanged, and full-detail preview and export agree. |
-| Photo orientation | Integration test pending | Implemented. A user check verifies it: preview, override, project reopening and TIFF orientation. |
-| Auto exposure | Integration test pending | Implemented on the worker queue. A user check verifies it: real-photo response, repeated clicks, saved EV and preview/export agreement. |
-| Perspective Transform view | Integration test pending | Tests cover preparation on the compute runtime and the frame geometry. A desktop session verifies the handles, Keep inside and Fit. |
-| White-balance controls | Follow-up | Add temperature/tint and neutral sampling to the CAT16 controls when needed. Initial controls accept source xy. |
-| Partial chromatic adaptation | Deferred | Define whether the aim is manual mood preservation or observer-appearance prediction before adding adaptation-degree controls. Compare generalized/two-step CAT16 and WGM against photographic examples. |
-| Exposure normalization | Deferred | Neither manual exposure nor mean-to-18% metering calibrates an 18% scene reflector. Automatic baseline handling and cross-camera exposure matching need a defined convention and validation. |
-| Output-gamut rendering | Deferred | Revisit explicit target-gamut rendering only when image evidence warrants it. Distinguish source compression from output mapping. |
-| CJK text | Deferred | Embedded fonts cover Latin, Greek and Cyrillic, and CJK names and paths render as `?`. Prefer a system-font fallback at runtime over embedding Source Han Sans (several MB per region and weight). |
+| Compute model coverage | Follow-up | Deferred shapes read only `Rgb`, and warps are projective. Other payloads, lens distortion and many-frame foreign inputs wait for a node that needs them. |
+| Waveform pass | Follow-up | The generic bins pass counts a level-1 waveform in 2.3 ms against 1.6 ms for the per-column kernel it replaced. A bins body that confines counts to a column could accumulate per workgroup in shared memory. |
+| Scope output ports | Open | The scopes' `Counts` output shows as a port no node accepts. Decide whether the canvas hides outputs nothing consumes. |
+| Reduction readback | Follow-up | Each reduction reads its result back before the next node runs, so three scopes wait three times. Keep results on the device until read, and measure. |
+| Kernel halos | Open | Opaque kernels run whole, so a 100 % crop computes the whole RCD once per graph. A `halo` declaration needs lazily run kernels or a describing pass, and CFA-aligned Bayer windows ([DESIGN](DESIGN.md#compute)). |
+| Stencil load fusion | Idea | Maps before a stencil run in a launch of their own. Fusing them into the taps recomputes them `(2R + 1)²` times, so measure first. |
+| Separable stencils | Idea | Sharpen reads 121 taps per sample at its default reach, 14 ms over the tail at full detail. A row and a column pass would read `2(2R + 1)`, as a stencil shape or a meta node of two stencils. |
+| Two-image maps | Open | A map reads one image, so Pyramid blur cannot blend its blur with its input, which local contrast and masked edits need. A body over a pixel of several images on one lattice would fuse such a blend. |
+| Meta expansion | Follow-up | Sub-graph nodes are absent from `Dag::order`, so their time counts as the meta node's and a frontend cannot target them. Revisit when a meta node needs foreign or meta nodes inside, or when contracts run before evaluation. |
+| Bayer stencils | Open | Hot pixels and demosaic passes as stencils need windows aligned to CFA cells and a lattice per phase. |
+| Tiled export | Follow-up | Whole kernels upstream still allocate the whole image on the device, and the TIFF encoder takes one host buffer because tiff 0.11.3's `write_strip` ignores compression. Stream strips when the encoder allows it, and band JPEG export too. |
+| Foreign job cancellation | Open | A job no demand needs runs to its end. Add a cooperative check when a foreign node can stop early, such as a denoiser. |
+| Disk tier reads | Follow-up | A disk hit reads on the evaluating thread, 89 ms for the Sony mosaic from the page cache. Measure a cold read before moving reads to the job thread. |
+| Store accounting | Follow-up | Entries sharing storage are charged twice, and budgets bound neither a running evaluation's values nor untaken job outputs. Measure device memory over a long session first. |
+| Benchmark protocol | Open | Confirm with the user whether the protocol adopts the five new-EV requests the store measurements added. |
+| Step 3 measurement | Follow-up | Time the template tail with Orientation, and without geometry, against 17142d6 in `../drip-benchmark-results/2026-10-13-fusion/`. |
+| Raster runtime identity | Follow-up | `Raster::device` does not check that a later caller uses the runtime that made the buffer, and `Statistics` mixes concurrent evaluations on one runtime. Check or key it if a store ever serves several runtimes. |
+| Remaining simplifications | Follow-up | Revisit preparation and kernel contexts, colorimetry helpers, the evaluation loop and preview-context ownership. A scope's density scale is a parameter, so changing it counts again, and `InputValues` could be renamed. |
+| Packaged proof of concept | Next | Verify saved edits, full-detail RAW-to-TIFF use, and installation and launch on clean desktops. Record supported environments and known limitations. |
+| Portable artifacts | Next | Add Linux `.tar.xz`/Flatpak and macOS `.app` bundles with their minimum systems and runtime packaging. Audit runtime-loaded dependencies, permissions, submodule sources and notices. |
+| Build portability | Open | Verify Rust 1.95 and full native Windows and macOS builds. |
+| Display portability | Open | Verify Windows and macOS tagging, reference white, monitor changes and Advanced Color, plus other GPUs, compositors and HDR white. Legacy Windows needs ICC output. |
+| Image/color validation | Follow-up | Review detail, highlights and colour against measured targets, and the display path with SpyderX. Not a proof-of-concept gate. |
+| Scene-illuminant white balance | Integration test pending | A user check verifies that saved overrides reopen unchanged and full-detail preview and export agree. |
+| Photo orientation | Integration test pending | A user check verifies preview, override, reopening and TIFF orientation. |
+| Auto exposure | Integration test pending | A user check verifies real-photo response, repeated clicks, saved EV and preview/export agreement. |
+| Perspective Transform view | Integration test pending | A desktop session verifies the handles, Keep inside and Fit. |
+| White-balance controls | Follow-up | Add temperature/tint and neutral sampling to the CAT16 controls, which accept source xy today. |
+| Partial chromatic adaptation | Deferred | Decide between mood preservation and appearance prediction before adding a degree control, and compare generalized CAT16 with WGM on photographs. |
+| Exposure normalization | Deferred | Neither manual exposure nor metering calibrates an 18 % reflector. Cross-camera matching needs a defined convention and validation. |
+| Output-gamut rendering | Deferred | Revisit target-gamut rendering when images warrant it, separating source compression from output mapping. |
+| CJK text | Deferred | Embedded fonts cover Latin, Greek and Cyrillic. Prefer a system-font fallback over embedding Source Han Sans. |
 | Editing UI/UX | Follow-up | Refine from tester feedback. |
-| Remaining frontend presentation | Open | Export-depth/intent terminology, explicit EV reference annotations, proof-mode badges, error elision and blank/stale pop-out views. |
-| RAW metadata extraction | Open | Canon EOS D30 (#1307): unusable as-shot WB. Samsung GX-1L (#8115): unusable WB and zero camera matrix. Excluded from the active corpus. IDs refer to raw.pixls.us. |
-| DNG matrix extraction | Open | Sigma fp 8-bit (#7280) and 14-bit (#7273): nonzero ColorMatrix1/2, but LibRaw returns zero `cam_xyz` after unpack. Excluded from the active corpus. |
-| Panic-time native teardown | Open | Investigate the NVIDIA/Wayland segmentation fault during unwind after the fixed image-view panic. |
+| Remaining frontend presentation | Open | Export depth and intent terminology, EV reference annotations, proof-mode badges, error elision and blank or stale pop-out views. |
+| RAW metadata extraction | Open | Canon EOS D30 (#1307) and Samsung GX-1L (#8115) have unusable white balance, the latter a zero camera matrix. Both are excluded from the corpus, and IDs refer to raw.pixls.us. |
+| DNG matrix extraction | Open | Sigma fp DNGs (#7280, #7273) have ColorMatrix tags, but LibRaw returns a zero `cam_xyz`. Excluded from the corpus. |
+| Panic-time native teardown | Open | Investigate the NVIDIA/Wayland segmentation fault during unwind after the image-view panic. |
 | Worker startup failures | Open | Report thread-creation failures in `Worker::new` without losing the worker. |
-| Sensor calibration | Open | Expose sample conventions and sensor coordinates before dark/flat correction. See [DESIGN](DESIGN.md#processing). |
-| Everyday image nodes | Proposed | Implement in the order under [Next image nodes](#next-image-nodes). Not part of the packaged proof-of-concept gate. |
-| Geometry template | Follow-up | `templates/straighten-and-resize.drip-template` uses Perspective Transform and Resample and is checked against its re-serialization, but it is not built in. Decide whether to list it in `drip-gui/src/templates.rs`. |
-| Geometry extensions | Open | Single-channel geometry for masks, one map shared by an image and its mask, resampling onto another image's grid for registration, EWA footprints or a prefiltered pyramid for reductions beyond 16 samples per output sample, deferred nonlinear value operations, and a citable derivation of repeated-resampling loss. See [FIELD](FIELD.md#open-questions). |
-| Later processing extensions | Deferred | Pixel math, general filtering, gain fields, registration and multi-frame denoise/HDR/super-resolution/stitching. Add payloads with consumers. |
-| Chart calibration | Deferred | Fit reusable transforms from separate chart images. See [DESIGN](DESIGN.md#processing). |
-| Camera color / other CFAs | Deferred | Calibration beyond matrix/as-shot WB. X-Trans and other non-Bayer inputs. |
+| Sensor calibration | Open | Expose sample conventions and sensor coordinates before dark and flat correction ([DESIGN](DESIGN.md#processing)). |
+| Everyday image nodes | Proposed | Implement in the order under [Next image nodes](#next-image-nodes), outside the proof-of-concept gate. |
+| Geometry template | Follow-up | Decide whether to list `templates/straighten-and-resize.drip-template` among the built-in templates. |
+| Geometry extensions | Open | Single-channel geometry, maps shared by an image and its mask, registration onto another grid, EWA or a prefiltered pyramid beyond 16× reduction, and a derivation of repeated-resampling loss ([FIELD](FIELD.md#open-questions)). |
+| Later processing extensions | Deferred | Pixel math, general filtering, gain fields, registration and multi-frame work. Add payloads with their consumers. |
+| Chart calibration | Deferred | Fit reusable transforms from separate chart images ([DESIGN](DESIGN.md#processing)). |
+| Camera color / other CFAs | Deferred | Calibration beyond the matrix and as-shot balance, and X-Trans and other non-Bayer inputs. |
 | Windows RAW paths | Open | Use LibRaw's wide-path API. |
-| Drop the wgpu fork | Deferred | Upgrade when a compatible release supports passthrough. See [THIRD_PARTY](../THIRD_PARTY.md). |
-| CLI | Deferred | Loading GUI-saved templates that contain view kinds, template parameters, overwrite/collision policy and partial failures. |
-| Project-relative paths | Open | Resolve against the project location alongside CLI work. |
-| Save/close protection | Deferred | Failure-safe saves/exports, confirmation when closing the app with unsaved edits, and in-flight export handling. |
-| File changes | Idea | Detect changed ICC files. Assets are read when first used and assumed unchanged until chosen again. RAW files are stamped at every evaluation since step 5. |
-| End-to-end latency | Measured | Device scopes brought full-detail worker latency to 164–171 ms. Profile display upload/draw. Remaining worker costs include about 64 ms of CPU preview packing and an 86 ms GPU-completion/readback span. Consider device RGBA packing, and keep LittleCMS proofing on the CPU. |
-| Memory and drawing cost | Deferred | Measure retained RAWs/export buffers, duplicate GPU uploads across windows and scope mesh copies before considering streaming TIFF/shared textures. |
-| Evaluation performance | Deferred | Cooperative cancellation and backend optimization, driven by measured latency. |
-| Lens-correction metadata | Deferred | Resolve crop factor and correction profiles. Extract exposure focus distance where available (lens minimum focus distance is distinct). Preserve image-to-capture geometry. |
-| Capture metadata | Deferred | Time zone and private maker-note passthrough. Extend TIFF EXIF export separately. |
-| HDR | Deferred | Define headroom/metadata and track Windows desktop SDR white. |
-| Native windows | Deferred | Windows/macOS parenting and pin control, cross-window pacing/occlusion. Retest hidden-window pacing and native dialogs after their fixes. |
-| Deflate levels 1–9 | Blocked | The TIFF encoder exposes only fast/balanced/best. |
-| RawSpeed evaluation | Deferred | Measure decoder coverage/speed and dependency cost. Distinguish standalone support, LibRaw integration and Drip's CFA restrictions. |
-| LibRaw OpenMP | Deferred | Resolve runtime acquisition/bundling on all platforms, check upstream restrictions and measure decode gains. |
-| v0.1 release scope | Open | Set criteria after proof-of-concept feedback and portability/color verification. |
-| CPU-specific builds | Deferred | Measure x86-64-v3 gains before adding variants. Keep Rust/native settings consistent, user overrides and ARM64 support. |
+| Drop the wgpu fork | Deferred | Upgrade when a release supports passthrough ([THIRD_PARTY](../THIRD_PARTY.md)). |
+| CLI | Deferred | Templates with view kinds, template parameters, overwrite policy and partial failures. |
+| Project-relative paths | Open | Resolve paths against the project location, with the CLI work. |
+| Save/close protection | Deferred | Failure-safe saves and exports, a prompt when closing with unsaved edits, and in-flight export handling. |
+| File changes | Idea | Detect changed ICC files, which are read on first use and assumed unchanged until chosen again. |
+| End-to-end latency | Measured | Full-detail worker latency is 164–171 ms, with about 64 ms of CPU preview packing and 86 ms of GPU completion and readback. Profile display upload and consider device packing. |
+| Memory and drawing cost | Deferred | Measure retained RAWs, export buffers, duplicate uploads across windows and scope meshes before streaming or sharing textures. |
+| Evaluation performance | Deferred | Cooperative cancellation and backend tuning, driven by measured latency. |
+| Lens-correction metadata | Deferred | Crop factor, correction profiles, exposure focus distance and image-to-capture geometry. |
+| Capture metadata | Deferred | Time zone and maker-note passthrough, and a wider TIFF EXIF export. |
+| HDR | Deferred | Define headroom and metadata, and track Windows desktop SDR white. |
+| Native windows | Deferred | Pop-out parenting on Windows and macOS, pin control, and pacing and occlusion across windows. Retest hidden-window pacing and native dialogs. |
+| Deflate levels 1–9 | Blocked | The TIFF encoder exposes only fast, balanced and best. |
+| RawSpeed evaluation | Deferred | Measure coverage, speed and dependency cost against LibRaw. |
+| LibRaw OpenMP | Deferred | Resolve runtime bundling on every platform and measure decode gains. |
+| v0.1 release scope | Open | Set criteria after proof-of-concept feedback and portability checks. |
+| CPU-specific builds | Deferred | Measure x86-64-v3 gains before adding variants. |
 
 ## Next image nodes
 
@@ -76,13 +76,13 @@ until implementation.
 
 | Order | Node work | First use | Initial scope |
 |-------|-----------|-----------|---------------|
-| 1 | RGB image input | Edit a JPEG or bring in a TIFF reference. | RGB JPEG/PNG/TIFF sources with ICC and orientation handling, an explicit untagged-profile assumption and defined alpha handling. Decode into documented linear RGB coordinates without treating an already rendered image as unrendered scene data. |
-| 2 | Saturation/chroma | Make a landscape less dull or a portrait less colourful. | One global chroma adjustment with stated colour basis and luminance/hue behavior. Define signed/HDR handling, with no implicit clipping into a display range. |
-| 3 | Tone curve | Lift midtones or adjust the toe without replacing the whole rendering. | Editable master curve with a defined luminance/per-channel policy, black and above-range behavior. Reuse existing exposure and sigmoid controls for their current jobs. |
-| 4 | Masks and blend | Brighten a face or darken the sky. | Add a mask payload with its Blend consumer and linear/radial mask producers together. Blend base and adjusted RGB with explicit spatial, colour and weight contracts. Reuse existing adjustment nodes. Add a mask view and direct manipulation. Brush and colour/luminance selections follow later. |
-| 5 | Denoise | Clean up a high-ISO photograph. | A documented starting algorithm with useful luminance/chroma controls and predictable behavior at preview scales. Verify detail retention and artifacts at full resolution. Choose the input domain with the algorithm. |
-| 6 | Sharpen | Restore apparent detail, including after delivery resizing. | Landed 2026-10-13 as an unsharp mask with amount and radius in full-detail pixels that repeats edge samples. A threshold and the recommended placement remain. |
-| 7 | Lens correction | Remove barrel distortion, dark corners and lateral colour fringes. | Separate lens-model loading from its application. Start with distortion and vignetting, then lateral CA. Use capture metadata, explicit image-to-capture mapping and model-applicability checks. Distortion and lateral CA are per-channel coordinate maps, and vignetting is a per-pixel gain. |
+| 1 | RGB image input | Edit a JPEG or bring in a TIFF reference. | JPEG, PNG and TIFF sources with ICC, orientation, an explicit untagged-profile assumption and defined alpha. Decode into linear RGB without treating a rendered image as scene data. |
+| 2 | Saturation/chroma | Make a landscape less dull or a portrait less colourful. | One global chroma adjustment with a stated colour basis and luminance and hue behaviour. Define signed and HDR handling without clipping to a display range. |
+| 3 | Tone curve | Lift midtones or adjust the toe without replacing the rendering. | An editable master curve with a defined luminance or per-channel policy and black and above-range behaviour. Exposure and Sigmoid keep their jobs. |
+| 4 | Masks and blend | Brighten a face or darken the sky. | A mask payload with its Blend consumer, linear and radial producers, a mask view and direct manipulation, reusing existing adjustments. Brush and colour or luminance selections follow. |
+| 5 | Denoise | Clean up a high-ISO photograph. | A documented algorithm with luminance and chroma controls that behaves predictably at preview scales. Verify detail and artifacts at full resolution, and choose its input domain with it. |
+| 6 | Sharpen | Restore apparent detail, including after resizing. | Landed 2026-10-13 as an unsharp mask. A threshold and the recommended placement remain. |
+| 7 | Lens correction | Remove barrel distortion, dark corners and lateral colour fringes. | Load lens models apart from applying them, starting with distortion and vignetting, then lateral CA. Use capture metadata, an explicit image-to-capture mapping and applicability checks. |
 
 Keep local edits compositional: an adjusted image and its base feed Blend,
 rather than embedding masking separately into every adjustment.

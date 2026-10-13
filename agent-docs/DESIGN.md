@@ -1,803 +1,545 @@
 # Design
 
-The decisions behind the design and the requirements they answer.
-[ARCHITECTURE](ARCHITECTURE.md) describes the design as implemented, and
-`AGENTS.md` holds the code principles. Research is in
-[COMPUTE_MODEL](COMPUTE_MODEL.md), [FIELD](FIELD.md) and
-[TYPE_SYSTEM](TYPE_SYSTEM.md). Unfinished work is in [TODO](TODO.md),
-evidence in [PROGRESS](PROGRESS.md).
+The decisions behind Drip and the requirements they answer, one entry each.
+[ARCHITECTURE](ARCHITECTURE.md) describes what the code does, and the
+module docs state the rules. Unfinished work is in [TODO](TODO.md),
+measurements in [PROGRESS](PROGRESS.md).
 
 Status: **Requirement** is stated by the user, **Decided** is agreed, and
-**Tentative** and **Open** are unsettled and may be challenged.
+**Tentative** and **Open** are unsettled and may be challenged. Dates mark
+decisions from the compute-model migration and later.
 
 ## Scope
 
-- **Requirement:** The README addresses users: highlight CubeCL computation,
-  freely arranged controls/views, color-managed output and pipeline checks.
-  Explain only the unusual canvas gestures and leave conventional node controls
-  to the interface. Demo captures use the Sony ILCE-7RM3 fixture and show only
-  Drip. Use cheerful, benefit-led product copy and show every supplied demo
-  inline with its own visible caption. Identify gamut warnings in the caption.
-- **Decided:** The next milestone is a packaged, user-testable proof of concept,
-  including scene-illuminant white balance and orientation. Other
-  image-quality and editing limitations are accepted. Broader reference
-  validation and SpyderX measurements are not blockers. Verify installation,
-  launch and a complete RAW-to-TIFF smoke test.
-- **Decided:** “Scientific” for the prototype means sound, documented image
-  processing, not calibrated radiometry or ACES conformance. Quantitative
-  sensor/chart calibration is outside this milestone.
-- **Requirement:** Correct display color on Wayland, macOS and Windows. Linux is
-  the primary development platform. X11 is unsupported.
+- **Requirement:** The root README addresses users: CubeCL computation,
+  freely arranged controls and views, colour-managed output and pipeline
+  checks. Explain only the unusual canvas gestures. Demo captures use the
+  Sony ILCE-7RM3 fixture, show only Drip and appear inline with a visible
+  caption, which identifies gamut warnings. Use cheerful, benefit-led copy.
+- **Decided:** The next milestone is a packaged, user-testable proof of
+  concept with scene-illuminant white balance and orientation. Other
+  image-quality and editing limits are accepted, and broader reference
+  validation and SpyderX measurements do not block it. Verify installation,
+  launch and a RAW-to-TIFF smoke test.
+- **Decided:** “Scientific” means sound, documented image processing, not
+  calibrated radiometry or ACES conformance. Quantitative sensor and chart
+  calibration is outside this milestone.
+- **Requirement:** Correct display colour on Wayland, macOS and Windows.
+  Linux is the primary platform. X11 is unsupported.
 - **Decided:** Prototype project formats have no migration guarantee. The
   format version is the `drip` crate's major version, and other versions are
   rejected.
 
 ## Model
 
-Settled with the user on 2026-10-11 and revised by the compute model
-(2026-10-13).
-
 ### Evaluation
 
-- **Decided:** Evaluation is lazy, after Haskell's model. Each check depends
-  only on what its event supplies. A graph edit checks ports: payload types,
-  occupancy and cycles. Admission checks parameters only. Contracts,
-  requirements, missing inputs and file reads happen when evaluation forces
-  the node and are reported on it, and downstream nodes name it. Edit-time
-  contracts made the same edit pass or fail depending on whether a RAW was
-  loaded.
+- **Decided:** Evaluation is lazy, after Haskell. Each check depends only on
+  what its event supplies: an edit checks ports, admission checks
+  parameters, and evaluation runs contracts, requirements and file reads,
+  reporting failures on the node. Edit-time contracts had made the same edit
+  pass or fail depending on whether a RAW was loaded.
 - **Decided:** Only views and actions force evaluation, as `main` forces
-  thunks. A GUI preview targets the nodes with a view. Export runs when its
+  thunks. A preview targets the nodes with a view, and export runs when its
   action runs.
-- **Decided (2026-10-13):** A node that reads input files to produce its
-  outputs is a foreign node. Evaluation stamps the files its parameters name
-  (path, length, modification time) whenever it keys the node, and the
-  stamps key its outputs, so a changed file is a new key and is read again.
-  Files read during evaluation are assumed not to change while they are
-  read. This replaces the source form, which read its files when first
-  forced and kept them with the node until they were chosen again. Assets,
-  the files a kernel's parameters name (output ICC profiles), are still read
-  when an action or preparation first asks and kept with the node, failure
+- **Decided (2026-10-13):** A node that reads input files is a foreign node,
+  stamped (path, length, modification time) whenever it is keyed, so a
+  changed file is read again. Files are assumed not to change while read.
+  This replaces the source form, which read its files when first forced and
+  kept them until chosen again. Assets, the files a kernel's parameters
+  name, are still read on first use and kept with the node, failure
   included.
 - **Decided:** One sequential queue with one evaluator runs previews, export
-  and auto exposure. Edits read no files, and project open reads only the
-  project JSON. A preview or an action is a demand: a graph snapshot forced
-  under one `GlobalContext` in one batch, with an optional region per target
-  (2026-10-13), whose effect then consumes the inputs. Actions use full
-  detail. Demands are not merged. A later demand
-  reuses what the evaluator's store kept from earlier ones (2026-10-13). A
-  GUI action may return node parameters, applied as an ordinary edit.
+  and auto exposure. Edits read no files, and opening a project reads only
+  its JSON. A demand is a graph snapshot forced under one `GlobalContext`,
+  with an optional region per target. Actions use full detail. Demands are
+  not merged, and a later demand reuses what the store kept. A GUI action may
+  return parameters, applied as an ordinary edit.
 - **Decided (2026-10-13):** A preview does not wait for foreign work. It
-  evaluates under `Policy::Defer`: views that need a running job keep what
-  they showed, the status line names the job's node ("Computing Bayer
-  RAW…") without reporting an error, and the worker sends the latest
-  preview request again when the job ends. Actions wait. The GUI's
-  evaluators keep a disk tier in `Disk::platform()`, so reopening a project
-  reads its RAWs instead of decoding them.
-- **Decided:** A worker serves one project. New and Open replace it: the old
-  thread finishes its current command and skips its queue, and its replies
-  have no receiver, so reused node IDs cannot pick up old results. New and
-  Open are disabled while an action runs, since it cannot be interrupted and
-  its result would be lost.
+  evaluates under `Policy::Defer`: waiting views keep what they showed, the
+  status line names the job's node without an error, and the worker sends
+  the latest preview again when the job ends. Actions wait. The GUI's
+  evaluators keep a disk tier, so reopening a project reads its RAWs.
+- **Decided:** A worker serves one project. New and Open replace it, and the
+  old thread finishes its current command, skips its queue and loses its
+  receiver, so reused node IDs cannot pick up old results. New and Open are
+  disabled while an action runs, since it cannot be interrupted and its
+  result would be lost.
 
 ### Payloads and ports
 
-- **Decided:** One `Rgb` payload. Interpretation is a typed descriptor value.
-  Float identity is exact: only values copied from canonical constants are the
-  same space, so an ICC profile near Rec.2020 is a different space.
-- **Decided:** `Payload { NAME, Desc, Host, validate, check, allocate }`. The
-  subtrait `DeviceLayout` (`byte_len`, `encode`, `decode`) marks payloads a
-  kernel reads. Structured data stays on the CPU. Nodes flatten the numbers a
-  kernel needs into per-invocation constants.
-- **Decided (2026-10-13):** Ports name payloads, and residency is not part of
-  a node signature. A node asks an input for host or device samples when it
-  runs, and the missing representation is made once and counted. This
-  replaces the `Cpu<P>`/`Device<P>` placements and the
-  [TYPE_SYSTEM](TYPE_SYSTEM.md) principle that placement is known at connect
-  time. The consumer decides where samples live, which the compute model
-  needs before a planner or store can place materializations.
-- **Decided:** Payloads: `Rgb` and `Bayer` (`HostBuffer` storage),
-  `BayerLevels` (`[f32; 4]`) and host-only `CaptureMetadata`, whose `Desc` is
-  the shared `Arc` of the decoded facts. Samples are linear. There is no scale
-  or encoding descriptor until a producer differs.
-- **Decided:** `RgbDesc { extent, full, window, coordinates }` with
-  `Coordinates::{Camera(Response), Space(RgbSpace)}`. `Response { camera,
-  balance }` holds make/model identity and the applied gains. Applying gains
-  to balanced data composes the balance. `full` records the full-detail
-  extent beside the stored one, so contracts derive preview geometry instead
-  of reconstructing it from `extent · scale`, which is inexact after
-  `div_ceil` reductions. `Display` impls supply every interpretation label.
-- **Decided (2026-10-13):** A raster holding part of its image states it in
-  its description: `RgbDesc::window` holds the lattice index of the first
-  stored sample and the whole lattice's extent, and `extent` keeps counting
-  the stored samples, so every kernel that sizes its launch by `extent`
-  stays correct. `None` means the whole lattice, and a window covering it is
-  rejected, so equal samples have one description. Contracts describe whole
-  images: only frontends and actions receive windows. The compiler reads
-  the same geometry as `shape::Lattice { extent, full, window }`.
-- **Decided:** Requirements are port type arguments,
-  `Read<'_, Rgb, Rec2020>`, defaulting to `Any`. On outputs they are
-  guarantees checked on contract output. The checker, help and canvas labels
-  read the same declaration.
+- **Decided:** One `Rgb` payload, with its interpretation in a typed
+  description. Float identity is exact, so an ICC profile near Rec.2020 is a
+  different space.
+- **Decided:** `Payload { NAME, Desc, Host, validate, check, allocate }`,
+  with `DeviceLayout` for payloads a kernel reads. Structured data stays on
+  the CPU, and nodes flatten the numbers a kernel needs into
+  per-invocation constants.
+- **Decided (2026-10-13):** Residency is not part of a node signature. The
+  consumer asks for host or device samples, which the compute model needs
+  before a planner or store can place materializations. This replaces the
+  `Cpu<P>`/`Device<P>` placements and [TYPE_SYSTEM](TYPE_SYSTEM.md)'s
+  placement known at connect time.
+- **Decided:** No scale or encoding descriptor until a producer differs.
+  `RgbDesc::full` records the full-detail extent, so contracts derive
+  preview geometry instead of reconstructing it from `extent · scale`, which
+  is inexact after `div_ceil`. Applying gains to balanced data composes the
+  balance. `Display` impls supply every interpretation label.
+- **Decided (2026-10-13):** A raster holding part of its image states its
+  `window` in its description, and `extent` keeps counting stored samples,
+  so every kernel that sizes its launch by `extent` stays correct. A window
+  covering the whole lattice is rejected, so equal samples have one
+  description. Only frontends and actions receive windows.
 
 ### Nodes
 
-- **Decided:** Contracts receive evaluated descriptions: `&Desc` for required
-  inputs, `Option<&Desc>` for optional ones. An unconnected optional input is
-  incomplete wiring: a node that needs it in some mode (CAT16 As shot) reports
-  it at evaluation.
-- **Decided:** Kernels, foreign nodes, maps, warps and resamples are declared
-  as functions with `#[node]` ([ARCHITECTURE](ARCHITECTURE.md#shapes)). Views
-  and actions are kernels with an empty body. A map's contract describes its
-  output like a kernel's, so both share one port and contract mechanism. A
-  foreign node has no contract: its outputs' descriptions exist only once it
-  has run (a RAW's extent and CFA), so it sets each output's description
-  with its samples through `Publish` (2026-10-13).
-- **Decided (2026-10-13):** An output may be `Forward` instead of `Write`: the
-  node publishes a raster it holds under the contract's new description,
-  sharing storage. Published rasters are never written again, so sharing keeps
-  nodes pure. Byte lengths must agree.
-- **Decided:** Other files a node names (output ICC profiles in Export TIFF and
-  Preview proofing) are assets: `#[node(assets)]` with `impl Assets for Params`.
-- **Decided:** Headless actions are declared with the node,
-  `#[node(action = export)]`. A kind has at most one action, a `GuiNode` extra
-  or the node's. TIFF export is such a node in `drip`, and projects carry no
-  separate export target. The CLI is a scaffold until batch work. An action
-  receives `&InputValues` and binds them whole, or by region when an input
-  exceeds the device budget (2026-10-13).
-- **Decided:** RAW outputs `mosaic` and facts-only metadata. Consumers derive
-  what they apply: Bayer gains from as-shot WB, Camera RGB conversion from
-  `xyz_to_cam` and the image's balance, CAT16 the as-shot white. A user matrix
-  becomes an optional port when chart calibration needs it.
-- **Decided:** Each kind has one generated `static Kind`, and replacement
-  compares kinds by identity. `#[node]` also generates typed `Inputs<'a>` and a
-  `Typed` impl, which frontend extras bind through.
-- **Decided:** Kinds are listed by hand, without link-time registration:
-  `drip::registry::NODES` in pipeline order. A frontend composes a `Registry`
-  from its lists and loads projects through it, and an unlisted kind cannot be
-  added or loaded. Explicit lists are readable and avoid linker-section
+- **Decided:** An unconnected optional input is incomplete wiring. A node
+  that needs it in some mode, such as CAT16 As shot, reports it at
+  evaluation.
+- **Decided:** Views and actions are kernels with an empty body. A map's
+  contract describes its output like a kernel's, so both share one
+  mechanism. A foreign node has no contract, since its outputs'
+  descriptions exist only once it has run.
+- **Decided (2026-10-13):** `Forward` outputs share the raster a node holds
+  under a new description. Published rasters are never written again, so
+  sharing keeps nodes pure.
+- **Decided:** Files a node names besides its inputs, such as the output ICC
+  profiles of Export TIFF and Preview proofing, are assets.
+- **Decided:** Headless actions are declared with the node, and a kind has
+  at most one action, a GUI extra or the node's. TIFF export is such a node,
+  so projects carry no separate export target. The CLI is a scaffold until
+  batch work.
+- **Decided:** RAW outputs the mosaic and facts-only metadata, and consumers
+  derive what they apply. A user matrix becomes an optional port when chart
+  calibration needs it.
+- **Decided:** One generated `static Kind` per kind, compared by identity.
+  Frontend extras bind through the generated typed `Inputs` and `Typed`.
+- **Decided:** Kinds and tags are listed by hand, without link-time
+  registration: explicit lists are readable and avoid linker-section
   portability risks.
 
 ### Parameters and GUI bindings
 
-- **Decided:** `#[param(default = 1.5, range = 0.5..=4.0)]`, bare `#[param]`
-  for a choice's `#[default]` variant (`default = ...` overrides it),
-  `open`/`save = [..]` and `flatten`. The typed default is the source of
-  `Default` and the schema, and a const assertion checks field/schema
-  agreement. Flattened fields validate with their parent. File roles live in
-  the schema, and dialogs use its label and extensions.
-- **Decided:** GUI extras are `impl GuiNode for <node>::Definition`, listed in
-  `registry::BINDINGS` like kinds. Kinds without an entry use the schema
-  controls. Test-only kinds and bindings live in `test_nodes`.
+- **Decided:** One typed declaration per parameter field is the source of
+  `Default` and the schema, and a const assertion checks that they agree.
+  File roles live in the schema, and dialogs use its label and extensions.
+- **Decided:** GUI extras are `impl GuiNode`, listed like kinds. Kinds
+  without one use the schema controls. Test-only kinds and bindings live in
+  `test_nodes`.
 
 ## Processing
 
-- **Requirement:** Combine crop, rotation and perspective into Perspective
-  Transform. Resample images by a factor, with interpolation and antialiasing.
-- **Decided:** Implement JPEG export using `jpeg-encoder`, reusing output
-  profiles and actions. Default to sRGB, quality 95 and 4:4:4. Quality and
-  chroma subsampling remain independent controls. Reduced chroma uses area
-  averaging. TIFF and JPEG share capture-tag writing and omit original
-  orientation because stored pixels already carry their geometry.
-- **Decided (2026-10-13):** Geometry is deferred and filtered once: geometry
-  nodes are warps whose projective maps compose, and Resample chooses the
-  filter and output size where it materializes. One footprint-scaled
-  resampling stage serves interpolation and antialiasing ([FIELD](FIELD.md)).
-  When geometry and per-pixel operations compose is under Compute. This
-  replaces `RgbField` with Interpolate and Sample (2026-10-12).
+- **Requirement:** Combine crop, rotation and perspective in Perspective
+  Transform. Resample by a factor with interpolation and antialiasing.
+- **Decided:** JPEG export uses `jpeg-encoder` with the output profiles and
+  actions of TIFF, defaulting to sRGB, quality 95 and 4:4:4. Reduced chroma
+  uses area averaging, and quality and chroma subsampling stay independent
+  controls. TIFF and JPEG share capture tags and omit the
+  original orientation, since stored pixels carry their geometry.
+- **Decided (2026-10-13):** Geometry is deferred and filtered once: warps'
+  projective maps compose, and Resample chooses the filter and size where
+  it materializes. One footprint-scaled stage serves interpolation and
+  antialiasing ([FIELD](FIELD.md)). This replaces `RgbField` with
+  Interpolate and Sample.
 - **Decided (2026-10-12):** Perspective Transform's geometry is one ordered
-  four-point quad plus output aspect, in bijection with projective maps. The
-  output is the quad's content, so crop and rotation are quads and have no
-  parameters of their own. See [FIELD](FIELD.md#perspective-transform).
+  four-point quad plus an output aspect, in bijection with projective maps,
+  so crop and rotation need no parameters of their own
+  ([FIELD](FIELD.md#perspective-transform)).
 - **Decided (2026-10-12):** Points mapped outside the source are black, and
-  edge taps repeat the edge. Auto-crop is a GUI constraint (Keep inside, on)
-  plus a Fit action, not a stored mode. Resample defaults to Lanczos-3, and
-  Perspective Transform resamples with it unless a Resample follows, accepting
-  signed halos around HDR highlights. See
-  [FIELD](FIELD.md#borders-and-auto-crop).
-- **Decided (2026-10-12):** Perspective Transform has its own editing view,
-  separate from Preview and without proofing, with Frame, Level and
-  Perspective tools editing the same quad. A view's window may edit its node.
-  See [FIELD](FIELD.md#editing-view).
-- **Open:** Lens-correction coordinates (capture geometry, orientation and
-  crop) and single-channel geometry for masks. See
-  [FIELD](FIELD.md#open-questions). The compute model proposes masks as
-  scalar images instead of a `MonoField` payload.
-- **Tentative:** The node order in [TODO](TODO.md#next-image-nodes)
-  prioritizes ordinary still-photo editing: input and colour/tone controls,
-  then reusable local adjustments, followed by noise, sharpening and lens
-  correction. Reuse existing exposure, CAT16 and sigmoid operations.
-  Temperature/tint and neutral sampling extend the existing WB interface.
-  This proposal does not change the packaged proof-of-concept gate.
-- **Decided:** RAW metadata holds common capture/lens/GPS/sensor fields and
-  native WB/color/black/white calibration. Derived values belong to
-  consumers. Missing calibration does not hide descriptive metadata or mosaic
-  data. Vendor maker notes are out of scope.
-- **Decided:** Bayer site gains update samples and clipping levels in one node,
-  and both outputs declare the same target coordinates. Capture facts stay
-  immutable and do not describe the geometry of a transformed image.
+  edge taps repeat the edge. Auto-crop is a GUI constraint (Keep inside) plus
+  a Fit action, not a stored mode. Resample defaults to Lanczos-3, and
+  Perspective Transform resamples with it unless a Resample follows,
+  accepting signed halos around HDR highlights
+  ([FIELD](FIELD.md#borders-and-auto-crop)).
+- **Decided (2026-10-12):** Perspective Transform has its own editing view
+  without proofing, whose Frame, Level and Perspective tools edit the same
+  quad. A view's window may edit its node ([FIELD](FIELD.md#editing-view)).
+- **Open:** Lens-correction coordinates and single-channel geometry for
+  masks ([FIELD](FIELD.md#open-questions)). The compute model proposes masks
+  as scalar images instead of a `MonoField` payload.
+- **Tentative:** The node order in [TODO](TODO.md#next-image-nodes) serves
+  ordinary still-photo editing first and reuses Exposure, CAT16 and Sigmoid.
+  Temperature/tint and neutral sampling extend the existing white-balance
+  interface. It does not change the proof-of-concept gate.
+- **Decided:** RAW metadata holds common capture, lens, GPS and sensor
+  fields and native calibration. Derived values belong to consumers, and
+  missing calibration hides neither metadata nor mosaic. Maker notes are out
+  of scope.
+- **Decided:** Bayer site gains update samples and clipping levels in one
+  node, with both outputs in the same coordinates. Capture facts stay
+  immutable and do not describe a transformed image's geometry.
 - **Decided:** Keep as-shot gains through highlights and demosaic, then fold
-  reference/as-shot gain ratios into the camera matrix, following darktable's
-  “as shot to reference” placement (THIRD_PARTY [22]). Derive the scene white
-  from the mapped camera neutral and apply CAT16 in linear Rec.2020 before
-  rendering. The node accepts metadata or custom source xy. Target white is
-  D65.
-- **Decided:** Start with full CAT16 adaptation, composed into one working-RGB
-  matrix. Full adaptation needs no scene luminance or surround estimate. Partial
-  adaptation needs a policy: generalized/two-step von Kries keeps inverse and
-  composition consistency [7], WGM models incomplete adaptation differently
-  [8], and high-chroma experiments expose limits in all six tested CATs [9].
-  Keep model choice separate from illuminant estimation. Temperature/tint is a
-  white-point UI, not a CAT. Full CAM16/Hellwig modeling and mixed illuminants
-  are separate [4], [5].
-- **Decided:** EXIF orientation travels in capture metadata so contracts know
-  the oriented extent before allocation. Decode LibRaw's convention at the RAW
-  boundary, where unknown means identity. Orient once after camera conversion.
-  Bayer processing keeps sensor coordinates. TIFF omits the original
-  orientation tag.
-- **Decided:** Exposure scaling is distinct from sensor-white normalization. The
-  RAW denominator and sigmoid's 0.18 pivot do not establish ACES's 18% reflector
-  scale [6]. Auto exposure is a one-shot GUI action that meters the linear
-  Rec.2020 mean luminance of Exposure's input on the device and sets EV to
-  `log2(0.18 / mean)`, which needs no current EV. Mean-to-18% is a starting
+  reference over as-shot gain ratios into the camera matrix, after
+  darktable's “as shot to reference” placement (THIRD_PARTY \[22\]). CAT16
+  derives the scene white from the mapped camera neutral or a custom xy and
+  adapts to D65 in linear Rec.2020 before rendering.
+- **Decided:** Full CAT16 adaptation, composed into one working-RGB matrix,
+  needs no scene luminance or surround. Partial adaptation needs a policy:
+  generalized von Kries keeps inverse and composition consistency [7], WGM
+  models incomplete adaptation differently [8], and high-chroma experiments
+  expose limits in all six tested CATs [9]. Model choice stays separate from
+  illuminant estimation, and temperature/tint is a white-point UI, not a
+  CAT. CAM16/Hellwig and mixed illuminants are separate [4], [5].
+- **Decided:** EXIF orientation travels in capture metadata, so contracts
+  know the oriented extent before allocation. LibRaw's convention is decoded
+  at the RAW boundary, where unknown means identity. Orient once after
+  camera conversion, and keep sensor coordinates through Bayer processing.
+- **Decided:** Exposure scaling is distinct from sensor-white
+  normalization: neither the RAW denominator nor Sigmoid's 0.18 pivot
+  establishes ACES's 18 % reflector scale [6]. Auto exposure meters linear
+  Rec.2020 mean luminance and sets EV to `log2(0.18 / mean)`, a starting
   point, not calibration.
-- **Decided:** Signed/HDR coordinates are valid before rendering [3]. Sigmoid is
-  a rendering operation although its output stays identity-encoded. LittleCMS
-  with the selected intent handles output conversion. ACES target-aware
-  rendering and source gamut compression are references, not prototype
-  requirements [1], [2]. The Rec.2020/D65 working space stays for the prototype.
-- **Decided:** Missing camera calibration is a supported-input limitation, not a
-  reason to invent a matrix. Keep absent calibration distinct from extraction
-  failures (Sigma DNGs have ColorMatrix tags but zero LibRaw `cam_xyz`).
+- **Decided:** Signed and HDR coordinates are valid before rendering [3].
+  Sigmoid is a rendering operation although its output stays
+  identity-encoded. LittleCMS handles output conversion with the selected
+  intent. ACES target-aware rendering and gamut compression are references,
+  not prototype requirements [1], [2]. The working space stays Rec.2020/D65.
+- **Decided:** Missing camera calibration is a supported-input limitation,
+  not a reason to invent a matrix. Absent calibration stays distinct from
+  extraction failures (Sigma DNGs have ColorMatrix tags but zero LibRaw
+  `cam_xyz`).
 - **Decided:** TIFF depth is u8, u16 (default) or f32. LittleCMS converts into
-  the output encoding before quantization. Depth selects no transfer function.
+  the output encoding before quantization, and depth selects no transfer
+  function.
 - **Tentative:** Explain the scene-adjustment → rendering → encoding order in
-  help and templates without an ordering graph check.
-- **Requirement:** Sensor calibration needs matching sites, CFA phase and sample
-  units. Separate decoding from black subtraction/normalization/crop or retain
-  enough to account for them. Spatial gains may need spatial saturation/noise
-  data.
-- **Requirement:** Chart calibration produces a reusable transform with stated
-  basis, normalization, reference illumination and fit residuals. Chart and
-  subject may differ in grid and exposure.
-- **Requirement:** Masks, gain fields and scalar samples have distinct contracts
-  despite shared storage. Range, broadcasting, division and geometry rules belong
-  to consumers. Applying a mask after filtering differs from restricting the
-  filter's samples.
+  help and templates, without an ordering check.
+- **Requirement:** Sensor calibration needs matching sites, CFA phase and
+  sample units, so decoding is separable from black subtraction,
+  normalization and crop, or keeps enough to account for them. Spatial gains
+  may need saturation and noise data.
+- **Requirement:** Chart calibration produces a reusable transform with
+  stated basis, normalization, reference illumination and fit residuals.
+  Chart and subject may differ in grid and exposure.
+- **Requirement:** Masks, gain fields and scalar samples have distinct
+  contracts despite shared storage, and their range, broadcasting, division
+  and geometry rules belong to consumers. Masking after filtering differs
+  from restricting the filter's samples.
 - **Requirement:** Capture provenance and model applicability stay separate.
   Processing updates or discards metadata whose assumptions it changes.
 - **Tentative:** Lens correction needs lens identification, crop factor and
-  correction profiles. Vignetting may use focus distance, not minimum focus
-  distance. Place correction before orientation or account for transformed
-  coordinates. Distortion and lateral CA are per-channel coordinate maps.
-  Vignetting is a per-pixel gain on `Rgb`.
-- **Decided:** Multiple-frame operations consume decoded-value collections,
-  with no graph-level frame-stack abstraction.
+  profiles, and vignetting may need focus distance rather than minimum focus
+  distance. Correct before orientation or account for transformed
+  coordinates. Distortion and lateral CA are per-channel coordinate maps,
+  and vignetting is a per-pixel gain.
+- **Decided:** Multiple-frame operations consume collections of decoded
+  values, with no frame-stack abstraction in the graph.
 
 ## Compute
 
-- **Decided (2026-10-13):** Make the compiler embedded in evaluation explicit,
-  as proposed in [COMPUTE_MODEL](COMPUTE_MODEL.md#proposal-for-drip): nodes
-  declare a shape, evaluation fuses segments between materialization points,
-  derives regions and preview scale from shapes, and memoizes in one store.
-  It is executed in eight steps. Step 4 replaced the no-cache requirement
-  under Performance with the store, step 5 added its disk tier, step 6
-  regions and the scale rule, step 7 reductions, which removed the GUI's
-  kernels, and step 8 stencils and meta nodes. All eight steps landed on
-  2026-10-13.
-- **Decided (2026-10-13):** Step 1. `Kind::shape` declares how evaluation runs
-  a kind, `Kernel` or `Source`, and later shapes are added beside them. A
-  run's values lived in a `Store`, which step 4 grew into the memo.
-- **Decided (2026-10-13):** Step 2. A map node returns the constants of a
-  `#[cube]` body over one pixel, and its contract still describes the output.
-  Its output is a deferred image that the next map extends and the first
-  consumer that needs samples materializes, once for all clones. Maps after a
-  fan-out each recompute the shared plan in their own kernel instead of
-  cutting the segment, which trades arithmetic for bandwidth and keeps
-  results independent of evaluation order.
-- **Decided (2026-10-13):** Step 3. A warp node (`#[node(warp)]`) returns
-  per-channel projective maps from its output plane to its input plane in
-  full-detail pixels, and the filter that reconstructs the input where the
-  maps leave the sample lattice, or none for a reindex, which evaluation
-  checks. Its contract describes ordinary `Rgb` on the output's lattice, so
-  a domain origin folds into the maps and no field payload exists. A
-  resample node (`#[node(resample)]`) returns its filter, and its contract
-  sets the lattice from the size, the input's full extent and the global
-  scale. Perspective Transform is a warp with Lanczos-3, Orientation a
-  reindex warp, and Resample replaces Sample. Filters register as bodies, so
-  the kernel names no node code.
-- **Decided (2026-10-13):** A plan has one resampling stage before its map
-  bodies, and a step composes into it only where the result is exact, so
-  users never see the grouping. A reindex (Orientation, an integer crop)
-  commutes with per-pixel maps and joins the stage wherever it sits. A
-  filtering warp or Resample after a map cuts the segment: the maps
-  materialize on their own lattice and the resampling runs as its own
-  launch, because a weighted average of sigmoid values is not the sigmoid of
-  the average. The compiler does not special-case linear maps. Before any
-  map, warps and a Resample compose into one stage. A Resample fixes its
-  lattice, so a filtering step after it resamples again. The preview
-  reduction is a preview-only approximation (step 6, below).
-- **Decided (2026-10-13):** The stage loads samples when the composed map is
-  the identity on an equal lattice and the filter interpolates, copies them
-  when only reindexes composed, and filters otherwise. Its kind and filter
-  are comptime, so a plan without geometry compiles to step 2's kernel. A
-  plan that neither moves nor maps samples launches nothing and shares its
-  input. An interpolating filter at factor one reproduces a reindex bit for
-  bit, which Orientation's tests check with Lanczos-3 and Box.
+- **Decided (2026-10-13):** The compiler embedded in evaluation is explicit,
+  as [COMPUTE_MODEL](COMPUTE_MODEL.md#proposal-for-drip) proposes: nodes
+  declare a shape, evaluation fuses segments between materialization
+  points, derives regions and preview scale from shapes, and memoizes in one
+  store. All eight migration steps landed on 2026-10-13.
+- **Decided (2026-10-13):** Maps after a fan-out each recompute the shared
+  plan instead of cutting the segment. This trades arithmetic for bandwidth
+  and keeps results independent of evaluation order.
+- **Decided (2026-10-13):** A warp returns projective maps in full-detail
+  pixels, and its contract describes ordinary `Rgb` on the output lattice,
+  so a domain origin folds into the maps and no field payload exists.
+  Filters register as bodies, so the kernel names no node code.
+- **Decided (2026-10-13):** A step composes only where the result is exact,
+  so users never see the grouping. The compiler does not special-case
+  linear maps. The rules are in `plan.rs`.
+- **Decided (2026-10-13):** The stage kind and filter are comptime, so a
+  plan without geometry compiles to the map-only kernel. An interpolating
+  filter at factor one reproduces a reindex bit for bit, which
+  Orientation's tests check with Lanczos-3 and Box.
 - **Decided (2026-10-13):** The fused kernel is one `#[cube(launch)]` shell
-  whose comptime argument is the body sequence, so each sequence compiles once
-  and other constant values reuse it. Bodies keep the expression order of the
-  kernels they replaced, so results are bit-identical. Fusion takes the colour
-  tail from 6.6 ms to 1.8 ms at full detail on the Sony fixture
-  ([PROGRESS](PROGRESS.md#2026-10-13)).
-- **Decided (2026-10-13):** Step 4. The evaluator owns a `Store` that keeps
-  materialized values across demands, keyed by content. An output's key is a
-  SHA-256 over the producer's kind ID and `version`, its identity and the
-  keys of its inputs in port order. A computed node's identity is its
-  canonical parameter JSON (object keys sorted), and step 6 adds the scale
-  for a kind whose shape reads it. A foreign node's is its parameters and
-  the stamps of the input files they name, without the scale. Bound
-  in-memory data hashes a per-instance random identity, and keys derived
-  from it stay off the disk. The kind ID determines a map's body, so input
-  keys cover a plan's body sequence and constants without hashing them.
-  `version` is bumped by hand when a kernel's numerics change. Equal nodes
-  share one entry, and a new evaluator, as each GUI project has, starts
-  empty.
-- **Decided (2026-10-13):** Durability orders eviction: Low first, then
-  Medium, then High, least recently used first within a class. A kind's
-  durability is High for a foreign node or bound data, otherwise the most
-  durable of its tags,
-  Low without tags. Tags state theirs: `io` High; `input-transform`,
-  `bayer-raw`, `demosaic`, `recovery`, `geometry` and `color` Medium;
-  `look`, `output-transform`, `tonemap`, `view` and `scope` Low. No node
-  declares its own.
-- **Decided (2026-10-13):** The store keeps rasters only, with each
-  representation charged at the payload's `byte_len`, against a device
-  budget (half the memory the runtime reports, 4 GiB where it reports none)
-  and a host budget (8 GiB), both `RuntimeContext` settings. Over a budget it
-  drops representations in eviction order. Dropping a device one keeps the
-  host one, and an entry with neither leaves. Rasters sharing storage are
-  charged once per entry. A deferred image enters the store once a consumer
-  materializes it. One no consumer materialized is rebuilt by its nodes'
-  host functions, so the store never holds a plan's input outside the
-  budget.
-- **Decided (2026-10-13):** Evaluation keys every needed node first, which
-  stamps foreign nodes' files, then walks back from the demanded values. A
-  stored value is a hit, and a missing one schedules its node and the
-  node's inputs.
-  Target nodes of `evaluate_inputs` always run, so their contracts check
-  what they receive. A run keeps its own live values with use counts, so a
-  value the budget evicts mid-run stays available to its consumers.
-  `Statistics` reports hits and evictions. A Sigmoid-only edit runs the five
-  nodes of the tail segment and one launch, and an unchanged demand runs
-  none.
-- **Decided (2026-10-13):** Step 5. A foreign node, declared with
-  `#[node(foreign = memory)]` or `foreign = disk`, is a host function on
-  `Read` inputs and `Publish` outputs without a context. The store runs it as a job on a thread of its own, one
-  job per node key, after the run materializes its inputs, and the job
-  downloads them before the call. It runs at scale 1: its key and its
-  function ignore the global scale, and previews reduce its outputs
-  downstream like any full-detail raster. Its outputs are High entries. A
-  failed job stays with its key and repeats its error, so a deferred
-  preview does not rerun a failing decode in a loop.
-- **Decided (2026-10-13):** Step 6. A demand is a `GlobalContext` holding
-  the scale and targets, each with an optional region: a rectangle of the
-  plane of the target's inputs in full-detail pixels (`shape::Rect`).
-  `evaluate_batch` takes `Target`s and returns a `Batch` of inputs and
-  statistics. One shared scale with per-target regions is the smaller API,
-  since every frontend demand has one scale. Contracts still receive the
-  scale through `GlobalContext`. Only a node without outputs takes a region:
-  a node computed from part of its inputs would publish part of its
-  outputs under a whole-image key.
+  whose comptime argument is the body sequence. Bodies keep the expression
+  order of the kernels they replaced, so results are bit-identical. Fusion
+  took the colour tail from 6.6 ms to 1.8 ms at full detail.
+- **Decided (2026-10-13):** The store replaces the requirement of no
+  persistent intermediate cache. Outputs are keyed by content, and the kind
+  ID determines a map's body, so input keys cover a plan's bodies and
+  constants without hashing them. `version` is bumped by hand when a
+  kernel's numerics change. Each evaluator starts empty.
+- **Decided (2026-10-13):** Durability orders eviction, and tags state it.
+  `io` is High. `input-transform`, `bayer-raw`, `demosaic`, `recovery`,
+  `geometry` and `color` are Medium, and `look`, `output-transform`,
+  `tonemap`, `view` and `scope` are Low. No node declares its own.
+- **Decided (2026-10-13):** The store keeps rasters only, charged at the
+  payload's `byte_len` per side. A deferred image no consumer materialized
+  is rebuilt by its nodes' host functions, so the store never holds a plan's
+  input outside the budget. A run holds its own live values, so a value the
+  budget evicts mid-run stays available to its consumers.
+- **Decided (2026-10-13):** A foreign node runs at scale 1, and previews
+  reduce its outputs downstream. A failed job stays with its key, so a
+  deferred preview does not rerun a failing decode in a loop.
+- **Decided (2026-10-13):** A demand has one scale and a region per target,
+  the smaller API, since every frontend demand has one scale. Only a node
+  without outputs takes a region, since a node computed from part of its
+  inputs would publish part of its outputs under a whole-image key.
 - **Decided (2026-10-13):** Regions propagate backward inside fused
-  segments. `Plan::input_window` maps a window of the output lattice to the
-  input: the same window through a load, the reindexed corners through a
-  gather, and through a filter the corners mapped by the projective index
-  maps, grown by the support times the footprint (`MAX_FOOTPRINT` for a
-  projective map) plus one sample. A projective map keeps lines straight,
-  so the corners bound the image, and a corner beyond the horizon takes the
-  whole input. The kernel positions samples by whole-lattice index and
-  clamps taps to the stored window, so a window equals the same samples of
-  the whole image bit for bit, which tiled export relies on. Keys derive a
-  region's entry from the image's (`Key::region`), so two crops are two
-  entries and the whole image a third. A crop of a stored whole raster is
-  copied from it in one launch: kernels read dense buffers, so a strided
-  view would need every kernel to take strides.
-- **Open (2026-10-13):** Kernel halos. Kernels, foreign nodes and sources
-  receive and produce whole images, so a region bounds only the segments
-  after the last of them. Running an opaque kernel on its output region
-  plus a declared `halo` needs that region before the kernel runs, but
-  warps between it and the target describe their maps only when their host
-  functions run, after the kernel. It needs lazily run kernels, or a pass
-  that describes the graph before running it, and Bayer windows aligned to
-  CFA cells. RCD and the 2×2 demosaic therefore run whole and declare no
-  halo. At 100 % the whole RCD output is computed once at scale 1 and
-  stored, and pans recompute only the tail. Stencils do not need this
-  (step 8, below).
-- **Decided (2026-10-13):** Scale dependence derives from shapes. From the
-  targets every node is read at the requested scale, and a foreign node
-  reads its inputs at scale 1, so its inputs and outputs are full detail
-  wherever it sits and evaluation reduces after it. A node read at the
-  requested scale runs at it when its shape is scaled (a `scaled` kernel, a
-  warp, a resample) or it reads an image on a plane, which arrives reduced or
-  from a node that runs at the scale. Every other node runs at scale 1 and
-  is keyed without it, so the RAW, its gains and Opposed highlights are
-  stored once for all preview levels. Nodes that do not read the scale
-  receive scale 1, so a key without the scale hides no dependence on it.
-  Keys hash the scale only
-  for scaled shapes and derive a reduced image's key from the image's
-  (`Key::reduced`).
-- **Decided (2026-10-13):** The preview reduction is compiler work with one
-  claimed exception. Where a node reads an image on a plane at a scale
-  coarser than 1 and the image's lattice is finer than `div_ceil(full,
-  scale)`, evaluation reduces it with the box filter `shape::BOX` as a
-  resampling stage of the consumer's plan, so an RGB source feeding maps is
-  reduced and mapped in one launch. A kernel declared `#[node(scaled)]`
-  claims to produce its output at the requested scale itself, and its
-  output is trusted: RCD and the 2×2 demosaic keep reducing each CFA phase
-  plane in `reduce::for_demosaic`, which no box filter on RGB can match. A
-  consumer with a scaled shape reaches the scale itself and reads its input
-  unreduced: Perspective Transform and Resample filter full-detail input
-  onto their reduced lattice in one stage. A warp's output is still checked,
-  since Orientation keeps the sampling of a full-detail input. The reduction
-  is a preview approximation: it never applies at scale 1, export runs at
-  scale 1, and a stage clamps footprints at `MAX_FOOTPRINT`, so reductions
-  beyond 16 alias. This replaces demosaic reducing for the whole graph.
-- **Decided (2026-10-13):** Step 8, stencils. A stencil node (`#[node(stencil
-  = BODY)]`) names a `StencilBody` static: a name, a constant count, a
-  `Border` and a `#[cube] fn(w: &Window, k: &[f32]) -> Pixel` that reads
-  `w.at(dx, dy)` within the reach. Its host function returns a `Stencil {
-  radius, constants }`. The plan declared the radius with the body, but
-  Sharpen's radius is a parameter, so the host function returns it, as a
-  warp returns its maps. The output is a deferred image whose plan's stage
-  is the stencil over the input image. This resolves the halo question for
-  stencils without lazily run kernels or a describing pass: a crop of the
-  output grows the window by the reach, crops the input to it, which runs
-  the earlier segment on that window only, and runs the stencil on the
-  crop. A 1600 × 1000 crop through the template's tail and Sharpen writes
-  3 226 100 samples in 1.01 ms where the whole image writes 84 779 520 in
-  24.77 ms ([PROGRESS](PROGRESS.md#2026-10-13)). Whole outputs are stored
-  under the node's key and crops under `Key::region`.
-- **Decided (2026-10-13):** A stencil's input always materializes, and maps
-  before it run in the input's plan. Fusing them into the taps would
-  recompute them per tap, so the planned `linear` declaration that fused
-  them is not implemented ([TODO](TODO.md)). Maps after a stencil join its kernel
-  through the same `#[cube]` evaluation of a pixel that fused kernels and
-  reductions call. Warps and Resample after a stencil start a new plan.
-  Stencils read only `MapPayload`s: a Bayer stencil needs windows aligned
-  to CFA cells.
+  segments, and a window equals the same samples of the whole image bit for
+  bit. A crop of a stored whole raster is copied in one launch: kernels read
+  dense buffers, and a strided view would need every kernel to take
+  strides.
+- **Open (2026-10-13):** Kernel halos. An opaque kernel running on its
+  output region plus a declared halo needs that region before it runs, but
+  warps downstream describe their maps only when their host functions run.
+  It needs lazily run kernels or a describing pass, and Bayer windows
+  aligned to CFA cells. RCD therefore runs whole once at scale 1, and pans
+  recompute only the tail.
+- **Decided (2026-10-13):** Scale dependence derives from shapes. Nodes
+  that do not read the scale receive scale 1, so a key without the scale
+  hides no dependence on it.
+- **Decided (2026-10-13):** The preview reduction is compiler work, with
+  one claimed exception: a `scaled` kernel produces its own output, as the
+  demosaics reduce each CFA plane, which no box filter on RGB matches. A
+  consumer with a scaled shape filters full-detail input onto its reduced
+  lattice in one stage. A warp's output is still checked, since Orientation
+  keeps a full-detail input's sampling. Footprints clamp at
+  `MAX_FOOTPRINT`, so reductions beyond 16 alias. This replaces demosaic
+  reducing for the whole graph.
+- **Decided (2026-10-13):** A stencil's host function returns its radius,
+  as a warp returns its maps, because Sharpen's radius is a parameter. A
+  crop grows by the reach through the earlier segment, which settles halos
+  for stencils without lazy kernels: a 1600 × 1000 crop through the tail and
+  Sharpen writes 3 226 100 samples in 1.01 ms, the whole image 84 779 520 in
+  24.77 ms.
+- **Decided (2026-10-13):** A stencil's input always materializes, since
+  fusing maps into its taps would recompute them per tap. The planned
+  `linear` declaration is therefore not implemented. Stencils read only
+  `MapPayload`s, because a Bayer stencil needs windows aligned to CFA cells.
 - **Decided (2026-10-13):** Lengths in parameters are full-detail pixels.
-  The compiler converts a stencil's reach to the samples of the lattice it
-  reads, `ceil(radius · extent / full)` per axis and at least one, and the
-  body receives `extent / full` to convert its own lengths. A stencil reads
-  its input at the requested scale, box-reduced where it is finer, and its
-  shape is not scaled. Where the reach spans less than one sample of a
-  preview lattice, `Statistics::approximated` counts the launch, and the
-  preview shows less of the stencil than full detail. Rounding the reach up
-  to one sample keeps the body's weights, so full detail is never
-  approximated.
-- **Decided (2026-10-13):** `Border::Repeat` reads the nearest edge sample
-  and `Border::Zero` reads black, so a window of the output equals the
-  same samples of the whole output bit for bit. Sharpen repeats edges.
-  darktable's sharpen leaves a border of the reach unsharpened instead.
-- **Decided (2026-10-13):** Sharpen (`sharpen`) is an unsharp mask per
-  channel of linear RGB with a Gaussian whose standard deviation is the
-  `radius` parameter (0.25 to 4 full-detail pixels) and whose reach is 2.5
-  radii, after darktable's sharpen, and an `amount` from −1 to 4. Negative
-  amounts soften and −1 outputs the blur, which Pyramid blur uses. It has no
-  threshold: a threshold in linear light has no fixed meaning across
-  exposures. One 2D window of `(2R + 1)²` taps per sample costs 14 ms over
-  the tail at full detail with the default reach of 5. A separable pair of
-  passes would cost `2(2R + 1)` taps ([TODO](TODO.md)).
-- **Tentative (2026-10-13):** Step 8, meta nodes. A meta node
-  (`#[node(meta)]`) is a function of its parameters, a `&mut SubGraph` and
-  its ports as `Inlet` (with the input's description) and `Outlet`. It adds
-  nodes with their kinds' generated `add` to the sub-graph's `Dag`, connects
-  them with `Dag::connect`, and maps its ports with `SubGraph::input` and
-  `SubGraph::output`. The plan proposed `SubGraph::add(&'static Kind,
-  params)`. Reusing `Dag` and the generated `add` keeps parameters and port
-  payloads typed and adds no second graph builder. The GUI, projects and
-  the registry see one node.
-- **Tentative (2026-10-13):** Evaluation expands a meta node when it runs,
-  after its inputs resolve, instead of before keying. Expansion reads input
-  descriptions, which exist only once upstream nodes have run (a RAW's
-  extent after decode), so expanding before keying needs a describing pass
-  that foreign nodes cannot take part in. The meta node is keyed like any
-  node from its parameters and input keys. When it runs, each sub-graph node
-  is keyed from the meta node's input keys as if it were in the graph, the
-  store serves what it holds walking back from the outputs, and the other
-  nodes run in the sub-graph's order at the meta node's scale. Errors and
-  timings name the meta node. Values a sub-graph node materializes while
-  the sub-graph runs, such as a kernel's output, are stored under their own
-  keys, so two meta nodes with equal parameters and inputs share them.
-- **Decided (2026-10-13):** The store memoizes expansions by the meta node's
-  key, which covers its parameters and its input keys, and equal input keys
-  mean equal descriptions. It keeps the 64 used last. Failed expansions are
-  not kept.
-- **Decided (2026-10-13):** A sub-graph holds no foreign node, whose job the
+  Rounding a stencil's reach up to one sample keeps the body's weights, so
+  full detail is never approximated and a preview shows less of the effect.
+- **Decided (2026-10-13):** `Border::Repeat` or `Border::Zero` answers
+  positions outside the lattice, so a window equals the whole output there.
+  Sharpen repeats edges, where darktable leaves a border unsharpened.
+- **Decided (2026-10-13):** Sharpen is a per-channel unsharp mask in linear
+  RGB after darktable's sharpen: radius 0.25 to 4 full-detail pixels, reach
+  2.5 radii, amount −1 to 4. It has no threshold, since a threshold in
+  linear light has no fixed meaning across exposures. Its 2D window costs
+  14 ms over the tail at full detail with reach 5.
+- **Tentative (2026-10-13):** A meta node adds nodes with their kinds'
+  generated `add` to the sub-graph's `Dag`, instead of the planned
+  `SubGraph::add(&Kind, params)`. That keeps parameters and port payloads
+  typed and adds no second graph builder.
+- **Tentative (2026-10-13):** A meta node expands when it runs, after its
+  inputs resolve, because expansion reads input descriptions that exist only
+  once upstream nodes have run. Expanding before keying would need a
+  describing pass that foreign nodes cannot join.
+- **Decided (2026-10-13):** The store memoizes the 64 expansions used last
+  by the meta node's key. Equal input keys mean equal descriptions. Failed
+  expansions are not kept.
+- **Decided (2026-10-13):** Sub-graphs hold no foreign node, whose job the
   store owns under its own key, and no meta node, so expansions do not
-  nest. A sub-graph node reads the meta node's inputs as they arrive,
-  reduced to the requested scale, so a scaled node inside (Resample)
-  filters reduced input at a preview.
-- **Decided (2026-10-13):** Pyramid blur (`pyramid-blur`) is the first meta
-  node: `levels` halvings with a Box Resample, each followed by Sharpen at
-  amount −1 with `radius` in that level's pixels, then a Mitchell Resample
-  to the input's full extent, `2 · levels + 1` nodes. It needs the input's
-  description to size the last Resample, so Resample gained an exact size
-  that may change the aspect ratio. The planned blending map is left out:
-  a map reads one image per pixel, and blending the blur with its input
-  needs two ([TODO](TODO.md)).
-- **Decided (2026-10-13):** `Policy::Wait` blocks on a running job, for
-  headless evaluation, actions and tests. `Policy::Defer` fails the job's
-  node and its consumers with `Error::Pending`, inside the `Error::Node` that
-  names the node, and leaves the job running. Targets independent of it
-  still receive their inputs. The job calls the evaluator's wake callback
-  when it ends, and the next run moves its outputs into the store, so the
-  same demand then hits. A demand while a job runs takes that job instead of
-  starting another.
-- **Open (2026-10-13):** Cancelling a job no demand needs. The design asks a
-  foreign function to check a cancellation flag cooperatively. Neither RAW
-  decode (one LibRaw call) nor Hot pixel removal (milliseconds) can use one,
-  so no flag exists yet. Such a job runs to its end and its outputs enter the
-  store.
-- **Decided (2026-10-13):** The disk tier keeps the outputs of `foreign =
-  disk` nodes across evaluators and processes, in `Disk::directory`:
-  `Disk::platform()` is `drip/store` in the platform cache directory
-  (`$XDG_CACHE_HOME`, or `~/.cache`, on Linux). One file per output is named
-  by its key in hexadecimal and holds `drip store 1`, the payload name and
-  the payload's `Persist` stream: the description as JSON, then the samples'
-  bytes. A job writes its files before it ends, through a temporary name
-  renamed into place, so another evaluator demanding the key after the wake
-  finds them. Entries are immutable and may be deleted at any time. A file
-  that fails to read (wrong format line or payload, a short or long stream,
-  an invalid description) is deleted and counts as a miss. Reads set the
-  file's modification time, and over the budget (16 GiB by default) the
-  oldest files go first. A disk hit is read on the evaluating thread into a
-  host raster and stored as a High entry. `Evaluator::new` has no disk tier;
-  a frontend opts in with `with_disk`, so tests never write the user's cache.
-- **Tentative (2026-10-13):** Disk entries carry no checksum. A file renamed
-  into place is complete unless the system crashed before writing it back,
-  and a damaged length or description fails to read, but flipped sample
-  bits are not detected. A checksum would read every sample a second time
-  per reopen. Add one if damaged entries appear.
-- **Decided (2026-10-13):** RAW decode (`bayer-raw`) is `foreign = disk`. Its
-  version is `drip_raw::VERSION`, bumped with LibRaw, its build or the shim,
-  and with Drip's normalization. On the Sony fixture, a new evaluator reads
-  the decode from disk in 89 ms instead of decoding in 398 ms
-  ([PROGRESS](PROGRESS.md#2026-10-13)).
-- **Decided (2026-10-13):** Hot pixel removal (`hot-pixels`) is the second
-  foreign node, `foreign = memory`: a Bayer sample above the maximum of its
-  eight same-colour neighbours by more than a threshold becomes their median.
+  nest. A sub-graph node reads the meta node's inputs reduced to the
+  requested scale.
+- **Decided (2026-10-13):** Pyramid blur is the first meta node: Box
+  halvings, Sharpen at −1 per level and a Mitchell Resample back to the
+  input's full extent. It needed an exact Resample size, which may change
+  the aspect ratio. Blending the blur with its input needs a map over two
+  images ([TODO](TODO.md)).
+- **Decided (2026-10-13):** `Policy::Wait` serves headless evaluation,
+  actions and tests. `Policy::Defer` leaves a running job running, and a
+  demand while it runs takes the same job.
+- **Open (2026-10-13):** Cancelling a job no demand needs, through a
+  cooperative flag. RAW decode (one LibRaw call) and Hot pixel removal
+  (milliseconds) cannot use one, so none exists yet.
+- **Decided (2026-10-13):** The disk tier keeps `foreign = disk` outputs
+  across evaluators and processes. Entries are immutable and may be deleted
+  at any time. `Evaluator::new` has no disk tier, so tests never write the
+  user's cache.
+- **Tentative (2026-10-13):** Disk entries carry no checksum. A renamed file
+  is complete unless the system crashed, and a damaged length or
+  description fails to read, but flipped sample bits go undetected. A
+  checksum would read every sample twice per reopen. Add one if damaged
+  entries appear.
+- **Decided (2026-10-13):** RAW decode is `foreign = disk`, versioned by
+  `drip_raw::VERSION`, which is bumped with LibRaw, its build, the shim and
+  Drip's normalization. A new evaluator reads the Sony decode from disk in
+  89 ms instead of decoding in 398 ms.
+- **Decided (2026-10-13):** Hot pixel removal is a `foreign = memory` node.
   The template does not include it.
-- **Decided:** CubeCL computation with one kernel source per algorithm across
-  runtimes. wgpu presentation and color management stay frontend-owned.
-  `DRIP_BACKEND` selects explicitly and never falls back (crate README).
-- **Requirement:** Do not distribute the CPU runtime: its LLVM JIT is too large.
-  Windows uses D3D12. Distribution builds use the native candidates: Vulkan
-  SPIR-V on Linux, native Metal on macOS, WGSL/D3D12 on Windows. xtask checks
-  the target platform. These are performance candidates, not measured winners.
-- **Decided:** RCD scratch is allocated before its first pass and released after
-  its last dispatch. CubeCL owns queued bindings. No host waits.
-- **Decided (2026-10-13):** Step 7. A reduce node (`#[node(reduce =
-  BODY)]`) names a `ReduceBody` static: an identity of N f32, an
-  `accumulate` body that folds one pixel into the accumulator and a
-  `combine` body that folds one accumulator into another. A bins node
-  (`#[node(bins = BODY)]`) names a `BinsBody`: a bin count, 1 to 3
-  channels and a `bin` body that maps a pixel and its `Position` to one
-  bin per channel. Both host functions return the body's constants, as a
-  map's does, and both outputs are host values the store keeps. Bodies are
-  declared statics, as filters are, because they have several parts and
-  sizes the signature does not state. Reduce bodies fold in place over
-  `&mut [f32]`: an accumulator `CubeType` of the node's own would need a
-  generic kernel per accumulator, with load and store code beside it.
-  Waveforms need the pixel's position, so bin bodies receive it. Reduce
-  bodies have no user that needs it and do not.
-- **Decided (2026-10-13):** `plan.rs` owns the reduction rules once. A pass
-  evaluates each pixel through the plan's stage and map bodies with the
-  `#[cube]` function the fused store kernel calls, then accumulates, so a
-  reduction of a deferred image never stores it. Folds run in a fixed order
-  without float atomics: lanes of at most 256 strided pixels, then combine
-  passes of at most 256 accumulators, so `combine` must be associative and
-  commutative. Counts up to 4096 accumulate per workgroup in shared memory
-  and merge in order. Larger counts go to global copies with integer
-  atomics, at most 32 and 2²⁰ counts in all, each lane adding a run of its
-  pixels in one bin at once. In 32 copies a level-1 waveform's 196 608
-  counts spread atomics over 25 MB and took 6.1 ms on the RTX 3080, and in
-  five copies, within its L2 cache, 2.0 ms. The vectorscope, at 32 copies
-  before, gets 16. Kernels with barriers cap their lanes at the runtime's
-  limit, since the CPU runtime needs a host worker per lane. Bodies compare
-  uploaded f32 bin edges for exact exposure boundaries, and the vectorscope
-  normalizes RGB before XYZ for HDR headroom.
+- **Decided:** CubeCL computation with one kernel source per algorithm
+  across runtimes. wgpu presentation and colour management stay
+  frontend-owned. `DRIP_BACKEND` selects explicitly and never falls back.
+- **Requirement:** Do not distribute the CPU runtime, whose LLVM JIT is too
+  large. Distribution uses Vulkan SPIR-V on Linux, native Metal on macOS and
+  WGSL/D3D12 on Windows, and xtask checks the target. These are candidates,
+  not measured winners.
+- **Decided:** RCD scratch is allocated before its first pass and released
+  after its last dispatch. CubeCL owns queued bindings, so no host waits.
+- **Decided (2026-10-13):** Reduce and bins bodies are declared statics, as
+  filters are, because they have several parts and sizes the signature does
+  not state. Reduce bodies fold in place over `&mut [f32]`, since an
+  accumulator type per node would need a generic kernel per accumulator.
+  Bin bodies receive the pixel's position, which waveforms need.
+- **Decided (2026-10-13):** `plan.rs` owns the reduction rules once. Global
+  count copies are capped at 2²⁰ counts: a level-1 waveform took 6.1 ms in 32
+  copies spread over 25 MB and 2.0 ms in five, within the RTX 3080's L2
+  cache. Bodies compare uploaded f32 bin edges for exact exposure
+  boundaries, and the vectorscope normalizes RGB before XYZ for HDR
+  headroom.
 - **Decided (2026-10-13):** A reduction reads a deferred input in place
-  when it is the input's only consumer in the run, and otherwise
-  materializes it first, once for every consumer, and the store keeps it.
-  Results are bit-identical either way. Three scopes at level 1 on the Sony
-  fixture took 5.03 ms, each computing the tail, and 4.19 ms reading it
-  materialized once ([PROGRESS](PROGRESS.md#2026-10-13)). Maps after a
-  fan-out still recompute, since materializing would cut their segment.
+  only when it is the input's sole consumer, and otherwise the input
+  materializes once: three scopes took 5.03 ms recomputing the tail and 4.19
+  ms reading it once. Maps after a fan-out still recompute, since
+  materializing would cut their segment.
 - **Decided (2026-10-13):** A frontend consumes a reduce or bins target's
-  outputs instead of its inputs. Evaluation demands the outputs like any
-  value, so stored counts run nothing, and `InputValues::bind_outputs`
-  binds them to `Typed::Outputs`, which `#[node]` generates for every node.
-  A reduction target takes no region, under the rule that only nodes
-  without outputs do. A reduction's shape is not scaled: its output has no
-  lattice. It runs at the requested scale when it reads an image on a
-  plane, and its key carries the scale through its input's
-  (`Key::reduced`).
+  outputs, demanded like any value. A reduction's shape is not scaled, since
+  its output has no lattice, and its key carries the scale through its
+  input's.
 - **Decided (2026-10-13):** Histogram, Waveform and Vectorscope stay GUI
-  kinds tagged `view` and `scope` and are bins nodes whose `#[cube]` bin
-  bodies are drip-gui's only device code. Their `Counts` output (`node::data`,
-  with the coordinates of the counted samples for the plot's label) is a
-  port on the canvas that nothing consumes yet, and `Prepare::Outputs`
-  plots it. The worker and the user's graph are unchanged. A view that
-  received inputs and ran the reduction through `Image::count` would keep
-  the binding as it was, but would recount an unchanged image on every
-  preview, where the store now serves the counts.
-- **Decided (2026-10-13):** Auto exposure is `node::exposure::meter`, a
-  library function over an `Image` that folds `MEAN_LUMINANCE` with
-  `Image::fold` and returns `Exposure` parameters, so a headless frontend
-  can meter, and the GUI action is one call. It keeps the exact Y = 0.18
-  target and the darktable reference.
+  kinds and are bins nodes whose bin bodies are drip-gui's only device code.
+  A view running `Image::count` would have kept the old binding but recounted
+  an unchanged image on every preview, where the store now serves the
+  counts.
+- **Decided (2026-10-13):** Auto exposure is `node::exposure::meter`, so a
+  headless frontend can meter too, with the exact Y = 0.18 target.
 - **Decided:** Softproof, gamut check and preview packing stay on the CPU.
   Packing uses Rayon over disjoint RGBA f16 slices.
-
-- **Decided (2026-10-13):** Export TIFF writes an image larger than the
-  device budget in bands. A target's input on a plane over the budget stays
-  deferred in its `InputValues`, holding the rasters its plan reads, since
-  the store would not keep it. The action asks `InputValues::bands` for
-  bands of whole rows, each within the budget, and binds
-  `InputValues::region` per band, top to bottom. The file equals the export
-  in one piece byte for byte. Two limits: whole kernels upstream, RCD
-  first, still allocate whole images on the device, and the TIFF encoder
-  receives the converted image in one buffer, because tiff 0.11.3's
-  `write_strip` does not set the writer's compression. Host memory holds
-  the encoded file either way, as before. JPEG export binds its input whole.
+- **Decided (2026-10-13):** Export TIFF writes an image over the device
+  budget in bands of rows, equal byte for byte to an export in one piece.
+  Whole kernels upstream, RCD first, still allocate whole images, and the
+  TIFF encoder takes the converted image in one buffer, because tiff 0.11.3's
+  `write_strip` does not set the writer's compression. JPEG binds its input
+  whole.
 
 ## Performance
 
-- **Requirement:** Apply mechanical simplifications that reduce complexity first.
-  Ownership, scheduling and contract changes remain separate work.
-- **Decided:** GUI bindings stay frontend-owned. The editor uses core port
-  handles and saves names. Canvas layout and drawing share a node snapshot per
-  pass. The worker keeps packed preview images until they are released, not
-  their source pixels.
+- **Requirement:** Apply mechanical simplifications first. Ownership,
+  scheduling and contract changes are separate work.
+- **Decided:** GUI bindings stay frontend-owned. Canvas layout and drawing
+  share a node snapshot per pass. The worker keeps packed preview images
+  until released, not their source pixels.
 - **Tentative:** Presentation-only edits need current drawing settings or
-  re-preparation of retained results. Suppressing evaluation alone leaves
-  prepared settings stale. Keep typed single-output evaluation as public API
-  even while only tests call it.
-- **Tentative:** Preview levels (powers of two) stay in the frontend. The core
-  accepts any integer scale and validates it at evaluation, since
-  `GlobalContext::scale` is public.
-- **Decided:** Render tests use production packing, upload, binding and pipeline
-  setup. Expected color values remain independent of that implementation.
-- **Decided:** The GPU display test initializes the selected compute runtime
-  before its independent wgpu instance. CubeCL serializes compute startup,
-  which prevents concurrent first Vulkan calls that crash the NVIDIA ICD while
-  allowing parallel tests. The display test therefore also requires the
-  selected `DRIP_BACKEND` to be available.
+  re-preparation, since suppressing evaluation alone leaves prepared
+  settings stale. Typed single-output evaluation stays public API.
+- **Tentative:** Preview levels (powers of two) stay in the frontend. The
+  core accepts any integer scale and validates it at evaluation.
+- **Decided:** Render tests use production packing, upload, binding and
+  pipeline setup, with expected colours independent of that code.
+- **Decided:** The GPU display test initializes the compute runtime before
+  its own wgpu instance. CubeCL serializes compute startup, which prevents
+  concurrent first Vulkan calls that crash the NVIDIA ICD, so the test needs
+  the selected `DRIP_BACKEND`.
 - **Requirement:** Do not optimize prematurely. Tracing adds no
   synchronization. Benchmark artifacts stay outside Git.
-- **Decided (2026-10-13):** Materialized values persist across demands in
-  the evaluator's store under byte budgets ([Compute](#compute), step 4).
-  This replaces the requirement of no persistent intermediate cache. The
-  user approved the compute model's plan that replaces it.
-- **Decided:** Sub-300 ms latency is acceptable without further optimization.
-- **Decided:** Benchmark protocol: Sony fixture (7968×5320), release builds,
-  WGPU on the RTX 3080, `RAYON_NUM_THREADS=12`, serial runs. Drive the real GUI
-  worker with Preview, Histogram, Waveform, Vectorscope and Export targets.
-  Warm up levels 2, 1, 0, repeat them five times, alternate ±0.1 EV five times
-  at level 1, and issue five identical level-1 requests. Report medians and
-  ranges. Exclude drawing, texture upload and file export. Harness and results
-  live in `../drip-benchmark-results/`.
-- **Tentative (2026-10-13):** The benchmark protocol's ±0.1 EV alternation
-  returns to stored values from its third sample. The step 4 measurement
-  adds five level-1 requests with a new EV each to time a recomputed tail.
+- **Decided:** Sub-300 ms latency is acceptable without further
+  optimization.
+- **Decided:** Benchmark protocol: Sony fixture (7968 × 5320), release
+  builds, wgpu on the RTX 3080, `RAYON_NUM_THREADS=12`, serial runs, the
+  real GUI worker with Preview, the three scopes and Export. Warm up levels
+  2, 1 and 0, repeat them five times, alternate ±0.1 EV five times at level
+  1, and issue five identical level-1 requests. Report medians and ranges,
+  excluding drawing, upload and file writing. Harness and results live in
+  `../drip-benchmark-results/`.
+- **Tentative (2026-10-13):** The ±0.1 EV alternation hits the store from
+  its third sample, so measurements add five level-1 requests with a new EV
+  each.
 
 ## GUI
 
-- **Requirement:** Preserve universal node controls/views, per-node pop-out
-  windows and interaction logic. Internal APIs may change.
-- **Decided:** Sentence-case display labels independent of persisted keys. IDs
-  name the operation alone in kebab case, qualified where it would be unclear
-  (`rcd-demosaic`, `export-tiff`), without migration aliases.
-- **Decided:** Nodes carry tags from one list, `drip::registry::TAGS` (`id`,
-  `description`), named by path so a misspelling fails to compile. Frontends
-  declare none of their own, so `view` and `scope` live there too. Tags say
-  what a node is for, since ports and payloads already say what it accepts. At
-  most one stage per node, by convention rather than a check: the ACES input
-  transform, look or output transform. Exposure is a look. Geometry, views and
-  file writers have no stage. RAW decoding and chromatic adaptation (as-shot
-  white by default) count as input transforms. `io` marks nodes that read or
-  write files, crossing stages. `bayer-raw` marks work on the undemosaiced
-  Bayer mosaic, so X-Trans or monochrome sensor data can later take tags of
-  their own.
-- **Decided:** Nodes are added through a palette, an `egui::Modal` sized to
-  the window, opened by a right-click on the background or Space over the
-  canvas (the node goes under the pointer) or "Add node…" in the menu (the
-  centre of the visible canvas). Search matches name, ID and tags, ranking
-  name prefixes, then word prefixes, then other matches. Tag chips narrow to
-  kinds carrying every chosen tag. Each result shows its tags and its help's
-  first sentence. Filtering by a dragged wire's payload would read ports, not
+- **Requirement:** Preserve universal node controls and views, per-node
+  pop-out windows and interaction logic. Internal APIs may change.
+- **Decided:** Display labels are sentence case and independent of
+  persisted IDs, which name the operation in kebab case, qualified where
+  unclear (`rcd-demosaic`, `export-tiff`), without migration aliases.
+- **Decided:** Tags come from one list, `drip::registry::TAGS`, named by
+  path so a misspelling fails to compile. Frontends declare none, so `view`
+  and `scope` live there too. Tags say what a node is for, since ports
+  already say what it accepts. By convention a node takes at most one ACES
+  stage: input
+  transform, look or output transform. RAW decoding and chromatic adaptation
+  count as input transforms, and Exposure is a look. `io` marks file
+  readers and writers. `bayer-raw` leaves room for X-Trans and monochrome
   tags.
-- **Decided:** Enum variants own their dependent parameter structs. Serde
-  adapters and UI schemas are generated together, externally tagged. Only the
+- **Decided:** A palette adds nodes: an `egui::Modal` sized to the window,
+  opened by right-clicking the background or Space over the canvas (the node
+  goes under the pointer), or from the menu (the centre of the visible
+  canvas). Search ranks name prefixes, then word prefixes, then other
+  matches of name, ID and tags, and tag chips narrow to kinds carrying every
+  chosen tag. Each result shows its tags and its help's first sentence.
+  Filtering by a dragged wire's payload would read ports, not tags.
+- **Decided:** Choice variants own their dependent parameters, and only the
   selected variant's fields are shown and saved.
-- **Decided:** Projects use `.drip`, templates `.drip-template`. Opening a
-  template creates an untitled project. Exposed template parameters reset to
-  their defaults when saving a template.
-- **Decided:** Project commands share one table for menu buttons and
-  shortcuts, which match modifiers exactly in every window: New Ctrl+N, Open
-  Ctrl+O, Save Ctrl+S, Save as Ctrl+Shift+S, Save template Ctrl+Alt+S, Undo
-  Ctrl+Z, Redo Ctrl+Shift+Z (Cmd on macOS). Button tooltips show them. Focused
-  text fields keep their keys.
-- **Decided:** Undo restores whole-graph snapshots: DAG, names, template
-  inputs and layout, not the preview level, selection or windows. Nodes are
-  shared `Arc`s, so a step copies entries and labels. A replaced node and its
-  loaded file stay in memory while a step refers to it, which is intended. A
-  step ends when the pointer is released in the window that edited. Text
-  fields edit once on losing focus, and action results are steps of their own.
-  `DRIP_HISTORY` sets the depth (default 100).
+- **Decided:** Projects use `.drip` and templates `.drip-template`. Opening
+  a template creates an untitled project, and saving a template resets its
+  exposed parameters to their defaults.
+- **Decided:** Menu buttons and shortcuts share one command table, matching
+  modifiers exactly in every window: New Ctrl+N, Open Ctrl+O, Save Ctrl+S,
+  Save as Ctrl+Shift+S, Save template Ctrl+Alt+S, Undo Ctrl+Z, Redo
+  Ctrl+Shift+Z (Cmd on macOS). Button tooltips show the shortcuts, and
+  focused text fields keep their keys.
+- **Decided:** Undo restores whole-graph snapshots of the DAG, names,
+  template inputs and layout, not the preview level, selection or windows.
+  Nodes are shared `Arc`s, so a replaced node and its loaded file stay in
+  memory while a step refers to it. A step ends when the pointer is released
+  in the window that edited. Text fields edit once on losing focus, and
+  action results are steps of their own. `DRIP_HISTORY` sets the depth, 100
+  by default.
 - **Decided:** New and Open ask to save, discard or cancel unsaved edits in
   every window. A failed or canceled save keeps the project.
-- **Decided:** Ports show declared payload names and endpoint names, and
-  optional inputs are marked `?`. Long titles are elided with full names on
-  hover. Unsaved edits are tracked separately from evaluation requests.
-- **Decided:** Scope overlays keep axes and compact color-space labels, with no
-  counts, dimensions or repeated settings. Waveforms default to logarithmic
-  density, histograms to linear.
-- **Decided:** Text is set in Source Sans 3 at weight 400, names (palette
-  results, the inspector's name field) at 600, and monospace in Source Code
-  Pro, both vendored variable fonts embedded in the binary. egui's bundled
-  fonts are disabled, so glyphs outside these fonts render as `?`: no emoji,
-  and node header buttons use `≡` (parameters) and `❒` (view). Every test
-  harness installs the fonts, so text is measured as shipped.
-- **Decided:** Inspector help joins Rustdoc source wraps and keeps paragraphs.
-  Reflow belongs to presentation.
-- **Decided (2026-10-12):** Built-in templates are ordinary `.drip-template`
-  files in the repository's `templates/`, embedded in the GUI with
-  `include_str!` and listed by hand in `templates.rs`. They load through the
-  same path as a template a user opens. New creates the first (Neutral
-  restore). A test requires each listed file to equal its own
-  re-serialization, so a schema or format change regenerates them. They carry
-  the crate's major version and are not migrated. They contain GUI view kinds,
-  so a headless frontend cannot load them as they are. The core keeps only a
-  test fixture of the RAW chain.
+- **Decided:** Ports show payload and endpoint names, optional inputs are
+  marked `?`, and long titles are elided with the full name on hover.
+  Unsaved edits are tracked apart from evaluation requests.
+- **Decided:** Scope overlays keep axes and compact colour-space labels and
+  nothing else. Waveforms default to logarithmic density, histograms to
+  linear.
+- **Decided:** Text uses vendored Source Sans 3 at weight 400, names at 600,
+  and Source Code Pro, embedded in the binary. egui's fonts are disabled, so
+  glyphs outside these render as `?`: no emoji, and node header buttons use
+  `≡` (parameters) and `❒` (view). Every test harness installs the fonts, so
+  text is measured as shipped.
+- **Decided:** Inspector help joins Rustdoc source wraps and keeps
+  paragraphs. Reflow belongs to presentation.
+- **Decided (2026-10-12):** Built-in templates are `.drip-template` files in
+  `templates/`, embedded and listed by hand, loaded through the same path as
+  a user's template. New creates the first, Neutral restore. A test requires
+  each to equal its re-serialization, so format changes regenerate them, and
+  they carry the crate's major version without migration. They contain GUI
+  view kinds, so a headless frontend cannot load them as they are, and the
+  core keeps only a test fixture of the RAW chain.
 - **Decided (2026-10-13):** The image view navigates in the full-detail
-  plane: 100 % shows one full-detail pixel per display pixel at every
-  preview level, and a coarser preview is magnified. At 100 % or more over a
-  preview coarser than full detail, the window reports its visible region,
-  and the worker evaluates the view node's input over it at scale 1, a
-  detail demand, after any waiting preview, once per region and preview
-  generation. The crop is drawn over the magnified preview while both
-  belong to the same graph, so an edit shows the new preview alone until the
-  new crop arrives, and a crop of an older region stays until the newer one
-  arrives. Scopes keep the preview's samples. Fit, smaller zooms and
-  full-detail previews ask for nothing.
-- **Decided:** Neutral restore uses a landscape layout: views share a top edge,
-  processing staggers down through Orientation, and RAW and TIFF sit at the
-  bottom corners.
-- **Tentative:** Rounded orthogonal wires could help backward links. Routing
-  around nodes needs obstacle-aware paths. No router chosen.
+  plane, so 100 % shows one full-detail pixel per display pixel at every
+  preview level. Magnified to 100 % or more past its preview, the window
+  asks for a full-detail crop of its visible region, once per region and
+  preview generation, evaluated after any waiting preview. The crop is
+  drawn over the preview while both belong to the same graph, so an edit
+  shows the new preview alone until its crop arrives. Scopes keep the
+  preview's samples. Fit, smaller zooms and full-detail previews ask for
+  nothing.
+- **Decided:** Neutral restore uses a landscape layout: views share a top
+  edge, processing staggers down through Orientation, and RAW and TIFF sit at
+  the bottom corners.
+- **Tentative:** Rounded orthogonal wires could help backward links, but
+  routing around nodes needs obstacle-aware paths. No router chosen.
 
 ## Distribution
 
-- **Decided:** Headless CI builds `drip/cpu` and tests with `DRIP_BACKEND=cpu`.
-  GPU tests are opt-in. Tests on every platform gate distribution, and
-  distribution jobs only build and upload. Clippy uses `--workspace
-  --no-deps`. Validate test changes with `drip/cpu` enabled too, since
-  default-feature builds omit CPU-only integration tests.
-- **Decided:** Worker tests allow 90 seconds for compute completion, including
-  a dropped worker finishing its current preview. CPU tests share a compute
-  client with full-RAW evaluations. Synchronization gates retain five seconds.
+- **Decided:** Headless CI builds `drip/cpu` and tests with
+  `DRIP_BACKEND=cpu`, and GPU tests are opt-in. Tests on every platform gate
+  distribution jobs, which only build and upload. Validate test changes with
+  `drip/cpu` too, since default builds omit CPU-only tests.
+- **Decided:** Worker tests allow 90 seconds for compute completion, since
+  CPU tests share a compute client with full-RAW evaluations.
+  Synchronization gates keep five seconds.
 - **Requirement:** Minimize user-installed dependencies. Native processing
-  libraries are static. The normal Linux C/C++ runtime may stay external.
-- **Decided:** Vendor unmodified sources at release tags. Builds never fetch.
-  Pins and licenses are in [THIRD_PARTY](../THIRD_PARTY.md). LibRaw uses its
-  shared source manifest through `cc` on Windows too.
-- **Decided:** Preserve user compiler flags and targets. Defer CPU variants and
-  OpenMP until measured gains justify their packaging cost.
-- **Decided:** Build each target natively on the newest standard GitHub runners.
-- **Tentative:** Linux `.tar.xz`/Flatpak, unsigned macOS `.app` ZIPs, Windows ZIPs.
+  libraries are static, and the normal Linux C/C++ runtime may stay
+  external.
+- **Decided:** Vendor unmodified sources at release tags, and never fetch
+  during builds. Pins and licenses are in [THIRD_PARTY](../THIRD_PARTY.md).
+  LibRaw uses its shared source manifest through `cc` on Windows too.
+- **Decided:** Preserve user compiler flags and targets. Defer CPU variants
+  and OpenMP until measured gains justify their packaging cost.
+- **Decided:** Build each target natively on the newest standard GitHub
+  runners.
+- **Tentative:** Linux `.tar.xz`/Flatpak, unsigned macOS `.app` ZIPs and
+  Windows ZIPs.
+
+## Documentation
+
+- **Decided (2026-10-13):** Each documentation level answers one question
+  and points down. The crate index gives the parts and one example, a
+  module doc says what the module owns and why, and states its rules when
+  it implements them (`plan.rs`, `store.rs`, `eval.rs`), and an item doc
+  states its contract. This file records decisions, and ARCHITECTURE gives
+  the overview. The drip README's examples compile as doc tests through a
+  `#[cfg(doctest)]` include in `lib.rs`.
 
 ## References
 

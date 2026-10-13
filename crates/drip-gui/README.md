@@ -1,97 +1,99 @@
 # Drip GUI
 
-Ownership follows the [library's organization](../drip/README.md#organization):
-node-specific controls, preparation and presentation live under `src/node_ui/`.
+The interactive frontend: a node canvas, pop-out windows and colour-managed
+previews over the `drip` library. Node-specific controls, preparation and
+presentation live under `src/node_ui/`, one module per node, as the library
+keeps node code under `node/`.
+
+## Build and run
+
+```sh
+cargo run --release -p drip-gui -- [project.drip]
+```
+
+The default build computes through wgpu. To use a native runtime, build it
+in and select it with `DRIP_BACKEND` (see the
+[drip README](../drip/README.md#build-and-test)):
+
+```sh
+cargo build --release -p drip-gui --features drip/vulkan
+DRIP_BACKEND=vulkan target/release/drip-gui
+```
+
+On macOS use `--features drip/metal,drip/metal-native`. On Windows the
+default build uses D3D12, which PowerShell can name with
+`$env:DRIP_BACKEND='dx12'`. The backend does not change the GUI renderer.
+
+Logs go to stderr. `RUST_LOG=warn,drip=debug,drip_gui=debug` shows
+processing diagnostics, `drip_gui::frame=trace` frame timings and
+`drip_gui::worker=trace` per-node host timings. `DRIP_HISTORY` sets the undo
+depth, 100 by default.
 
 ## Files
 
-The non-trivial files outside `node_ui/`:
+| File | Owns |
+|---|---|
+| `main.rs` | OS windows and the event loop |
+| `app.rs`, `app/commands.rs` | the project, windows, layout and evaluation requests, and the commands the menu and shortcuts share |
+| `editing.rs` | a frame's graph edits and their effects |
+| `history.rs` | undo history of whole-graph snapshots |
+| `editor.rs`, `editor/picker.rs` | the canvas and the node picker |
+| `inspector.rs` | the selected node's help and controls |
+| `model/` | `Graph`: the DAG plus names, template inputs and layout, and its persistence |
+| `worker.rs` | the background queue for previews, full-detail crops and actions |
+| `registry.rs` | the hand-kept `VIEWS`, `REGISTRY` and `BINDINGS` |
+| `templates.rs` | built-in templates, embedded from `templates/` |
+| `node_ui/` | node-specific controls, preparation and views |
+| `render/` | drawing prepared views and colour-managed presentation per window system |
+| `parent.rs` | pop-outs as child windows of the main window |
 
-- `app.rs`: application state: the project, windows, layout, evaluation
-  requests and node actions.
-- `app/commands.rs`: project commands shared by the menu and shortcuts, the
-  unsaved-edits prompt, opening and saving, undo/redo.
-- `history.rs`: undo history of whole-graph snapshots.
-- `editing.rs`: applies a frame's graph edits and reports their effects.
-- `editor.rs`, `editor/picker.rs`: the canvas (node frames, ports, wires, pan
-  and zoom) and the node picker.
-- `model/`: `Graph`, the DAG plus names, template inputs and layout, and its
-  project persistence.
-- `registry.rs`: the hand-maintained `VIEWS`, `REGISTRY` and `BINDINGS`.
-- `templates.rs`: built-in templates, the repository's `templates/*.drip-template`
-  files embedded in the binary and listed by hand.
-- `worker.rs`: the background queue for previews, details and node actions.
-  A preview that waits for a foreign job, such as RAW decode, keeps its
-  views, names the node in the status line and runs again when the job ends.
-  A detail is a view's input over the region its window shows at 100 % or
-  more, evaluated at full detail after the preview and drawn over it.
-- `parent.rs`: pop-outs as child windows of the main window.
-- `render/`: worker-prepared node drawing, linear Rec.2020 images and
-  color-managed presentation per window system.
-
-## Registries
-
-`src/registry.rs` lists, by hand, everything the GUI discovers:
-
-- `VIEWS`: node kinds declared in the GUI because what they prepare is GUI-only
-  (Preview, and the scopes, which are bins nodes). They use the library's
-  `view` and `scope` tags.
-- `REGISTRY`: the kinds the editor offers and projects may contain,
-  `drip::registry::NODES` followed by `VIEWS`.
-- `BINDINGS`: node-specific presentation, an `impl GuiNode` on a node's
-  generated `Definition` (custom controls, a prepared view or a frontend
-  action). Kinds without an entry use schema controls and their declared
-  action.
-
-Test builds append the lists in `src/test_nodes.rs`, which hold test-only kinds
-and bindings that project loading or prepared views must find.
+`registry.rs` lists everything the GUI discovers. `REGISTRY` is
+`drip::registry::NODES` followed by `VIEWS`, the kinds declared here because
+what they prepare is GUI-only: Preview and the three scopes. `BINDINGS`
+lists node-specific presentation. Test builds append the kinds and bindings
+in `test_nodes.rs`.
 
 ## Presenting a node
 
-A node listed in `drip::registry::NODES` needs no GUI code: the canvas, its
-ports, the inspector's help and the schema controls come from its
-declaration. Add GUI code only to override that. For the library's
-[`double` example](../drip/README.md#adding-a-node), a note under its
-controls goes in `src/node_ui/double.rs`:
+A node listed in `drip::registry::NODES` needs no GUI code: the canvas,
+its ports, the inspector's help and the schema controls come from its
+declaration. Add GUI code only to override that. Auto exposure, in
+`src/node_ui/exposure.rs`, adds a frontend action to Exposure:
 
 ```rust
-use super::{ControlCx, GuiNode};
-use drip::node::double;
-use egui::Ui;
+use super::{Action, GuiNode};
+use drip::{image::Image, node::exposure};
 
-impl GuiNode for double::compute::Definition {
+impl GuiNode for exposure::Definition {
     type Presentation = ();
-    fn controls(ui: &mut Ui, node: &mut ControlCx<'_, '_, '_, '_, Self::Parameters>) {
-        node.schema(ui);
-        ui.small("Equivalent to Exposure at +1 EV.");
-    }
+    const ACTION: Option<Action<Self>> = Some(Action {
+        name: "Auto exposure",
+        run: |_, inputs, ctx| {
+            let image = Image::from(inputs.image.data.clone());
+            Ok(Some(exposure::meter(&image, &ctx.kernels())?))
+        },
+    });
 }
 ```
 
-1. Declare the module: `mod double;` in `src/node_ui/mod.rs`.
-2. List `Binding::new::<drip::node::double::compute::Definition>()` in
-   `registry::BINDINGS`. Without this the override is ignored and the schema
-   controls remain.
+1. Declare the module in `src/node_ui/mod.rs`.
+2. List `Binding::new::<exposure::Definition>()` in `registry::BINDINGS`.
+   Without it the binding is ignored.
 
-Other overrides use the same impl and entry:
+The action's result becomes the node's new parameters, applied as an
+ordinary edit. The same impl can also override:
 
-- `PREPARE` with a `Presentation` draws a view in the node and its pop-out:
+- `controls`, to replace the schema controls, as in `sigmoid.rs`.
+- `PREPARE`, to draw a view in the node and its pop-out:
   `Prepare::Inputs` from the node's typed inputs, as in `preview/mod.rs`, or
-  `Prepare::Outputs` from a reduce or bins node's typed outputs, as in
+  `Prepare::Outputs` from a reduction's typed outputs, as in
   `scopes/histogram.rs`.
-- `ACTION` adds a frontend action whose result may become new parameters, as
-  in `exposure.rs` (auto exposure, one call to the library's
-  `exposure::meter`). A kind has a frontend action or one declared on the
-  node, not both.
-- A view whose window edits the node implements `Drawable::interact` and sets
-  parameters through `ControlCx::set`, as in `perspective.rs` (Perspective
-  Transform's handles).
+- `Drawable::interact`, for a view whose window edits the node through
+  `ControlCx::set`, as in `perspective.rs`.
 
-A node that only presents its inputs and prepares GUI-only data, such as
-Preview, is declared here with `#[drip::node]` instead of in the library,
-listed in `registry::VIEWS` as well as `BINDINGS`, and tagged `view`. The
-scopes are declared the same way and tagged `scope` too, as bins nodes: each
-counts its input with a `#[cube]` bin body, the only device code in
-drip-gui, and its view plots the `Counts` the store keeps. The GUI launches
-no kernel itself. It reaches the device through drip's `Image` and node
-shapes.
+A kind has a frontend action or one declared on the node, never both.
+A view node that prepares GUI-only data is declared here with
+`#[drip::node]`, tagged `view`, and listed in both `VIEWS` and `BINDINGS`.
+The scopes are bins nodes tagged `scope` too: their `#[cube]` bin bodies
+are drip-gui's only device code, and preparation reaches the device only
+through drip.

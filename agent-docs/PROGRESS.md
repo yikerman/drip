@@ -5,57 +5,50 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
-- Explicit compute model, benchmark of the migration: the GUI worker
-  protocol on the baseline (21fd470) and after each of the eight steps,
-  with a Sigmoid edit, a 100 % crop and a project reopen added, three rounds
-  of five samples per version, `DRIP_BACKEND=wgpu` on the RTX 3080 and
-  `RAYON_NUM_THREADS=12`. Medians in ms, baseline to final (df6565f): a new
-  Exposure at level 1 69.5 to 36.3, a new Sigmoid contrast 70.2 to 37.4, an
-  unchanged request 68.7 to 33.1, scale changes 45.8, 69.2 and 170.3 to
-  12.7, 32.9 and 76.7 at levels 2, 1 and 0, and a reopen 472.6 to 168.2. The
-  first load rose from 525.9 to 589.5 with the disk-tier write. A
-  1600 × 1000 crop takes 7.3. Peak RSS stays at 2.1 GiB after 4.8 GiB at
-  steps 4 and 5. Step 6 made recomputation faster (50.3 to 33.8 for a new
-  EV) and store hits slower (25.2 to 33.9 at level 1), since Preview's
-  preparation costs 27.7 ms on a hit instead of 18.0, and step 8 is 1 to 3
-  ms slower than step 7 at level 1. Neither cause was isolated. Every saved
-  preview is bit identical to the baseline's. Report, driver, per-version
-  patches and data are in
-  `../drip-benchmark-results/2026-10-13-migration/report.md`.
-- Explicit compute model, step 8: the meta shape and Pyramid blur. All
-  eight steps have landed. `tests/meta.rs` checks on the CPU runtime and
-  wgpu (RTX 3080) that Pyramid blur with three levels expands to Resample
-  and Sharpen three times and a Resample back, that its expansion fails
-  without its input and its contract fails, that a flat 37 × 29 image
-  passes unchanged within 1e-5 relative and keeps its lattice, running the
-  source, the meta node and seven sub-graph nodes, that the same demand
-  again runs nothing and hits the stored output, that it keeps the input's
-  lattice at scale 4, and that a 24 × 16 crop through a two-level pyramid
-  over a 96 × 80 image equals the whole output there bit for bit, writing
-  less than half the samples. The flat check first used 1e-6: wgpu returned
-  1.699999 for 1.7 after seven stages of normalized weights. The macro
-  tests cover the meta form and its rejections. The GUI picker test lists
-  Sharpen and Pyramid blur among the look nodes. The full workspace gate
-  passes.
-- Explicit compute model, step 8: the stencil shape and Sharpen.
-  `tests/stencil.rs` checks on the CPU runtime and wgpu (RTX 3080) that
-  Sharpen turns a delta into `δ + amount · (δ − G)` within 1e-6, with `G`
-  the Gaussian normalized over a reach of 4 samples and zero beyond it, that
-  a reach of 4 full-detail pixels reads 4 samples at scale 1 and 2 at scale
-  2, that a reach of 0.625 pixels counts one approximated stencil at scale
-  2 and none at scale 1, and that Exposure after Sharpen runs in Sharpen's
-  launch with the same bits as with the stencil's output materialized first.
-  Exposure before it runs in a launch of its own. A crop through Exposure
-  and Sharpen equals the whole output's samples bit for bit, inside the
-  image and at its corner, and writes the crop and the crop grown by the
-  reach, clamped to the image, in two launches. Unit tests cover the reach
-  conversion with `div_ceil` lattices and the window growth, and the macro
-  tests the stencil form. Timed with a release driver kept in
-  `../drip-benchmark-results/2026-10-13-stencil/` on the Sony fixture with
-  the template's tail and Sharpen (radius 2, reach 5) after Sigmoid,
-  `DRIP_BACKEND=wgpu` and `RAYON_NUM_THREADS=12`, a new Exposure per
-  sample, five samples after one warm-up each, wall time around
-  `evaluate_batch`. Medians (ranges) in ms:
+All runs below use the Sony fixture (`sony-ilce-7rm3.arw`, 7968 × 5320),
+`DRIP_BACKEND=wgpu` on the RTX 3080 and `RAYON_NUM_THREADS=12` unless
+stated, and report medians (ranges) in ms. Drivers and data are in
+`../drip-benchmark-results/2026-10-13-*/`. Each step passed the full
+workspace gate.
+
+- Documentation cut to one job per level: crate indexes with a diagram and
+  an example, module docs with their rules, and an overview ARCHITECTURE.
+  The drip README's examples now compile as doc tests, and `cargo doc
+  --no-deps` passes with `-D warnings`. Run once on the CPU runtime, the
+  `no_run` examples pass.
+- Migration benchmark, baseline (21fd470) to final (df6565f), GUI worker
+  protocol plus a Sigmoid edit, a 100 % crop and a reopen, three rounds of
+  five samples. Every saved preview is bit identical to the baseline's.
+  Peak RSS is 2.1 GiB, after 4.8 GiB at steps 4 and 5.
+
+  | Scenario | Baseline | Final |
+  |---|---|---|
+  | New Exposure, level 1 | 69.5 | 36.3 |
+  | New Sigmoid contrast, level 1 | 70.2 | 37.4 |
+  | Unchanged request, level 1 | 68.7 | 33.1 |
+  | Scale change to level 2, 1, 0 | 45.8, 69.2, 170.3 | 12.7, 32.9, 76.7 |
+  | Reopen | 472.6 | 168.2 |
+  | First load | 525.9 | 589.5 |
+  | 1600 × 1000 crop | | 7.3 |
+
+  The first load includes the disk-tier write. Step 6 made a new EV faster
+  (50.3 to 33.8) and store hits slower (25.2 to 33.9 at level 1), since
+  Preview's preparation costs 27.7 ms on a hit instead of 18.0. Step 8 is 1
+  to 3 ms slower than step 7 at level 1. Neither cause was isolated.
+- Step 8, meta nodes (`tests/meta.rs`, CPU runtime and wgpu). Pyramid blur
+  with three levels expands to three Resample and Sharpen pairs and a
+  Resample back. A flat 37 × 29 image passes unchanged within 1e-5 relative
+  (wgpu returned 1.699999 for 1.7 after seven stages, so 1e-6 failed). The
+  same demand again runs nothing, scale 4 keeps the lattice, and a 24 × 16
+  crop of a two-level pyramid over 96 × 80 equals the whole output bit for bit while
+  writing less than half the samples.
+- Step 8, stencils (`tests/stencil.rs`, CPU runtime and wgpu). Sharpen
+  turns a delta into `δ + amount · (δ − G)` within 1e-6. A reach of 4 pixels
+  reads 4 samples at scale 1 and 2 at scale 2, and 0.625 pixels counts one
+  approximated launch at scale 2. Exposure after Sharpen runs in its launch
+  with the bits of a materialized intermediate, and a crop equals the whole
+  output bit for bit inside the image and at its corner. Template tail and
+  Sharpen (radius 2, reach 5), new Exposure per sample, five samples:
 
   | Request | Samples written | Evaluate | With host read |
   |---|---|---|---|
@@ -63,33 +56,15 @@ in [TODO](TODO.md).
   | Whole, full detail | 84 779 520 | 24.77 (24.70–32.98) | 122.11 (117.67–154.42) |
   | Crop, 1600 × 1000 | 3 226 100 | 1.01 (0.86–1.11) | 6.92 (2.84–7.79) |
 
-  The crop computes the tail on 1610 × 1010 samples and Sharpen on
-  1600 × 1000. Without Sharpen, step 6 measured 10.67 ms and 0.43 ms. The
-  full workspace gate passes.
-- Explicit compute model, step 7: the reduce and bins shapes. `tests/reduce.rs`
-  checks on the CPU runtime and wgpu (RTX 3080) that `Image::count` matches
-  host counts for a ten-bin, three-channel body in shared memory and a
-  position-dependent 8192-bin body in global copies, over rasters of 1 × 1,
-  17 × 15, 300 × 300 and 1000 × 3 holding NaN, infinite and signed samples,
-  and over a crop, whose positions start at the crop. `Image::fold` sums
-  match f64 sums. A bins node after Exposure and Sigmoid counts the same as
-  the materialized tail with no fused launch, one reduction pass and no
-  download, and the same demand again runs nothing and hits the stored
-  counts. Two bins nodes on the tail materialize it once, as do a bins node
-  and a view. A reduce node folds the deferred tail to the same bits as its
-  samples, at scale 4 the counts equal those of the box-reduced tail, and a
-  region on a bins target is refused. drip-gui launches no kernel of its own
-  (`grep -rn "cube(launch)" crates/drip-gui/src` finds nothing). The scope
-  and auto exposure tests pass with unchanged expected values on wgpu and
-  on the CPU runtime. The scope device tests are ignored by default and ran
-  with `--ignored`. They now evaluate scope nodes and compare the counts
-  with the same host references. The macro tests cover both forms. Timed
-  with release drivers kept in
-  `../drip-benchmark-results/2026-10-13-reduce/` on the Sony fixture at
-  level 1 with `DRIP_BACKEND=wgpu` and `RAYON_NUM_THREADS=12`, a new
-  Exposure per sample, five samples after two warm-ups, evaluation until the
-  counts are on the host, plot meshes excluded. Step 6 ran in a worktree at
-  `fe3a83f`. Medians (ranges) in ms:
+  Without Sharpen, step 6 measured 10.67 and 0.43.
+- Step 7, reductions (`tests/reduce.rs`, CPU runtime and wgpu). Counts match
+  host counts for shared-memory and global-copy bodies over rasters from
+  1 × 1 to 1000 × 3 with NaN, infinite and signed samples, and `fold` sums
+  match f64. A bins node on the deferred tail runs no fused launch and one
+  pass, and two consumers materialize the tail once. drip-gui launches no
+  kernel (`grep -rn "cube(launch)" crates/drip-gui/src` is empty). Level 1,
+  new Exposure per sample, five samples after two warm-ups, plot meshes
+  excluded:
 
   | Targets | Step 6 | Step 7 |
   |---|---|---|
@@ -99,72 +74,28 @@ in [TODO](TODO.md).
   | Three scopes | 3.92 (3.79–3.92) | 4.19 (4.18–4.33) |
   | Preview and three scopes | 3.91 (3.86–4.01) | 4.19 (4.06–4.31) |
 
-  A scope alone writes no image. With several consumers the tail is
-  materialized once, as before, since recomputing it in three passes took
-  5.03 ms. The generic waveform pass is 0.6 ms slower than the per-column
-  kernel it replaced, after limiting its global copies to five took it from
-  6.1 ms. The full workspace gate passes.
-- Explicit compute model, step 6: regions, windows and the scale rule.
-  `tests/regions.rs` checks on the CPU runtime and wgpu (RTX 3080) that a
-  13 × 9 crop of six chains over a 61 × 47 source (maps, a reindex, a
-  projective Perspective Transform, Resample after a map, a magnifying
-  Resample, and three warps) equals the same samples of the whole output bit
-  for bit, and that a chain launching once writes only the crop's 117
-  samples. A region at scale 4 selects the samples its cells meet, a region
-  beyond the plane fails, and a crop is stored under its region: the same
-  region again runs only the sink, another runs the tail on its crop alone,
-  and a crop of a stored whole image is one copy launch. On the template's
-  processing from a 96 × 64 mosaic (RCD, camera matrix, CAT16, Orientation,
-  Exposure, Sigmoid) a 24 × 20 crop launches the tail once over 480 samples
-  and a pan reuses the stored RCD output. Export TIFF of the same graph
-  with Perspective Transform after the tail, under a device budget of ten
-  rows, writes more than three bands and the same bytes as the export in
-  one piece. At scale 2 an RGB source feeding Exposure is box-reduced in the
-  same launch, matching the 2 × 2 block means, and after Orientation too. A
-  Bayer negation before a 2×2 demosaic and a foreign copy after it run once
-  across scales 1 and 4: the copy reads full detail and its consumer
-  receives it reduced. In the GUI, the image view reports its visible region
-  only at 100 % or more over a coarser preview, and the worker shows a
-  full-detail crop over the preview it belongs to, hides it after an edit
-  until the new crop arrives, and leaves scopes on the preview
-  (`a_magnified_view_shows_a_full_detail_crop_over_its_preview`). Three
-  tests changed on purpose. The explicit RGB reduction is checked at full
-  detail, since a preview scale now reduces its source first. The scale
-  test's source claims `scaled` and describes a plane that no scale
-  reduces. A file-reading test kernel keeps its first read for the export,
-  since its key no longer holds the scale. Timed with a release driver kept in
-  `../drip-benchmark-results/2026-10-13-regions/` on the Sony fixture with
-  `DRIP_BACKEND=wgpu` and `RAYON_NUM_THREADS=12`, a new Exposure per sample,
-  so the tail runs as one launch from the stored RCD output, five samples
-  after a warm-up. Medians (ranges) in ms:
+  Recomputing the tail in three passes took 5.03. Five global copies took
+  the waveform from 6.1 to its 2.26.
+- Step 6, regions and the scale rule (`tests/regions.rs`, CPU runtime and
+  wgpu). A 13 × 9 crop of six chains over a 61 × 47 source equals the whole
+  output bit for bit, and a one-launch chain writes only the crop's 117
+  samples. A 24 × 20 crop of the template's processing launches the tail
+  once over 480 samples, and a pan reuses the stored RCD output. Export TIFF
+  under a ten-row device budget writes more than three bands and the same
+  bytes as one piece. Three tests changed on purpose for the new scale rule.
+  New Exposure per sample, five samples after a warm-up:
 
   | Request | Samples | Evaluate | With host read |
   |---|---|---|---|
   | Whole, 7968 × 5320 | 42 389 760 | 10.67 (10.61–10.83) | 105.95 (105.59–109.40) |
   | 100 % crop, 1600 × 1000 | 1 600 000 | 0.43 (0.24–0.53) | 4.42 (4.08–6.61) |
 
-  The full workspace gate passes.
-- Explicit compute model, step 5: foreign nodes, the pending policy and the
-  store's disk tier. RAW decode is a `foreign = disk` node and Hot pixel
-  removal a `foreign = memory` one. `tests/foreign.rs` checks on the host
-  runtime that a new evaluator reads a disk node's output instead of
-  running it (no node, one disk read, equal samples), that a file with a
-  damaged format line, a missing last byte or a trailing byte is discarded,
-  computed again and rewritten, that a two-entry budget deletes the entry
-  used least recently, where a read counts as a use, that nothing derived
-  from bound data is written, that a failed job repeats its error without
-  running again, and that a deferred batch reports the running job's
-  consumer as pending twice, serves an independent target, starts one job,
-  wakes when it ends and then hits. Decoding `nikon-d70s.nef` and reopening
-  it in a new evaluator reads the mosaic and the metadata from disk without
-  running the node. `raw_is_decoded_once_per_file_stamp` replaces the test
-  that a RAW is decoded again only when chosen again: the same file is a
-  hit, a new modification time decodes again and a removed file fails. Hot
-  pixel removal replaces one hot sample with the median of its eight
-  same-colour neighbours and leaves every other sample. Timed with a
-  release driver kept in `../drip-benchmark-results/2026-10-13-foreign/`
-  (host runtime, a new evaluator per sample, mosaic and metadata of the
-  Sony fixture), in ms:
+- Step 5, foreign nodes and the disk tier (`tests/foreign.rs`, host
+  runtime). A new evaluator reads a disk node's output instead of running
+  it, damaged files are discarded and rewritten, the budget deletes the
+  least recently used entry, and a deferred batch starts one job, reports
+  pending, wakes and then hits. Mosaic and metadata, a new evaluator per
+  sample:
 
   | Evaluation | Samples |
   |---|---|
@@ -172,36 +103,12 @@ in [TODO](TODO.md).
   | Decode and write to an empty disk tier | 463.1, 461.7, 461.2 |
   | Read from the disk tier | 90.8, 88.2, 88.8 |
 
-  Reopening a project therefore costs about 89 ms for the RAW instead of
-  about 398 ms, read from the page cache. Writing the 170 MB entry adds
-  about 63 ms to the first decode. In the GUI worker, a preview of a slow
-  foreign node returns while the job runs, names the node as waiting,
-  starts no second job for another detail level, runs again when the job
-  ends and then shows its output, and keeps the previous view while a new
-  value's job runs (`a_preview_waits_for_foreign_work_and_runs_again_when_it_ends`).
-- Explicit compute model, step 4: the evaluator's store keeps materialized
-  values across demands under content keys, durability and per-side byte
-  budgets. `tests/store.rs` checks on the CPU runtime and wgpu (RTX 3080)
-  that a Sigmoid-only edit of a Bayer source, 2×2 demosaic, camera matrix,
-  CAT16, Orientation, Exposure and Sigmoid graph runs five nodes and one
-  launch with two hits and no upload, and that the unchanged demand runs no
-  node, launches nothing and transfers nothing. On the host runtime, a
-  budget holding the source and one scaled copy evicts the older copy and
-  keeps the source. The same graph built in two `Dag`s shares every value,
-  other parameters or a bumped `version` do not, and bound data is never
-  shared. A device budget below one raster drops the source's upload and
-  keeps its host samples, which upload again on the next edit. A source's
-  identity changes when its file is rewritten. Tests that count the work of
-  one evaluation now use a new evaluator, and four tests changed on purpose:
-  a node's two outputs are hits on the second evaluation, the GUI worker no
-  longer reruns a source for a new target set, a file-reading test kernel
-  picks up a new file through a new path, and auto exposure checks the
-  running state on its first click only, since the store serves the second.
-  Measured with the GUI worker protocol in
-  `../drip-benchmark-results/2026-10-13-store/`: before is a worktree of
-  f1e0697, after the same commit with this change, `DRIP_BACKEND=wgpu`,
-  `RAYON_NUM_THREADS=12`, three alternating runs of five samples. Medians
-  (ranges) in ms:
+  Writing the 170 MB entry adds about 63 ms to the first decode.
+- Step 4, the store (`tests/store.rs`, CPU runtime and wgpu). A Sigmoid-only
+  edit runs five nodes and one launch with two hits and no upload, and the
+  unchanged demand runs nothing. Four tests changed on purpose. GUI worker
+  protocol, worktree of f1e0697 before and after, three alternating runs of
+  five samples:
 
   | Scenario | Level | Before | After |
   |---|---|---|---|
@@ -212,51 +119,20 @@ in [TODO](TODO.md).
   | Exposure, new EV each | 1 | 68.7 (67.4–74.8) | 55.3 (47.8–72.4) |
   | Unchanged | 1 | 73.0 (67.7–76.4) | 24.9 (23.6–26.5) |
 
-  Preview texels are identical before and after. After warm-up every level
-  is stored, so scale changes and unchanged demands cost the view
-  preparation alone. The alternating edit returns to stored values from its
-  third sample. With a new EV the five tail nodes take microseconds on the
-  host, and Preview's preparation grows from 17 ms to 38 ms as it waits for
-  the fused launch and downloads the new 127 MB sigmoid output. Build each
-  variant with `CC=/usr/bin/cc CXX=/usr/bin/c++
-  CARGO_TARGET_DIR=$PWD/../<v>-target cargo build --release --offline -p
-  drip-gui` in its worktree and run `./run.sh`. The full workspace gate
-  passes.
-- Explicit compute model, step 3: warps, Resample and the resampling stage
-  replace `RgbField`, Interpolate and Sample. Orientation's permutations
-  pass bit for bit through the graph on the CPU runtime and wgpu (RTX 3080),
-  from metadata and explicit, on a source whose `full` exceeds its extent,
-  and followed by Resample at factor one with Lanczos-3 and with Box. The
-  step 2 fusion test now also runs with each of the eight orientations ahead
-  of the colour maps against the previous orientation kernel: bit identical,
-  one launch. The template tail with Orientation between CAT16 and exposure
-  launches once instead of twice. A new test covers each composition rule:
-  Resample or a rotating Perspective Transform after a sigmoid takes two
-  launches with the bits of a materialization between them, Resample before
-  the sigmoid takes one, an integer crop after it takes one, adjacent warps
-  and a Resample take one, and the identity or two cancelling quarter turns
-  take none. The resampling reference tests (identity, constants under
-  per-channel maps, box halving, Nyquist antialiasing, preview framing and a
-  keystone against an independent f64 resampler) pass through Resample and
-  the image API. Perspective Transform alone equals Perspective Transform
-  followed by Resample with Lanczos-3 at factor one, bit for bit. The
-  workspace gate passes, including the `selected_backend` tests on wgpu. No
-  benchmarks were run (see [TODO](TODO.md)).
-- Explicit compute model, step 2: the map shape and fused segment kernels.
-  Exposure, Camera RGB to color RGB, Chromatic adaptation and Sigmoid are
-  maps. `tests/fusion.rs` compares the fused chain against the replaced
-  kernels, kept there verbatim, on 369 pixels with signed, zero, tiny, huge,
-  infinite and NaN samples: bit identical on wgpu (RTX 3080) and the CPU
-  runtime. It also checks that a fan-out materializes once, a kernel after
-  two maps reads their samples, `evaluate` materializes a map output, a plan
-  without constants runs, and the template's colour tail launches once after
-  Orientation. Measured with a release driver kept in
-  `../drip-benchmark-results/2026-10-13-fusion/`: RCD output of
-  `fixtures/raw/sony-ilce-7rm3.arw` bound as a device raster, then camera
-  matrix, CAT16 (as shot), exposure and sigmoid evaluated to a `Raster<Rgb>`
-  with the terminal device wait, `DRIP_BACKEND=wgpu`, `RAYON_NUM_THREADS=12`,
-  one warm-up and five samples, three alternating runs per build. Before is a
-  worktree of 3479319, after is 17142d6. Medians (ranges) in ms:
+  Preview texels are identical before and after. With a new EV, Preview's
+  preparation grows from 17 to 38 ms as it waits for the fused launch and
+  downloads the 127 MB output.
+- Step 3, warps and Resample. Orientation's permutations pass bit for bit
+  through the graph on the CPU runtime and wgpu, and the colour tail with
+  Orientation launches once instead of twice. Each composition rule has a
+  test, and the resampling reference tests pass through Resample.
+  Perspective Transform alone equals it followed by a factor-one Lanczos-3
+  Resample, bit for bit. No benchmarks were run.
+- Step 2, maps and fused kernels (`tests/fusion.rs`). The fused chain
+  equals the replaced kernels bit for bit on 369 pixels with signed, zero,
+  tiny, huge, infinite and NaN samples, on wgpu and the CPU runtime. RCD
+  output bound as a device raster, then camera matrix, CAT16, Exposure and
+  Sigmoid, worktrees of 3479319 and 17142d6, one warm-up and five samples:
 
   | Scenario | Scale | Before | After |
   |---|---|---|---|
@@ -265,21 +141,10 @@ in [TODO](TODO.md).
   | RAW to sigmoid, RAW decoded once | 1 | 50.37 (49.15–62.02) | 46.78 (45.89–58.41) |
   | RAW to sigmoid, RAW decoded once | 2 | 36.54 (35.97–37.64) | 35.59 (34.94–36.07) |
 
-  Output hashes agree before and after in every scenario. Build each variant
-  with `CC=/usr/bin/cc CXX=/usr/bin/c++ CARGO_TARGET_DIR=$PWD/target cargo
-  build --release --offline` in its `before/` or `after/` directory and run
-  `DRIP_BACKEND=wgpu RAYON_NUM_THREADS=12 DRIP_BENCH_SAMPLES=5
-  DRIP_BENCH_RAW=<fixture> ./target/release/fusion-bench`. The full
-  workspace gate passes.
-- Explicit compute model, step 1: residency left node signatures. All 17
-  library kinds, the GUI views, scopes, Perspective Transform's view and auto
-  exposure moved mechanically. Transfer counts between nodes are unchanged.
-  Five tests that counted the final download of an `evaluate::<Cpu<_>>`
-  result now expect one download fewer, since the caller reads the result.
-  The workspace gate passes with default features (wgpu on the RTX 3080),
-  with `drip/cpu`, the doctests (including a `compile_fail` for a device read
-  of `CaptureMetadata`) and the `selected_backend` tests. The ignored GUI
-  scope tests pass on the GPU. No benchmarks were run.
+  Output hashes agree before and after.
+- Step 1, residency left node signatures. Transfer counts between nodes are
+  unchanged, and five tests expect one download fewer, since the caller now
+  reads the result. No benchmarks were run.
 
 ## 2026-10-12
 

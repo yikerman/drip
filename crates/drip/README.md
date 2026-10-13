@@ -1,219 +1,232 @@
 # Drip library
 
-## Organization
+The headless half of Drip: the node graph, image processing, colour
+management and persistence. Anything a batch run on a server would never
+touch, such as preparing a vectorscope for display, belongs in `drip-gui`.
 
-- `src/node/` owns node-specific behavior. Each node has a file or directory
-  containing its parameters, contracts, computation and private helpers/kernels.
-  RCD kernels belong in `node/rcd/`, sigmoid math in `node/sigmoid.rs`.
-- Shared image-processing code also lives under `node/`: payload implementations,
-  color management and export encoding. `shared_kernel.rs`
-  contains reusable operations such as matrix multiplication and Bayer reduction,
-  never a collection of unrelated node kernels.
-- Outside `node/`, keep shared DAG/evaluation infrastructure: definitions and
-  discovery, ports and payload interfaces, graph checks, scheduling, runtime
-  access, parameter schemas, node file assets and generic project persistence. These
-  modules must not depend on concrete image-processing nodes or payloads.
-- `src/registry.rs` is the one exception: the composition point that lists
-  every node kind by hand. See [Registries](#registries).
-
-The same ownership rule applies to `drip-gui`: node-specific declarations,
-contracts, controls, preparation and presentation belong under `src/node_ui/`.
-Each GUI node has its own module, and code shared by GUI nodes stays beside
-them.
-Windowing, the graph editor, worker scheduling and shared rendering machinery
-remain outside. File organization does not justify splitting one algorithm
-into more DAG nodes or changing GUI interaction behavior.
-
-[ARCHITECTURE](../../agent-docs/ARCHITECTURE.md) describes ports, payloads,
-residency, shapes and evaluation. Keep a concrete Rust type per payload.
-Implement `DeviceLayout` only for payloads a kernel reads, keep structured
-data on the host, and flatten the numbers a kernel needs into
-`KernelContext::constants`. Implement `Persist` for payloads a
-`foreign = disk` node outputs. Do not flatten unrelated ports merely to make
-storage uniform.
+For the design, read the crate documentation (`cargo doc -p drip --open`)
+and [ARCHITECTURE](../../agent-docs/ARCHITECTURE.md).
 
 ## Files
 
-The non-trivial files outside `node/`:
+`src/node/` owns everything node-specific. Each node has a file or
+directory with its parameters, contract, computation and private kernels.
+Shared image-processing code sits beside the nodes: payloads (`data.rs`),
+colorimetry (`color.rs`, `camera.rs`, `profile.rs`), resampling filters
+(`filter.rs`) and `shared_kernel.rs`, which holds reusable operations such as
+matrix multiplication and Bayer reduction, never unrelated node kernels.
 
-- `definition.rs`: what `#[node]` generates against: `Kind`, `Tag`, the
-  `Node`/`Typed` traits, `Action`, `Assets`, and the `Identity` and
-  `Durability` the store keys and evicts by.
-- `shape.rs`: how evaluation runs a kind (`Shape`: kernel, bound source,
-  foreign, map, warp, resample, reduce, bins, stencil or meta, and whether
-  it reads the scale), where a foreign node's outputs are kept (`Cache`,
-  `Codec`), and what the segment compiler composes: `MapBody` and the
-  `Pixel` it maps, `Warp`, `FilterBody` and the `BOX` filter that reduces to
-  the requested scale, `ReduceBody` and `BinsBody` with the `Position` and
-  `Bin` a bin body sees and returns, `StencilBody` with its `Border` and the
-  `Window` it reads, and the `Lattice` of a `MapPayload` with the window a
-  raster holds, in `Rect`s.
-- `expand.rs`: the `SubGraph` a meta node's function builds, with the
-  mapping of the meta node's ports and the checks evaluation relies on.
-- `registry.rs`: the hand-maintained `NODES`, `TAGS` and `Registry`.
-- `graph.rs`: `Dag` and transactional edits, checked on ports only.
-- `eval.rs`: `Evaluator`, demand-driven evaluation of the requested subgraph;
-  contracts run here, nodes whose outputs the store holds are skipped, and
-  results are materialized for their consumers. It runs a meta node's
-  sub-graph in the node's place, keyed node by node. It decides the scale each
-  node runs at, reduces full-detail images to the requested scale and cuts a
-  `Target`'s inputs to its region. `Policy` says whether a run waits for a
-  foreign job or reports it pending, and `InputValues` hands frontends and
-  actions the inputs, whole or in bands, or a reduction's outputs.
-- `image.rs`: `Image`, the value on an edge, a raster or the deferred output of
-  a map, warp, resample or stencil, materialized on first need, whole or by window
-  (`Image::crop`), or reduced to host values without storing it
-  (`Image::fold`, `Image::count`), `Raster`, samples with lazy host and
-  device residency and counted transfers, and `Plane`, what evaluation does
-  to an image on a plane without its type.
-- `plan.rs`: the segment compiler: a `Plan` of one stage, resampling or a
-  stencil, and map bodies, the rules for composing steps into it, the input
-  window a window of its output reads, a stencil's reach in samples, the
-  fused kernel that runs it on a window, and the passes that fold or count
-  its pixels.
-- `store.rs`: the evaluator's memo of materialized values across demands:
-  content keys, eviction by durability and recency within per-side byte
-  budgets, foreign jobs, meta expansions, and the `Disk` tier.
-- `ports.rs`: port views (`Read`, `Write`, `Forward`, `Publish` for foreign
-  nodes, `Point` for maps, warps, resamples, reductions and stencils, and
-  `Inlet` and `Outlet` for meta nodes) and interpretation requirements.
-- `payload.rs`: payload families, their host types, device byte layouts and
-  `Persist` streams.
-- `param.rs`: parameter schemas, encoding and validation.
-- `project.rs`: `.drip` persistence, loaded through a `Registry`.
-- `runtime.rs`: one compute client per evaluator and `DRIP_BACKEND` selection.
+Modules outside `node/` are infrastructure and name no concrete node or
+payload, except `registry.rs`, which lists the kinds by hand:
 
-## Registries
+| File | Owns |
+|---|---|
+| `definition.rs` | `Kind`, `Tag`, the `Node` and `Typed` traits, actions, assets, and the `Identity` and `Durability` the store keys and evicts by |
+| `shape.rs` | `Shape` and the bodies the segment compiler fuses |
+| `plan.rs` | the segment compiler: composition rules, input windows, the fused kernel, reduction passes |
+| `eval.rs` | `Evaluator`: scale, keys, scheduling, regions, `Policy` and `InputValues` |
+| `store.rs` | content keys, eviction, foreign jobs, meta expansions and the `Disk` tier |
+| `expand.rs` | the `SubGraph` a meta node builds |
+| `image.rs` | `Image`, `Raster` and residency |
+| `ports.rs` | port views and requirements |
+| `payload.rs` | payload traits, device layouts and `Persist` streams |
+| `graph.rs` | `Dag` and transactional edits checked on ports |
+| `param.rs` | parameter schemas, encoding and validation |
+| `project.rs` | `.drip` persistence, loaded through a `Registry` |
+| `registry.rs` | `NODES`, `TAGS` and `Registry` |
+| `runtime.rs` | the compute client, budgets and `DRIP_BACKEND` selection |
 
-Everything a frontend discovers is listed by hand in a registry module, not
-collected at link time. A kind missing from a list cannot be added or loaded;
-a new node is one more line.
+File organization never justifies splitting one algorithm into more nodes.
 
-- `drip::registry::NODES`: processing node kinds, in pipeline order.
-- `drip::registry::TAGS`: every tag a node may carry, with a one-sentence
-  description and the durability of its nodes' outputs in the store. Frontends add none. A node takes at most one stage tag, after
-  ACES: `input-transform`, `look` or `output-transform`. File readers and
-  writers carry `io`.
-- `drip::registry::Registry`: composes lists, rejects duplicate IDs and
-  admits persisted parameters. `Project::from_json` loads through the registry
-  it is given, so a frontend states which kinds it knows. A headless frontend
-  passes `NODES`.
+Keep one concrete Rust type per payload. Implement `DeviceLayout` only for
+payloads a kernel reads, keep structured data on the host, and flatten the
+numbers a kernel needs into `KernelContext::constants`. Implement `Persist`
+for payloads a `foreign = disk` node outputs.
 
-`drip-gui` keeps its own lists in `src/registry.rs`, described in its
-[README](../drip-gui/README.md).
+## Build and test
+
+```sh
+cargo build -p drip
+DRIP_BACKEND=cpu cargo test -p drip --features cpu
+cargo test -p drip --doc --features cpu
+```
+
+Cargo features include compute runtimes, and `DRIP_BACKEND` selects one at
+startup. Unset, it selects `metal-native` on macOS or `vulkan` on Linux when
+that feature is enabled, and `wgpu` otherwise. A selection the build does
+not include fails instead of falling back. The choice does not change the
+GUI renderer.
+
+| `DRIP_BACKEND` | `drip` feature | Execution |
+|---|---|---|
+| `wgpu` or `wgsl` | `wgpu` (default) | WGSL through wgpu: D3D12 on Windows, wgpu's choice elsewhere |
+| `dx12` | `wgpu` | the same D3D12 path, named explicitly |
+| `vulkan` | `vulkan` | SPIR-V through wgpu on Vulkan |
+| `metal` | `metal` | MSL through wgpu on macOS |
+| `metal-native` | `metal-native` | CubeCL's own Metal runtime |
+| `cuda` | `cuda` | NVIDIA CUDA |
+| `hip` | `hip` | AMD HIP/ROCm |
+| `cpu` | `cpu` | LLVM CPU JIT, for development and CI only |
+
+Features are additive: `vulkan` and `metal` also include wgpu without
+changing what `wgsl` means. `--no-default-features` removes wgpu. `cargo
+xtask dist` enables the native choice of each platform and never ships the
+CPU runtime.
+
+To run the device tests on another runtime, build it in and name it:
+
+```sh
+DRIP_BACKEND=vulkan cargo test -p drip --features vulkan selected_backend -- --ignored
+```
 
 ## Adding a node
 
-A node that doubles every RGB sample, as `src/node/double.rs`:
+A node is a function with `#[node]` in `src/node/<name>.rs`. These examples
+are compiled as doc tests, so they use `drip::` paths. Inside the crate,
+write `crate::`.
 
-```rust
-use crate::{
+The worked example doubles every RGB sample in a kernel:
+
+```rust,no_run
+use drip::{
     Result,
-    node::data::*,
+    eval::Evaluator,
+    graph::Dag,
+    node::{self, data::*},
     ports::*,
     registry::tag,
-    runtime::{GlobalContext, KernelContext, dispatch_dims},
+    runtime::{GlobalContext, KernelContext, RuntimeContext},
 };
 
 fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(RgbDesc,)> {
     Ok((image.clone(),))
 }
 
-/// Double every RGB sample (+1 EV). Output keeps the input coordinates.
-#[crate::node(id = "double", name = "Double", tags = [tag::LOOK], contract = contract)]
+/// Double every RGB sample (+1 EV). The output keeps the input coordinates.
+#[drip::node(id = "double", name = "Double", tags = [tag::LOOK], contract = contract)]
 pub fn compute(
-    ctx: &KernelContext<'_>,
+    _: &KernelContext<'_>,
     _: &(),
     image: Read<'_, Rgb>,
-    output: Write<'_, Rgb>,
+    mut output: Write<'_, Rgb>,
 ) -> Result<()> {
-    let (count, dim) = dispatch_dims(image.desc.extent.pixels() * 3);
-    let (input, output) = (image.data.device(ctx)?.argument(), output.device(ctx)?.argument());
-    kernel::double::launch(ctx.client()?, count, dim, input, output);
+    let input = image.data.host()?;
+    for (out, px) in output.host().iter_mut().zip(input.iter()) {
+        *out = px.map(|v| v * 2.0);
+    }
     Ok(())
 }
 
-mod kernel {
-    use cubecl::prelude::*;
-    #[cube(launch)]
-    pub fn double(input: &[f32], output: &mut [f32]) {
-        let i = ABSOLUTE_POS;
-        if i < input.len() {
-            output[i] = input[i] * 2.0;
-        }
-    }
+fn main() -> Result<()> {
+    let mut dag = Dag::new();
+    let desc = RgbDesc::new(Extent { width: 2, height: 1 }, Coordinates::Space(REC2020_D65));
+    let source = node::source::<Rgb>(&mut dag, desc, vec![[0.1, -0.2, 2.0]; 2])?;
+    let double = compute::add(&mut dag, ())?;
+    dag.connect(source, double.image)?;
+    let result = Evaluator::new(RuntimeContext::from_env()?)
+        .evaluate::<Rgb>(&dag, &Default::default(), double.output)?;
+    assert_eq!(&**result.data.host()?, &[[0.2, -0.4, 4.0]; 2]);
+    Ok(())
 }
 ```
 
-A per-pixel operation is better declared as a map. Its host function returns
-the constants of a `#[cube]` body that maps one pixel. Evaluation runs a chain
-of maps, such as the template's exposure and sigmoid, as one kernel and stores
-only its result:
+1. Declare the module in `src/node/mod.rs`.
+2. List `&double::compute::KIND` in `registry::NODES` at its pipeline
+   position. A kind missing there cannot be added or loaded.
+3. Test it through a graph, as `main` does. Graph tests live in `tests/`.
+
+`#[node]` generates the rest: the `Kind` with help from the Rustdoc, `add`,
+and typed `Ports` and `Inputs`. The contract runs at evaluation and
+describes the outputs, so reject inputs the node cannot handle there. A
+kernel writes `output.host()` or `output.device(ctx)` and reads
+`image.data.host()?` or `image.data.device(ctx)?`, and the raster transfers
+what the next node asks for. `reduce/rgb.rs` is a device kernel.
+
+The ID is the persistence key, so keep it once projects use it. Bump
+`version = N` when the node computes something else from the same
+parameters and inputs, since the store keys outputs by it. Parameters are a
+struct deriving `Parameters` in place of `()`, as in `exposure.rs`. Credit
+adapted algorithms beside the code and in `THIRD_PARTY.md`.
+
+### Map
+
+A per-pixel operation on `Rgb` is better declared as a map. Its host
+function returns the constants of a `#[cube]` body, and evaluation runs a
+chain of maps as one kernel and stores only its result. `exposure.rs` is the
+smallest real map.
 
 ```rust
-use crate::{Result, node::data::*, ports::*, registry::tag, runtime::GlobalContext};
+use drip::{Result, node::data::*, ports::*, registry::tag, runtime::GlobalContext};
 
 fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(RgbDesc,)> {
     Ok((image.clone(),))
 }
 
-/// Double every RGB sample (+1 EV). Output keeps the input coordinates.
-#[crate::node(id = "double", name = "Double", tags = [tag::LOOK], contract = contract, map = kernel::double)]
+/// Double every RGB sample (+1 EV). The output keeps the input coordinates.
+#[drip::node(id = "double", name = "Double", tags = [tag::LOOK], contract = contract, map = kernel::double)]
 pub fn compute(_: &(), _image: Point<'_, Rgb>, _output: Point<'_, Rgb>) -> Result<[f32; 1]> {
     Ok([2.0])
 }
 
 mod kernel {
-    use crate::shape::Pixel;
     use cubecl::prelude::*;
+    use drip::shape::Pixel;
     #[cube]
     pub fn double(px: Pixel, k: &[f32]) -> Pixel {
         Pixel { r: px.r * k[0], g: px.g * k[0], b: px.b * k[0] }
     }
 }
+# fn main() {}
 ```
 
-The first `Point` is the mapped input and the second the output. Other inputs
-are `Read` and arrive materialized, as Camera RGB to color RGB reads its
-`metadata`. A map has no `KernelContext` because it launches nothing.
-Geometry is a warp declared the same way, `#[node(warp, ...)]`, whose host
-function returns a `Warp` of projective maps from the output plane to the
-input plane, as in `node/orientation.rs` and `node/perspective.rs`.
+The first `Point` is the mapped input and the second the output. Other
+inputs are `Read` and arrive materialized, as `camera_to_rgb.rs` reads its
+metadata. A warp, `#[node(warp)]`, has the same ports and returns a `Warp`
+of projective maps from the output plane to the input plane, as in
+`orientation.rs` and `perspective.rs`. `resample.rs` is the one resample.
+
+### Foreign node
 
 Host work over whole images, or work outside CubeCL such as a decoder, is a
 foreign node. It runs on a thread of its own at full detail, once per key,
-and has no contract because it describes each output as it publishes it:
+and describes each output as it publishes it. `hot_pixels.rs` is the
+smallest real one.
 
 ```rust
-use crate::{Result, node::data::*, ports::*, registry::tag};
+use drip::{Result, node::data::*, ports::*, registry::tag};
 
-/// Double every RGB sample (+1 EV) on the host. Output keeps the input
+/// Double every RGB sample (+1 EV) on the host. The output keeps the input
 /// coordinates.
-#[crate::node(id = "double", name = "Double", tags = [tag::LOOK], foreign = memory)]
+#[drip::node(id = "double", name = "Double", tags = [tag::LOOK], foreign = memory)]
 pub fn compute(_: &(), image: Read<'_, Rgb>, output: Publish<'_, Rgb>) -> Result<()> {
     let doubled: Vec<_> = image.data.host()?.iter().map(|px| px.map(|v| v * 2.0)).collect();
     output.set(image.desc.clone(), doubled.into())
 }
+# fn main() {}
 ```
 
 `foreign = disk` also keeps the outputs on disk, so another evaluator or
-process reads them instead of running the node, as `node/raw.rs` does for
-RAW decode. A foreign node's key includes the path, length and modification
-time of the input files its `Path` parameters name.
+process reads them instead of running the node, as `raw.rs` does for RAW
+decode. Declare it when running the node costs more than reading its
+outputs. A foreign node's key includes the path, length and modification
+time of the files its `Path` parameters name.
 
-A measurement over every pixel is a reduce or bins node. Its body counts or
+### Reduction
+
+A measurement over every pixel is a reduce or bins node. Its body
 accumulates inside the input's segment, so measuring a chain of maps stores
-no image. A node that counts samples by tenths of each channel:
+no image. This one counts samples by tenths of each channel. The scopes in
+`drip-gui/src/node_ui/scopes/` are real bins nodes.
 
 ```rust
-use crate::{Result, node::data::*, ports::*, runtime::GlobalContext, shape::BinsBody};
+use drip::{Result, node::data::*, ports::*, runtime::GlobalContext, shape::BinsBody};
 
 fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(CountsDesc,)> {
     Ok((CountsDesc { bins: 10, channels: 3, coordinates: image.coordinates.clone() },))
 }
 
 /// Count RGB samples in `[0, 1)` per tenth of each channel.
-#[crate::node(id = "tenths", name = "Tenths", contract = contract, bins = TENTHS)]
+#[drip::node(id = "tenths", name = "Tenths", contract = contract, bins = TENTHS)]
 pub fn compute(_: &(), _image: Point<'_, Rgb>, _counts: Point<'_, Counts>) -> Result<[f32; 0]> {
     Ok([])
 }
@@ -222,8 +235,8 @@ static TENTHS: BinsBody =
     BinsBody { name: "tenths", constants: 0, bins: 10, channels: 3, bin: kernel::tenths::expand };
 
 mod kernel {
-    use crate::shape::{Bin, Pixel, Position};
     use cubecl::prelude::*;
+    use drip::shape::{Bin, Pixel, Position};
     #[cube]
     fn tenth(v: f32) -> u32 {
         let mut bin = 10u32; // counts nothing
@@ -237,23 +250,25 @@ mod kernel {
         Bin { c0: tenth(px.r), c1: tenth(px.g), c2: tenth(px.b) }
     }
 }
+# fn main() {}
 ```
 
-`reduce = BODY` names a `ReduceBody` instead, which folds pixels into an
-accumulator of f32. A frontend that targets the node receives its outputs
-and binds them with `InputValues::bind_outputs`. One that wants a
-measurement without a node calls `Image::fold` or `Image::count`, as
-`exposure::meter` does.
+`reduce = BODY` names a `ReduceBody`, which folds pixels into an
+accumulator of f32. A frontend that targets the node binds its outputs with
+`InputValues::bind_outputs`. To measure without a node, call `Image::fold`
+or `Image::count`, as `exposure::meter` does for auto exposure.
+
+### Stencil
 
 An operation on a neighbourhood of samples is a stencil. Its host function
 returns how far the body reads, in full-detail pixels, and the body's
-constants. Evaluation converts that reach to samples of the lattice the
-stencil reads, so the same node runs at every preview scale, and a crop of
-its output computes only the crop and the input under its reach. A node that
-averages each sample with its neighbours within `radius` full-detail pixels:
+constants. Evaluation converts the reach to samples of the lattice the
+stencil reads, so the node runs at every preview scale, and a crop of its
+output computes only the crop and the input under its reach. `sharpen.rs`
+is the real one.
 
 ```rust
-use crate::{
+use drip::{
     Result,
     node::data::*,
     ports::*,
@@ -266,7 +281,7 @@ fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(RgbDesc,)> {
 }
 
 /// Average each RGB sample with its neighbours within 2 full-detail pixels.
-#[crate::node(id = "soften", name = "Soften", contract = contract, stencil = MEAN)]
+#[drip::node(id = "soften", name = "Soften", contract = contract, stencil = MEAN)]
 pub fn compute(_: &(), _image: Point<'_, Rgb>, _output: Point<'_, Rgb>) -> Result<Stencil<0>> {
     Ok(Stencil { radius: 2.0, constants: [] })
 }
@@ -275,8 +290,8 @@ static MEAN: StencilBody =
     StencilBody { name: "soften::mean", constants: 0, border: Border::Repeat, expand: kernel::mean::expand };
 
 mod kernel {
-    use crate::shape::{Pixel, Window};
     use cubecl::prelude::*;
+    use drip::shape::{Pixel, Window};
     #[cube]
     pub fn mean(w: &Window, _k: &[f32]) -> Pixel {
         let mut r = 0.0f32;
@@ -295,19 +310,21 @@ mod kernel {
         Pixel { r: r / n, g: g / n, b: b / n }
     }
 }
+# fn main() {}
 ```
 
-The stencil's input materializes first, and maps after it run in its kernel.
 A body that weighs taps by distance scales its lengths by `w.rate_x` and
-`w.rate_y`, samples per full-detail pixel, as `node/sharpen.rs` does.
+`w.rate_y`, samples per full-detail pixel, as `sharpen.rs` does.
+
+### Meta node
 
 An operation built from other nodes is a meta node. Its function adds nodes
 to a sub-graph and wires them to its ports, and evaluation runs those nodes
-in its place, so the graph shows one node while its parts are keyed and
-stored like any node's. A node that softens and then halves its input:
+in its place. `pyramid.rs` is the real one and sizes its last Resample from
+`image.desc`.
 
 ```rust
-use crate::{
+use drip::{
     Result,
     expand::SubGraph,
     node::{data::*, filter::Filter, resample, sharpen},
@@ -315,7 +332,7 @@ use crate::{
 };
 
 /// Soften RGB with a Gaussian of 1 full-detail pixel, then halve it.
-#[crate::node(id = "soft-half", name = "Soft half", meta)]
+#[drip::node(id = "soft-half", name = "Soft half", meta)]
 pub fn expand(_: &(), graph: &mut SubGraph, image: Inlet<'_, Rgb>, output: Outlet<Rgb>) -> Result<()> {
     let soften = sharpen::add(&mut graph.dag, sharpen::Settings { radius: 1.0, amount: -1.0 })?;
     let size = resample::Size::Factor(resample::Factor { factor: 0.5 });
@@ -324,136 +341,28 @@ pub fn expand(_: &(), graph: &mut SubGraph, image: Inlet<'_, Rgb>, output: Outle
     graph.dag.connect(soften.output, half.image)?;
     graph.output(half.output, output)
 }
+# fn main() {}
 ```
 
-`image.desc` holds the input's description, so an expansion can depend on
-it, as `node/pyramid.rs` sizes its last Resample from the input's full
-extent.
+## Labels, tags and parameters
 
-1. Declare the module: `pub mod double;` in `src/node/mod.rs`.
-2. List `&double::compute::KIND` in `registry::NODES`, at its pipeline
-   position. Without this the node cannot be added or loaded.
-3. Test it through a graph:
+IDs name the operation in kebab case (`exposure`, `rcd-demosaic`). Display
+labels use sentence case and keep technical spellings such as RAW, RGB, ICC
+and Rec.2020. Neither decides compatibility. Tags say what the node is for:
+at most one ACES stage tag, then any others that help finding it
+(`registry::tag`).
 
-   ```rust
-   let mut dag = Dag::new();
-   let source = node::source::<Rgb>(&mut dag, desc, vec![[0.1, -0.2, 2.0]; 2])?;
-   let double = node::double::compute::add(&mut dag, ())?;
-   dag.connect(source, double.image)?;
-   let result = Evaluator::new(RuntimeContext::from_env()?)
-       .evaluate::<Rgb>(&dag, &Default::default(), double.output)?;
-   assert_eq!(&**result.data.host()?, &[[0.2, -0.4, 4.0]; 2]);
-   ```
-
-`#[node]` generates the rest: the `Kind` (ID, help from the Rustdoc, ports,
-schema, shape), `add`, typed `Ports` and `Inputs`. The contract runs at
-evaluation and states what the output describes. Reject inputs it cannot
-handle there. A host node writes `output.host()` instead of `output.device(ctx)`
-and reads `image.data.host()?`. The raster transfers what the next node asks
-for. An output declared `Forward<'_, P>` instead of `Write` is set from samples
-the node already holds, `output.set(image.data)`, so a node that only changes
-the description copies nothing.
-A kernel receives whole inputs and scale 1. At a preview scale its RGB
-inputs arrive reduced. Declare
-`scaled` (`#[node(..., scaled)]`) only for a kernel that reaches the
-requested scale itself, cheaper or better than evaluation's box reduction,
-as the demosaics do with `reduce::for_demosaic`. Its contract and function
-then receive `GlobalContext::scale`, its output is taken as produced at that
-scale, and its outputs are keyed by it. Kernels declare no `halo` yet: they
-run whole, and a region bounds only the fused segments after them, stencils
-included.
-The ID is the persistence key, so keep it once projects use it. The
-evaluator stores outputs under keys that include `version`, 1 by default:
-add `version = 2` to `#[node]` when a change alters what the node computes
-from the same parameters and inputs. Tags say what
-the node is for: at most one stage tag, then any others that help finding it.
-Parameters are a struct deriving `Parameters` in place of `()`, as in
-`exposure.rs`. Credit adapted algorithms beside the code and in
-`THIRD_PARTY.md`. Every frontend offers the node with schema controls. For
-GUI-specific presentation, see the [drip-gui README](../drip-gui/README.md).
-
-## Node metadata and parameters
-
-Declare operation names, tags, help and port contracts beside node functions.
-IDs name the operation in kebab case (`exposure`, `rcd-demosaic`) and are the
-persistence keys. Display labels use sentence case and
-retain technical spellings such as RAW, RGB, ICC, sRGB and Rec.2020. Labels do
-not determine compatibility or persistence keys.
-
-`Parameters` generates `Default`, field schemas and Rustdoc help from one typed
-declaration per field: `#[param(default = 1.5, range = 0.5..=4.0)]`, a choice
-default, `open`/`save` file extensions, or `flatten`. `Choice` generates Serde
-adapters, schemas and `Default` from its `#[default]` variant, for unit variants
-or variants containing a parameter struct. Unit variants serialize as strings,
-and variants with settings use Serde's externally tagged object form. The GUI renders only the active variant. Keep
-profile-file paths, proof settings and compression levels in the variants that
-consume them, rather than independent inactive fields.
-
-File extensions are file-format facts in the schema, and the GUI derives its
-dialogs from them. Scope annotations belong to `drip-gui`. The library owns
-processing values and their interpretations.
+`Parameters` and `Choice` generate defaults, schemas and Serde adapters
+from typed declarations (see their Rustdoc). Keep settings that only one
+choice uses, such as a profile path or a compression level, inside that
+choice's variant. File extensions are file-format facts in the schema, and
+the GUI derives its dialogs from them.
 
 ## Store directory
 
-An evaluator keeps values in memory. `Evaluator::with_disk(Disk)` adds a disk
-tier for `foreign = disk` outputs, such as decoded RAWs, which outlives the
-process. Frontends pass `Disk::platform()`: `drip/store` in the platform
-cache directory, `$XDG_CACHE_HOME/drip/store` or `~/.cache/drip/store` on
-Linux, within 16 GiB. Each output is one file named by its content key. You can
+An evaluator given `Disk::platform()` through `Evaluator::with_disk` keeps
+the outputs of `foreign = disk` nodes, such as decoded RAWs, in `drip/store`
+under the platform cache
+directory (`$XDG_CACHE_HOME/drip/store` or `~/.cache/drip/store` on Linux),
+within 16 GiB. Each output is one file named by its content key. You can
 delete the directory, or any file in it, at any time.
-
-## Compute backends
-
-Cargo features include compute runtimes, and `DRIP_BACKEND` selects one at
-startup.
-An unset environment variable selects `metal-native` on macOS if that feature
-is enabled, or `vulkan` on Linux if enabled, and otherwise `wgpu`. An
-ordinary default-feature build uses wgpu. `cargo xtask dist` enables the native
-platform choice, using WGSL/D3D12 on Windows. CPU/LLVM is opt-in for development
-and is not shipped by xtask. These choices do not change the GUI renderer.
-
-| `DRIP_BACKEND` | Required `drip` feature | Execution |
-| --- | --- | --- |
-| `wgpu` or `wgsl` | `wgpu` (default) | WGSL through wgpu, D3D12 on Windows, automatic API elsewhere |
-| `dx12` | `wgpu` | Explicit Windows spelling of the same D3D12/WGSL path |
-| `vulkan` | `vulkan` | Direct SPIR-V through wgpu on Vulkan |
-| `metal` | `metal` | Direct MSL through wgpu on macOS |
-| `metal-native` | `metal-native` | CubeCL's independent Metal runtime on macOS |
-| `cuda` | `cuda` | NVIDIA CUDA |
-| `hip` | `hip` | AMD HIP/ROCm |
-| `cpu` | `cpu` | LLVM CPU JIT |
-
-For example, build with `cargo build --release -p drip-gui --features drip/vulkan`,
-then launch with `DRIP_BACKEND=vulkan target/release/drip-gui` or
-`DRIP_BACKEND=wgsl target/release/drip-gui`. Metal builds similarly use
-`--features drip/metal,drip/metal-native` on macOS. On Windows the default build
-uses D3D12; PowerShell can explicitly select it with `$env:DRIP_BACKEND='dx12'`.
-
-Features are additive. Enabling `vulkan` or `metal` also includes wgpu, but never
-changes what `DRIP_BACKEND=wgsl` means. An unavailable selection fails instead of
-switching compiler or device runtime. Drivers and hardware support are still
-required. For library-only builds, `--no-default-features` removes wgpu. Select
-an included backend explicitly if calling `RuntimeContext::from_env()`.
-
-Run the shared algorithm checks on any configured runtime with
-`DRIP_BACKEND=vulkan cargo test -p drip --features vulkan selected_backend -- --ignored`.
-
-## RAW metadata
-
-RAW decode is a `foreign = disk` node with outputs `mosaic: Bayer` and
-`metadata: CaptureMetadata`. The metadata is what LibRaw reported: capture
-settings, lens identifiers, optional GPS, sensor geometry and native
-WB/black/white/color calibration. Unknown values retain
-LibRaw's sentinels. Vendor-specific maker notes and correction profiles are not
-included. It is a host-only value whose description is the shared value itself.
-
-Consumers derive what they apply (`node::camera`). `Bayer site gains` derives
-as-shot gains and clipping levels and records the balance in the Bayer response.
-Camera conversion derives its matrix from `xyz_to_cam` and that balance,
-replacing it with D65 reference gains. CAT16 maps the as-shot camera neutral
-through the same matrix for its initial source white. As-shot conditioning
-remains in place through highlights and demosaic. The minimum lens focus
-distance describes the lens, not this exposure's focus. TIFF and JPEG write the
-selected EXIF subset and ICC profile. JPEG converts to 8-bit output through the
-same profile settings. Quality and chroma subsampling control its lossy
-encoding.
