@@ -252,6 +252,14 @@ Settled with the user on 2026-10-11 after a review against
 
 ## Compute
 
+- **Open (2026-10-12):** Whether to make the embedded compiler explicit:
+  nodes declare a shape (map, stencil, warp, reduce, meta, opaque) and
+  evaluation fuses segments between materialization points, derives regions
+  and preview scale from shapes, and memoizes by content hash with a disk
+  tier for expensive nodes. Research, routes and experiments in
+  [COMPUTE_MODEL](COMPUTE_MODEL.md). This questions the placement-typed
+  ports, the demosaic-internal reduction, the no-cache requirement and the
+  free-form contracts above.
 - **Decided:** CubeCL computation with one kernel source per algorithm across
   runtimes; wgpu presentation and color management stay frontend-owned.
   `DRIP_BACKEND` selects explicitly and never falls back (crate README).

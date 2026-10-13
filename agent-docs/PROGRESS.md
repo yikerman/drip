@@ -4,6 +4,20 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-12
 
+- Researched an explicit computation model for the user ([COMPUTE_MODEL](COMPUTE_MODEL.md)):
+  read Drip `aec5201`, vkdt `f0be638` and darktable `ddc0bc5` (cloned),
+  CubeCL 0.11.0 sources, aces-core's output transform CTL, Blender's
+  realtime-compositor evaluator, Core Image, OCIO, Halide, Burn fusion,
+  libvips/GEGL, Nuke Blink, Salsa and the functional-array literature.
+  Counted darktable's duplicated CPU/OpenCL bodies (77 of 97 modules) and
+  per-module scale handling (58 modules). Conclusion recorded as Open:
+  declare node shapes (map, stencil, warp, reduce, meta, opaque), fuse
+  segments between materialization points, derive regions and scale from
+  shapes, add a content-addressed cache with durability and a disk tier.
+  Documentation only; no code, benchmarks or dependencies changed.
+- 2026-10-13: added a concrete proposal for Drip to the same note: shapes
+  on `#[node]`, `Image`/`Raster`/`Store`, foreign nodes with a disk tier,
+  and an eight-step migration inside the `drip` crate. Open.
 - Decided with the user: Perspective Transform is parameterized by one
   four-point quad plus aspect, in bijection with projective maps, with crop
   and rotation as quads; auto-crop is a GUI constraint plus Fit; points outside

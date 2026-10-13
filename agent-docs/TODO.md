@@ -4,6 +4,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 
 | Work | Status | Remaining scope |
 |------|--------|-----------------|
+| Explicit compute model | Open | Decide on shape-declared nodes with segment fusion, region/scale inference and a content-addressed cache; run the five experiments in [COMPUTE_MODEL](COMPUTE_MODEL.md#recommendation) before any rewrite. |
 | Remaining simplifications | Follow-up | Revisit shared preparation/kernel context, colorimetry helpers and derived shader matrices, evaluation-loop consolidation, category declarations and preview-context ownership separately. Presentation-only edits need a drawing/preparation path; source device residency and batched scope readback need ownership and performance evidence. |
 | Packaged proof of concept | Next | No additional processing stage identified in the post-CAT16 review. Verify saved edits and full-detail RAW-to-TIFF use, plus installation/launch on clean desktops; record supported environments and known limitations. |
 | Portable artifacts | Next | Add Linux `.tar.xz`/Flatpak and macOS `.app` bundles. Choose Linux minimum systems, macOS deployment target and Windows runtime packaging; audit runtime-loaded dependencies. Preserve executable permissions, bundle submodule sources, and include build provenance/notices. |
