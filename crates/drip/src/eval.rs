@@ -8,6 +8,10 @@
 //! target of `evaluate` materialize what they receive, so each segment runs as
 //! one fused kernel at its first consumer that needs samples. A value enters
 //! the store when the run stops reading it, if it was materialized by then.
+//! A foreign node runs as a store job on a thread of its own. Under
+//! [`Policy::Wait`] the run blocks on it. Under [`Policy::Defer`] the node and
+//! its consumers fail with [`Error::Pending`], and the evaluator's wake
+//! callback runs when the job ends.
 use crate::{
     Error, Result,
     definition::{Kind, Typed},
@@ -16,11 +20,12 @@ use crate::{
     payload::Payload,
     ports::*,
     runtime::{GlobalContext, KernelContext, RuntimeContext},
-    store::{Key, Store},
+    shape::{Cache, Codec, Shape},
+    store::{Disk, Key, Store},
 };
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration, Instant},
 };
 
@@ -52,9 +57,23 @@ pub struct Statistics {
     pub fused: usize,
     /// Demanded values the store served.
     pub hits: usize,
+    /// Values among `hits` read from the disk tier.
+    pub reads: usize,
     /// Representations the store dropped to stay within its budget.
     pub evictions: usize,
 }
+/// What an evaluation does when a foreign node's job is still running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Policy {
+    /// Block until the job ends. Headless evaluation and actions wait.
+    Wait,
+    /// Fail the node and its consumers with [`Error::Pending`] and leave the
+    /// job running. When it ends, the evaluator's wake callback runs, and
+    /// the next demand of the same values finds them stored. Interactive
+    /// previews defer.
+    Defer,
+}
+
 /// The target output's raster, where its node produced it. A deferred target
 /// is materialized on the device.
 pub struct Evaluation<P: Payload> {
@@ -64,16 +83,37 @@ pub struct Evaluation<P: Payload> {
 }
 /// Evaluates graphs on one runtime and keeps their materialized values in a
 /// store until the budget evicts them or the evaluator is dropped. Calls on
-/// one evaluator share the store and run one at a time.
+/// one evaluator share the store and run one at a time. Foreign jobs still
+/// running when the evaluator is dropped finish on their threads and write
+/// their disk entries.
 pub struct Evaluator {
     runtime: RuntimeContext,
     store: Mutex<Store>,
 }
 impl Evaluator {
-    /// An evaluator with an empty store under `runtime`'s budget.
+    /// An evaluator with an empty store under `runtime`'s budget, in memory
+    /// only.
     pub fn new(runtime: RuntimeContext) -> Self {
         let store = Mutex::new(Store::new(runtime.budget()));
         Self { runtime, store }
+    }
+
+    /// This evaluator with a disk tier in `disk`, which keeps the outputs of
+    /// `foreign = disk` nodes across evaluators and processes.
+    pub fn with_disk(mut self, disk: Disk) -> Self {
+        self.store_mut().disk = Some(Arc::new(disk));
+        self
+    }
+
+    /// This evaluator calling `wake` on a job's thread whenever a foreign
+    /// job ends, so a caller that deferred can demand again.
+    pub fn with_wake(mut self, wake: impl Fn() + Send + Sync + 'static) -> Self {
+        self.store_mut().wake = Some(Arc::new(wake));
+        self
+    }
+
+    fn store_mut(&mut self) -> &mut Store {
+        self.store.get_mut().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// The runtime that owns this evaluator's device rasters. External
@@ -92,10 +132,12 @@ impl Evaluator {
         global: &GlobalContext,
         targets: &[NodeId],
     ) -> BTreeMap<NodeId, Result<InputValues>> {
-        self.evaluate_batch(dag, global, targets, None)
+        self.evaluate_batch(dag, global, targets, Policy::Wait, None)
     }
 
-    /// `evaluate_inputs`, recording host timings.
+    /// `evaluate_inputs` under `policy`, recording host timings. With
+    /// [`Policy::Defer`], a target that depends on a running foreign job
+    /// receives `Error::Pending` inside the `Error::Node` of that job's node.
     ///
     /// `timings` receives host timings for attempted nodes in execution order.
     /// Shared ancestors appear once. Nodes skipped after upstream failure, and
@@ -107,6 +149,7 @@ impl Evaluator {
         dag: &Dag,
         global: &GlobalContext,
         targets: &[NodeId],
+        policy: Policy,
         timings: Option<&mut Vec<NodeTiming>>,
     ) -> BTreeMap<NodeId, Result<InputValues>> {
         if let Err(error) = global.validate() {
@@ -119,7 +162,7 @@ impl Evaluator {
             .filter_map(|r| r.as_ref().ok())
             .flat_map(|r| r.needed.iter().copied())
             .collect();
-        let mut run = Run::new(self, dag, global, &needed);
+        let mut run = Run::new(self, dag, global, policy, &needed);
         run.timings = timings;
         for (&id, request) in requests.iter().filter_map(|(id, r)| Some((id, r.as_ref().ok()?))) {
             run.schedule(id);
@@ -144,7 +187,8 @@ impl Evaluator {
         results
     }
 
-    /// Evaluate `target` and the nodes it depends on.
+    /// Evaluate `target` and the nodes it depends on, waiting for foreign
+    /// jobs.
     pub fn evaluate<P: Payload>(
         &self,
         dag: &Dag,
@@ -156,7 +200,7 @@ impl Evaluator {
         let (uploads, downloads) = self.runtime.transfers();
         let fused = self.runtime.fused();
         let needed = required_nodes(dag, target.node())?;
-        let mut run = Run::new(self, dag, global, &needed);
+        let mut run = Run::new(self, dag, global, Policy::Wait, &needed);
         run.demand(target.id);
         for index in &dag.order {
             if run.running.contains(index) {
@@ -166,7 +210,7 @@ impl Evaluator {
         let image = run.value(target.id)?.clone();
         image.materialize(&run.kernels())?;
         run.release(target.id);
-        let (nodes, hits, evictions) = run.finish();
+        let (nodes, hits, reads, evictions) = run.finish();
         let data = image.downcast::<P>().expect("output payload is checked").clone();
         // One terminal wait; host consumers have already waited at read boundaries.
         self.runtime.finish()?;
@@ -177,6 +221,7 @@ impl Evaluator {
             downloads: downloaded - downloads,
             fused: self.runtime.fused() - fused,
             hits,
+            reads,
             evictions,
         };
         Ok(Evaluation { desc: data.desc().clone(), data, statistics })
@@ -207,16 +252,18 @@ struct Run<'a, 't> {
     runtime: &'a RuntimeContext,
     global: &'a GlobalContext,
     store: MutexGuard<'a, Store>,
-    /// Per needed node, the key its output keys derive from, or `None` when
-    /// the node or an input cannot be keyed.
-    keys: HashMap<NodeId, Option<Key>>,
+    policy: Policy,
+    /// Per needed node, the key its output keys derive from, or why the node
+    /// or an input has none.
+    keys: HashMap<NodeId, Result<Key>>,
     /// Values of demanded ports, with the consumers still to read each.
     live: HashMap<PortId, Live>,
     /// Indices of the nodes this run executes.
     running: HashSet<usize>,
     nodes: usize,
     hits: usize,
-    /// The store's eviction count when the run began.
+    /// The store's read and eviction counts when the run began.
+    reads: usize,
     evictions: usize,
     timings: Option<&'t mut Vec<NodeTiming>>,
 }
@@ -227,31 +274,34 @@ struct Live {
     uses: usize,
 }
 impl<'a, 't> Run<'a, 't> {
-    /// Key the `needed` nodes in graph order. A source loads here, since its
-    /// key includes the files it read.
+    /// Key the `needed` nodes in graph order. A foreign node stamps its
+    /// files here, since its key includes them.
     fn new(
         evaluator: &'a Evaluator,
         dag: &'a Dag,
         global: &'a GlobalContext,
+        policy: Policy,
         needed: &HashSet<usize>,
     ) -> Self {
-        let store = evaluator.store.lock().unwrap_or_else(PoisonError::into_inner);
-        let evictions = store.evictions();
-        let mut keys: HashMap<NodeId, Option<Key>> = HashMap::new();
+        let mut store = evaluator.store.lock().unwrap_or_else(PoisonError::into_inner);
+        store.collect();
+        let (reads, evictions) = (store.reads(), store.evictions());
+        let mut keys: HashMap<NodeId, Result<Key>> = HashMap::new();
         for entry in dag.order.iter().filter(|i| needed.contains(i)) {
             let entry = dag.entries[*entry].as_ref().unwrap();
             // A connected input without a key leaves the node without one.
-            let inputs: Option<Vec<Option<Key>>> = entry
+            let inputs: Result<Vec<Option<Key>>> = entry
                 .inputs
                 .iter()
                 .map(|from| match from {
-                    None => Some(None),
-                    Some(from) => keys[&from.node].map(|key| Some(key.output(from.index))),
+                    None => Ok(None),
+                    Some(from) => keys[&from.node].clone().map(|key| Some(key.output(from.index))),
                 })
                 .collect();
-            let key = inputs
-                .zip(entry.node.identity().ok())
-                .map(|(inputs, identity)| Key::node(entry.node.kind(), &identity, global, &inputs));
+            let key = inputs.and_then(|inputs| {
+                let identity = entry.node.identity()?;
+                Ok(Key::node(entry.node.kind(), &identity, global, &inputs))
+            });
             keys.insert(entry.id, key);
         }
         Self {
@@ -259,29 +309,44 @@ impl<'a, 't> Run<'a, 't> {
             runtime: &evaluator.runtime,
             global,
             store,
+            policy,
             keys,
             live: HashMap::new(),
             running: HashSet::new(),
             nodes: 0,
             hits: 0,
+            reads,
             evictions,
             timings: None,
         }
     }
 
     fn key(&self, port: PortId) -> Option<Key> {
-        self.keys.get(&port.node).copied().flatten().map(|key| key.output(port.index))
+        let key = self.keys.get(&port.node)?.as_ref().ok()?;
+        Some(key.output(port.index))
+    }
+
+    /// How the disk tier stores `port`, when its node is `foreign = disk`.
+    fn codec(&self, port: PortId) -> Option<&'static Codec> {
+        match self.dag.entries[port.node.index].as_ref().unwrap().node.kind().shape {
+            Shape::Foreign(Cache::Disk(codecs)) => codecs.get(port.index),
+            _ => None,
+        }
     }
 
     /// Count one more consumer of `port`. The first one takes the value from
-    /// the store or schedules its node.
+    /// the store, in memory or on disk, or schedules its node.
     fn demand(&mut self, port: PortId) {
         let live = self.live.entry(port).or_default();
         live.uses += 1;
         if live.uses > 1 {
             return;
         }
-        match self.key(port).and_then(|key| self.store.get(key)) {
+        let codec = self.codec(port);
+        let stored = self.key(port).and_then(|key| {
+            self.store.get(key).or_else(|| codec.and_then(|codec| self.store.read(key, codec)))
+        });
+        match stored {
             Some(image) => {
                 self.live.get_mut(&port).unwrap().image = Some(image);
                 self.hits += 1;
@@ -389,10 +454,14 @@ impl<'a, 't> Run<'a, 't> {
         let descs: Vec<_> = inputs.iter().map(|v| v.as_ref().map(|i| i.desc().clone())).collect();
         let outputs = e.node.contract(self.global, &descs)?;
         let specs = e.node.kind().outputs;
-        if outputs.len() != specs.len() {
-            return Err(Error::Runtime("node contract output arity mismatch".into()));
-        }
-        let result = e.node.run(&self.kernels(), &inputs, &outputs)?;
+        let result = match e.node.kind().shape {
+            // A foreign node describes its outputs when it publishes them.
+            Shape::Foreign(cache) => self.foreign(e, cache, inputs)?,
+            _ if outputs.len() != specs.len() => {
+                return Err(Error::Runtime("node contract output arity mismatch".into()));
+            }
+            _ => e.node.run(&self.kernels(), &inputs, &outputs)?,
+        };
         if result.len() != specs.len() {
             return Err(Error::Runtime("node result arity mismatch".into()));
         }
@@ -405,6 +474,28 @@ impl<'a, 't> Run<'a, 't> {
             }
         }
         Ok(())
+    }
+
+    /// Materialize `inputs` here, then take the outputs of the store's job
+    /// for `e`'s key, which runs the node at full detail on host samples.
+    fn foreign(
+        &mut self,
+        e: &Entry,
+        cache: Cache,
+        inputs: Vec<Option<Image>>,
+    ) -> Result<Vec<Image>> {
+        let key = self.keys[&e.id].clone()?;
+        let kernels = self.kernels();
+        for image in inputs.iter().flatten() {
+            image.materialize(&kernels)?;
+        }
+        let (node, runtime) = (e.node.clone(), self.runtime.clone());
+        let compute = move || {
+            let full = GlobalContext::default();
+            node.run(&KernelContext::new(&full, &runtime), &inputs, &[])
+        };
+        let wait = self.policy == Policy::Wait;
+        self.store.foreign(key, cache, wait, compute).unwrap_or(Err(Error::Pending))
     }
 
     fn release_inputs(&mut self, e: &Entry) {
@@ -437,11 +528,12 @@ impl<'a, 't> Run<'a, 't> {
     }
 
     /// Trim the store, whose entries consumers may have uploaded or
-    /// downloaded during the run, and return the nodes run, the hits and the
-    /// evictions of this call.
-    fn finish(&mut self) -> (usize, usize, usize) {
+    /// downloaded during the run, and return the nodes run, the hits, the
+    /// disk reads and the evictions of this call.
+    fn finish(&mut self) -> (usize, usize, usize, usize) {
         self.store.trim();
-        (self.nodes, self.hits, self.store.evictions() - self.evictions)
+        let (reads, evictions) = (self.store.reads(), self.store.evictions());
+        (self.nodes, self.hits, reads - self.reads, evictions - self.evictions)
     }
 }
 

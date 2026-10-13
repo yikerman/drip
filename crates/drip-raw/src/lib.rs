@@ -3,12 +3,18 @@
 //! copies everything Drip needs into owned values and closes LibRaw before
 //! returning, so no LibRaw state outlives a call or is shared between threads.
 //! Linking the reentrant `libraw_r` makes concurrent calls safe.
+//! [`Metadata`] derives serde, so callers can store decoded facts.
 
 use std::ffi::{CStr, CString, c_char, c_int, c_longlong, c_uint, c_void};
 use std::fmt;
 use std::path::Path;
 
 const CBLACK_SIZE: usize = 4104;
+
+/// What [`decode`] returns for a given file, as a number. Bump it with every
+/// change to the bundled LibRaw, its build options or the shim that can change
+/// decoded samples or metadata: Drip keys stored decodes by it.
+pub const VERSION: u32 = 1;
 
 /// Mirrors `drip_raw_info` in `shim/shim.c`.
 #[repr(C)]

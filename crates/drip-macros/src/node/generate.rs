@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use super::parse::{Deferred, Direction, Options, Port, Signature, View};
+use super::parse::{Deferred, Direction, Foreign, Options, Port, Signature, View};
 
 pub(super) fn node(
     function: &syn::ItemFn,
@@ -24,42 +24,20 @@ pub(super) fn node(
     };
     let ports = ports(signature, &vis);
     let inputs = inputs(signature, &vis);
-    let (contract, run) = match (&options.deferred, signature.source) {
-        (_, true) => (loaded_contract(), loaded_run(signature)),
-        (Some(deferred), _) => {
-            (contract(options, signature), deferred_run(name, deferred, signature))
-        }
-        (None, false) => (contract(options, signature), run(name, signature)),
+    let run = match (&options.deferred, signature.foreign) {
+        (_, true) => foreign_run(name, signature),
+        (Some(deferred), _) => deferred_run(name, deferred, signature),
+        (None, false) => run(name, signature),
     };
-    let identity = if signature.source {
-        quote!(Ok(self.loaded()?.1.clone()))
+    let contract = contract(options, signature);
+    // A foreign node's outputs are the same at every scale. The file stamps
+    // in its identity key them to the files' current contents.
+    let identity = if signature.foreign {
+        quote!(::drip::definition::Identity::foreign(&KIND, self.parameters()?))
     } else {
         quote!(Ok(::drip::definition::Identity::Computed(self.parameters()?)))
     };
-    // Files are read when first forced and kept with the node, error included,
-    // with the identity that keys the outputs in the store. They are assumed
-    // not to change, so the cache keeps the node pure. A parameter edit
-    // admits a new node, which reads and stamps them again.
-    let (definition, admission) = if signature.source {
-        let load = load(name, signature);
-        (
-            quote! {
-                #vis struct Definition {
-                    #vis parameters: #parameters,
-                    loaded: ::std::sync::OnceLock<::drip::Result<Loaded>>,
-                }
-                type Loaded = (Vec<::drip::image::Image>, ::drip::definition::Identity);
-                impl Definition {
-                    fn loaded(&self) -> ::drip::Result<&Loaded> {
-                        let loaded = self.loaded.get_or_init(|| load(&self.parameters));
-                        loaded.as_ref().map_err(Clone::clone)
-                    }
-                }
-                #load
-            },
-            quote!(Definition { parameters, loaded: Default::default() }),
-        )
-    } else if options.assets {
+    let (definition, admission) = if options.assets {
         let loaded = quote!(<#parameters as ::drip::definition::Assets>::Loaded);
         (
             quote! {
@@ -149,12 +127,21 @@ fn kind(
     let parameters = &signature.parameters;
     let inputs = signature.inputs().map(port_spec);
     let outputs = signature.outputs().map(port_spec);
-    let shape = match (signature.source, &options.deferred) {
-        (true, _) => quote!(::drip::shape::Shape::Source),
-        (false, Some(Deferred::Map(_))) => quote!(::drip::shape::Shape::Map(&BODY)),
-        (false, Some(Deferred::Warp)) => quote!(::drip::shape::Shape::Warp),
-        (false, Some(Deferred::Resample)) => quote!(::drip::shape::Shape::Resample),
-        (false, None) => quote!(::drip::shape::Shape::Kernel),
+    let codecs = signature.outputs().map(|port| {
+        let payload = &port.payload;
+        quote!(::drip::shape::Codec::of::<#payload>())
+    });
+    let shape = match (options.foreign, &options.deferred) {
+        (Some(Foreign::Memory), _) => {
+            quote!(::drip::shape::Shape::Foreign(::drip::shape::Cache::Memory))
+        }
+        (Some(Foreign::Disk), _) => {
+            quote!(::drip::shape::Shape::Foreign(::drip::shape::Cache::Disk(&[#(#codecs),*])))
+        }
+        (None, Some(Deferred::Map(_))) => quote!(::drip::shape::Shape::Map(&BODY)),
+        (None, Some(Deferred::Warp)) => quote!(::drip::shape::Shape::Warp),
+        (None, Some(Deferred::Resample)) => quote!(::drip::shape::Shape::Resample),
+        (None, None) => quote!(::drip::shape::Shape::Kernel),
     };
     let action = match &options.action {
         None => quote!(None),
@@ -288,7 +275,8 @@ fn contract(options: &Options, signature: &Signature) -> TokenStream {
         });
         arguments.push(local);
     }
-    let outputs = signature.outputs().map(|port| {
+    // A foreign node describes its outputs when it publishes them.
+    let outputs = signature.outputs().filter(|_| !signature.foreign).map(|port| {
         let name = port.name.to_string();
         let index = syn::Index::from(port.index);
         let payload = &port.payload;
@@ -436,71 +424,49 @@ fn body(body: &syn::Path, constants: &syn::Type, vis: &TokenStream) -> TokenStre
     }
 }
 
-/// Run a source when it is first forced, after stamping the files its
-/// parameters name. A failure is cached like a value, so the node stays
-/// editable and persistable and evaluation reports it.
-fn load(name: &syn::Ident, signature: &Signature) -> TokenStream {
-    let slots: Vec<_> =
-        signature.outputs().map(|port| format_ident!("slot_{}", port.index)).collect();
-    let names = signature.outputs().map(|port| port.name.to_string());
-    let loads = signature.outputs().zip(&slots).map(|(port, slot)| {
-        let payload = &port.payload;
-        quote!(::drip::ports::Load::<#payload>::new(#slot))
-    });
-    let count = slots.len();
-    let parameters = &signature.parameters;
-    quote! {
-        fn load(parameters: &#parameters) -> ::drip::Result<Loaded> {
-            let identity =
-                ::drip::definition::Identity::loaded(&KIND, ::drip::param::encode(parameters)?)?;
-            let mut slots: [Option<::drip::image::Image>; #count] = ::std::array::from_fn(|_| None);
-            let [#(#slots),*] = &mut slots;
-            super::#name(parameters, #(#loads),*)?;
-            let images = slots
-                .into_iter()
-                .zip([#(#names),*])
-                .map(|(slot, port)| slot.ok_or_else(|| ::drip::Error::Contract(
-                    format!("source did not load {port}"),
-                )))
-                .collect::<::drip::Result<_>>()?;
-            Ok((images, identity))
+/// The adapter of a foreign node, run on the store job's thread with
+/// materialized inputs: download them, call the host function and collect
+/// what it published.
+fn foreign_run(name: &syn::Ident, signature: &Signature) -> TokenStream {
+    let mut downloads = Vec::new();
+    let mut slots = Vec::new();
+    let mut arguments = Vec::new();
+    let mut results = Vec::new();
+    for port in &signature.ports {
+        let local = &port.name;
+        match port.direction {
+            Direction::Input => {
+                downloads.push(if port.optional {
+                    quote!(if let Some(input) = &inputs.#local { input.data.host()?; })
+                } else {
+                    quote!(inputs.#local.data.host()?;)
+                });
+                arguments.push(quote!(inputs.#local));
+            }
+            Direction::Output => {
+                let slot = format_ident!("output_{}", port.index);
+                let payload = &port.payload;
+                let name = local.to_string();
+                slots.push(quote!(let mut #slot = None;));
+                arguments.push(quote!(::drip::ports::Publish::<#payload>::new(&mut #slot)));
+                results.push(quote! {
+                    #slot.ok_or_else(|| ::drip::Error::Contract(format!("node did not publish {}", #name)))?
+                });
+            }
         }
     }
-}
-
-fn loaded_contract() -> TokenStream {
-    quote! {
-        fn contract(
-            &self,
-            _: &::drip::runtime::GlobalContext,
-            _: &[Option<::drip::image::Description>],
-        ) -> ::drip::Result<Vec<::drip::image::Description>> {
-            Ok(self.loaded()?.0.iter().map(|image| image.desc().clone()).collect())
-        }
-    }
-}
-
-/// Each run receives the loaded host samples in a fresh raster, so a device
-/// copy belongs to the store entry that keeps it, like any computed output.
-fn loaded_run(signature: &Signature) -> TokenStream {
-    let images = signature.outputs().map(|port| {
-        let index = port.index;
-        let payload = &port.payload;
-        quote! {
-            ::drip::image::Image::from(
-                loaded.0[#index].downcast::<#payload>().expect("loaded payload").share_host()?,
-            )
-        }
-    });
     quote! {
         fn run(
             &self,
             _: &::drip::runtime::KernelContext<'_>,
-            _: &[Option<::drip::image::Image>],
+            inputs: &[Option<::drip::image::Image>],
             _: &[::drip::image::Description],
         ) -> ::drip::Result<Vec<::drip::image::Image>> {
-            let loaded = self.loaded()?;
-            Ok(vec![#(#images),*])
+            let inputs = <Definition as ::drip::definition::Typed>::bind(inputs)?;
+            #(#downloads)*
+            #(#slots)*
+            super::#name(&self.parameters, #(#arguments),*)?;
+            Ok(vec![#(#results),*])
         }
     }
 }

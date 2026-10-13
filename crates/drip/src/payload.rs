@@ -1,9 +1,14 @@
 //! Logical payload families and their concrete host/device representations.
 //! A payload names its Rust host type and description; `DeviceLayout` adds
-//! the byte layout kernels read. Residency and transfers live in `image`.
+//! the byte layout kernels read, and `Persist` the byte stream the store's
+//! disk tier keeps. Residency and transfers live in `image`.
 use crate::Result;
 use cubecl::{bytes::Bytes, prelude::BufferArg, server::Handle};
-use std::{fmt::Debug, marker::PhantomData};
+use std::{
+    fmt::Debug,
+    io::{self, Read, Write},
+    marker::PhantomData,
+};
 mod host;
 pub use host::HostBuffer;
 
@@ -32,6 +37,63 @@ pub trait Payload: Send + Sync + Sized + 'static {
 pub trait DeviceLayout: Payload {
     fn encode(desc: &Self::Desc, host: &Self::Host) -> Result<Bytes>;
     fn decode(desc: &Self::Desc, bytes: Bytes) -> Result<Self::Host>;
+}
+
+/// A payload the store can keep on disk, for foreign nodes declared
+/// `foreign = disk`. `read` returns what `write` was given, bit for bit, or
+/// fails. It fails on a stream `write` did not produce or that ends early.
+/// The store validates what `read` returns before using it.
+pub trait Persist: Payload {
+    fn write(desc: &Self::Desc, host: &Self::Host, out: &mut dyn Write) -> io::Result<()>;
+    fn read(input: &mut dyn Read) -> io::Result<(Self::Desc, Self::Host)>;
+}
+
+/// Write `value` as JSON after its byte length (u64, little endian). Finite
+/// floats read back bit for bit: serde_json's `float_roundtrip` parses them
+/// exactly, which descriptions compared by value (`RgbSpace`) need.
+pub(crate) fn write_json(value: &impl serde::Serialize, out: &mut dyn Write) -> io::Result<()> {
+    let json = serde_json::to_vec(value)?;
+    write_bytes(&json, out)
+}
+/// Read what [`write_json`] wrote.
+pub(crate) fn read_json<T: serde::de::DeserializeOwned>(input: &mut dyn Read) -> io::Result<T> {
+    // Descriptions are small; a longer prefix belongs to a corrupt stream.
+    let json = read_bytes(input, 1 << 24)?;
+    Ok(serde_json::from_slice(&json)?)
+}
+fn write_bytes(bytes: &[u8], out: &mut dyn Write) -> io::Result<()> {
+    out.write_all(&(bytes.len() as u64).to_le_bytes())?;
+    out.write_all(bytes)
+}
+fn read_bytes(input: &mut dyn Read, limit: u64) -> io::Result<Vec<u8>> {
+    let mut len = [0; 8];
+    input.read_exact(&mut len)?;
+    let len = u64::from_le_bytes(len);
+    if len > limit {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "length exceeds its limit"));
+    }
+    let mut bytes = vec![0; len as usize];
+    input.read_exact(&mut bytes)?;
+    Ok(bytes)
+}
+impl<T: bytemuck::Pod + Send + Sync> HostBuffer<T> {
+    /// Write the elements' bytes after their byte length.
+    pub(crate) fn write(&self, out: &mut dyn Write) -> io::Result<()> {
+        write_bytes(bytemuck::cast_slice(self), out)
+    }
+    /// Read what [`write`](Self::write) wrote of `len` elements. Fails on any
+    /// other length.
+    pub(crate) fn read(input: &mut dyn Read, len: usize) -> io::Result<Self> {
+        let mut prefix = [0; 8];
+        input.read_exact(&mut prefix)?;
+        if u64::from_le_bytes(prefix) != (len * size_of::<T>()) as u64 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "unexpected sample count"));
+        }
+        // Read into typed storage, so the buffer keeps the element alignment.
+        let mut values = vec![bytemuck::Zeroable::zeroed(); len];
+        input.read_exact(bytemuck::cast_slice_mut(&mut values))?;
+        Ok(values.into())
+    }
 }
 
 /// A CubeCL allocation tagged with its logical payload (or `()` for scratch

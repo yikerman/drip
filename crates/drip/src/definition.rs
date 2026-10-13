@@ -78,10 +78,10 @@ impl Kind {
         self.parameters.iter().find(|p| p.name == name)
     }
 
-    /// `High` for a source, otherwise the most durable of the kind's tags,
-    /// `Low` without tags.
+    /// `High` for a bound source or a foreign node, otherwise the most
+    /// durable of the kind's tags, `Low` without tags.
     pub fn durability(&self) -> Durability {
-        if self.shape == Shape::Source {
+        if matches!(self.shape, Shape::Source | Shape::Foreign(_)) {
             return Durability::High;
         }
         self.tags.iter().map(|tag| tag.durability).max().unwrap_or(Durability::Low)
@@ -95,23 +95,25 @@ pub enum Identity {
     /// Outputs computed from these parameters, persisted JSON, under the
     /// evaluation's global context.
     Computed(serde_json::Value),
-    /// Outputs a source loaded with these parameters from these files. They
-    /// are the same under every global context.
-    Loaded(serde_json::Value, Vec<FileStamp>),
-    /// Outputs bound in memory, which no other node instance shares.
+    /// Outputs a foreign node computed with these parameters from these
+    /// files and its inputs. They are the same under every global context.
+    Foreign(serde_json::Value, Vec<FileStamp>),
+    /// Outputs bound in memory, which no other node instance shares. Keys
+    /// derived from it never reach the disk.
     Bound(u128),
 }
 impl Identity {
-    /// A source's identity: its parameters and the input files they name
-    /// under `kind`'s schema, stamped now. Call it before reading the files:
-    /// a file written during the read then stamps differently when chosen
-    /// again.
-    pub fn loaded(kind: &Kind, parameters: serde_json::Value) -> Result<Self> {
+    /// A foreign node's identity: its parameters and the input files they
+    /// name under `kind`'s schema, stamped now. Evaluation calls it before
+    /// the node reads the files, so a file written during the read stamps
+    /// differently at the next evaluation. Fails, naming the path, when a
+    /// file cannot be inspected.
+    pub fn foreign(kind: &Kind, parameters: serde_json::Value) -> Result<Self> {
         let files = param::input_files(kind.parameters, &parameters)
             .into_iter()
             .map(FileStamp::read)
             .collect::<Result<_>>()?;
-        Ok(Self::Loaded(parameters, files))
+        Ok(Self::Foreign(parameters, files))
     }
 
     /// An identity no other call returns in this process. A random
@@ -124,7 +126,7 @@ impl Identity {
     }
 }
 
-/// A file as a source found it before reading: its path, byte length and
+/// A file as a foreign node found it before reading: its path, byte length and
 /// modification time. Equal stamps are taken to mean equal contents.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileStamp {
@@ -147,11 +149,13 @@ impl FileStamp {
 pub trait Node: Any + Send + Sync {
     fn kind(&self) -> &'static Kind;
     fn parameters(&self) -> Result<serde_json::Value>;
-    /// What the outputs depend on beside the kind and the inputs. A source
-    /// loads its files here, so a failure is the source's load error.
+    /// What the outputs depend on beside the kind and the inputs. A foreign
+    /// node stamps its input files here, so a missing file fails here.
     fn identity(&self) -> Result<Identity>;
     /// Pure output description/check using the same global configuration as run.
     /// Inputs are the evaluated descriptions; `None` is an unconnected optional input.
+    /// A foreign node describes its outputs when it runs, so its contract
+    /// checks the inputs and returns no descriptions.
     fn contract(
         &self,
         global: &crate::runtime::GlobalContext,
@@ -159,6 +163,8 @@ pub trait Node: Any + Send + Sync {
     ) -> Result<Vec<Description>>;
     /// Produce every output described by the contract, in output order.
     /// Inputs may be deferred. The node materializes those it reads as rasters.
+    /// A foreign node receives materialized inputs and empty `outputs`, reads
+    /// host samples only and may run on any thread.
     fn run(
         &self,
         context: &KernelContext<'_>,

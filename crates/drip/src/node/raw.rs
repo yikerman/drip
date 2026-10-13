@@ -1,8 +1,10 @@
-//! Decode a Bayer RAW when first evaluated; the node keeps it or the error.
+//! Bayer RAW decode as a foreign node: LibRaw runs on the store's job
+//! thread, and the disk tier keeps the normalized mosaic and the metadata,
+//! so reopening a project reads them instead of decoding again.
 use crate::{
     Error, Result,
     node::{camera, data::*},
-    ports::Load,
+    ports::Publish,
     registry::tag,
 };
 use std::{path::PathBuf, sync::Arc};
@@ -10,7 +12,7 @@ use std::{path::PathBuf, sync::Arc};
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
-    /// Bayer RAW, decoded when first evaluated.
+    /// The Bayer RAW to decode.
     #[param(open = ["arw", "cr2", "cr3", "dng", "erf", "fff", "iiq", "kdc", "mef", "mos", "mrw", "nef", "nrw", "orf", "pef", "raf", "raw", "rw2", "rwl", "srw", "x3f"])]
     #[label("RAW file")]
     #[external]
@@ -18,16 +20,19 @@ pub struct Settings {
 }
 /// Read a Bayer RAW, subtract black and normalize by a common white reference.
 /// Outputs Bayer camera responses and the decoded capture metadata, including
-/// native calibration. The file is decoded when first evaluated and kept with
-/// the node; choose it again to pick up changes. Calibration remains approximate.
-#[crate::node(id = "bayer-raw", name = "Bayer RAW", tags = [tag::INPUT_TRANSFORM, tag::BAYER_RAW, tag::IO], references = [(
+/// native calibration. The store keeps the decode under the file's path,
+/// size and modification time, on disk when the evaluator has a disk tier,
+/// so a changed file decodes again. Calibration remains approximate.
+// The decoder version keys the stored outputs. A change to `normalize` bumps
+// it as well.
+#[crate::node(id = "bayer-raw", name = "Bayer RAW", tags = [tag::INPUT_TRANSFORM, tag::BAYER_RAW, tag::IO], foreign = disk, version = drip_raw::VERSION, references = [(
     "LibRaw black normalization",
     "https://github.com/LibRaw/LibRaw/blob/0.22.0/src/utils/utils_libraw.cpp",
 )])]
 pub fn read(
     p: &Settings,
-    mosaic: Load<'_, Bayer>,
-    metadata: Load<'_, CaptureMetadata>,
+    mosaic: Publish<'_, Bayer>,
+    metadata: Publish<'_, CaptureMetadata>,
 ) -> Result<()> {
     let path =
         p.path.as_ref().ok_or_else(|| Error::Contract("select a RAW before evaluation".into()))?;

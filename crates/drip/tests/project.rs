@@ -158,8 +158,11 @@ fn missing_raw_preserves_editable_parameters_and_reports_load_error() {
     assert!(restored.dag.node(raw).unwrap().parameters().unwrap()["path"].is_null());
 }
 
+/// The store keeps a decode under the file's stamp: the same file is a hit,
+/// a file with another modification time decodes again, and a removed file
+/// fails evaluation.
 #[test]
-fn raw_is_decoded_once_when_forced_and_again_only_when_chosen_again() {
+fn raw_is_decoded_once_per_file_stamp() {
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/raw/pixls/nikon-d70s.nef");
     let temporary =
@@ -171,20 +174,22 @@ fn raw_is_decoded_once_when_forced_and_again_only_when_chosen_again() {
         .unwrap();
     let output = dag.typed_output::<Bayer>(dag.output_port(source, "mosaic").unwrap()).unwrap();
     let evaluator = Evaluator::new(RuntimeContext::host());
-    let evaluate = |dag: &drip::graph::Dag| {
-        evaluator.evaluate::<Bayer>(dag, &Default::default(), output).map(|e| e.data)
-    };
+    let evaluate =
+        |dag: &drip::graph::Dag| evaluator.evaluate::<Bayer>(dag, &Default::default(), output);
     let first = evaluate(&dag).unwrap();
-    std::fs::remove_file(&temporary).unwrap();
-    // Files are assumed unchanged: the node and every graph snapshot sharing it
-    // keep the first decode.
+    assert_eq!(first.statistics.nodes, 1);
+    // Every graph snapshot sharing the file shares the stored decode.
     let again = evaluate(&dag.clone()).unwrap();
-    assert_eq!(first.host().unwrap().as_ptr(), again.host().unwrap().as_ptr());
-    // Choosing the file again admits a new node, which reads it again.
-    dag.set_parameters(source, json!({"path":temporary})).unwrap();
-    assert!(evaluate(&dag).is_err());
-    dag.set_parameters(source, json!({"path":fixture})).unwrap();
-    assert!(evaluate(&dag).is_ok());
+    assert_eq!(again.statistics.nodes, 0);
+    assert_eq!(first.data.host().unwrap().as_ptr(), again.data.host().unwrap().as_ptr());
+    let earlier = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1 << 30);
+    std::fs::File::options().write(true).open(&temporary).unwrap().set_modified(earlier).unwrap();
+    let touched = evaluate(&dag).unwrap();
+    assert_eq!(touched.statistics.nodes, 1);
+    assert_eq!(touched.data.host().unwrap(), first.data.host().unwrap());
+    std::fs::remove_file(&temporary).unwrap();
+    let error = evaluate(&dag).err().unwrap();
+    assert!(error.to_string().contains(&*temporary.to_string_lossy()), "{error}");
 }
 
 #[test]

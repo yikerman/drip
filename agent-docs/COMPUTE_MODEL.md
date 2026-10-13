@@ -519,8 +519,8 @@ changes add shapes without changing what a value is.
 | 2 | `map` and the fused segment kernel. Exposure, camera matrix, CAT16 and Sigmoid as maps, measured against four launches. | Landed 2026-10-13 |
 | 3 | `warp` and `resample` replace `RgbField`, Interpolate, Perspective Transform and Sample. Orientation becomes an exact warp. | Landed 2026-10-13 |
 | 4 | Keys, durability and the device budget. A Sigmoid-only edit recomputes only the tail. | Landed 2026-10-13 |
-| 5 | `foreign` with the disk tier. RAW decode moves to it, and one stacking or model placeholder proves the path. | Next |
-| 6 | Regions: a 100 % crop view and tiled export. | Planned |
+| 5 | `foreign` with the disk tier. RAW decode moves to it, and one stacking or model placeholder proves the path. | Landed 2026-10-13, with Hot pixel removal as the second node |
+| 6 | Regions: a 100 % crop view and tiled export. | Next |
 | 7 | `reduce`. Scopes and auto exposure leave GUI-owned kernels. | Planned |
 | 8 | `stencil` and `meta` with the first sharpen and pyramid nodes. | Planned |
 

@@ -19,6 +19,7 @@ hip = ["cubecl/hip"]
 [dependencies]
 cubecl = { version = "=0.11.0", default-features = false, features = ["std"] }
 cubecl-environment = { version = "=0.11.0", features = ["shared-bytes"] }
+dirs = "6.0.0"
 bytes = "1"
 bytemuck = "1"
 pollster = "1.0.1"
@@ -29,7 +30,7 @@ jpeg-encoder = "0.7.1"
 log = "0.4.34"
 rayon = "1.12"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
 thiserror = "2.0.21"
 tiff = { version = "0.11.3", default-features = false, features = ["deflate"] }

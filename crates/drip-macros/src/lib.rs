@@ -28,8 +28,13 @@ use documentation::documentation;
 /// Use `&()` for nodes without parameters.
 /// `Option<Read<Payload>>` declares an optional input; output ports remain required.
 /// A node without computation names an unread port `_image`; the port is `image`.
-/// A source is `fn(&parameters, Load<Payload>...)`, without a context or
-/// contract; it loads its outputs once, when first evaluated.
+/// A foreign node, `#[node(foreign = memory, ...)]` or `foreign = disk`, is
+/// `fn(&parameters, Read<Payload>..., Publish<Payload>...)` without a context
+/// or contract. It runs on a thread of its own with its inputs on the host,
+/// once per key, and sets each output with its description and host samples.
+/// The store keeps its outputs, and with `disk` also on disk, which requires
+/// every output payload to implement `Persist`. Its key includes the stamps
+/// of the input files its parameters name.
 /// A map, `#[node(map = body, ...)]`, is
 /// `fn(&parameters, Point<In>, Read<Payload>..., Point<Out>) -> Result<[f32; N]>`
 /// without a context. The first `Point` is the input and the second the

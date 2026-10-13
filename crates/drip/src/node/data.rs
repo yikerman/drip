@@ -2,7 +2,7 @@
 use crate::{
     Error, Result,
     node::color,
-    payload::decode_array,
+    payload::{Persist, decode_array, read_json, write_json},
     ports::Requirement,
     shape::{Lattice, MapPayload},
 };
@@ -11,9 +11,14 @@ pub use crate::{
     payload::{DeviceBuffer, DeviceLayout, HostBuffer, Payload},
 };
 use cubecl::bytes::Bytes;
-use std::{fmt, sync::Arc};
+use serde::{Deserialize, Serialize};
+use std::{
+    fmt,
+    io::{self, Read, Write},
+    sync::Arc,
+};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Extent {
     pub width: u32,
     pub height: u32,
@@ -41,7 +46,7 @@ impl Extent {
 
 /// Camera identity from the decoder. Responses of the same make and model
 /// share coordinates, independently of the individual capture.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Camera {
     pub make: String,
     pub model: String,
@@ -55,7 +60,7 @@ impl Camera {
 /// Black-relative camera responses, normalized by the sensor white reference.
 /// `balance` holds the gains applied per LibRaw color index (R, G, B, second
 /// G), relative to green; `None` means unbalanced responses.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Response {
     pub camera: Camera,
     pub balance: Option<[f32; 4]>,
@@ -63,7 +68,7 @@ pub struct Response {
 
 /// A linear RGB space by its CIE 1931 xy primaries and white. Identity is
 /// exact: only values copied from the same constants are the same space.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RgbSpace {
     pub primaries: [[f64; 2]; 3],
     pub white: [f64; 2],
@@ -72,7 +77,7 @@ pub const REC2020_D65: RgbSpace = RgbSpace { primaries: color::REC2020, white: c
 
 /// What three-channel samples mean: camera responses or a defined RGB space.
 /// Samples are linear; there is no encoded RGB producer yet.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Coordinates {
     Camera(Response),
     Space(RgbSpace),
@@ -94,7 +99,7 @@ impl fmt::Display for Coordinates {
 /// pixel `i` covers full-detail plane position `(i + 0.5) · full / extent`
 /// along each axis, approximately where a reduction dropped or averaged
 /// partial edge blocks.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RgbDesc {
     pub extent: Extent,
     pub full: Extent,
@@ -149,6 +154,18 @@ impl DeviceLayout for Rgb {
     }
 }
 
+impl Persist for Rgb {
+    fn write(d: &RgbDesc, host: &Self::Host, out: &mut dyn Write) -> io::Result<()> {
+        write_json(d, out)?;
+        host.write(out)
+    }
+    fn read(input: &mut dyn Read) -> io::Result<(RgbDesc, Self::Host)> {
+        let d: RgbDesc = read_json(input)?;
+        let host = HostBuffer::read(input, d.extent.pixels())?;
+        Ok((d, host))
+    }
+}
+
 impl MapPayload for Rgb {
     fn lattice(d: &RgbDesc) -> Lattice {
         Lattice { extent: [d.extent.width, d.extent.height], full: [d.full.width, d.full.height] }
@@ -175,14 +192,14 @@ impl Requirement<Rgb> for CameraRgb {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BayerPhase {
     Rggb,
     Grbg,
     Gbrg,
     Bggr,
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BayerDesc {
     pub extent: Extent,
     pub phase: BayerPhase,
@@ -216,6 +233,18 @@ impl DeviceLayout for Bayer {
     }
     fn decode(_: &BayerDesc, bytes: Bytes) -> Result<Self::Host> {
         HostBuffer::from_bytes(bytes)
+    }
+}
+
+impl Persist for Bayer {
+    fn write(d: &BayerDesc, host: &Self::Host, out: &mut dyn Write) -> io::Result<()> {
+        write_json(d, out)?;
+        host.write(out)
+    }
+    fn read(input: &mut dyn Read) -> io::Result<(BayerDesc, Self::Host)> {
+        let d: BayerDesc = read_json(input)?;
+        let host = HostBuffer::read(input, d.extent.pixels())?;
+        Ok((d, host))
     }
 }
 
@@ -281,9 +310,50 @@ impl Payload for CaptureMetadata {
     }
 }
 
+// JSON writes a non-finite float as null, which fails to read back, so
+// such metadata is computed again rather than stored wrong.
+impl Persist for CaptureMetadata {
+    fn write(d: &Self::Desc, _: &Self::Host, out: &mut dyn Write) -> io::Result<()> {
+        write_json(&**d, out)
+    }
+    fn read(input: &mut dyn Read) -> io::Result<(Self::Desc, Self::Host)> {
+        let facts = Arc::new(read_json::<drip_raw::Metadata>(input)?);
+        Ok((facts.clone(), facts))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Descriptions compare by value, so a stored one must read back bit for
+    /// bit, and a stream cut short must fail.
+    #[test]
+    fn persisted_payloads_read_back_exactly() {
+        let space = RgbSpace {
+            primaries: [[0.1 + 0.2, 1.0 / 3.0], [0.64, 0.33], [1e-300, 0.06]],
+            white: color::D65,
+        };
+        let desc = RgbDesc::new(Extent { width: 2, height: 1 }, Coordinates::Space(space));
+        let host: HostBuffer<[f32; 3]> =
+            vec![[0.1, f32::MIN_POSITIVE, -0.0], [f32::NAN, 1e30, 2.0]].into();
+        let mut stream = Vec::new();
+        Rgb::write(&desc, &host, &mut stream).unwrap();
+        let (read, samples) = Rgb::read(&mut stream.as_slice()).unwrap();
+        assert_eq!(read, desc);
+        let bits = |host: &HostBuffer<[f32; 3]>| {
+            host.as_flattened().iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        };
+        assert_eq!(bits(&samples), bits(&host));
+        assert!(Rgb::read(&mut &stream[..stream.len() - 1]).is_err());
+        let mut facts = drip_raw::Metadata { make: "Fixture".into(), ..Default::default() };
+        facts.calibration.as_shot = [2.123_456_7, 1.0, 1.7, 0.0];
+        facts.sensor.pixel_aspect = 1.0 + f64::EPSILON;
+        let facts = Arc::new(facts);
+        let mut stream = Vec::new();
+        CaptureMetadata::write(&facts, &facts, &mut stream).unwrap();
+        assert_eq!(*CaptureMetadata::read(&mut stream.as_slice()).unwrap().0, *facts);
+    }
 
     #[test]
     fn rgb_never_stores_more_than_its_full_detail() {

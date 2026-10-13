@@ -18,6 +18,16 @@ pub(super) struct Options {
     pub assets: bool,
     /// How a node with `Point` ports publishes its output.
     pub deferred: Option<Deferred>,
+    /// `foreign = memory` or `foreign = disk`: where the store keeps the
+    /// outputs of a node with `Publish` ports.
+    pub foreign: Option<Foreign>,
+}
+
+/// Where a foreign node's outputs are kept beside memory.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Foreign {
+    Memory,
+    Disk,
 }
 
 /// The shapes whose host function sees descriptions and returns what the
@@ -54,6 +64,7 @@ impl Options {
         let mut references = None;
         let mut action = None;
         let mut map = None;
+        let mut foreign = None;
         let mut flags = Vec::new();
 
         for entry in entries {
@@ -79,6 +90,7 @@ impl Options {
                 "references" => &mut references,
                 "action" => &mut action,
                 "map" => &mut map,
+                "foreign" => &mut foreign,
                 _ => return Err(syn::Error::new(entry.span(), "unknown node option")),
             };
             if option.is_some() {
@@ -102,6 +114,13 @@ impl Options {
         };
         let action = action.map(|expr| function_path(expr, "an action")).transpose()?;
         let map = map.map(|expr| function_path(expr, "a #[cube] body")).transpose()?;
+        let foreign = foreign
+            .map(|expr| match &expr {
+                syn::Expr::Path(path) if path.path.is_ident("memory") => Ok(Foreign::Memory),
+                syn::Expr::Path(path) if path.path.is_ident("disk") => Ok(Foreign::Disk),
+                _ => Err(syn::Error::new(expr.span(), "expected foreign = memory or disk")),
+            })
+            .transpose()?;
         let flag = |name: &str| flags.iter().any(|flag| flag == name);
         let mut shapes = [
             map.map(Deferred::Map),
@@ -111,8 +130,9 @@ impl Options {
         .into_iter()
         .flatten();
         let deferred = shapes.next();
-        if shapes.next().is_some() {
-            return Err(syn::Error::new(span, "a node is at most one of map, warp and resample"));
+        if shapes.next().is_some() || deferred.is_some() && foreign.is_some() {
+            let message = "a node is at most one of map, warp, resample and foreign";
+            return Err(syn::Error::new(span, message));
         }
         Ok(Self {
             name: display_name.unwrap_or_else(|| id.clone()),
@@ -124,6 +144,7 @@ impl Options {
             action,
             assets: flag("assets"),
             deferred,
+            foreign,
         })
     }
 }
@@ -141,7 +162,8 @@ pub(super) enum View {
     Write,
     /// The node sets the output from samples it holds.
     Forward,
-    Load,
+    /// A foreign node's output, set with its description and host samples.
+    Publish,
     /// The input, then the output, of a map, warp or resample: descriptions only.
     Point,
 }
@@ -163,8 +185,9 @@ pub(super) struct Port {
 pub(super) struct Signature {
     pub parameters: syn::Type,
     pub ports: Vec<Port>,
-    /// `fn(&Params, Load<Payload>...)`: outputs loaded once, when first forced.
-    pub source: bool,
+    /// `fn(&Params, Read<In>..., Publish<Out>...)`: a foreign node, which
+    /// describes its outputs as it publishes them.
+    pub foreign: bool,
     /// `fn(&Params, Point<In>, Read..., Point<Out>) -> Result<T>`: the host
     /// function of a map, warp or resample.
     pub point: bool,
@@ -184,10 +207,10 @@ impl Signature {
                 "node must be a concrete synchronous safe function",
             ));
         }
-        let source = signature.inputs.iter().any(|argument| is_view(argument, "Load"));
+        let foreign = signature.inputs.iter().any(|argument| is_view(argument, "Publish"));
         let point = signature.inputs.iter().any(|argument| is_view(argument, "Point"));
         let mut arguments = signature.inputs.iter();
-        if !source && !point {
+        if !foreign && !point {
             arguments.next(); // Rust checks the context type when compiling the generated call.
         }
         let parameters = arguments
@@ -199,11 +222,10 @@ impl Signature {
         let mut ports = Vec::new();
         let mut points = 0;
         for argument in arguments {
-            if source != is_view(argument, "Load") {
-                return Err(syn::Error::new(
-                    argument.span(),
-                    "a source takes &parameters and only Load ports, without a context",
-                ));
+            if foreign && !["Read", "Publish"].iter().any(|view| is_view(argument, view)) {
+                let message = "a foreign node takes &parameters, Read inputs and Publish outputs, \
+                               without a context";
+                return Err(syn::Error::new(argument.span(), message));
             }
             let mut port = Port::parse(argument)?;
             if point && matches!(port.view, View::Write | View::Forward) {
@@ -234,7 +256,7 @@ impl Signature {
             return Err(syn::Error::new(signature.span(), message));
         }
         let result = result_type(&signature.output);
-        Ok(Self { parameters, ports, source, point, result })
+        Ok(Self { parameters, ports, foreign, point, result })
     }
 
     pub fn inputs(&self) -> impl Iterator<Item = &Port> {
@@ -310,11 +332,11 @@ impl Port {
             "Point" => (Direction::Input, View::Point),
             "Write" => (Direction::Output, View::Write),
             "Forward" => (Direction::Output, View::Forward),
-            "Load" => (Direction::Output, View::Load),
+            "Publish" => (Direction::Output, View::Publish),
             _ => {
                 return Err(syn::Error::new(
                     wrapper.span(),
-                    "expected Read, Write, Forward, Load or Point; wrapper aliases are not resolved",
+                    "expected Read, Write, Forward, Publish or Point; wrapper aliases are not resolved",
                 ));
             }
         };

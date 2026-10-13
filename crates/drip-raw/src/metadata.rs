@@ -1,6 +1,6 @@
 //! Owned common LibRaw fields. Numeric sentinels retain LibRaw's meaning;
 //! absent GPS is explicit, and decoded text is UTF-8. No decoder pointers escape.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Metadata {
     pub make: String,
     pub model: String,
@@ -54,7 +54,7 @@ impl Default for Metadata {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Sensor {
     /// Visible sensor area copied into the decoded pixel buffer.
     pub width: usize,
@@ -70,7 +70,7 @@ pub struct Sensor {
     pub masked_areas: [[i32; 4]; 8],
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Calibration {
     /// Local Bayer sites: 0 R, 1 G, 2 B, 3 second G.
     pub cfa: [[u8; 2]; 2],
@@ -98,7 +98,7 @@ pub struct Calibration {
 
 /// Local C shim layout, filled by field name from LibRaw's DNG records.
 #[repr(C)]
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct DngColor {
     pub parsed_fields: u32,
     pub illuminant: u32,
@@ -107,7 +107,7 @@ pub struct DngColor {
     pub forward_matrix: [[f32; 4]; 3],
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct BlackPattern {
     pub height: usize,
     pub width: usize,
@@ -123,7 +123,7 @@ impl BlackPattern {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Lens {
     pub make: String,
     pub model: String,
@@ -151,7 +151,7 @@ pub struct Lens {
     pub attachment_id: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Gps {
     /// Degrees, minutes, seconds; hemisphere comes from the reference byte.
     pub latitude: [f32; 3],

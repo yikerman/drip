@@ -1,23 +1,34 @@
 //! How evaluation runs a node kind, and what the segment compiler composes.
 //!
 //! Every [`Kind`](crate::definition::Kind) declares a [`Shape`]. A kernel or
-//! source runs as written. A map registers a [`MapBody`], a `#[cube]` function
-//! of one [`Pixel`]. A warp returns a [`Warp`], projective maps between planes,
-//! and a resample names a [`FilterBody`]. `plan` composes them into one kernel
-//! per segment instead of launching one per node.
-use crate::payload::DeviceLayout;
+//! bound source runs as written. A foreign node runs on a thread of its own
+//! and its outputs stay in the store, on disk through a [`Codec`] per output
+//! when its [`Cache`] says so. A map registers a [`MapBody`], a `#[cube]`
+//! function of one [`Pixel`]. A warp returns a [`Warp`], projective maps
+//! between planes, and a resample names a [`FilterBody`]. `plan` composes
+//! them into one kernel per segment instead of launching one per node.
+use crate::{
+    Error, Result,
+    image::{Image, Raster},
+    payload::{DeviceLayout, Persist},
+};
 use cubecl::prelude::*;
+use std::io::{Read, Write};
 
 /// How evaluation runs a node kind. The segment compiler fuses maps, warps
-/// and resamples. `Kernel` and `Source` stay opaque to it.
+/// and resamples. `Kernel`, `Source` and `Foreign` stay opaque to it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
     /// The node's function runs on every evaluation. Its inputs are
     /// materialized first, and each output where the node wrote it.
     Kernel,
-    /// The node loads its outputs once, when first evaluated, and keeps them
-    /// with the admitted node.
+    /// A value bound in memory (`node::source`), handed to each run.
     Source,
+    /// The node's host function runs on a thread of its own, on host samples
+    /// of its inputs, without a scale, and describes its outputs when it
+    /// publishes them. The store keeps the outputs, or the failure, under the
+    /// node's key, so the function runs once per key while they stay stored.
+    Foreign(Cache),
     /// The node's host function returns constants for its body, and its
     /// output is a deferred image. A consumer that needs samples runs every
     /// map since the last raster in one kernel.
@@ -28,6 +39,55 @@ pub enum Shape {
     /// The node's host function returns a [`FilterBody`], and its output is
     /// its input resampled with that filter onto the output's lattice.
     Resample,
+}
+
+/// Where the store keeps a foreign node's outputs beside memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cache {
+    /// In the evaluator's memory only, like computed outputs.
+    Memory,
+    /// Also on disk, one [`Codec`] per output in port order, so another
+    /// evaluator or process reads them instead of running the node.
+    Disk(&'static [Codec]),
+}
+
+/// How the store writes and reads one output of a [`Persist`] payload.
+/// `#[node(foreign = disk)]` generates one per output.
+#[derive(Clone, Copy)]
+pub struct Codec {
+    /// The payload's name. Codecs compare by it.
+    pub payload: &'static str,
+    pub(crate) write: fn(&Image, &mut dyn Write) -> Result<()>,
+    pub(crate) read: fn(&mut dyn Read) -> Result<Image>,
+}
+impl Codec {
+    pub const fn of<P: Persist>() -> Self {
+        Self { payload: P::NAME, write: write::<P>, read: read::<P> }
+    }
+}
+fn write<P: Persist>(image: &Image, out: &mut dyn Write) -> Result<()> {
+    let raster = image
+        .downcast::<P>()
+        .ok_or_else(|| Error::Contract(format!("image is not {}", P::NAME)))?;
+    P::write(raster.desc(), raster.host()?, out).map_err(|e| Error::Runtime(e.to_string()))
+}
+/// Fails unless the stream holds a valid description and samples that agree
+/// with it.
+fn read<P: Persist>(input: &mut dyn Read) -> Result<Image> {
+    let (desc, host) = P::read(input).map_err(|e| Error::Runtime(e.to_string()))?;
+    P::validate(&desc)?;
+    Ok(Raster::<P>::from_host(desc, host)?.into())
+}
+impl PartialEq for Codec {
+    fn eq(&self, other: &Self) -> bool {
+        self.payload == other.payload
+    }
+}
+impl Eq for Codec {}
+impl std::fmt::Debug for Codec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.payload)
+    }
 }
 
 /// One sample of a [`MapPayload`] as a map body sees it, channels in storage order.

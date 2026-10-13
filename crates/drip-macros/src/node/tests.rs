@@ -54,15 +54,16 @@ fn an_unread_port_drops_its_underscore() {
 }
 
 #[test]
-fn sources_load_host_outputs_without_a_contract() {
+fn foreign_nodes_publish_host_outputs_without_a_contract() {
     let function: syn::ItemFn = syn::parse_quote! {
-        fn read(p: &Settings, mosaic: Load<'_, Bayer>, metadata: Load<'_, Facts>) -> Result<()> {
+        fn read(p: &Settings, mosaic: Publish<'_, Bayer>, metadata: Publish<'_, Facts>) -> Result<()> {
             Ok(())
         }
     };
     let signature = Signature::parse(&function.sig).unwrap();
-    assert!(signature.source);
-    let module = generated_module(expand(quote!(id = "raw"), function.clone()).unwrap());
+    assert!(signature.foreign);
+    let module =
+        generated_module(expand(quote!(id = "raw", foreign = disk), function.clone()).unwrap());
     assert_port_specs(
         &module,
         "outputs",
@@ -72,22 +73,65 @@ fn sources_load_host_outputs_without_a_contract() {
         ),
     );
     let shape = kind_field(&module, "shape");
-    assert_eq!(quote!(#shape).to_string(), quote!(::drip::shape::Shape::Source).to_string());
-    let items = &module.content.as_ref().unwrap().1;
-    assert!(items.iter().any(|item| matches!(item, syn::Item::Fn(f) if f.sig.ident == "load")));
-    let error = expand(quote!(id = "raw", contract = c), function).unwrap_err();
-    assert!(error.to_string().contains("remove the contract"));
-    for declaration in [
-        quote!(
-            fn x(p: &P, a: Load<A>, b: Read<B>) {}
-        ),
-        quote!(
-            fn x(c: &C, p: &P, a: Load<A>) {}
+    let codecs = quote!(::drip::shape::Codec::of::<Bayer>(), ::drip::shape::Codec::of::<Facts>());
+    let expected = quote!(::drip::shape::Shape::Foreign(::drip::shape::Cache::Disk(&[#codecs])));
+    assert_eq!(quote!(#shape).to_string(), expected.to_string());
+    let contract = &generated_method(&module, "contract").block;
+    assert!(quote!(#contract).to_string().ends_with("Ok (vec ! []) }"), "{}", quote!(#contract));
+    let module =
+        generated_module(expand(quote!(id = "raw", foreign = memory), function.clone()).unwrap());
+    let shape = kind_field(&module, "shape");
+    let expected = quote!(::drip::shape::Shape::Foreign(::drip::shape::Cache::Memory));
+    assert_eq!(quote!(#shape).to_string(), expected.to_string());
+    for (options, message) in [
+        (quote!(id = "raw", foreign = disk, contract = c), "remove the contract"),
+        (quote!(id = "raw"), "Publish ports declare foreign = memory or disk"),
+        (quote!(id = "raw", foreign = cloud), "expected foreign = memory or disk"),
+        (
+            quote!(id = "raw", foreign = disk, warp),
+            "at most one of map, warp, resample and foreign",
         ),
     ] {
-        let error = expand(quote!(id = "x"), syn::parse2(declaration).unwrap()).unwrap_err();
-        assert!(error.to_string().contains("only Load ports"), "{error}");
+        let error = expand(options, function.clone()).unwrap_err();
+        assert!(error.to_string().contains(message), "{error}");
     }
+    for declaration in [
+        quote!(
+            fn x(p: &P, a: Publish<A>, b: Write<B>) {}
+        ),
+        quote!(
+            fn x(c: &C, p: &P, a: Publish<A>) {}
+        ),
+    ] {
+        let function = syn::parse2(declaration).unwrap();
+        let error = expand(quote!(id = "x", foreign = memory), function).unwrap_err();
+        assert!(error.to_string().contains("Read inputs and Publish outputs"), "{error}");
+    }
+    let kernel = syn::parse_quote! { fn x(c: &C, p: &P, a: Read<A>) {} };
+    let error = expand(quote!(id = "x", foreign = memory), kernel).unwrap_err();
+    assert!(error.to_string().contains("through Publish ports"), "{error}");
+}
+
+#[test]
+fn foreign_nodes_download_their_inputs_before_the_call() {
+    let function: syn::ItemFn = syn::parse_quote! {
+        fn x(p: &P, image: Read<'_, Bayer>, flat: Option<Read<'_, Bayer>>, output: Publish<'_, Bayer>) -> Result<()> {
+            Ok(())
+        }
+    };
+    let module = generated_module(expand(quote!(id = "x", foreign = memory), function).unwrap());
+    let run = generated_method(&module, "run");
+    let body = quote!(#run).to_string();
+    let call = body.find("super :: x").unwrap();
+    for download in ["inputs . image . data . host () ?", "input . data . host () ?"] {
+        assert!(body.find(download).is_some_and(|at| at < call), "{body}");
+    }
+    let call = kernel_call(run, "x");
+    let arguments: Vec<_> = call.args.iter().map(|arg| quote!(#arg).to_string()).collect();
+    assert_eq!(
+        arguments[3],
+        quote!(::drip::ports::Publish::<Bayer>::new(&mut output_0)).to_string()
+    );
 }
 
 #[test]
@@ -132,9 +176,10 @@ fn assets_load_when_first_used_and_reach_the_action() {
         let error = expand(options, function.clone()).unwrap_err();
         assert_eq!(error.to_string(), "expected a single `assets` flag");
     }
-    let source =
-        syn::parse_quote! { fn read(p: &Settings, raw: Load<'_, Bayer>) -> Result<()> { Ok(()) } };
-    let error = expand(quote!(id = "x", assets), source).unwrap_err();
+    let foreign = syn::parse_quote! {
+        fn read(p: &Settings, raw: Publish<'_, Bayer>) -> Result<()> { Ok(()) }
+    };
+    let error = expand(quote!(id = "x", foreign = disk, assets), foreign).unwrap_err();
     assert!(error.to_string().contains("remove assets"), "{error}");
 }
 
@@ -217,13 +262,13 @@ fn rejects_unsupported_signatures() {
             quote!(
                 fn x(c: &C, p: &P, a: Either<A, B>) {}
             ),
-            "expected Read, Write, Forward, Load or Point; wrapper aliases are not resolved",
+            "expected Read, Write, Forward, Publish or Point; wrapper aliases are not resolved",
         ),
         (
             quote!(
                 fn x(c: &C, p: &P, a: Alias<A>) {}
             ),
-            "expected Read, Write, Forward, Load or Point; wrapper aliases are not resolved",
+            "expected Read, Write, Forward, Publish or Point; wrapper aliases are not resolved",
         ),
         (
             quote!(
@@ -386,16 +431,24 @@ fn versions_default_to_one_and_are_declared_by_hand() {
 }
 
 #[test]
-fn sources_identify_by_what_they_loaded_and_others_by_parameters() {
-    let source = syn::parse_quote! {
-        fn read(p: &Settings, raw: Load<'_, Bayer>) -> Result<()> { Ok(()) }
+fn foreign_nodes_identify_by_their_files_and_others_by_parameters() {
+    let foreign = syn::parse_quote! {
+        fn read(p: &Settings, raw: Publish<'_, Bayer>) -> Result<()> { Ok(()) }
     };
     let kernel = syn::parse_quote! { fn x(c: &Context, p: &P) -> Result<()> { Ok(()) } };
-    for (function, expected) in [
-        (source, "Ok (self . loaded () ? . 1 . clone ())"),
-        (kernel, "Ok (:: drip :: definition :: Identity :: Computed (self . parameters () ?))"),
+    for (function, options, expected) in [
+        (
+            foreign,
+            quote!(id = "x", foreign = disk),
+            ":: drip :: definition :: Identity :: foreign (& KIND , self . parameters () ?)",
+        ),
+        (
+            kernel,
+            quote!(id = "x"),
+            "Ok (:: drip :: definition :: Identity :: Computed (self . parameters () ?))",
+        ),
     ] {
-        let module = generated_module(expand(quote!(id = "x"), function).unwrap());
+        let module = generated_module(expand(options, function).unwrap());
         let body = &generated_method(&module, "identity").block;
         assert!(quote!(#body).to_string().contains(expected), "{}", quote!(#body));
     }
@@ -691,7 +744,7 @@ fn rejects_malformed_maps() {
             quote!(
                 fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "a node is at most one of map, warp and resample",
+            "a node is at most one of map, warp, resample and foreign",
         ),
         (
             quote!(id = "x", contract = c, warp, warp),

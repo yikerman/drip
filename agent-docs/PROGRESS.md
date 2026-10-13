@@ -5,6 +5,37 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
+- Explicit compute model, step 5: foreign nodes, the pending policy and the
+  store's disk tier. RAW decode is a `foreign = disk` node and Hot pixel
+  removal a `foreign = memory` one. `tests/foreign.rs` checks on the host
+  runtime that a new evaluator reads a disk node's output instead of
+  running it (no node, one disk read, equal samples), that a file with a
+  damaged format line, a missing last byte or a trailing byte is discarded,
+  computed again and rewritten, that a two-entry budget deletes the entry
+  used least recently, where a read counts as a use, that nothing derived
+  from bound data is written, that a failed job repeats its error without
+  running again, and that a deferred batch reports the running job's
+  consumer as pending twice, serves an independent target, starts one job,
+  wakes when it ends and then hits. Decoding `nikon-d70s.nef` and reopening
+  it in a new evaluator reads the mosaic and the metadata from disk without
+  running the node. `raw_is_decoded_once_per_file_stamp` replaces the test
+  that a RAW is decoded again only when chosen again: the same file is a
+  hit, a new modification time decodes again and a removed file fails. Hot
+  pixel removal replaces one hot sample with the median of its eight
+  same-colour neighbours and leaves every other sample. Timed with a
+  release driver kept in `../drip-benchmark-results/2026-10-13-foreign/`
+  (host runtime, a new evaluator per sample, mosaic and metadata of the
+  Sony fixture), in ms:
+
+  | Evaluation | Samples |
+  |---|---|
+  | Decode, no disk tier | 402.2, 398.1, 391.1 |
+  | Decode and write to an empty disk tier | 463.1, 461.7, 461.2 |
+  | Read from the disk tier | 90.8, 88.2, 88.8 |
+
+  Reopening a project therefore costs about 89 ms for the RAW instead of
+  about 398 ms, read from the page cache. Writing the 170 MB entry adds
+  about 63 ms to the first decode.
 - Explicit compute model, step 4: the evaluator's store keeps materialized
   values across demands under content keys, durability and per-side byte
   budgets. `tests/store.rs` checks on the CPU runtime and wgpu (RTX 3080)

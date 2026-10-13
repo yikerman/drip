@@ -10,11 +10,22 @@ use parse::{Deferred, Options, Signature};
 pub(crate) fn expand(args: TokenStream, function: syn::ItemFn) -> syn::Result<TokenStream> {
     let options = Options::parse(args, function.sig.span())?;
     let signature = Signature::parse(&function.sig)?;
-    if options.assets && signature.source {
-        let message = "a source loads its outputs itself; remove assets";
-        return Err(syn::Error::new(function.sig.ident.span(), message));
-    }
     let span = function.sig.ident.span();
+    if options.assets && signature.foreign {
+        let message = "a foreign node reads its files itself; remove assets";
+        return Err(syn::Error::new(span, message));
+    }
+    match (options.foreign, signature.foreign) {
+        (Some(_), false) => {
+            let message = "a foreign node publishes its outputs through Publish ports";
+            return Err(syn::Error::new(span, message));
+        }
+        (None, true) => {
+            let message = "Publish ports declare foreign = memory or disk";
+            return Err(syn::Error::new(span, message));
+        }
+        _ => {}
+    }
     match (&options.deferred, signature.point) {
         (Some(deferred), false) => {
             let message =
@@ -36,11 +47,12 @@ pub(crate) fn expand(args: TokenStream, function: syn::ItemFn) -> syn::Result<To
         _ => {}
     }
     match (&options.contract, signature.outputs().next()) {
-        (Some(contract), _) if signature.source => {
-            let message = "a source describes its outputs by loading them; remove the contract";
+        (Some(contract), _) if signature.foreign => {
+            let message =
+                "a foreign node describes its outputs by publishing them; remove the contract";
             return Err(syn::Error::new(contract.span(), message));
         }
-        (None, Some(output)) if !signature.source => {
+        (None, Some(output)) if !signature.foreign => {
             let message = "a node with outputs needs a contract";
             return Err(syn::Error::new(output.name.span(), message));
         }

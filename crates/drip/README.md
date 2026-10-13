@@ -28,7 +28,8 @@ into more DAG nodes or changing GUI interaction behavior.
 residency, shapes and evaluation. Keep a concrete Rust type per payload.
 Implement `DeviceLayout` only for payloads a kernel reads, keep structured
 data on the host, and flatten the numbers a kernel needs into
-`KernelContext::constants`. Do not flatten unrelated ports merely to make
+`KernelContext::constants`. Implement `Persist` for payloads a
+`foreign = disk` node outputs. Do not flatten unrelated ports merely to make
 storage uniform.
 
 ## Files
@@ -38,15 +39,17 @@ The non-trivial files outside `node/`:
 - `definition.rs`: what `#[node]` generates against: `Kind`, `Tag`, the
   `Node`/`Typed` traits, `Action`, `Assets`, and the `Identity` and
   `Durability` the store keys and evicts by.
-- `shape.rs`: how evaluation runs a kind (`Shape`: kernel, source, map, warp
-  or resample) and what the segment compiler composes: `MapBody` and the
-  `Pixel` it maps, `Warp`, `FilterBody`, and the `Lattice` of a
+- `shape.rs`: how evaluation runs a kind (`Shape`: kernel, bound source,
+  foreign, map, warp or resample), where a foreign node's outputs are kept
+  (`Cache`, `Codec`), and what the segment compiler composes: `MapBody` and
+  the `Pixel` it maps, `Warp`, `FilterBody`, and the `Lattice` of a
   `MapPayload`.
 - `registry.rs`: the hand-maintained `NODES`, `TAGS` and `Registry`.
 - `graph.rs`: `Dag` and transactional edits, checked on ports only.
 - `eval.rs`: `Evaluator`, demand-driven evaluation of the requested subgraph;
   contracts run here, nodes whose outputs the store holds are skipped, and
-  results are materialized for their consumers.
+  results are materialized for their consumers. `Policy` says whether a run
+  waits for a foreign job or reports it pending.
 - `image.rs`: `Image`, the value on an edge, a raster or the deferred output of
   a map, warp or resample, materialized on first need, and `Raster`, samples
   with lazy host and device residency and counted transfers.
@@ -54,11 +57,13 @@ The non-trivial files outside `node/`:
   bodies, the rules for composing steps into it, and the fused kernel that
   runs it.
 - `store.rs`: the evaluator's memo of materialized values across demands:
-  content keys, and eviction by durability and recency within per-side byte
-  budgets.
-- `ports.rs`: port views (`Read`, `Write`, `Forward`, `Load`, and `Point` for
-  maps, warps and resamples) and interpretation requirements.
-- `payload.rs`: payload families, their host types and device byte layouts.
+  content keys, eviction by durability and recency within per-side byte
+  budgets, foreign jobs, and the `Disk` tier.
+- `ports.rs`: port views (`Read`, `Write`, `Forward`, `Publish` for foreign
+  nodes, and `Point` for maps, warps and resamples) and interpretation
+  requirements.
+- `payload.rs`: payload families, their host types, device byte layouts and
+  `Persist` streams.
 - `param.rs`: parameter schemas, encoding and validation.
 - `project.rs`: `.drip` persistence, loaded through a `Registry`.
 - `runtime.rs`: one compute client per evaluator and `DRIP_BACKEND` selection.
@@ -160,6 +165,27 @@ Geometry is a warp declared the same way, `#[node(warp, ...)]`, whose host
 function returns a `Warp` of projective maps from the output plane to the
 input plane, as in `node/orientation.rs` and `node/perspective.rs`.
 
+Host work over whole images, or work outside CubeCL such as a decoder, is a
+foreign node. It runs on a thread of its own at full detail, once per key,
+and has no contract because it describes each output as it publishes it:
+
+```rust
+use crate::{Result, node::data::*, ports::*, registry::tag};
+
+/// Double every RGB sample (+1 EV) on the host. Output keeps the input
+/// coordinates.
+#[crate::node(id = "double", name = "Double", tags = [tag::LOOK], foreign = memory)]
+pub fn compute(_: &(), image: Read<'_, Rgb>, output: Publish<'_, Rgb>) -> Result<()> {
+    let doubled: Vec<_> = image.data.host()?.iter().map(|px| px.map(|v| v * 2.0)).collect();
+    output.set(image.desc.clone(), doubled.into())
+}
+```
+
+`foreign = disk` also keeps the outputs on disk, so another evaluator or
+process reads them instead of running the node, as `node/raw.rs` does for
+RAW decode. A foreign node's key includes the path, length and modification
+time of the input files its `Path` parameters name.
+
 1. Declare the module: `pub mod double;` in `src/node/mod.rs`.
 2. List `&double::compute::KIND` in `registry::NODES`, at its pipeline
    position. Without this the node cannot be added or loaded.
@@ -214,6 +240,15 @@ File extensions are file-format facts in the schema, and the GUI derives its
 dialogs from them. Scope annotations belong to `drip-gui`. The library owns
 processing values and their interpretations.
 
+## Store directory
+
+An evaluator keeps values in memory. `Evaluator::with_disk(Disk)` adds a disk
+tier for `foreign = disk` outputs, such as decoded RAWs, which outlives the
+process. Frontends pass `Disk::platform()`: `drip/store` in the platform
+cache directory, `$XDG_CACHE_HOME/drip/store` or `~/.cache/drip/store` on
+Linux, within 16 GiB. Each output is one file named by its content key. You can
+delete the directory, or any file in it, at any time.
+
 ## Compute backends
 
 Cargo features include compute runtimes, and `DRIP_BACKEND` selects one at
@@ -252,9 +287,10 @@ Run the shared algorithm checks on any configured runtime with
 
 ## RAW metadata
 
-RAW exposes `mosaic: Bayer` and `metadata: CaptureMetadata`. The metadata is
-what LibRaw reported: capture settings, lens identifiers, optional GPS, sensor
-geometry and native WB/black/white/color calibration. Unknown values retain
+RAW decode is a `foreign = disk` node with outputs `mosaic: Bayer` and
+`metadata: CaptureMetadata`. The metadata is what LibRaw reported: capture
+settings, lens identifiers, optional GPS, sensor geometry and native
+WB/black/white/color calibration. Unknown values retain
 LibRaw's sentinels. Vendor-specific maker notes and correction profiles are not
 included. It is a host-only value whose description is the shared value itself.
 

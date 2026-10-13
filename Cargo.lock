@@ -1873,6 +1873,7 @@ dependencies = [
  "bytes",
  "cubecl",
  "cubecl-environment",
+ "dirs",
  "drip-macros",
  "drip-raw",
  "jpeg-decoder",
@@ -1934,6 +1935,7 @@ version = "0.1.0-dev"
 dependencies = [
  "cc",
  "cmake",
+ "serde",
 ]
 
 [[package]]

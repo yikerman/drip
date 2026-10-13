@@ -49,15 +49,16 @@ Settled with the user on 2026-10-11 and revised by the compute model
 - **Decided:** Only views and actions force evaluation, as `main` forces
   thunks. A GUI preview targets the nodes with a view. Export runs when its
   action runs.
-- **Decided:** A node reads its files (source outputs or assets) when first
-  forced and keeps the result, failure included. Files are assumed not to
-  change, so the cache does not change the node's outputs. It holds file
-  contents, not intermediate results. To pick up a changed file, choose it
-  again. A source stamps the input files its parameters name (path, length,
-  modification time) before reading them, and the stamps key its outputs
-  (2026-10-13). Each run receives loaded host samples in a fresh raster, so
-  a device upload of them belongs to the store entry, under its budget,
-  rather than to the node.
+- **Decided (2026-10-13):** A node that reads input files to produce its
+  outputs is a foreign node. Evaluation stamps the files its parameters name
+  (path, length, modification time) whenever it keys the node, and the
+  stamps key its outputs, so a changed file is a new key and is read again.
+  Files read during evaluation are assumed not to change while they are
+  read. This replaces the source form, which read its files when first
+  forced and kept them with the node until they were chosen again. Assets,
+  the files a kernel's parameters name (output ICC profiles), are still read
+  when an action or preparation first asks and kept with the node, failure
+  included.
 - **Decided:** One sequential queue with one evaluator runs previews, export
   and auto exposure. Edits read no files, and project open reads only the
   project JSON. A preview or an action is a demand: a graph snapshot forced
@@ -109,10 +110,13 @@ Settled with the user on 2026-10-11 and revised by the compute model
   inputs, `Option<&Desc>` for optional ones. An unconnected optional input is
   incomplete wiring: a node that needs it in some mode (CAT16 As shot) reports
   it at evaluation.
-- **Decided:** Kernels, sources and maps are declared as functions with
-  `#[node]` ([ARCHITECTURE](ARCHITECTURE.md#shapes)). Views and actions are
-  kernels with an empty body. A map's contract describes its output like a
-  kernel's, so both share one port and contract mechanism.
+- **Decided:** Kernels, foreign nodes, maps, warps and resamples are declared
+  as functions with `#[node]` ([ARCHITECTURE](ARCHITECTURE.md#shapes)). Views
+  and actions are kernels with an empty body. A map's contract describes its
+  output like a kernel's, so both share one port and contract mechanism. A
+  foreign node has no contract: its outputs' descriptions exist only once it
+  has run (a RAW's extent and CFA), so it sets each output's description
+  with its samples through `Publish` (2026-10-13).
 - **Decided (2026-10-13):** An output may be `Forward` instead of `Write`: the
   node publishes a raster it holds under the contract's new description,
   sharing storage. Published rasters are never written again, so sharing keeps
@@ -313,15 +317,16 @@ Settled with the user on 2026-10-11 and revised by the compute model
   SHA-256 over the producer's kind ID and `version`, its identity and the
   keys of its inputs in port order. A computed node's identity is its
   canonical parameter JSON (object keys sorted) and the global scale. A
-  source's is its parameters and the stamps of the input files they name,
-  without the scale. Bound in-memory data hashes a per-instance random
-  identity. The kind ID determines a map's body, so input keys cover a
+  foreign node's is its parameters and the stamps of the input files they
+  name, without the scale. Bound in-memory data hashes a per-instance random
+  identity, and keys derived from it stay off the disk. The kind ID determines a map's body, so input keys cover a
   plan's body sequence and constants without hashing them. `version` is
   bumped by hand when a kernel's numerics change. Equal nodes share one
   entry, and a new evaluator, as each GUI project has, starts empty.
 - **Decided (2026-10-13):** Durability orders eviction: Low first, then
   Medium, then High, least recently used first within a class. A kind's
-  durability is High for a source, otherwise the most durable of its tags,
+  durability is High for a foreign node or bound data, otherwise the most
+  durable of its tags,
   Low without tags. Tags state theirs: `io` High; `input-transform`,
   `bayer-raw`, `demosaic`, `recovery`, `geometry` and `color` Medium;
   `look`, `output-transform`, `tonemap`, `view` and `scope` Low. No node
@@ -337,14 +342,72 @@ Settled with the user on 2026-10-11 and revised by the compute model
   host functions, so the store never holds a plan's input outside the
   budget.
 - **Decided (2026-10-13):** Evaluation keys every needed node first, which
-  loads sources, then walks back from the demanded values. A stored value
-  is a hit, and a missing one schedules its node and the node's inputs.
+  stamps foreign nodes' files, then walks back from the demanded values. A
+  stored value is a hit, and a missing one schedules its node and the
+  node's inputs.
   Target nodes of `evaluate_inputs` always run, so their contracts check
   what they receive. A run keeps its own live values with use counts, so a
   value the budget evicts mid-run stays available to its consumers.
   `Statistics` reports hits and evictions. A Sigmoid-only edit runs the five
   nodes of the tail segment and one launch, and an unchanged demand runs
   none.
+- **Decided (2026-10-13):** Step 5. A foreign node, declared with
+  `#[node(foreign = memory)]` or `foreign = disk`, is a host function on
+  `Read` inputs and `Publish` outputs without a context. The store runs it as a job on a thread of its own, one
+  job per node key, after the run materializes its inputs, and the job
+  downloads them before the call. It runs at scale 1: its key and its
+  function ignore the global scale, and previews reduce its outputs
+  downstream like any full-detail raster. Its outputs are High entries. A
+  failed job stays with its key and repeats its error, so a deferred
+  preview does not rerun a failing decode in a loop.
+- **Tentative (2026-10-13):** A foreign node's inputs come from the demand,
+  so one placed after a scale-dependent node (demosaic, Resample) receives
+  reduced samples under a scale-dependent key. Step 6 moves the preview
+  reduction to the first materialization finer than requested, which keeps
+  every input of a foreign node at full detail. Until then, place foreign
+  nodes on full-detail data, as Hot pixel removal on the RAW mosaic is.
+- **Decided (2026-10-13):** `Policy::Wait` blocks on a running job, for
+  headless evaluation, actions and tests. `Policy::Defer` fails the job's
+  node and its consumers with `Error::Pending`, inside the `Error::Node` that
+  names the node, and leaves the job running. Targets independent of it
+  still receive their inputs. The job calls the evaluator's wake callback
+  when it ends, and the next run moves its outputs into the store, so the
+  same demand then hits. A demand while a job runs takes that job instead of
+  starting another.
+- **Open (2026-10-13):** Cancelling a job no demand needs. The design asks a
+  foreign function to check a cancellation flag cooperatively. Neither RAW
+  decode (one LibRaw call) nor Hot pixel removal (milliseconds) can use one,
+  so no flag exists yet. Such a job runs to its end and its outputs enter the
+  store.
+- **Decided (2026-10-13):** The disk tier keeps the outputs of `foreign =
+  disk` nodes across evaluators and processes, in `Disk::directory`:
+  `Disk::platform()` is `drip/store` in the platform cache directory
+  (`$XDG_CACHE_HOME`, or `~/.cache`, on Linux). One file per output is named
+  by its key in hexadecimal and holds `drip store 1`, the payload name and
+  the payload's `Persist` stream: the description as JSON, then the samples'
+  bytes. A job writes its files before it ends, through a temporary name
+  renamed into place, so another evaluator demanding the key after the wake
+  finds them. Entries are immutable and may be deleted at any time. A file
+  that fails to read (wrong format line or payload, a short or long stream,
+  an invalid description) is deleted and counts as a miss. Reads set the
+  file's modification time, and over the budget (16 GiB by default) the
+  oldest files go first. A disk hit is read on the evaluating thread into a
+  host raster and stored as a High entry. `Evaluator::new` has no disk tier;
+  a frontend opts in with `with_disk`, so tests never write the user's cache.
+- **Tentative (2026-10-13):** Disk entries carry no checksum. A file renamed
+  into place is complete unless the system crashed before writing it back,
+  and a damaged length or description fails to read, but flipped sample
+  bits are not detected. A checksum would read every sample a second time
+  per reopen. Add one if damaged entries appear.
+- **Decided (2026-10-13):** RAW decode (`bayer-raw`) is `foreign = disk`. Its
+  version is `drip_raw::VERSION`, bumped with LibRaw, its build or the shim,
+  and with Drip's normalization. On the Sony fixture, a new evaluator reads
+  the decode from disk in 89 ms instead of decoding in 398 ms
+  ([PROGRESS](PROGRESS.md#2026-10-13)).
+- **Decided (2026-10-13):** Hot pixel removal (`hot-pixels`) is the second
+  foreign node, `foreign = memory`: a Bayer sample above the maximum of its
+  eight same-colour neighbours by more than a threshold becomes their median.
+  The template does not include it.
 - **Decided:** CubeCL computation with one kernel source per algorithm across
   runtimes. wgpu presentation and color management stay frontend-owned.
   `DRIP_BACKEND` selects explicitly and never falls back (crate README).

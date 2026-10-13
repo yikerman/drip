@@ -6,7 +6,7 @@ use crate::{
     definition::{Kind, Node},
     node::{
         bayer_2x2, bayer_gains, camera_to_rgb, chromatic_adaptation, export, exposure, highlights,
-        orientation, perspective, raw, rcd, reduce, resample, sigmoid,
+        hot_pixels, orientation, perspective, raw, rcd, reduce, resample, sigmoid,
     },
 };
 use std::sync::Arc;
@@ -50,6 +50,7 @@ pub use tag::TAGS;
 /// be added or loaded from a project.
 pub static NODES: &[&Kind] = &[
     &raw::read::KIND,
+    &hot_pixels::remove::KIND,
     &reduce::bayer::compute::KIND,
     &bayer_gains::compute::KIND,
     &highlights::reconstruct::KIND,

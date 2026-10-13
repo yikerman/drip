@@ -4,7 +4,8 @@
 //! forces and hands each node its input images; a node asks them for host or
 //! device samples and writes its outputs where it computes them. Map, warp and
 //! resample nodes publish deferred images instead, and a segment of them runs
-//! as one kernel.
+//! as one kernel. Foreign nodes run host functions on threads of their own,
+//! and the evaluator's store keeps their outputs, on disk when declared.
 //! Passing a contract establishes declared compatibility, not physical accuracy.
 
 extern crate self as drip;
@@ -22,7 +23,7 @@ pub mod project;
 pub mod registry;
 pub mod runtime;
 pub mod shape;
-mod store;
+pub mod store;
 
 pub use drip_macros::{Choice, Parameters, node};
 pub use error::{Error, Result};
@@ -40,6 +41,10 @@ mod error {
         Runtime(String),
         #[error("node {kind} ({node:?}): {source}")]
         Node { node: crate::ports::NodeId, kind: &'static str, source: Box<Error> },
+        /// A foreign node's job is still running, and the evaluation was
+        /// asked not to wait ([`Policy::Defer`](crate::eval::Policy::Defer)).
+        #[error("being computed")]
+        Pending,
     }
     impl From<String> for Error {
         fn from(s: String) -> Self {

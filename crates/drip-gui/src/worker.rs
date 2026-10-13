@@ -12,7 +12,7 @@ use std::time::Instant;
 use crate::model::{Graph, NodeId};
 use crate::node_ui::NodeAction;
 use drip::Error as NodeError;
-use drip::eval::{Evaluator, InputValues, NodeTiming};
+use drip::eval::{Evaluator, InputValues, NodeTiming, Policy};
 use drip::runtime::{GlobalContext, RuntimeContext};
 use serde_json::Value as Json;
 
@@ -329,6 +329,7 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
             &demand.graph.dag,
             &demand.global,
             &targets,
+            Policy::Wait,
             trace.then_some(&mut timings),
         ),
         Err(error) => targets.iter().map(|&id| (id, Err(error.clone()))).collect(),

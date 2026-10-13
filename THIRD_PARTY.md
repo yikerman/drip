@@ -46,7 +46,8 @@ no darktable source code is copied.
 | [rust-windowing contributors](https://github.com/rust-windowing/winit) (`winit`) | Windows and input events | Apache-2.0 |
 | [Smithay contributors](https://github.com/Smithay/wayland-rs) (`wayland-client`, `wayland-protocols`) | Wayland pop-out parenting and surface color descriptions | MIT |
 | [PolyMeilex and rfd contributors](https://github.com/PolyMeilex/rfd) | Native file dialogs | MIT |
-| [Serde contributors](https://github.com/serde-rs/serde) (`serde`, `serde_json`) | Project serialization | MIT OR Apache-2.0 |
+| [Serde contributors](https://github.com/serde-rs/serde) (`serde`, `serde_json`) | Project serialization and the store's disk entries | MIT OR Apache-2.0 |
+| [Simon Ochsenreither and dirs-rs contributors](https://github.com/soc/dirs-rs) (`dirs` 6) | Platform cache directory of the store's disk tier | MIT OR Apache-2.0; [MIT](https://github.com/soc/dirs-rs/blob/00511bdc252f491a72ac89f6d6a2463406266fb2/LICENSE-MIT), [Apache-2.0](https://github.com/soc/dirs-rs/blob/00511bdc252f491a72ac89f6d6a2463406266fb2/LICENSE-APACHE) |
 | [RustCrypto contributors](https://github.com/RustCrypto/hashes) (`sha2` 0.10) | SHA-256 content keys of the evaluator's store | MIT OR Apache-2.0; [MIT](https://github.com/RustCrypto/hashes/blob/master/sha2/LICENSE-MIT), [Apache-2.0](https://github.com/RustCrypto/hashes/blob/master/sha2/LICENSE-APACHE) |
 | [David Tolnay and thiserror contributors](https://github.com/dtolnay/thiserror) | Error definitions | MIT OR Apache-2.0 |
 | [Rust log contributors](https://github.com/rust-lang/log), [env_logger contributors](https://github.com/rust-cli/env_logger) | Logging | MIT OR Apache-2.0 |

@@ -10,6 +10,7 @@ pub mod export;
 pub mod exposure;
 pub mod filter;
 pub mod highlights;
+pub mod hot_pixels;
 pub mod orientation;
 pub mod perspective;
 pub mod profile;

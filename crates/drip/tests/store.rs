@@ -157,10 +157,10 @@ struct Ramp {
     #[param(default = 4, range = 1..=64)]
     length: i64,
 }
-/// A source whose outputs its parameters determine, so equal parameters in
-/// two graphs share a key.
-#[drip::node(id = "test-ramp")]
-fn ramp(p: &Ramp, image: Load<'_, Rgb>) -> Result<()> {
+/// A foreign node whose outputs its parameters determine, so equal
+/// parameters in two graphs share a key.
+#[drip::node(id = "test-ramp", foreign = memory)]
+fn ramp(p: &Ramp, image: Publish<'_, Rgb>) -> Result<()> {
     let extent = Extent { width: p.length as u32, height: 1 };
     let pixels = (0..p.length).map(|i| [i as f32, 0.5, 1.0]).collect::<Vec<_>>();
     image.set(RgbDesc::new(extent, Coordinates::Space(REC2020_D65)), pixels.into())
@@ -233,24 +233,24 @@ fn keys_follow_content_across_graph_instances() {
     assert_eq!([bound(), bound()], [1, 1]);
 }
 
-/// A source's identity stamps the files its parameters name before it reads
-/// them, so a rewritten file keys differently.
+/// A foreign node's identity stamps the files its parameters name before it
+/// reads them, so a rewritten file keys differently.
 #[test]
-fn a_source_identity_stamps_its_files() {
+fn a_foreign_identity_stamps_its_files() {
     let path = std::env::temp_dir().join(format!("drip-store-{}.arw", std::process::id()));
     let identity = || {
         let parameters = json!({"path": path});
-        Identity::loaded(&node::raw::read::KIND, parameters).unwrap()
+        Identity::foreign(&node::raw::read::KIND, parameters).unwrap()
     };
     std::fs::write(&path, "first").unwrap();
-    let Identity::Loaded(_, files) = identity() else { panic!("a source is loaded") };
+    let Identity::Foreign(_, files) = identity() else { panic!("RAW decode is foreign") };
     assert_eq!(files, [FileStamp::read(path.clone()).unwrap()]);
     assert_eq!(files[0].len, 5);
     std::fs::write(&path, "second").unwrap();
-    assert_ne!(identity(), Identity::Loaded(json!({"path": path}), files));
+    assert_ne!(identity(), Identity::Foreign(json!({"path": path}), files));
     std::fs::remove_file(&path).unwrap();
-    let unset = Identity::loaded(&node::raw::read::KIND, json!({"path": null})).unwrap();
-    assert_eq!(unset, Identity::Loaded(json!({"path": null}), Vec::new()));
+    let unset = Identity::foreign(&node::raw::read::KIND, json!({"path": null})).unwrap();
+    assert_eq!(unset, Identity::Foreign(json!({"path": null}), Vec::new()));
 }
 
 fn all(runtime: RuntimeContext) {

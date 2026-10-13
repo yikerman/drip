@@ -1,6 +1,6 @@
 use drip::{
     Error, Result,
-    eval::{Evaluator, InputValues},
+    eval::{Evaluator, InputValues, Policy},
     graph::Dag,
     image::Description,
     node,
@@ -429,8 +429,13 @@ fn device_chain(runtime: RuntimeContext) {
     // only the sink where the store holds its input.
     for (eval, expected) in [(Evaluator::new(eval.runtime().clone()), 8), (eval, 1)] {
         let mut timings = Vec::new();
-        let values =
-            eval.evaluate_batch(&d, &Default::default(), &[observer.node], Some(&mut timings));
+        let values = eval.evaluate_batch(
+            &d,
+            &Default::default(),
+            &[observer.node],
+            Policy::Wait,
+            Some(&mut timings),
+        );
         let inputs = values[&observer.node].as_ref().unwrap().bind::<sink::Definition>().unwrap();
         assert_eq!(inputs.image.data.host().unwrap(), result.data.host().unwrap());
         assert_eq!(timings.len(), expected);
@@ -539,6 +544,7 @@ fn batch_shares_ancestors_and_isolates_failures() {
         &dag,
         &Default::default(),
         &targets,
+        Policy::Wait,
         Some(&mut timings),
     );
     assert_eq!(timings.len(), 7); // Shared nodes once; nodes after a failure skipped.

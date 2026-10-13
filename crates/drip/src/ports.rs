@@ -3,10 +3,10 @@
 //! A port names a payload and an interpretation requirement, never a
 //! placement. `Read` borrows an input [`Raster`] and the node asks it for
 //! `host()` or `device(ctx)`. `Write` creates the output where the node writes
-//! it; `Forward` publishes samples the node already holds; `Load` sets a
-//! source's output. The host function of a map, warp or resample sees its
-//! input and output as `Point`, a description without samples. Type erasure is
-//! confined to the generated node adapter.
+//! it; `Forward` publishes samples the node already holds; a foreign node
+//! describes and fills each output through `Publish`. The host function of a
+//! map, warp or resample sees its input and output as `Point`, a description
+//! without samples. Type erasure is confined to the generated node adapter.
 use crate::{
     Error, Result,
     image::{Description, Image, Raster},
@@ -159,13 +159,13 @@ impl<P: Payload> ForwardSlot<P> {
     }
 }
 
-/// An output of a source node, set once when the node is first evaluated.
-/// Setting it is the boundary check of the loaded value.
-pub struct Load<'a, P> {
+/// An output of a foreign node, which has no contract: the node sets it once
+/// with its description and host samples. Setting it validates both.
+pub struct Publish<'a, P> {
     slot: &'a mut Option<Image>,
     payload: PhantomData<P>,
 }
-impl<'a, P: Payload> Load<'a, P> {
+impl<'a, P: Payload> Publish<'a, P> {
     #[doc(hidden)]
     pub fn new(slot: &'a mut Option<Image>) -> Self {
         Self { slot, payload: PhantomData }
