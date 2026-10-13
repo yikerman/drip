@@ -214,7 +214,7 @@ impl Plan {
             domain(to),
             kernel,
         );
-        ctx.runtime.count_fused(to.window.cells());
+        ctx.count_fused(to.window.cells());
         Ok(output)
     }
 
@@ -252,7 +252,7 @@ impl Plan {
             kernel,
             *body,
         );
-        ctx.runtime.count_reduction();
+        ctx.count_reduction();
         while len > 1 {
             let next = len.div_ceil(FAN_IN);
             let output = ctx.scratch_32(next * width)?;
@@ -332,7 +332,7 @@ impl Plan {
             );
             (shards, partial)
         };
-        ctx.runtime.count_reduction();
+        ctx.count_reduction();
         let output = ctx.scratch_32(len)?;
         kernel::merge::launch(
             client,
@@ -361,7 +361,7 @@ impl Plan {
             Front::Stencil { body, radius } => {
                 let reach = Reach::of(*radius, from);
                 if reach.approximates {
-                    ctx.runtime.count_approximated();
+                    ctx.count_approximated();
                 }
                 let [rx, ry] = reach.samples.map(|r| r as f32);
                 (Stage::Stencil(*body), vec![rx, ry, reach.rate[0], reach.rate[1]])

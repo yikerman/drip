@@ -20,7 +20,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Store accounting | Follow-up | Entries sharing storage are charged twice, and budgets bound neither a running evaluation's values nor untaken job outputs. Measure device memory over a long session first. |
 | Benchmark protocol | Open | Confirm with the user whether the protocol adopts the five new-EV requests the store measurements added. |
 | Step 3 measurement | Follow-up | Time the template tail with Orientation, and without geometry, against 17142d6 in `../drip-benchmark-results/2026-10-13-fusion/`. |
-| Raster runtime identity | Follow-up | `Raster::device` does not check that a later caller uses the runtime that made the buffer, and `Statistics` mixes concurrent evaluations on one runtime. Check or key it if a store ever serves several runtimes. |
+| Raster runtime identity | Follow-up | `Raster::device` does not check that a later caller uses the runtime that made the buffer, and `Statistics` counts the transfers of concurrent evaluations on one runtime together. Check or key it if a store ever serves several runtimes. |
 | Remaining simplifications | Follow-up | Revisit preparation and kernel contexts, colorimetry helpers, the evaluation loop and preview-context ownership. A scope's density scale is a parameter, so changing it counts again. |
 | Packaged proof of concept | Next | Verify saved edits, full-detail RAW-to-TIFF use, and installation and launch on clean desktops. Record supported environments and known limitations. |
 | Portable artifacts | Next | Add Linux `.tar.xz`/Flatpak and macOS `.app` bundles with their minimum systems and runtime packaging. Audit runtime-loaded dependencies, permissions, submodule sources and notices. |

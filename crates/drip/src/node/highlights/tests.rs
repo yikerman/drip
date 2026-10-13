@@ -30,7 +30,8 @@ fn evaluate(
     let input = Raster::<Bayer>::from_host(desc.clone(), samples.to_vec().into()).unwrap();
     let levels = Raster::<BayerLevels>::from_host(levels_desc, levels).unwrap();
     let mut output = adapter::OutputSlot::<Bayer>::new(&(Arc::new(desc) as Description));
-    let ctx = KernelContext { global: &GlobalContext::default(), runtime };
+    let global = GlobalContext::default();
+    let ctx = KernelContext::new(&global, runtime);
     reconstruct(
         &ctx,
         &Settings { threshold },

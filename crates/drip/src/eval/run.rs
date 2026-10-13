@@ -12,7 +12,7 @@ use crate::{
     image::{Description, Image},
     lattice::Rect,
     ports::*,
-    runtime::{GlobalContext, KernelContext, RuntimeContext},
+    runtime::{GlobalContext, KernelContext, RuntimeContext, Tally},
     shape::{Cache, Codec, Shape},
     store::{Key, Store},
 };
@@ -72,6 +72,8 @@ impl Slot {
 pub(super) struct Run<'a, 't> {
     dag: &'a Dag,
     runtime: &'a RuntimeContext,
+    /// Where the call's kernels count their work.
+    tally: &'a Tally,
     scale: u32,
     pub store: MutexGuard<'a, Store>,
     policy: Policy,
@@ -132,6 +134,7 @@ impl<'a, 't> Run<'a, 't> {
     /// since its key includes them.
     pub(super) fn new(
         evaluator: &'a Evaluator,
+        tally: &'a Tally,
         dag: &'a Dag,
         global: &GlobalContext,
         policy: Policy,
@@ -144,6 +147,7 @@ impl<'a, 't> Run<'a, 't> {
         let mut run = Self {
             dag,
             runtime: &evaluator.runtime,
+            tally,
             scale: global.scale,
             store,
             policy,
@@ -432,7 +436,7 @@ impl<'a, 't> Run<'a, 't> {
     }
 
     pub(super) fn kernels(&self) -> KernelContext<'a> {
-        KernelContext { runtime: self.runtime, global: &FULL }
+        KernelContext::counted(&FULL, self.runtime, self.tally)
     }
 
     /// The value of `slot`, deriving it from its parent on first read: a
@@ -540,7 +544,8 @@ impl<'a, 't> Run<'a, 't> {
         if outputs.len() != node.kind().outputs.len() {
             return Err(Error::Runtime("node contract output arity mismatch".into()));
         }
-        let images = node.run(&KernelContext::new(&global, self.runtime), inputs, &outputs)?;
+        let ctx = KernelContext::counted(&global, self.runtime, self.tally);
+        let images = node.run(&ctx, inputs, &outputs)?;
         if images.len() != outputs.len() {
             return Err(Error::Runtime("node result arity mismatch".into()));
         }

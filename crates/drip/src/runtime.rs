@@ -1,10 +1,11 @@
 //! The compute device an evaluator runs on.
 //!
 //! One [`RuntimeContext`] per evaluator owns the CubeCL client, counts the
-//! transfers, fused launches and reduction passes that
-//! [`Statistics`](crate::eval::Statistics) reports, and states the store's
-//! byte [`Budget`]. Build features include runtimes, and `DRIP_BACKEND`
-//! selects one. Host nodes stay ordinary Rust.
+//! transfers that [`Statistics`](crate::eval::Statistics) reports, and
+//! states the store's byte [`Budget`]. A [`KernelContext`] counts the fused
+//! launches and reduction passes of one evaluation call. Build features
+//! include runtimes, and `DRIP_BACKEND` selects one. Host nodes stay
+//! ordinary Rust.
 use crate::{
     Error, Result,
     payload::{DeviceBuffer, DeviceLayout},
@@ -67,10 +68,6 @@ impl Default for Budget {
 struct Counts {
     uploads: AtomicUsize,
     downloads: AtomicUsize,
-    fused: AtomicUsize,
-    samples: AtomicUsize,
-    reductions: AtomicUsize,
-    approximated: AtomicUsize,
 }
 
 impl RuntimeContext {
@@ -117,36 +114,6 @@ impl RuntimeContext {
     /// scratch are not counted.
     pub(crate) fn transfers(&self) -> (usize, usize) {
         (self.counts.uploads.load(Relaxed), self.counts.downloads.load(Relaxed))
-    }
-
-    /// Fused kernels launched on this runtime so far, and the output
-    /// samples they wrote.
-    pub(crate) fn fused(&self) -> (usize, usize) {
-        (self.counts.fused.load(Relaxed), self.counts.samples.load(Relaxed))
-    }
-
-    pub(crate) fn count_fused(&self, samples: usize) {
-        self.counts.fused.fetch_add(1, Relaxed);
-        self.counts.samples.fetch_add(samples, Relaxed);
-    }
-
-    /// Reduction passes over a plan's pixels on this runtime so far.
-    pub(crate) fn reductions(&self) -> usize {
-        self.counts.reductions.load(Relaxed)
-    }
-
-    pub(crate) fn count_reduction(&self) {
-        self.counts.reductions.fetch_add(1, Relaxed);
-    }
-
-    /// Stencil launches on this runtime so far whose radius fell below one
-    /// sample of a preview lattice.
-    pub(crate) fn approximated(&self) -> usize {
-        self.counts.approximated.load(Relaxed)
-    }
-
-    pub(crate) fn count_approximated(&self) {
-        self.counts.approximated.fetch_add(1, Relaxed);
     }
 
     pub(crate) fn upload(&self, bytes: Bytes) -> Result<Handle> {
@@ -196,12 +163,61 @@ pub(crate) fn grid(len: usize, dim: CubeDim) -> CubeCount {
 pub struct KernelContext<'a> {
     pub global: &'a GlobalContext,
     pub(crate) runtime: &'a RuntimeContext,
+    /// Where an evaluation call counts its kernels' work. `None` outside
+    /// evaluation, where nobody reads the counts.
+    tally: Option<&'a Tally>,
 }
+
+/// The work of one evaluation call's kernels, which
+/// [`Statistics`](crate::eval::Statistics) reports. Each call counts its own,
+/// so work on the same runtime from other threads or later calls never
+/// lands in it.
+#[derive(Default)]
+pub(crate) struct Tally {
+    /// Fused launches and the output samples they wrote.
+    pub fused: AtomicUsize,
+    pub samples: AtomicUsize,
+    /// Reduction passes over a plan's pixels.
+    pub reductions: AtomicUsize,
+    /// Stencil launches and passes whose radius fell below one sample of a
+    /// preview lattice.
+    pub approximated: AtomicUsize,
+}
+
 impl<'a> KernelContext<'a> {
     /// For frontends that run kernels or materialize images outside
     /// evaluation, such as a view resampling its input.
     pub fn new(global: &'a GlobalContext, runtime: &'a RuntimeContext) -> Self {
-        Self { global, runtime }
+        Self { global, runtime, tally: None }
+    }
+
+    /// A context whose kernels count their work in `tally`.
+    pub(crate) fn counted(
+        global: &'a GlobalContext,
+        runtime: &'a RuntimeContext,
+        tally: &'a Tally,
+    ) -> Self {
+        Self { global, runtime, tally: Some(tally) }
+    }
+
+    /// Count a fused launch that wrote `samples` output samples.
+    pub(crate) fn count_fused(&self, samples: usize) {
+        if let Some(tally) = self.tally {
+            tally.fused.fetch_add(1, Relaxed);
+            tally.samples.fetch_add(samples, Relaxed);
+        }
+    }
+
+    pub(crate) fn count_reduction(&self) {
+        if let Some(tally) = self.tally {
+            tally.reductions.fetch_add(1, Relaxed);
+        }
+    }
+
+    pub(crate) fn count_approximated(&self) {
+        if let Some(tally) = self.tally {
+            tally.approximated.fetch_add(1, Relaxed);
+        }
     }
 
     pub fn client(&self) -> Result<&'a Client> {

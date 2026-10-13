@@ -379,6 +379,11 @@ decisions from the compute-model migration and later.
   large. Distribution uses Vulkan SPIR-V on Linux, native Metal on macOS and
   WGSL/D3D12 on Windows, and xtask checks the target. These are candidates,
   not measured winners.
+- **Decided (2026-10-13):** Each evaluation call counts its own fused
+  launches, samples, reduction passes and approximated stencils through its
+  `KernelContext`, so tests and benchmarks that count them hold while other
+  work shares the runtime. Transfers stay counted on the runtime, so a
+  foreign job's downloads land in whichever call runs when they happen.
 - **Decided:** RCD scratch is allocated before its first pass and released
   after its last dispatch. CubeCL owns queued bindings, so no host waits.
 - **Decided (2026-10-13):** Reduce and bins bodies are declared statics, as

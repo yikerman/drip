@@ -66,13 +66,16 @@ use crate::{
     lattice::Rect,
     payload::Payload,
     ports::*,
-    runtime::{GlobalContext, RuntimeContext},
+    runtime::{GlobalContext, RuntimeContext, Tally},
     store::{Disk, Store},
 };
 use run::{Ran, Run};
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicUsize, Ordering::Relaxed},
+    },
     time::Duration,
 };
 
@@ -92,9 +95,11 @@ pub struct NodeTiming {
     pub success: bool,
 }
 
-/// Work done by one `evaluate` or `evaluate_batch` call, counted on the
-/// evaluator's runtime while the call runs. Reading the result's other side afterwards is the caller's
-/// transfer.
+/// Work done by one `evaluate` or `evaluate_batch` call. Kernel work is the
+/// call's own. Transfers are counted on the evaluator's runtime while the
+/// call runs, so they include a foreign job's downloads that land then, even
+/// when an earlier call started the job under [`Policy::Defer`]. Reading the
+/// result's other side afterwards is the caller's transfer.
 #[derive(Default, Debug)]
 pub struct Statistics {
     /// Nodes run. A node runs when a value it produces is demanded and not
@@ -259,7 +264,9 @@ impl Evaluator {
             }
         }
         let regions = valid.iter().filter_map(|t| Some((t.node, t.region?))).collect();
-        let mut run = Run::new(self, dag, global, policy, valid.iter().map(|t| t.node), regions);
+        let tally = Tally::default();
+        let roots = valid.iter().map(|t| t.node);
+        let mut run = Run::new(self, &tally, dag, global, policy, roots, regions);
         run.timings = timings;
         for target in &valid {
             let at = run.scale_of(target.node, global.scale);
@@ -277,7 +284,7 @@ impl Evaluator {
         for target in &valid {
             values.insert(target.node, run.collect(target.node, &failures));
         }
-        let statistics = counts.since(&self.runtime, run.finish());
+        let statistics = counts.since(&self.runtime, run.finish(), &tally);
         if let Err(error) = self.runtime.finish() {
             for value in values.values_mut().filter(|v| v.is_ok()) {
                 *value = Err(error.clone());
@@ -297,7 +304,9 @@ impl Evaluator {
         dag.output_of::<P>(target.id)?;
         global.validate()?;
         let counts = Counts::of(&self.runtime);
-        let mut run = Run::new(self, dag, global, Policy::Wait, [target.node()], HashMap::new());
+        let tally = Tally::default();
+        let mut run =
+            Run::new(self, &tally, dag, global, Policy::Wait, [target.node()], HashMap::new());
         let slot = run.edge(None, global.scale, target.id);
         run.demand(slot);
         for (id, scale) in run.order(dag) {
@@ -306,7 +315,7 @@ impl Evaluator {
         let image = run.resolve(slot)?;
         image.materialize(&run.kernels())?;
         run.release(slot);
-        let statistics = counts.since(&self.runtime, run.finish());
+        let statistics = counts.since(&self.runtime, run.finish(), &tally);
         let data = image.downcast::<P>().expect("output payload is checked").clone();
         // One terminal wait; host consumers have already waited at read boundaries.
         self.runtime.finish()?;
@@ -332,34 +341,27 @@ fn target_error(dag: &Dag, global: &GlobalContext, target: &Target) -> Option<Er
         .then(|| Error::Contract("only a node without outputs takes a region".into()))
 }
 
-/// The runtime's counts when a call began.
+/// The runtime's transfers when a call began.
 struct Counts {
     transfers: (usize, usize),
-    fused: (usize, usize),
-    reductions: usize,
-    approximated: usize,
 }
 impl Counts {
     fn of(runtime: &RuntimeContext) -> Self {
-        Self {
-            transfers: runtime.transfers(),
-            fused: runtime.fused(),
-            reductions: runtime.reductions(),
-            approximated: runtime.approximated(),
-        }
+        Self { transfers: runtime.transfers() }
     }
 
-    /// The call's statistics from the run's own counts.
-    fn since(&self, runtime: &RuntimeContext, run: Ran) -> Statistics {
-        let ((uploads, downloads), (fused, samples)) = (runtime.transfers(), runtime.fused());
+    /// The call's statistics from the run's and its kernels' own counts.
+    fn since(&self, runtime: &RuntimeContext, run: Ran, tally: &Tally) -> Statistics {
+        let (uploads, downloads) = runtime.transfers();
+        let count = |counter: &AtomicUsize| counter.load(Relaxed);
         Statistics {
             nodes: run.nodes,
             uploads: uploads - self.transfers.0,
             downloads: downloads - self.transfers.1,
-            fused: fused - self.fused.0,
-            samples: samples - self.fused.1,
-            reductions: runtime.reductions() - self.reductions,
-            approximated: runtime.approximated() - self.approximated,
+            fused: count(&tally.fused),
+            samples: count(&tally.samples),
+            reductions: count(&tally.reductions),
+            approximated: count(&tally.approximated),
             hits: run.hits,
             reads: run.reads,
             evictions: run.evictions,
