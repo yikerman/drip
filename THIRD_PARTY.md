@@ -123,6 +123,15 @@ release with passthrough support.
 Test images in `fixtures/raw/pixls/` are from [raw.pixls.us](https://raw.pixls.us/),
 licensed [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
 Thank you to the contributors—you guys are awesome!
+The samples that carry embedded lens correction data, by raw.pixls.us file
+number (`https://raw.pixls.us/getfile.php/<number>/nice/`), unmodified:
+
+| File | Camera, mode | Number | SHA-256 |
+|------|--------------|--------|---------|
+| `fujifilm-gfx50s-ii.raf` | Fujifilm GFX50S II, 14-bit compressed, 4:3 | 5004 | `59699d3063a9900eb5f226da664473c6081ed2cfe4d4529b7cd45afa2f1cac62` |
+| `google-pixel-4-xl.dng` | Google Pixel 4 XL, 4:3 | 3502 | `0c03a6c93b4b8593cd0e4426166e6389710007238b82eb23861ef191322f0c54` |
+| `om-system-tg-7.orf` | OM System TG-7, 4:3 | 6946 | `4f7344c67bfcfcfec45f754195ba612fc2ad6312f5fab87812bf04b9e9e7d46a` |
+| `panasonic-dmc-tz70.rw2` | Panasonic DMC-TZ70, 16:9 | 935 | `564df985a397edd1f80dd66ddae2bd2277a5c1fa57e0003bc0e1fafd0f1d05a3` |
 
 Original Sony ILCE-7RM3 photo (`fixtures/raw/sony-ilce-7rm3.arw`):
 Yi Cao <yi@ycao.net>.
