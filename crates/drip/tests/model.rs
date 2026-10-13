@@ -209,6 +209,60 @@ fn relabel(
     output.data.copy_from_slice(image.data);
     Ok(())
 }
+/// Relabels on the device without copying: the output shares the input's
+/// allocation. `half` describes the output with half the extent, which the
+/// adapter rejects because the storage no longer matches.
+#[node(id="test-forward",contract=forward_contract)]
+fn forward(
+    _: &KernelContext<'_>,
+    _: &Relabel,
+    image: Read<'_, Device<Rgb>>,
+    output: Forward<'_, Device<Rgb>>,
+) -> Result<()> {
+    output.set(image.data.share_as());
+    Ok(())
+}
+fn forward_contract(
+    global: &drip::runtime::GlobalContext,
+    p: &Relabel,
+    i: &RgbDesc,
+) -> Result<(RgbDesc,)> {
+    let (mut output,) = relabel_contract(global, &Relabel { camera: false }, i)?;
+    if p.camera {
+        output.extent.width /= 2;
+        output.full.width /= 2;
+    }
+    Ok((output,))
+}
+#[cfg(feature = "cpu")]
+#[test]
+fn cpu_forwarded_outputs_share_storage_under_a_checked_description() {
+    forwarded_outputs(RuntimeContext::cpu());
+}
+#[test]
+#[ignore = "requires the DRIP_BACKEND runtime and device; run explicitly"]
+fn selected_backend_forwarded_outputs_share_storage_under_a_checked_description() {
+    forwarded_outputs(RuntimeContext::from_env().unwrap());
+}
+fn forwarded_outputs(runtime: RuntimeContext) {
+    let mut d = Dag::new();
+    let a = metadata("forward");
+    let desc = RgbDesc::new(image_desc().extent, Coordinates::Camera(camera(&a)));
+    let source = node::source::<Rgb>(&mut d, desc, vec![[0.1, -0.2, 2.0]; 2]).unwrap();
+    let relabeled = forward::add(&mut d, Relabel { camera: false }).unwrap();
+    let mismatched = forward::add(&mut d, Relabel { camera: true }).unwrap();
+    d.connect(source, relabeled.image).unwrap();
+    d.connect(source, mismatched.image).unwrap();
+    let eval = Evaluator::new(runtime);
+    let output = eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), relabeled.output).unwrap();
+    assert_eq!(output.desc.coordinates, Coordinates::Space(REC2020_D65));
+    assert_eq!(&output.data[..], &[[0.1, -0.2, 2.0]; 2]);
+    let Err(error) = eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), mismatched.output) else {
+        panic!("a forward must match its description")
+    };
+    assert!(error.to_string().contains("RGB extent/storage mismatch"), "{error}");
+}
+
 #[test]
 fn parameter_edits_ignore_downstream_and_batch_edits_commit_together() {
     let mut d = Dag::new();

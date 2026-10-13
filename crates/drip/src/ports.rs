@@ -48,7 +48,10 @@ impl<P: DeviceLayout> Port for Device<P> {
         upload: |v, d, r| Ok(Arc::new(payload::upload::<P>(downcast(d), downcast(v), r)?)),
         download: |v, d, r| Ok(Arc::new(payload::download::<P>(downcast(d), downcast(v), r)?)),
     });
-    fn check(_: &P::Desc, _: &DeviceBuffer<P>) -> Result<()> {
+    fn check(desc: &P::Desc, data: &DeviceBuffer<P>) -> Result<()> {
+        if data.handle.size_in_used() != P::byte_len(desc) as u64 {
+            return Err(Error::Contract(format!("{} extent/storage mismatch", P::NAME)));
+        }
         Ok(())
     }
     fn allocate(desc: &P::Desc, runtime: &RuntimeContext) -> Result<DeviceBuffer<P>> {
@@ -130,6 +133,41 @@ impl<'a, P: Port> OutputSlot<'a, P> {
     pub fn finish(self) -> Result<Data> {
         P::check(self.desc, &self.data)?;
         Ok(Arc::new(self.data))
+    }
+}
+
+/// An output published from storage the node already holds, typically an
+/// input's allocation under a new description ([`DeviceBuffer::share_as`]).
+/// Published storage is never written again, so sharing it keeps nodes pure.
+pub struct Forward<'a, P: Port, R = Any> {
+    pub desc: &'a Desc<P>,
+    slot: &'a mut Option<P::Storage>,
+    requirement: PhantomData<R>,
+}
+impl<P: Port, R> Forward<'_, P, R> {
+    pub fn set(self, data: P::Storage) {
+        *self.slot = Some(data);
+    }
+}
+
+/// A forwarded output held by the generated node adapter until publication.
+#[doc(hidden)]
+pub struct ForwardSlot<'a, P: Port> {
+    desc: &'a Desc<P>,
+    data: Option<P::Storage>,
+}
+impl<'a, P: Port> ForwardSlot<'a, P> {
+    pub fn new(desc: &'a Description) -> Self {
+        Self { desc: downcast(desc), data: None }
+    }
+    pub fn forward<R>(&mut self) -> Forward<'_, P, R> {
+        Forward { desc: self.desc, slot: &mut self.data, requirement: PhantomData }
+    }
+    pub fn finish(self) -> Result<Data> {
+        let data =
+            self.data.ok_or_else(|| Error::Contract("node did not set its output".into()))?;
+        P::check(self.desc, &data)?;
+        Ok(Arc::new(data))
     }
 }
 

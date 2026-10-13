@@ -307,10 +307,17 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
                 let ty = &port.ty;
                 let requirement = &port.requirement;
                 let slot = format_ident!("output_{index}");
-                allocations.push(quote! {
-                    let mut #slot = ::drip::ports::OutputSlot::<#ty>::allocate(&outputs[#index], context)?;
-                });
-                arguments.push(quote!(#slot.write::<#requirement>()));
+                if port.forward {
+                    allocations.push(quote! {
+                        let mut #slot = ::drip::ports::ForwardSlot::<#ty>::new(&outputs[#index]);
+                    });
+                    arguments.push(quote!(#slot.forward::<#requirement>()));
+                } else {
+                    allocations.push(quote! {
+                        let mut #slot = ::drip::ports::OutputSlot::<#ty>::allocate(&outputs[#index], context)?;
+                    });
+                    arguments.push(quote!(#slot.write::<#requirement>()));
+                }
                 results.push(quote!(#slot.finish()?));
             }
         }

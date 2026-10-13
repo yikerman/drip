@@ -217,19 +217,19 @@ fn rejects_unsupported_signatures() {
             quote!(
                 fn x(c: &C, p: &P, a: Either<A, B>) {}
             ),
-            "expected Read, Write or Load; wrapper aliases are not resolved",
+            "expected Read, Write, Forward or Load; wrapper aliases are not resolved",
         ),
         (
             quote!(
                 fn x(c: &C, p: &P, a: Alias<A>) {}
             ),
-            "expected Read, Write or Load; wrapper aliases are not resolved",
+            "expected Read, Write, Forward or Load; wrapper aliases are not resolved",
         ),
         (
             quote!(
                 fn x(c: &C, p: &P, a: Option<Write<A>>) {}
             ),
-            "output Write ports cannot be optional",
+            "output ports cannot be optional",
         ),
     ];
     for (declaration, message) in declarations {
@@ -436,6 +436,35 @@ fn optional_execution_is_nullable_and_contracts_keep_one_description_per_input()
     };
     let arguments: Vec<_> = described.args.iter().map(|a| quote!(#a).to_string()).collect();
     assert_eq!(arguments, ["global", "& self . parameters", "image", "metadata"]);
+}
+
+#[test]
+fn forwarded_outputs_publish_storage_the_node_sets() {
+    let function = syn::parse_quote! {
+        fn x(c: &C, p: &P, image: Read<Device<A>>, kept: Forward<Device<B>, R>, made: Write<Cpu<C>>) {}
+    };
+    let module = generated_module(expand(quote!(id = "x", contract = c), function).unwrap());
+    let run = generated_method(&module, "run");
+    let statements: Vec<_> = run.block.stmts.iter().map(|s| quote!(#s).to_string()).collect();
+    assert!(statements[1].contains("ForwardSlot :: < Device < B > > :: new (& outputs [0usize])"));
+    assert!(statements[2].contains("OutputSlot :: < Cpu < C > > :: allocate (& outputs [1usize]"));
+    let call = kernel_call(run, "x");
+    let arguments: Vec<_> = call.args.iter().skip(3).map(|a| quote!(#a).to_string()).collect();
+    assert_eq!(
+        arguments,
+        [
+            quote!(output_0.forward::<R>()).to_string(),
+            quote!(output_1.write::<::drip::ports::Any>()).to_string()
+        ]
+    );
+    assert_port_specs(
+        &module,
+        "outputs",
+        quote!(
+            ::drip::ports::PortSpec::of::<Device<B>, R>("kept"),
+            ::drip::ports::PortSpec::of::<Cpu<C>, ::drip::ports::Any>("made")
+        ),
+    );
 }
 
 #[test]

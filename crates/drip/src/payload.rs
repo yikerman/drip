@@ -65,6 +65,12 @@ impl<P> DeviceBuffer<P> {
     pub(crate) fn new(handle: Handle) -> Self {
         Self { handle, marker: PhantomData }
     }
+    /// The same allocation read as payload `Q`, for forwarding an input under
+    /// a new description. Publication checks the byte length against `Q`'s
+    /// description; the element layout is the caller's claim.
+    pub fn share_as<Q>(&self) -> DeviceBuffer<Q> {
+        DeviceBuffer::new(self.handle.clone())
+    }
     pub fn argument(&self) -> BufferArg {
         // SAFETY: payload layouts and scratch allocators determine the byte layout.
         // Scalar vectorization matches the element slices declared by kernels.

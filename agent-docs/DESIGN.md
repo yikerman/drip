@@ -104,6 +104,12 @@ Settled with the user on 2026-10-11 after a review against
   `fn(&KernelContext, &Params, Read..., Write...) -> Result<()>`, with an empty
   body for views and actions. Sources: `fn(&Params, Load<'_, P>...)`, run once
   when first forced; `Load::set` validates at the boundary.
+- **Decided (2026-10-12):** An output may be `Forward` instead of `Write`: the
+  node sets it from storage it holds, typically an input's allocation shared
+  with `DeviceBuffer::share_as`, under the contract's new description.
+  Published storage is never written again, so sharing keeps nodes pure. The
+  adapter checks forwarded and written outputs alike; device storage must
+  match its description's byte length.
 - **Decided:** Other files a node names (output ICC profiles in Export TIFF and
   Preview proofing) are assets: `#[node(assets)]` with `impl Assets for Params`.
   Actions and preparations receive the admitted node and its assets.

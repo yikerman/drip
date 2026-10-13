@@ -155,10 +155,9 @@ pub struct RgbField;            // Host = HostBuffer<[f32; 3]>, DeviceLayout as 
 - **Contracts:** everything deferred is in the description, so contracts check
   undefined transforms (a quad with three collinear corners) and compute
   domains on the host before allocation.
-- **Pass-through outputs (needed):** today the `#[node]` adapter allocates
-  every output (`OutputSlot::allocate`). A field node must publish its input's
-  storage `Arc` with a new description. Add an output form, e.g.
-  `Forward<'_, Device<RgbField>>`, set from an input of the same placement.
+- **Pass-through outputs (done):** a field node declares
+  `output: Forward<'_, Device<RgbField>>` and sets it to
+  `image.data.share_as()`, the input's allocation under a new description.
   Storage is already shared and immutable, so purity holds. Nodes that only
   reinterpret (assigning RGB meaning to camera numbers) can use it too.
 
@@ -380,7 +379,7 @@ Each step is one self-contained commit series.
 1. `RgbDesc::full` and the pixel-centre convention through demosaic, reduction,
    Orientation, camera conversion and their tests. Done; `RgbDesc::new` builds
    full-detail descriptions, and validation rejects storing more than `full`.
-2. Pass-through outputs in `#[node]`, with adapter tests.
+2. Pass-through outputs in `#[node]`, with adapter tests. Done (`Forward`).
 3. Shared filters as `#[cube]` functions in `node/filter.rs`. Mitchell–Netravali
    (any B, C) and Lanczos-3 are implemented and tested on the host, CPU, WGPU
    and Vulkan; box and triangle remain.

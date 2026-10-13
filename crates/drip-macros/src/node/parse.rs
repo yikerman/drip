@@ -96,6 +96,8 @@ pub(super) struct Port {
     /// The port's requirement (input) or guarantee (output); `Any` if omitted.
     pub requirement: syn::Type,
     pub direction: Direction,
+    /// `Forward`: the node sets the output from storage it holds.
+    pub forward: bool,
     pub optional: bool,
     /// Index within this direction, independent of the function argument order.
     pub index: usize,
@@ -204,16 +206,16 @@ impl Port {
         }
         let direction = match wrapper.ident.to_string().as_str() {
             "Read" => Direction::Input,
-            "Write" | "Load" => Direction::Output,
+            "Write" | "Forward" | "Load" => Direction::Output,
             _ => {
                 return Err(syn::Error::new(
                     wrapper.span(),
-                    "expected Read, Write or Load; wrapper aliases are not resolved",
+                    "expected Read, Write, Forward or Load; wrapper aliases are not resolved",
                 ));
             }
         };
         if optional && direction == Direction::Output {
-            return Err(syn::Error::new(wrapper.span(), "output Write ports cannot be optional"));
+            return Err(syn::Error::new(wrapper.span(), "output ports cannot be optional"));
         }
         let (ty, requirement) = match types.as_slice() {
             // A source loads host values; its ports are CPU outputs of that payload.
@@ -230,7 +232,8 @@ impl Port {
                 ));
             }
         };
-        Ok(Self { name, ty, requirement, direction, optional, index: 0 })
+        let forward = wrapper.ident == "Forward";
+        Ok(Self { name, ty, requirement, direction, forward, optional, index: 0 })
     }
 }
 

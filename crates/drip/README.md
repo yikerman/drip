@@ -129,6 +129,9 @@ mod kernel {
 `#[node]` generates the rest: the `Kind` (ID, help from the Rustdoc, ports,
 schema), `add`, typed `Ports` and `Inputs`. The contract runs at evaluation
 and states what the output describes; reject inputs it cannot handle there.
+An output declared `Forward<'_, P>` instead of `Write` is set from storage the
+node already holds, such as `image.data.share_as()`, so a node that only
+changes the description copies nothing.
 The ID is the persistence key, so keep it once projects use it. Tags say what
 the node is for: at most one stage tag, then any others that help finding it.
 Parameters are a struct deriving `Parameters` in place of `()`; see
