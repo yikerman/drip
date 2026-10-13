@@ -9,6 +9,7 @@ use crate::history::History;
 use crate::model::NodeId;
 use crate::model::Project;
 use crate::templates;
+use drip::store::Disk;
 use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
 
 use crate::editing::{Edit, Frame, NodeCx, Report};
@@ -27,6 +28,8 @@ pub struct App {
     /// Serves the current project only; replaced with it.
     worker: Worker,
     wake: Arc<dyn Fn() + Send + Sync>,
+    /// The disk tier each project's worker keeps foreign outputs in.
+    disk: Option<Disk>,
     dirty: bool,
     modified: bool,
     /// Namespaces temporary control drafts when node IDs are reused by a new project.
@@ -72,6 +75,7 @@ impl App {
     pub fn new(
         file: Option<PathBuf>,
         wide_gamut: bool,
+        disk: Option<Disk>,
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
@@ -79,8 +83,9 @@ impl App {
         let mut app = App {
             history: History::new(project.graph.clone()),
             project,
-            worker: Worker::new(wake.clone()),
+            worker: Worker::new(wake.clone(), disk.clone()),
             wake,
+            disk,
             dirty: true,
             modified: false,
             ui_generation: 0,
@@ -349,7 +354,10 @@ impl App {
                 ui.label(RichText::new("Previews clipped to sRGB").color(theme::ERROR));
             }
             if self.worker.busy() {
-                let label = ui.label("Evaluating…");
+                let label = match self.worker.waiting() {
+                    Some(name) => ui.label(format!("Computing {name}…")),
+                    None => ui.label("Evaluating…"),
+                };
                 if self.worker.showing_previous() {
                     label.tip("Views retain the previous completed evaluation while the current request runs.");
                 }

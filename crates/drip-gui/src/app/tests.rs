@@ -28,7 +28,7 @@ fn detail_dropdown_scroll_updates_the_project_and_stops_at_ends() {
                 crate::theme::fonts(ui.ctx());
                 app.menu(ui)
             },
-            App::new(None, true, || {}),
+            App::new(None, true, None, || {}),
         );
     let pos = h.get_by_label("Preview detail").rect().center();
     for (delta, level) in [(-1.0, 2), (1.0, 1), (10.0, 0), (-20.0, MAX_LEVEL)] {
@@ -91,7 +91,7 @@ fn set_param(h: &mut Harness<'_, App>, id: NodeId, name: &str, value: serde_json
 #[test]
 fn auto_exposure_is_queued_and_applies_its_ev_as_an_edit() {
     let file = fixture_project("auto-exposure");
-    let mut h = harness(App::new(Some(file.clone()), true, || {}));
+    let mut h = harness(App::new(Some(file.clone()), true, None, || {}));
     settle(&mut h);
     let exposure = h.state().project.graph.find("Exposure").unwrap();
     h.state_mut().selected = Some(exposure);
@@ -129,7 +129,7 @@ fn auto_exposure_is_queued_and_applies_its_ev_as_an_edit() {
 
 #[test]
 fn shared_edits_redraw_windows_without_evaluating_presentation_changes() {
-    let mut h = harness(App::new(None, true, || {}));
+    let mut h = harness(App::new(None, true, None, || {}));
     settle(&mut h);
     let app = h.state_mut();
     let id = app.project.graph.find("Sigmoid").unwrap();
@@ -171,7 +171,7 @@ fn has_view(app: &App, label: &str) -> bool {
 #[test]
 fn previews_use_the_selected_global_detail() {
     let file = fixture_project("open");
-    let mut h = harness(App::new(Some(file.clone()), true, || {}));
+    let mut h = harness(App::new(Some(file.clone()), true, None, || {}));
     settle(&mut h);
     let app = h.state();
     assert!(app.file.as_ref() == Some(&file));
@@ -207,7 +207,7 @@ fn previews_use_the_selected_global_detail() {
     assert!(image.upgrade().is_some(), "resizing preserves the evaluated image");
     h.get_by_label("Save").click();
     settle(&mut h);
-    let mut restored = App::new(Some(file.clone()), true, || {});
+    let mut restored = App::new(Some(file.clone()), true, None, || {});
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while restored.worker.busy() {
         restored.poll();
@@ -254,7 +254,7 @@ mod only_views_force_evaluation_fixture {
         }
         let completions = Arc::new(AtomicUsize::new(0));
         let wake = completions.clone();
-        let mut app = App::new(None, true, move || {
+        let mut app = App::new(None, true, None, move || {
             wake.fetch_add(1, Ordering::SeqCst);
         });
         app.set_project(project, None).unwrap();
@@ -286,7 +286,7 @@ mod evaluating_message_keeps_the_ui_and_previous_preview_available_fixture {
         *GATE.lock().unwrap() = Some((started, resume));
         let mut project = Project::default();
         let id = project.graph.add_node(&slow::KIND).unwrap();
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(None, true, None, || {});
         app.set_project(project, None).unwrap();
         let mut h = harness(app);
         settle(&mut h);
@@ -313,7 +313,7 @@ mod evaluating_message_keeps_the_ui_and_previous_preview_available_fixture {
 
 #[test]
 fn invalid_detail_does_not_replace_the_open_project() {
-    let mut app = App::new(None, true, || {});
+    let mut app = App::new(None, true, None, || {});
     let original = app.project.clone();
     for value in [json!(-1), json!(9), json!(256), json!(2.5), json!("2"), json!(null)] {
         let mut project = templates::default_project();
@@ -326,7 +326,7 @@ fn invalid_detail_does_not_replace_the_open_project() {
 
 #[test]
 fn reports_unreadable_projects() {
-    let mut h = harness(App::new(Some("/nonexistent.drip".into()), true, || {}));
+    let mut h = harness(App::new(Some("/nonexistent.drip".into()), true, None, || {}));
     settle(&mut h);
     assert!(h.state().status.as_ref().is_some_and(|s| s.error));
 }
@@ -337,7 +337,7 @@ fn opening_templates_creates_untitled_projects_and_saving_clears_modified_title(
         std::env::temp_dir().join(format!("drip-title-{}.drip-template", std::process::id()));
     let destination = template.with_extension("drip");
     std::fs::write(&template, Project::default().to_json().unwrap()).unwrap();
-    let mut h = harness(App::new(Some(template.clone()), true, || {}));
+    let mut h = harness(App::new(Some(template.clone()), true, None, || {}));
     settle(&mut h);
     assert!(h.state().file.is_none());
     assert_eq!(h.state().title(), "Untitled · Drip");
@@ -365,7 +365,7 @@ fn opening_templates_creates_untitled_projects_and_saving_clears_modified_title(
 fn shortcuts_run_project_commands_with_exact_modifiers() {
     let file = std::env::temp_dir().join(format!("drip-shortcuts-{}.drip", std::process::id()));
     std::fs::write(&file, Project::default().to_json().unwrap()).unwrap();
-    let mut h = harness(App::new(Some(file.clone()), true, || {}));
+    let mut h = harness(App::new(Some(file.clone()), true, None, || {}));
     h.run();
     h.state_mut().edit(Edit::Add(&drip::node::exposure::compute::KIND, Vec2::ZERO));
     // Extra modifiers select no command, so New keeps the edit.
@@ -392,7 +392,7 @@ fn shortcuts_run_project_commands_with_exact_modifiers() {
 fn replacing_a_modified_project_asks_to_save_first() {
     let file = std::env::temp_dir().join(format!("drip-unsaved-{}.drip", std::process::id()));
     std::fs::write(&file, Project::default().to_json().unwrap()).unwrap();
-    let mut h = harness(App::new(Some(file.clone()), true, || {}));
+    let mut h = harness(App::new(Some(file.clone()), true, None, || {}));
     h.run();
     let add = |h: &mut Harness<'_, App>| {
         let kind = &drip::node::exposure::compute::KIND;
@@ -429,7 +429,7 @@ fn replacing_a_modified_project_asks_to_save_first() {
 fn built_in_templates_replace_the_project_after_the_unsaved_prompt() {
     let file = std::env::temp_dir().join(format!("drip-built-in-{}.drip", std::process::id()));
     std::fs::write(&file, Project::default().to_json().unwrap()).unwrap();
-    let mut h = harness(App::new(Some(file.clone()), true, || {}));
+    let mut h = harness(App::new(Some(file.clone()), true, None, || {}));
     h.run();
     h.state_mut().edit(Edit::Add(&drip::node::exposure::compute::KIND, Vec2::ZERO));
     h.get_by_label("New from template").click();
@@ -456,7 +456,7 @@ fn redo(h: &mut Harness<'_, App>) {
 
 #[test]
 fn a_slider_drag_is_one_undo_step() {
-    let mut h = harness(App::new(None, true, || {}));
+    let mut h = harness(App::new(None, true, None, || {}));
     let id = h.state().project.graph.find("Exposure").unwrap();
     h.state_mut().selected = Some(id);
     h.run();
@@ -493,7 +493,7 @@ fn a_slider_drag_is_one_undo_step() {
 
 #[test]
 fn undo_restores_removed_nodes_and_shares_the_others() {
-    let mut h = harness(App::new(None, true, || {}));
+    let mut h = harness(App::new(None, true, None, || {}));
     h.run();
     let graph = |h: &Harness<'_, App>| h.state().project.graph.clone();
     let raw = graph(&h).find("Bayer RAW").unwrap();
@@ -518,7 +518,7 @@ fn undo_restores_removed_nodes_and_shares_the_others() {
 
 #[test]
 fn focused_text_fields_keep_the_undo_shortcut() {
-    let mut h = harness(App::new(None, true, || {}));
+    let mut h = harness(App::new(None, true, None, || {}));
     let id = h.state().project.graph.find("Exposure").unwrap();
     h.state_mut().selected = Some(id);
     h.run();
@@ -532,17 +532,17 @@ fn focused_text_fields_keep_the_undo_shortcut() {
 
 #[test]
 fn warns_when_previews_are_clipped() {
-    let mut h = harness(App::new(None, false, || {}));
+    let mut h = harness(App::new(None, false, None, || {}));
     h.run();
     assert!(h.query_by_label("Previews clipped to sRGB").is_some());
-    let mut h = harness(App::new(None, true, || {}));
+    let mut h = harness(App::new(None, true, None, || {}));
     h.run();
     assert!(h.query_by_label("Previews clipped to sRGB").is_none());
 }
 
 #[test]
 fn inspector_shows_the_selected_node_and_the_inputs() {
-    let mut app = App::new(None, true, || {});
+    let mut app = App::new(None, true, None, || {});
     app.selected = app.project.graph.find("Export TIFF");
     let mut h = harness(app);
     h.run();
@@ -562,7 +562,7 @@ fn inspector_shows_the_selected_node_and_the_inputs() {
 #[test]
 fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
     let documentation = drip::node::sigmoid::apply::KIND.help.trim().replace('\n', " ");
-    let mut app = App::new(None, true, || {});
+    let mut app = App::new(None, true, None, || {});
     let id = app.project.graph.find("Sigmoid").unwrap();
     app.selected = Some(id);
     let mut h = harness(app);
@@ -582,7 +582,7 @@ fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
             app.window(ui, popped)
         },
         {
-            let mut app = App::new(None, true, || {});
+            let mut app = App::new(None, true, None, || {});
             app.project = h.state().project.clone();
             app
         },
@@ -597,7 +597,7 @@ fn node_help_follows_the_type_id_and_stays_out_of_parameter_windows() {
 
 #[test]
 fn nodes_without_controls_show_documentation_and_references() {
-    let mut app = App::new(None, true, || {});
+    let mut app = App::new(None, true, None, || {});
     app.selected = app.project.graph.find("RCD demosaic");
     let mut h = harness(app);
     h.run();
@@ -638,7 +638,7 @@ mod undocumented_nodes_show_generated_port_help_fixture {
     fn undocumented_nodes_show_generated_port_help() {
         let mut project = Project::default();
         let id = project.graph.add_node(&generic::KIND).unwrap();
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(None, true, None, || {});
         app.set_project(project, None).unwrap();
         app.selected = Some(id);
         let mut h = harness(app);
@@ -654,7 +654,7 @@ mod undocumented_nodes_show_generated_port_help_fixture {
 #[test]
 fn nodes_with_parameters_and_views_pop_them_out() {
     use crate::node_ui::Part;
-    let mut h = harness(App::new(None, true, || {}));
+    let mut h = harness(App::new(None, true, None, || {}));
     h.run();
     let graph = &h.state().project.graph;
     let histogram = graph.find("Histogram").unwrap();
@@ -698,7 +698,7 @@ fn scope_nodes_offer_popouts() {
     ] {
         let mut project = Project::default();
         let id = project.graph.add_node(kind).unwrap();
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(None, true, None, || {});
         app.set_project(project, None).unwrap();
         let mut h = harness(app);
         h.run();
@@ -719,7 +719,7 @@ mod declared_gui_view_gets_a_popout_before_preparation_succeeds_fixture {
     fn declared_gui_view_gets_a_popout_before_preparation_succeeds() {
         let mut project = Project::default();
         let id = project.graph.add_node(&view::KIND).unwrap();
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(None, true, None, || {});
         app.set_project(project, None).unwrap();
         let mut h = harness(app);
         h.run();
@@ -740,7 +740,7 @@ mod custom_controls_keep_the_generic_view_and_popout_fixture {
     fn custom_controls_keep_the_generic_view_and_popout() {
         let mut project = Project::default();
         let id = project.graph.add_node(&view::KIND).unwrap();
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(None, true, None, || {});
         app.set_project(project, None).unwrap();
         app.selected = Some(id);
         let mut h = harness(app);
@@ -772,7 +772,7 @@ fn parameter_windows_show_the_parameters_and_close_with_their_node() {
             &["Contrast", "Skew", "Preserve hue", "−8 … +8 EV relative to middle grey"][..],
         ),
     ] {
-        let mut app = App::new(None, true, || {});
+        let mut app = App::new(None, true, None, || {});
         let id = app.project.graph.find(name).unwrap();
         let popped = Popped { node: id, part: crate::node_ui::Part::Parameters };
         app.popped.insert(popped);
@@ -801,7 +801,7 @@ fn parameter_windows_show_the_parameters_and_close_with_their_node() {
 
 #[test]
 fn empty_canvas_above_the_nodes_takes_clicks() {
-    let mut app = App::new(None, true, || {});
+    let mut app = App::new(None, true, None, || {});
     app.selected = app.project.graph.find("Export TIFF");
     let mut h = harness(app);
     h.run();

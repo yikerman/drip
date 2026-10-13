@@ -35,7 +35,11 @@ in [TODO](TODO.md).
 
   Reopening a project therefore costs about 89 ms for the RAW instead of
   about 398 ms, read from the page cache. Writing the 170 MB entry adds
-  about 63 ms to the first decode.
+  about 63 ms to the first decode. In the GUI worker, a preview of a slow
+  foreign node returns while the job runs, names the node as waiting,
+  starts no second job for another detail level, runs again when the job
+  ends and then shows its output, and keeps the previous view while a new
+  value's job runs (`a_preview_waits_for_foreign_work_and_runs_again_when_it_ends`).
 - Explicit compute model, step 4: the evaluator's store keeps materialized
   values across demands under content keys, durability and per-side byte
   budgets. `tests/store.rs` checks on the CPU runtime and wgpu (RTX 3080)

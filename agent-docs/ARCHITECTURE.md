@@ -241,7 +241,17 @@ prepares each view from its inputs. A newer preview request replaces a
 pending one and makes a running one's result stale. An action demand forces
 one node at full detail and runs its action. Demands are not merged, but a
 later demand reuses what the store kept from earlier ones. A new project
-replaces the worker, its evaluator and the store.
+replaces the worker, its evaluator and the memory store. Every worker's
+evaluator has the disk tier of `Disk::platform()`, so a RAW decoded in one
+session is read from disk in the next.
+
+Previews evaluate under `Policy::Defer` and actions under `Policy::Wait`. A
+target waiting for a foreign job keeps its previous view, the worker stays
+busy, and the status line reads "Computing *node*…" in place of
+"Evaluating…", logged at debug level rather than as a failure. The
+evaluator's wake callback sends the worker a ready event, and the worker
+sends its latest preview request again, which finds the job's outputs
+stored.
 
 ## Data model
 

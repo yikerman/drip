@@ -66,6 +66,13 @@ Settled with the user on 2026-10-11 and revised by the compute model
   inputs. Actions use full detail. Demands are not merged. A later demand
   reuses what the evaluator's store kept from earlier ones (2026-10-13). A
   GUI action may return node parameters, applied as an ordinary edit.
+- **Decided (2026-10-13):** A preview does not wait for foreign work. It
+  evaluates under `Policy::Defer`: views that need a running job keep what
+  they showed, the status line names the job's node ("Computing Bayer
+  RAW…") without reporting an error, and the worker sends the latest
+  preview request again when the job ends. Actions wait. The GUI's
+  evaluators keep a disk tier in `Disk::platform()`, so reopening a project
+  reads its RAWs instead of decoding them.
 - **Decided:** A worker serves one project. New and Open replace it: the old
   thread finishes its current command and skips its queue, and its replies
   have no receiver, so reused node IDs cannot pick up old results. New and

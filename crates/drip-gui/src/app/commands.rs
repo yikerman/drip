@@ -259,7 +259,7 @@ impl App {
         self.popped.clear();
         self.dirty = true;
         // Queued work and late replies belong to the old project.
-        self.worker = Worker::new(self.wake.clone());
+        self.worker = Worker::new(self.wake.clone(), self.disk.clone());
         Ok(())
     }
 

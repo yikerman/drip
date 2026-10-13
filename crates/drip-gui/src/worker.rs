@@ -1,7 +1,10 @@
 //! One sequential queue per project: previews and node actions run in order
-//! with one evaluator, which also reads a node's files when first forced and
-//! keeps materialized values for later demands. The app replaces the worker
-//! with its project, discarding queued work, late replies and those values.
+//! with one evaluator, which keeps materialized values for later demands, and
+//! the outputs of disk-cached foreign nodes such as RAW decode across
+//! projects and sessions. A preview does not wait for a foreign job: views
+//! that need it keep what they showed, the status names the node, and the
+//! preview runs again when the job ends. The app replaces the worker with its
+//! project, discarding queued work, late replies and the memory store.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,6 +17,7 @@ use crate::node_ui::NodeAction;
 use drip::Error as NodeError;
 use drip::eval::{Evaluator, InputValues, NodeTiming, Policy};
 use drip::runtime::{GlobalContext, RuntimeContext};
+use drip::store::Disk;
 use serde_json::Value as Json;
 
 use crate::render::node_views::{Drawable, Images};
@@ -24,12 +28,14 @@ type Snapshot = BTreeMap<NodeId, ViewResult>;
 /// Forces part of one graph snapshot under one context. Shared ancestors run
 /// once, and values the evaluator stored for an earlier demand are reused.
 /// The effect then consumes the inputs of its nodes.
+#[derive(Clone)]
 struct Demand {
     graph: Graph,
     global: GlobalContext,
     effect: Effect,
 }
 
+#[derive(Clone)]
 enum Effect {
     /// Prepare the targets' views. A newer generation makes the result stale.
     Preview { generation: u64, targets: Vec<NodeId> },
@@ -44,8 +50,20 @@ enum Command {
 }
 
 enum Event {
-    Evaluated { generation: u64, views: Snapshot, failures: BTreeMap<NodeId, Failure> },
-    Performed { id: NodeId, result: Result<Option<Json>, String> },
+    /// `pending` maps each target that waits for a foreign job to the name of
+    /// the job's node. Those targets have no entry in `views`.
+    Evaluated {
+        generation: u64,
+        views: Snapshot,
+        failures: BTreeMap<NodeId, Failure>,
+        pending: BTreeMap<NodeId, String>,
+    },
+    Performed {
+        id: NodeId,
+        result: Result<Option<Json>, String>,
+    },
+    /// A foreign job ended, so a preview waiting for it can run again.
+    Ready,
     Stopped,
 }
 
@@ -119,12 +137,19 @@ pub struct Worker {
     views: Snapshot,
     views_generation: Option<u64>,
     failures: BTreeMap<NodeId, Failure>,
+    /// The latest preview request, sent again when a job it waits for ends.
+    latest: Option<Demand>,
+    /// The node whose foreign job the shown preview waits for.
+    waiting: Option<String>,
+    /// A foreign job ended since the last preview was sent.
+    woken: bool,
     collect: bool,
     failed: bool,
 }
 
 impl Worker {
-    pub fn new(wake: Arc<dyn Fn() + Send + Sync>) -> Self {
+    /// A worker whose evaluator keeps foreign outputs in `disk`, if given.
+    pub fn new(wake: Arc<dyn Fn() + Send + Sync>, disk: Option<Disk>) -> Self {
         let (events, replies) = mpsc::channel();
         let notify = Notify { events, wake };
         let stopped = Arc::new(AtomicBool::new(false));
@@ -134,7 +159,15 @@ impl Worker {
             serve("drip-worker", &stopped, &notify, move |command, notify| match command {
                 Command::Force(demand) => {
                     let evaluator = evaluator.get_or_insert_with(|| {
-                        drip::runtime::RuntimeContext::from_env().map(Evaluator::new)
+                        let ready = notify.clone();
+                        RuntimeContext::from_env().map(|runtime| {
+                            let evaluator =
+                                Evaluator::new(runtime).with_wake(move || ready.send(Event::Ready));
+                            match disk.clone() {
+                                Some(disk) => evaluator.with_disk(disk),
+                                None => evaluator,
+                            }
+                        })
                     });
                     notify.send(force(&demand, evaluator.as_ref(), &mut images));
                 }
@@ -150,6 +183,9 @@ impl Worker {
             views: Snapshot::new(),
             views_generation: None,
             failures: BTreeMap::new(),
+            latest: None,
+            waiting: None,
+            woken: false,
             collect: false,
             failed: false,
         }
@@ -164,8 +200,15 @@ impl Worker {
         self.views_generation.is_some_and(|generation| generation != self.generation)
     }
 
+    /// A preview or action is queued or running, or the shown preview waits
+    /// for a foreign job.
     pub fn busy(&self) -> bool {
-        self.in_flight || self.pending.is_some()
+        self.in_flight || self.pending.is_some() || self.waiting.is_some()
+    }
+
+    /// The name of the node whose foreign job the shown preview waits for.
+    pub fn waiting(&self) -> Option<&str> {
+        self.waiting.as_deref()
     }
 
     pub fn request(
@@ -184,11 +227,13 @@ impl Worker {
             log::trace!("coalesced pending preview into generation={}", self.generation);
         }
         self.collect = true;
-        self.pending = Some(Demand {
+        let demand = Demand {
             graph: graph.clone(),
             global: GlobalContext { scale: 1 << level },
             effect: Effect::Preview { generation: self.generation, targets },
-        });
+        };
+        self.latest = Some(demand.clone());
+        self.pending = Some(demand);
         self.start()
     }
 
@@ -203,7 +248,7 @@ impl Worker {
         let mut notices = Vec::new();
         while let Ok(event) = self.events.try_recv() {
             match event {
-                Event::Evaluated { generation, views, failures } => {
+                Event::Evaluated { generation, mut views, failures, pending } => {
                     self.in_flight = false;
                     self.collect = true;
                     if generation != self.generation {
@@ -227,6 +272,16 @@ impl Worker {
                         .values()
                         .next()
                         .map(|failure| format!("{}: {}", failure.name, failure.cause()));
+                    // A view that waits for a foreign job keeps what it showed.
+                    for id in pending.keys() {
+                        if let Some(view) = self.views.remove(id) {
+                            views.insert(*id, view);
+                        }
+                    }
+                    self.waiting = pending.into_values().next();
+                    if let Some(name) = &self.waiting {
+                        log::debug!("preview generation={generation} waits for {name}");
+                    }
                     self.failures = failures;
                     self.views = views;
                     self.views_generation = Some(generation);
@@ -237,11 +292,15 @@ impl Worker {
                         notices.push(Notice::Performed { id, result });
                     }
                 }
+                Event::Ready => self.woken = true,
                 Event::Stopped => {
                     log::error!("worker stopped");
                     notices.push(self.fail());
                 }
             }
+        }
+        if self.waiting.is_some() && self.woken && !self.in_flight && self.pending.is_none() {
+            self.pending = self.latest.clone();
         }
         if self.start().is_err() && !self.failed {
             log::error!("worker disconnected");
@@ -262,6 +321,7 @@ impl Worker {
         self.failed = true;
         self.in_flight = false;
         self.pending = None;
+        self.waiting = None;
         Notice::Failed
     }
 
@@ -271,6 +331,7 @@ impl Worker {
         {
             self.send(&self.commands, Command::Force(request))?;
             self.in_flight = true;
+            self.woken = false;
         }
         Ok(())
     }
@@ -324,12 +385,17 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
         runtime: evaluator.map_or_else(|_| RuntimeContext::host(), |e| e.runtime().clone()),
     };
     let targets = demand.targets();
+    // A preview shows what is ready, and an action needs every input.
+    let policy = match demand.effect {
+        Effect::Preview { .. } => Policy::Defer,
+        Effect::Perform { .. } => Policy::Wait,
+    };
     let mut inputs = match evaluator {
         Ok(evaluator) => evaluator.evaluate_batch(
             &demand.graph.dag,
             &demand.global,
             &targets,
-            Policy::Wait,
+            policy,
             trace.then_some(&mut timings),
         ),
         Err(error) => targets.iter().map(|&id| (id, Err(error.clone()))).collect(),
@@ -339,6 +405,7 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
         Effect::Preview { generation, .. } => {
             let mut timings = Vec::new();
             let mut failures = BTreeMap::new();
+            let mut pending = BTreeMap::new();
             let mut views: Snapshot = targets
                 .iter()
                 .filter_map(|&id| {
@@ -357,12 +424,17 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
                         None => Ok(None),
                     };
                     if let Err(error) = &result {
-                        let (id, kind) = match error {
+                        let (failed, kind) = match error {
                             NodeError::Node { node, kind, .. } => (*node, *kind),
                             _ => (id, node.kind().id),
                         };
-                        let name = demand.graph.name(id).unwrap_or(kind).to_owned();
-                        failures.insert(id, Failure { kind, name, error: error.clone() });
+                        let name = demand.graph.name(failed).unwrap_or(kind).to_owned();
+                        if matches!(error, NodeError::Node { source, .. } if **source == NodeError::Pending)
+                        {
+                            pending.insert(id, name);
+                            return None;
+                        }
+                        failures.insert(failed, Failure { kind, name, error: error.clone() });
                     }
                     Some((id, result))
                 })
@@ -373,12 +445,13 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
             }
             demand.log_timings("prepare", &timings);
             log::debug!(
-                "preview generation={generation} scale={} elapsed={:.1?} failures={}",
+                "preview generation={generation} scale={} elapsed={:.1?} failures={} pending={}",
                 demand.global.scale,
                 start.elapsed(),
-                failures.len()
+                failures.len(),
+                pending.len()
             );
-            Event::Evaluated { generation, views, failures }
+            Event::Evaluated { generation, views, failures, pending }
         }
         Effect::Perform { id, action } => {
             let result = demand

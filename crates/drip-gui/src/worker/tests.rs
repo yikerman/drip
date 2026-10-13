@@ -1,7 +1,7 @@
 use drip::{
     Error as KernelError,
     node::data::{Coordinates, Extent, REC2020_D65, Rgb, RgbDesc},
-    ports::Write,
+    ports::{Publish, Write},
     runtime::KernelContext,
 };
 use serde::{Deserialize, Serialize};
@@ -34,7 +34,7 @@ fn backend_configuration_errors_reach_preview_results() {
     let id = graph.add_node(&crate::node_ui::preview::observe::KIND).unwrap();
     let demand = preview(7, graph, 2, vec![id]);
     let error = NodeError::Runtime("DRIP_BACKEND=cpu requires --features drip/cpu".into());
-    let Event::Evaluated { generation, views, failures } =
+    let Event::Evaluated { generation, views, failures, .. } =
         force(&demand, Err(&error), &mut Images::default())
     else {
         panic!("expected preview completion");
@@ -162,7 +162,7 @@ mod preview_logs_only_changed_root_failures_at_their_severity_fixture {
 
         let source_kind = &diagnostics::KIND;
         let (mut graph, source, preview, histogram) = graph(source_kind);
-        let mut worker = Worker::new(Arc::new(|| {}));
+        let mut worker = Worker::new(Arc::new(|| {}), None);
         let mut evaluate = |graph: &Graph| {
             worker.request(graph, 1, vec![preview, histogram]).unwrap();
             let notices = wait(&mut worker);
@@ -199,7 +199,7 @@ mod preview_logs_only_changed_root_failures_at_their_severity_fixture {
             assert!(matches!(worker.result(id),
                 Some(Err(NodeError::Node { node, .. })) if *node == source));
         }
-        worker = Worker::new(Arc::new(|| {}));
+        worker = Worker::new(Arc::new(|| {}), None);
         worker.request(&graph, 1, vec![preview]).unwrap();
         wait(&mut worker);
         assert_eq!(
@@ -284,9 +284,12 @@ mod latest_targets_win_and_a_replaced_worker_skips_queued_work_fixture {
         let (release, resume) = mpsc::channel();
         *GATE.lock().unwrap() = Some((started, resume));
         let (wake, woke) = mpsc::channel();
-        let mut worker = Worker::new(Arc::new(move || {
-            let _ = wake.send(());
-        }));
+        let mut worker = Worker::new(
+            Arc::new(move || {
+                let _ = wake.send(());
+            }),
+            None,
+        );
         let (mut graph, source, preview, histogram) = graph(source_kind);
         graph.set_param(source, "block", json!(true)).unwrap();
         worker.request(&graph, 1, vec![preview]).unwrap();
@@ -327,9 +330,12 @@ mod latest_targets_win_and_a_replaced_worker_skips_queued_work_fixture {
             )
             .unwrap();
         let (wake, woke) = mpsc::channel();
-        let mut old = Worker::new(Arc::new(move || {
-            let _ = wake.send(());
-        }));
+        let mut old = Worker::new(
+            Arc::new(move || {
+                let _ = wake.send(());
+            }),
+            None,
+        );
         graph.set_param(source, "block", json!(true)).unwrap();
         old.request(&graph, 1, vec![preview]).unwrap();
         entered.recv_timeout(TIMEOUT).unwrap();
@@ -387,7 +393,7 @@ mod exports_read_current_files_at_full_detail_fixture {
             .unwrap();
         graph.set_param(source, "path", json!(input)).unwrap();
         graph.set_param(export, "path", json!(output)).unwrap();
-        let mut worker = Worker::new(Arc::new(|| {}));
+        let mut worker = Worker::new(Arc::new(|| {}), None);
         worker.request(&graph, 3, vec![preview]).unwrap();
         wait(&mut worker);
         let before = pixel(&worker, preview);
@@ -420,6 +426,76 @@ mod exports_read_current_files_at_full_detail_fixture {
     }
 }
 
+mod a_preview_waits_for_foreign_work_and_runs_again_when_it_ends_fixture {
+    use super::*;
+
+    static GATE: Mutex<Option<mpsc::Receiver<()>>> = Mutex::new(None);
+    static CALLS: Mutex<Vec<f32>> = Mutex::new(Vec::new());
+    #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
+    struct Slow {
+        #[param(default = 1.0, range = 0.0..=10.0)]
+        value: f32,
+    }
+    /// Publishes the value once `GATE` releases it.
+    #[drip::node(id = "test-slow-foreign", name = "slow", foreign = memory)]
+    fn slow(p: &Slow, image: Publish<'_, Rgb>) -> drip::Result<()> {
+        CALLS.lock().unwrap().push(p.value);
+        GATE.lock().unwrap().as_ref().unwrap().recv_timeout(TIMEOUT).unwrap();
+        let desc = RgbDesc::new(Extent { width: 1, height: 1 }, Coordinates::Space(REC2020_D65));
+        image.set(desc, vec![[p.value, 1.0, 0.0]].into())
+    }
+
+    /// Polls until the worker reports a preview that waits for `slow`.
+    fn deferred(worker: &mut Worker) -> Vec<Notice> {
+        let deadline = Instant::now() + COMPUTE_TIMEOUT;
+        let mut notices = Vec::new();
+        while worker.waiting().is_none() {
+            notices.extend(worker.poll());
+            assert!(Instant::now() < deadline, "the preview did not defer");
+            thread::sleep(Duration::from_millis(1));
+        }
+        notices
+    }
+
+    #[test]
+    fn a_preview_waits_for_foreign_work_and_runs_again_when_it_ends() {
+        let (release, gate) = mpsc::channel();
+        *GATE.lock().unwrap() = Some(gate);
+        let mut worker = Worker::new(Arc::new(|| {}), None);
+        let (mut graph, source, preview, histogram) = graph(&slow::KIND);
+
+        // The batch returns while the job runs. Nothing shown yet stays empty,
+        // and the waiting node is status, not a failure.
+        worker.request(&graph, 1, vec![preview, histogram]).unwrap();
+        let notices = deferred(&mut worker);
+        assert!(notices.iter().all(|notice| matches!(notice, Notice::Evaluated(Ok(())))));
+        assert_eq!(worker.waiting(), Some("slow"));
+        assert!(worker.busy());
+        assert!(worker.result(preview).is_none());
+        // Another detail level has the same key and joins the running job.
+        worker.request(&graph, 2, vec![preview, histogram]).unwrap();
+        deferred(&mut worker);
+        release.send(()).unwrap();
+        // The job's end wakes the worker, which runs the latest preview again.
+        wait(&mut worker);
+        assert_eq!(worker.waiting(), None);
+        assert_eq!(pixel(&worker, preview), [1.0, 1.0, 0.0, 1.0]);
+        assert!(worker.result(histogram).unwrap().is_ok());
+        assert_eq!(*CALLS.lock().unwrap(), [1.0]);
+
+        // A new value runs a new job, and the views keep the previous one
+        // until it ends.
+        graph.set_param(source, "value", json!(2)).unwrap();
+        worker.request(&graph, 2, vec![preview, histogram]).unwrap();
+        deferred(&mut worker);
+        assert_eq!(pixel(&worker, preview), [1.0, 1.0, 0.0, 1.0]);
+        release.send(()).unwrap();
+        wait(&mut worker);
+        assert_eq!(pixel(&worker, preview), [2.0, 1.0, 0.0, 1.0]);
+        assert_eq!(*CALLS.lock().unwrap(), [1.0, 2.0]);
+    }
+}
+
 #[test]
 fn preparation_retries_each_request_without_persistent_image_cache() {
     use crate::test_nodes::{PROBE_CALLS as CALLS, probe};
@@ -427,7 +503,7 @@ fn preparation_retries_each_request_without_persistent_image_cache() {
 
     let mut graph = Graph::default();
     let id = graph.add_node(&probe::KIND).unwrap();
-    let mut worker = Worker::new(Arc::new(|| {}));
+    let mut worker = Worker::new(Arc::new(|| {}), None);
     for _ in 0..2 {
         worker.request(&graph, 1, vec![id]).unwrap();
         wait(&mut worker);
@@ -463,9 +539,12 @@ mod panic_wakes_the_ui_and_ends_the_busy_state_fixture {
         let mut graph = Graph::default();
         let id = graph.add_node(&panic_node::KIND).unwrap();
         let (wake, woke) = mpsc::channel();
-        let mut worker = Worker::new(Arc::new(move || {
-            let _ = wake.send(());
-        }));
+        let mut worker = Worker::new(
+            Arc::new(move || {
+                let _ = wake.send(());
+            }),
+            None,
+        );
         worker.request(&graph, 0, vec![id]).unwrap();
         woke.recv_timeout(TIMEOUT).unwrap();
         assert!(worker.poll().iter().any(|notice| matches!(notice, Notice::Failed)));

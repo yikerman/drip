@@ -20,7 +20,9 @@ The non-trivial files outside `node_ui/`:
 - `registry.rs`: the hand-maintained `VIEWS`, `REGISTRY` and `BINDINGS`.
 - `templates.rs`: built-in templates, the repository's `templates/*.drip-template`
   files embedded in the binary and listed by hand.
-- `worker.rs`: the background queue for previews and node actions.
+- `worker.rs`: the background queue for previews and node actions. A
+  preview that waits for a foreign job, such as RAW decode, keeps its views,
+  names the node in the status line and runs again when the job ends.
 - `parent.rs`: pop-outs as child windows of the main window.
 - `render/`: worker-prepared node drawing, linear Rec.2020 images and
   color-managed presentation per window system.

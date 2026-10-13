@@ -126,7 +126,8 @@ impl ApplicationHandler<WorkerReady> for Shell {
         };
         let main = Pane::new(&gpu, window, display);
         let wake = self.wake.clone();
-        let app = App::new(self.file.take(), main.display.wide_gamut, move || {
+        let disk = drip::store::Disk::platform();
+        let app = App::new(self.file.take(), main.display.wide_gamut, disk, move || {
             let _ = wake.send_event(WorkerReady);
         });
         self.running = Some(Running { gpu, main, windows: Vec::new(), app });
