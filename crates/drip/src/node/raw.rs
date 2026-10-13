@@ -1,6 +1,12 @@
 //! Bayer RAW decode as a foreign node: LibRaw runs on the store's job
 //! thread, and the disk tier keeps the normalized mosaic and the metadata,
 //! so reopening a project reads them instead of decoding again.
+//!
+//! The metadata is what LibRaw reported: capture settings, lens identifiers,
+//! optional GPS, sensor geometry and native white balance, black, white and
+//! colour calibration. Unknown values keep LibRaw's sentinels. Maker notes and
+//! correction profiles are not included. Consumers derive what they apply
+//! ([`camera`]).
 use crate::{
     Error, Result,
     node::{camera, data::*},

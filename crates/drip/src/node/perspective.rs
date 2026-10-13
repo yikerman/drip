@@ -192,7 +192,7 @@ fn contract(global: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(Rg
 /// black. The image is resampled once with Lanczos-3, together with the
 /// warps next to it. A Resample after it chooses the filter and size instead.
 #[crate::node(id = "perspective-transform", name = "Perspective Transform", tags = [tag::GEOMETRY], contract = contract, warp, references = [
-    ("[1] Heckbert, Fundamentals of texture mapping and image warping", "https://www2.eecs.berkeley.edu/Pubs/TechRpts/1989/5504.html"),
+    ("Heckbert, Fundamentals of texture mapping and image warping", "https://www2.eecs.berkeley.edu/Pubs/TechRpts/1989/5504.html"),
 ])]
 pub fn transform(p: &Settings, image: Point<'_, Rgb>, output: Point<'_, Rgb>) -> Result<Warp> {
     let frame = frame(p, plane(image.desc))?;

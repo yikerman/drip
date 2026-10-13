@@ -22,11 +22,8 @@ pub use crate::shape::{BOX_SUPPORT, box_filter};
 use cubecl::prelude::*;
 use std::f32::consts::PI;
 
-/// Support radius of [`triangle`].
 pub const TRIANGLE_SUPPORT: f32 = 1.0;
-/// Support radius of [`mitchell_netravali`].
 pub const MITCHELL_NETRAVALI_SUPPORT: f32 = 2.0;
-/// Support radius of [`lanczos3`].
 pub const LANCZOS3_SUPPORT: f32 = 3.0;
 
 /// A filter by name, for parameters.

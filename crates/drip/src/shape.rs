@@ -1,20 +1,12 @@
-//! How evaluation runs a node kind, and what the segment compiler composes.
+//! How evaluation runs a node kind, and the bodies the segment compiler fuses.
 //!
-//! Every [`Kind`](crate::definition::Kind) declares a [`Shape`]. A kernel or
-//! bound source runs as written. A foreign node runs on a thread of its own
-//! and its outputs stay in the store, on disk through a [`Codec`] per output
-//! when its [`Cache`] says so. A map registers a [`MapBody`], a `#[cube]`
-//! function of one [`Pixel`]. A warp returns a [`Warp`], projective maps
-//! between planes, and a resample names a [`FilterBody`]. `plan` composes
-//! them into one kernel per segment instead of launching one per node, over
-//! the [`Lattice`] window a consumer asks for. A reduce or bins node names a
-//! [`ReduceBody`] or [`BinsBody`], which `plan` runs over a segment's pixels
-//! without storing them and reads back as a small host value. A stencil
-//! names a [`StencilBody`], a `#[cube]` function of a [`Window`] of its
-//! materialized input, and starts a segment that the maps after it join. A
-//! meta node builds a sub-graph of other kinds that evaluation runs in its
-//! place. The shape also says whether a kind's outputs depend on the
-//! requested scale ([`Shape::scaled`]).
+//! Every [`Kind`](crate::definition::Kind) declares a [`Shape`], which
+//! `#[node]` derives from the declaration. Kernels, sources and foreign nodes
+//! run as written on whole images. Maps, warps, resamples and stencils publish
+//! deferred images that the segment compiler runs as one kernel per segment,
+//! and reduce and bins nodes accumulate over those pixels without storing
+//! them. The `*Body` statics are what those shapes register. [`Lattice`] and
+//! [`Rect`] state where samples sit on the image's full-detail plane.
 use crate::{
     Error, Result,
     image::{Image, Raster},
@@ -23,14 +15,12 @@ use crate::{
 use cubecl::prelude::*;
 use std::io::{Read, Write};
 
-/// How evaluation runs a node kind. The segment compiler fuses maps, warps
-/// and resamples, runs stencils with the maps after them, and runs
-/// reductions and bins over the fused pixels. `Kernel`, `Source` and
-/// `Foreign` stay opaque to it and receive and produce whole images.
+/// How evaluation runs a node kind. `Kernel`, `Source` and `Foreign` are
+/// opaque and receive and produce whole images.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
-    /// The node's function runs on every evaluation. Its inputs are
-    /// materialized whole first, and each output where the node wrote it.
+    /// The node's function runs on whole materialized inputs whenever a
+    /// demanded output is not stored, and each output stays where it wrote it.
     /// With `scaled`, `#[node(scaled)]`, the kernel produces its outputs at
     /// the requested scale itself, as demosaic does. Otherwise it sees scale
     /// 1 and processes the samples it receives.
@@ -176,7 +166,6 @@ impl Lattice {
         Self { window, ..self }
     }
 
-    /// Whether the window holds every sample.
     pub fn is_whole(&self) -> bool {
         self.window == Rect { origin: [0; 2], extent: self.extent }
     }
@@ -210,7 +199,6 @@ impl Rect {
         [0, 1].map(|a| self.origin[a].saturating_add(self.extent[a]))
     }
 
-    /// Whether every cell of `other` is in this rectangle.
     pub fn contains(&self, other: &Rect) -> bool {
         let (end, other_end) = (self.end(), other.end());
         (0..2).all(|a| self.origin[a] <= other.origin[a] && other_end[a] <= end[a])
@@ -312,7 +300,6 @@ pub struct FilterBody {
     pub interpolating: bool,
     pub expand: FilterExpand,
 }
-/// Support radius of [`box_filter`].
 pub const BOX_SUPPORT: f32 = 0.5;
 
 /// The box filter. Evaluation reduces images finer than the requested scale

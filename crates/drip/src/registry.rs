@@ -1,6 +1,8 @@
-//! The registries: every node kind and tag the library provides, listed by
-//! hand. A frontend composes a `Registry` from these and its own lists; see
-//! the crate README.
+//! Every node kind and tag the library provides, listed by hand.
+//!
+//! A kind missing from a list cannot be added or loaded, so a frontend states
+//! what it knows by composing a [`Registry`] from these lists and its own.
+//! Explicit lists read plainly and avoid link-time registration.
 use crate::{
     Error, Result,
     definition::{Kind, Node},
@@ -12,14 +14,15 @@ use crate::{
 };
 use std::sync::Arc;
 
-/// Tags nodes may carry, stages first. A node takes at most one of the ACES
-/// stages [1] (input transform, look, output transform); geometry, views and
-/// file writers take none. Frontends declare no tags of their own. Each tag
-/// states how durable its nodes' outputs are in the store, and a kind takes
-/// the most durable of its tags.
+/// Tags nodes may carry, stages first. Tags say what a node is for, since
+/// ports already say what it accepts. By convention a node takes at most one
+/// of the ACES stages \[1\]: input transform, look or output transform.
+/// Geometry, views and file writers take none, and nodes that read or write
+/// files carry `io`. Frontends declare no tags of their own. Each tag states
+/// how durable its nodes' outputs are in the store.
 ///
-/// [1] Academy Color Encoding System, "ACES overview."
-/// https://docs.acescentral.com/background/overview
+/// \[1\] Academy Color Encoding System, “ACES overview.” \[Online\].
+/// Available: <https://docs.acescentral.com/background/overview>
 pub mod tag {
     use crate::definition::{Durability::*, Tag};
     macro_rules! tags {

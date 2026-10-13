@@ -94,20 +94,22 @@ fn contract(global: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(Rg
     Ok((RgbDesc { extent, full, window: None, coordinates: image.coordinates.clone() },))
 }
 
-/// Reconstruct the image and sample it on a new grid, with one filter for
-/// magnification and minification: centred on each output sample's position
-/// in the input and widened by the local footprint, so magnifying
-/// interpolates and minifying antialiases [1]. Weights are normalized, and
-/// taps beyond the edge repeat the edge sample. Warps directly before it,
-/// such as Perspective Transform, resample once with this filter. After a
-/// tone or colour operation it resamples that operation's output. Lanczos-3
-/// (default) is sharp but rings: in scene-linear HDR it leaves signed halos
-/// beside highlights, which are kept. Size scales the input's full-detail
-/// extent, fits its long edge to a pixel count, or sets both sides, which
-/// stretches the image where the aspect ratio differs. Preview detail stores
-/// proportionally fewer samples of the same framing. Coordinates are kept.
+/// Reconstruct RGB and sample it on a new grid with one filter for
+/// magnification and minification, after Heckbert: the filter is centred on
+/// each output sample's position in the input and widened by the local
+/// footprint, so magnifying interpolates and minifying antialiases. Weights
+/// are normalized, and taps beyond the edge repeat the edge sample. Size
+/// scales the input's full-detail extent, fits its long edge to a pixel
+/// count, or sets both sides, which stretches the image where the aspect
+/// ratio differs. Preview detail stores proportionally fewer samples of the
+/// same framing. Coordinates are kept.
+///
+/// Warps directly before it, such as Perspective Transform, resample once
+/// with this filter. After a tone or colour operation it resamples that
+/// operation's output. Lanczos-3, the default, is sharp but rings: in
+/// scene-linear HDR it leaves signed halos beside highlights, which are kept.
 #[crate::node(id = "resample", name = "Resample", tags = [tag::GEOMETRY], contract = contract, resample, references = [
-    ("[1] Heckbert, Fundamentals of texture mapping and image warping", "https://www2.eecs.berkeley.edu/Pubs/TechRpts/1989/5504.html"),
+    ("Heckbert, Fundamentals of texture mapping and image warping", "https://www2.eecs.berkeley.edu/Pubs/TechRpts/1989/5504.html"),
 ])]
 pub fn compute(
     p: &Settings,

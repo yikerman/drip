@@ -16,7 +16,7 @@ fn bayer_contract(_: &GlobalContext, p: &Settings, input: &BayerDesc) -> Result<
 
 /// Reduce Bayer by averaging each CFA phase plane separately. Output retains the
 /// input interpretation and phase. Complete blocks are retained, with at least
-/// one Bayer cell for small inputs; factor 1 preserves incomplete edge cells too.
+/// one Bayer cell for small inputs. Factor 1 preserves incomplete edge cells too.
 /// The explicit factor is independent of requested preview detail. Apply sensor
 /// corrections before this spatial approximation when physical correspondence matters.
 #[crate::node(id="reduce-bayer", name="Bayer box reduction", tags = [tag::GEOMETRY, tag::BAYER_RAW], contract=bayer_contract)]

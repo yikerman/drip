@@ -1,19 +1,21 @@
-//! The value on an edge and where its samples live.
+//! The value on an edge, [`Image`], and where its samples live, [`Raster`].
 //!
-//! A node asks a value for the residency it needs, so signatures name
-//! payloads only. A [`Raster`] holds a description and at most one host and
-//! one device representation; the missing one is made on first request and
-//! counted as a transfer on its runtime. An [`Image`] is the type-erased value
-//! that evaluation and the store pass between nodes: a raster, or a deferred
-//! image that a map, warp, resample or stencil published. `plan` decides how
-//! each step composes, and materializes a deferred image into a raster when
-//! a consumer first needs samples, whole or only a window of it
-//! ([`Image::crop`]). A
-//! payload's [`Plane`] lets evaluation reduce and crop images without their
-//! type. [`Image::fold`] and [`Image::count`] reduce an image to a few host
-//! values, running a deferred image's plan per pixel without storing it. A
-//! materialized image reports its bytes per side to the store, which may keep
-//! it without one side.
+//! A node asks a value for the residency it needs, so node signatures name
+//! payloads only. An image is a raster, or a deferred image that a map, warp,
+//! resample or stencil published:
+//!
+//! ```text
+//! Image ─┬─ Raster<P>   description, host and/or device samples:
+//!        │              the missing side is made on first request and counted
+//!        └─ deferred    input Image + Plan ──materialize──► Raster<P>
+//!                       whole, one window (crop), or folded and counted unstored
+//! ```
+//!
+//! Clones share one value, so a deferred image materializes once for all of
+//! its consumers. Nothing writes a published raster, so fan-out and
+//! forwarded outputs share storage while nodes stay pure. A payload's
+//! [`Plane`] lets evaluation reduce and crop images without knowing their
+//! type.
 use crate::{
     Error, Result,
     payload::{DeviceBuffer, DeviceLayout, Payload},

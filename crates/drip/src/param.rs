@@ -1,5 +1,6 @@
-//! UI parameter schemas generated beside typed, serde-validated settings.
-//! Ranges guide controls; computational contracts decide logical validity.
+//! Parameter schemas, generated beside typed, Serde-validated settings, so
+//! every frontend can offer controls for any node. Ranges guide controls,
+//! and contracts and `#[validate]` decide logical validity.
 
 use serde_json::Value as Json;
 

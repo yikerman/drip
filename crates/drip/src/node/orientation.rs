@@ -80,9 +80,9 @@ fn orientation_contract(
 }
 
 /// Rotate or reflect RGB pixels using the capture metadata's orientation.
-/// Missing metadata means identity; an explicit orientation replaces metadata.
-/// Transpose reflects across the top-left to bottom-right diagonal; transverse
-/// reflects across the other diagonal. Quarter turns and diagonal reflections
+/// Missing metadata means identity, and an explicit orientation replaces the
+/// metadata's. Transpose reflects across the top-left to bottom-right
+/// diagonal, and transverse across the other. Quarter turns and diagonal reflections
 /// exchange width and height. Samples and color interpretation are preserved,
 /// without resampling or clipping. Apply once after demosaic and color conversion.
 #[crate::node(id="orientation", name="Orientation", tags = [tag::GEOMETRY], contract=orientation_contract, warp)]

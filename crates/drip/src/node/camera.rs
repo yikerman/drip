@@ -1,5 +1,11 @@
 //! Calibration derived from decoded capture facts. Each consumer derives what it
 //! applies, so metadata stays a record of what the decoder reported.
+//!
+//! Bayer site gains apply the as-shot balance and record it in the Bayer
+//! response, and it stays in place through highlights and demosaic. Camera
+//! conversion then replaces it with D65 reference gains inside its
+//! [`matrix`], and Chromatic adaptation maps the as-shot camera neutral
+//! through the same matrix for its source white ([`as_shot_white`]).
 use crate::{
     Error, Result,
     node::{
@@ -80,8 +86,9 @@ pub fn site_levels(m: &Metadata) -> Result<[f32; 4]> {
 
 /// Camera RGB with the given balance to linear Rec.2020/D65. Reference (D65)
 /// gains replace the applied balance inside the matrix, following darktable's
-/// “as shot to reference” placement (THIRD_PARTY [22]); camera neutral under
-/// the reference white maps to RGB white. Unbalanced responses use unit balance.
+/// “as shot to reference” placement (`THIRD_PARTY.md` \[22\]). Camera neutral
+/// under the reference white maps to RGB white. Unbalanced responses use unit
+/// balance.
 pub fn matrix(m: &Metadata, balance: Option<[f32; 4]>) -> Result<Mat3> {
     let xyz_to_cam = color::to_f64(&std::array::from_fn(|i| m.calibration.xyz_to_cam[i]));
     let rgb_to_xyz = color::rgb_to_xyz(color::REC2020, color::D65);

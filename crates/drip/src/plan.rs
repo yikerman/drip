@@ -1,39 +1,66 @@
-//! The segment compiler: warps, a resample or a stencil, and the maps after
-//! them run as one kernel.
+//! The segment compiler: the deferred steps of maps, warps, resamples and
+//! stencils run as one kernel.
 //!
-//! Map, warp, resample and stencil nodes publish deferred images. A [`Plan`]
-//! holds one stage, then the map bodies. A resampling stage holds
-//! per-channel projective maps from the image's plane to its input raster's
-//! plane with their filter, and a stencil stage a [`StencilBody`] over the
-//! input's own lattice. The fused kernel computes each output pixel through
-//! the stage, applies the bodies in order and stores the result, so
-//! intermediate images never reach memory. A step composes into a plan only
-//! where the result is exact:
+//! A [`Plan`] holds one stage, resampling or a stencil, then map bodies. A
+//! resampling stage holds per-channel projective maps from the image's plane
+//! to its input's plane with their filter. A stencil stage holds a
+//! [`StencilBody`] over the input's own lattice. Every kernel of a plan
+//! evaluates a pixel the same way, so intermediate images never reach memory:
 //!
-//! - A reindex (Orientation) commutes with per-pixel maps and joins the stage
-//!   wherever it sits.
-//! - A filtering warp or a Resample after a map cuts the segment: the maps run
-//!   on their own lattice, then the resampling runs as its own launch. A
-//!   weighted average of sigmoid values is not the sigmoid of the average.
-//!   Before any map they fuse.
-//! - A Resample fixes the stage's lattice, so a filtering step after it
-//!   resamples again.
-//! - A stencil starts a plan over its input, which materializes, and every
-//!   warp or resample after it starts another. Maps after it join it.
+//! ```text
+//! input raster ─► stage: load | gather | filter | stencil ─► body ─► … ─► body ─┬─► store
+//!                                                                              └─► fold, count
+//! ```
+//!
+//! # Composition
+//!
+//! A step composes into a plan only where the result equals running the
+//! nodes one by one:
+//!
+//! - A reindex (Orientation, an integer crop) commutes with per-pixel maps
+//!   and joins the stage wherever it sits.
+//! - A filtering warp or a Resample before any map composes into the stage.
+//!   After a map it cuts the segment: the maps materialize on their own
+//!   lattice, then the resampling runs as its own launch. A weighted average
+//!   of sigmoid values is not the sigmoid of the average.
+//! - A Resample fixes the stage's filter and lattice, so a filtering step
+//!   after it resamples again.
+//! - A stencil starts a plan over its materialized input, and any warp or
+//!   Resample after it starts another. Maps after it join it.
+//! - Steps after a fan-out each extend the shared plan and recompute it in
+//!   their own kernel, which trades arithmetic for bandwidth.
+//!
+//! At run time the stage loads samples when the composed map is the identity
+//! on an equal lattice and the filter interpolates, gathers them when only
+//! reindexes composed, and filters otherwise. A plan that neither moves nor
+//! maps samples launches nothing and shares its input. Kernel identity is the
+//! stage and the body sequence, so each combination compiles once whatever
+//! the constants.
+//!
+//! # Windows
 //!
 //! A plan computes the window of its output lattice that a consumer asks
 //! for, and [`Plan::input_window`] bounds what that window reads: the same
-//! window through loads, the reindexed corners through gathers, and through a
-//! filter the mapped corners grown by the filter's support times its
-//! footprint, and through a stencil the window grown by its reach. A
-//! projective map keeps lines straight, so the corners bound the window's
-//! image. The kernel positions samples on whole lattices, so a
-//! window's samples equal the same samples of the whole image bit for bit.
+//! window through a load, the reindexed corners through a gather, through a
+//! filter the mapped corners grown by the support times the footprint, and
+//! through a stencil the window grown by its reach. A projective map keeps
+//! lines straight, so the corners bound the window's image. The kernel
+//! positions samples by whole-lattice index and clamps taps to the stored
+//! window, so a window's samples equal the same samples of the whole image
+//! bit for bit. Tiled export relies on this.
 //!
-//! Preview scale reduces samples once, early: in demosaic, or where
-//! evaluation reduces a finer image with [`BOX`](crate::shape::BOX). That
-//! approximation is preview-only: at full detail, as export runs, every
-//! resampling follows these rules.
+//! # Reductions
+//!
+//! - A fold gives each lane at most [`FAN_IN`] pixels, strided across the
+//!   window, then combines at most `FAN_IN` accumulators per lane per pass
+//!   until one remains. The order is fixed and no float atomics run, so
+//!   equal inputs give equal bits on one runtime.
+//! - A count of up to [`SHARED_COUNTS`] bins accumulates per workgroup in
+//!   shared memory, and a merge pass sums the workgroups' copies. Larger
+//!   counts go to at most [`SHARDS`] copies in global memory, each lane
+//!   adding a run of its pixels in one bin at once.
+//! - Kernels with barriers take at most the runtime's lanes per workgroup,
+//!   since the CPU runtime runs a host worker per lane.
 use crate::{
     Error, Result,
     image::Raster,

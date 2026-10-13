@@ -80,8 +80,8 @@ impl Assets for Export {
     }
 }
 
-/// Write linear Rec.2020/D65 RGB to TIFF through an RGB ICC profile.
-/// u8/u16 clip to the output range; f32 retains the profile's floating-point range.
+/// Write linear Rec.2020/D65 RGB to TIFF through an RGB ICC profile. u8 and
+/// u16 clip to the output range, and f32 keeps the profile's floating-point range.
 /// Connected capture metadata is copied when present. Export uses full processing
 /// detail, independently of preview detail. An image larger than the device
 /// budget is computed in bands of rows and written as one file, equal to an

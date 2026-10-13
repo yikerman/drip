@@ -30,9 +30,9 @@ fn validate(p: &Exposure) -> Result<()> {
 fn exposure_contract(_: &GlobalContext, _: &Exposure, image: &RgbDesc) -> Result<(RgbDesc,)> {
     Ok((image.clone(),))
 }
-/// Adjust RGB exposure by multiplying linear samples by 2^EV. Output retains
-/// the input coordinates. Negative and above-one samples are allowed; this
-/// operation does not impose a scene/display processing order.
+/// Adjust RGB exposure by multiplying linear samples by 2^EV. The output keeps
+/// the input coordinates. Negative and above-one samples are allowed, and the
+/// node imposes no scene or display processing order.
 #[crate::node(id = "exposure", name = "Exposure", tags = [tag::LOOK], contract = exposure_contract, map = kernel::exposure)]
 pub fn compute(
     params: &Exposure,

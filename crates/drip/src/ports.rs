@@ -1,15 +1,16 @@
-//! Typed views of a node's ports, requirements and port identities.
+//! Typed views of a node's ports, port requirements and port identities.
 //!
-//! A port names a payload and an interpretation requirement, never a
-//! placement. `Read` borrows an input [`Raster`] and the node asks it for
-//! `host()` or `device(ctx)`. `Write` creates the output where the node writes
-//! it; `Forward` publishes samples the node already holds; a foreign node
-//! describes and fills each output through `Publish`. The host function of a
-//! map, warp, resample, reduce, bins or stencil node sees its input and
-//! output as `Point`, a description without samples. A meta node's function
-//! sees its ports as `Inlet` and `Outlet`, which it wires to the nodes of the
-//! sub-graph it builds. Type erasure is confined to the generated node
-//! adapter.
+//! A port names a payload and an interpretation [`Requirement`], never a
+//! placement. Each shape's function sees its ports through its own views:
+//!
+//! | Shape | Inputs | Outputs |
+//! |---|---|---|
+//! | kernel | [`Read`] | [`Write`] or [`Forward`] |
+//! | foreign | [`Read`] | [`Publish`] |
+//! | map, warp, resample, reduce, bins, stencil | [`Point`], then [`Read`] | [`Point`] |
+//! | meta | [`Inlet`] | [`Outlet`] |
+//!
+//! Type erasure is confined to the generated node adapter.
 use crate::{
     Error, Result,
     image::{Description, Image, Raster},
@@ -267,7 +268,6 @@ pub fn typed<T: std::any::Any + Send + Sync>(desc: &Description) -> Arc<T> {
 #[derive(Clone, Copy)]
 pub struct PortSpec {
     pub name: &'static str,
-    /// The payload's declared name.
     pub payload: &'static str,
     /// The port's requirement label; empty when it accepts any description.
     pub requirement: &'static str,

@@ -1,11 +1,11 @@
-//! Meta nodes: kinds whose function builds a graph of other kinds.
+//! Meta nodes: kinds whose function builds a sub-graph of other kinds.
 //!
 //! Some operations are graphs of other operations whose size depends on
 //! their parameters or input, such as a pyramid with one blur per level, as
-//! vkdt's `create_nodes` builds them. A meta node's function wires the
-//! nodes of a [`SubGraph`] to its ports, and evaluation (`eval.rs`) runs
-//! those nodes in its place, keyed like any node's, so the graph a user
-//! edits keeps one node.
+//! vkdt's `create_nodes` builds them. A meta node's function wires a
+//! [`SubGraph`] to its ports, and [`eval`](crate::eval) runs those nodes in
+//! its place, so the graph a user edits keeps one node while each part is
+//! keyed and stored like any node.
 use crate::{
     Error, Result,
     definition::Kind,

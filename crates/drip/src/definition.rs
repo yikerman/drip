@@ -1,4 +1,9 @@
-//! Node declarations generated from functions. Contracts remain ordinary Rust.
+//! What `#[node]` generates against: the static [`Kind`] of each node type
+//! and the [`Node`] trait evaluation calls.
+//!
+//! Graph checks, help and editors read the same `Kind`, so a node is declared
+//! once, beside its function, and its contract stays ordinary Rust.
+//! [`Identity`] and [`Durability`] are what the store keys and evicts by.
 use crate::{
     Error, Result,
     eval::InputValues,
@@ -145,8 +150,8 @@ impl FileStamp {
     }
 }
 
-/// Mechanical adapter interface. Use #[node] for computational nodes.
-/// Implementations are trusted producers, just like a Payload implementation.
+/// What evaluation calls on a node. `#[node]` implements it, and evaluation
+/// trusts what an implementation produces, as it trusts a `Payload`.
 pub trait Node: Any + Send + Sync {
     fn kind(&self) -> &'static Kind;
     fn parameters(&self) -> Result<serde_json::Value>;

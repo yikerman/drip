@@ -1,7 +1,10 @@
-//! One explicit compute device per evaluator. Host nodes remain ordinary Rust.
-//! The runtime counts image transfers, fused launches and the samples they
-//! write, and reduction passes, which `eval::Statistics` reports, and states
-//! the byte budgets of the evaluator's store.
+//! The compute device an evaluator runs on.
+//!
+//! One [`RuntimeContext`] per evaluator owns the CubeCL client, counts the
+//! transfers, fused launches and reduction passes that
+//! [`Statistics`](crate::eval::Statistics) reports, and states the store's
+//! byte [`Budget`]. Build features include runtimes, and `DRIP_BACKEND`
+//! selects one. Host nodes stay ordinary Rust.
 use crate::{
     Error, Result,
     payload::{DeviceBuffer, DeviceLayout},

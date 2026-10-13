@@ -1,16 +1,63 @@
-//! Evaluate the requested dependency subgraph, reusing what the store keeps.
+//! Demand-driven evaluation: run what a demand needs, reuse what the store
+//! keeps.
 //!
-//! A demand names targets, a scale and, per target, an optional region. Each
-//! needed node runs at the requested scale when its outputs depend on it and
-//! at full detail otherwise, and a full-detail image on a plane read at a
-//! coarser scale is box-reduced in its consumer's kernel. A run keys every
-//! value, takes what the store holds, runs the other nodes in graph order and
-//! materializes each deferred image at its first consumer that needs samples,
-//! over a target's region only. A reduce or bins node computes a deferred
-//! input per pixel instead, unless other consumers read it too. A meta node
-//! runs the nodes of its sub-graph in its place. Foreign nodes run as store
-//! jobs, waited for under [`Policy::Wait`] and reported pending under
-//! [`Policy::Defer`].
+//! Nothing runs until a caller forces it. A demand is a graph, a scale in
+//! [`GlobalContext`] and targets, each with an optional region. Contracts,
+//! missing inputs and file reads fail here, on the node that forced them,
+//! since they read descriptions that exist only once data is loaded.
+//!
+//! ```text
+//! targets ─► scale per node ─► key every node ─► walk back from the demanded values
+//!                                                  ├─ stored: hit
+//!                                                  └─ missing: schedule its node
+//!         ─► run scheduled nodes in graph order ─► materialize for consumers ─► store
+//! ```
+//!
+//! # Rules
+//!
+//! - **Scale.** From the targets, every node is read at the requested scale,
+//!   and a foreign node reads its inputs at scale 1. A node read at the
+//!   requested scale runs at it when its shape is scaled or it reads an image
+//!   on a plane. Every other node runs at scale 1 and is keyed without the
+//!   scale, so a RAW and its gains are stored once for every preview level.
+//! - **Reduction.** An image on a plane read at scale `s > 1` whose lattice
+//!   is finer than `div_ceil(full, s)` is reduced with
+//!   [`BOX`](crate::shape::BOX) as a stage of its consumer's plan, unless a
+//!   `scaled` kernel produced it or the consumer's shape is scaled. The
+//!   reduction is a preview approximation and never applies at scale 1.
+//! - **Keys and hits.** A run keys every needed node in `Dag::order`, which
+//!   stamps foreign nodes' files, then walks back from the demanded values. A
+//!   stored value, in memory or on disk for a `foreign = disk` node, is a
+//!   hit. A missing one demands the value it derives from (a reduction or a
+//!   region) or schedules its node. Target nodes always run, so their
+//!   contracts check what they receive, except reduce and bins targets,
+//!   whose outputs are demanded instead.
+//! - **Lifetimes.** A run counts the consumers of each value and drops it
+//!   after the last, when the store keeps it if it has a key and samples. A
+//!   target's inputs are materialized before the run ends, except an input
+//!   on a plane larger than the device budget, which [`InputValues`]
+//!   computes by region.
+//! - **Regions.** Only a node without outputs takes a region, since a node
+//!   computed from part of its inputs would publish part of its outputs under
+//!   a whole-image key. Kernels, foreign nodes and sources run whole, so a
+//!   region bounds the segments after the last of them. Stencils grow it by
+//!   their reach.
+//! - **Reductions.** A reduce or bins node computes a deferred input per
+//!   pixel when it is the input's only consumer in the run. Otherwise the
+//!   input materializes once for every consumer.
+//! - **Meta nodes.** A meta node expands when it runs, once its inputs'
+//!   descriptions exist. Its sub-graph's nodes are keyed from the meta node's
+//!   input keys as if they were in the graph, served from the store walking
+//!   back from the outputs, and run at the meta node's scale.
+//! - **Foreign nodes.** The run materializes a foreign node's inputs and
+//!   takes the store's job for its key. [`Policy::Wait`] blocks on a running
+//!   job. [`Policy::Defer`] fails the node and its consumers with
+//!   [`Error::Pending`] and leaves the job running.
+//! - **Errors.** `evaluate` stops at the first error. `evaluate_batch`
+//!   reports `Error::Node` on the failed node and repeats it on the nodes
+//!   downstream, and targets whose ancestors succeeded still receive their
+//!   inputs. Each call ends with one device wait, and a device error there
+//!   fails every result.
 use crate::{
     Error, Result,
     definition::{Kind, Node, Typed},
@@ -350,14 +397,12 @@ impl Slot {
 struct Run<'a, 't> {
     dag: &'a Dag,
     runtime: &'a RuntimeContext,
-    /// The requested scale.
     scale: u32,
     store: MutexGuard<'a, Store>,
     policy: Policy,
     /// Indices of the nodes whose outputs at the requested scale differ from
     /// their outputs at full detail. The others run at scale 1.
     scaled: HashSet<usize>,
-    /// Regions of the targets that have one.
     regions: HashMap<NodeId, Rect>,
     /// Per node index and the scale it runs at, the key its output keys
     /// derive from, or why the node or an input has none.

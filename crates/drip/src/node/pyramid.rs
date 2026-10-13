@@ -35,14 +35,13 @@ fn validate(p: &Settings) -> Result<()> {
     Ok(())
 }
 
-/// Blur through a Gaussian pyramid. The image is halved `levels` times with
-/// a box filter, each level is blurred with a Gaussian of `radius` pixels of
-/// that level (Sharpen at amount −1), and the coarsest level is resampled
-/// back to the input's full-detail size with Mitchell–Netravali. Each level
-/// doubles the blur's reach in the input's pixels at a quarter of the cost,
-/// so a wide blur costs a few small stencils. A flat image passes unchanged.
-/// The node runs as those Resample and Sharpen nodes, and a 100 % view
-/// computes only the part of each level it reads. Coordinates are kept.
+/// Blur RGB through a Gaussian pyramid. The image is halved `levels` times
+/// with a box filter, each level is blurred with a Gaussian of `radius`
+/// pixels of that level (Sharpen at amount −1), and the coarsest level is
+/// resampled back to the input's full-detail size with Mitchell–Netravali.
+/// Each level doubles the blur's reach in the input's pixels at a quarter of
+/// the cost, so a wide blur stays cheap. A flat image passes unchanged.
+/// Coordinates are kept.
 #[crate::node(id = "pyramid-blur", name = "Pyramid blur", tags = [tag::LOOK], meta)]
 pub fn expand(
     p: &Settings,

@@ -1,7 +1,9 @@
-//! Logical payload families and their concrete host/device representations.
-//! A payload names its Rust host type and description; `DeviceLayout` adds
-//! the byte layout kernels read, and `Persist` the byte stream the store's
-//! disk tier keeps. Residency and transfers live in `image`.
+//! Payload families: what a port carries and how its samples are stored.
+//!
+//! A [`Payload`] names its host value and its description. [`DeviceLayout`]
+//! adds the byte layout kernels read, and [`Persist`] the byte stream the
+//! store's disk tier keeps. Residency and transfers live in
+//! [`image`](crate::image).
 use crate::{Result, image::Plane};
 use cubecl::{bytes::Bytes, prelude::BufferArg, server::Handle};
 use std::{

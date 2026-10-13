@@ -1,6 +1,7 @@
 //! Sharpen: an unsharp mask as a stencil. The host function turns the
-//! Gaussian's standard deviation into the stencil's reach, and the body
-//! blurs the window around each sample and adds back the detail.
+//! Gaussian's standard deviation into the stencil's reach, and the body blurs
+//! the window around each sample and adds back the detail. Pyramid blur uses
+//! it at amount −1 as its blur.
 use crate::{
     Error, Result,
     node::data::*,
@@ -36,18 +37,19 @@ fn contract(_: &GlobalContext, _: &Settings, image: &RgbDesc) -> Result<(RgbDesc
     Ok((image.clone(),))
 }
 
-/// Sharpen with an unsharp mask: each sample plus amount times its
-/// difference from a Gaussian blur of its neighbourhood. The blur's
-/// standard deviation is the radius, and it reaches 2.5 radii, after
-/// darktable's sharpen [1]. Each RGB channel is sharpened on its own, in
-/// linear light, so strong amounts leave coloured halos along saturated
-/// edges and overshoot below zero beside highlights, which are kept. Past
-/// the image's edge the blur repeats the edge samples. Negative amounts
-/// soften, and −1 outputs the blur. Coordinates are kept. A preview
-/// computes the same Gaussian on its own samples, so a radius below one
-/// preview sample shows less sharpening than full detail.
+/// Sharpen RGB with an unsharp mask: each sample plus the amount times its
+/// difference from a Gaussian blur of its neighbourhood, after darktable's
+/// sharpen. The blur's standard deviation is the radius in full-detail
+/// pixels, and it reaches 2.5 radii. Negative amounts soften, and −1 outputs
+/// the blur. Coordinates are kept.
+///
+/// Each channel is sharpened on its own in linear light, so strong amounts
+/// leave coloured halos along saturated edges and overshoot below zero beside
+/// highlights, which are kept. Past the image's edge the blur repeats the
+/// edge samples. A preview computes the same Gaussian on its own samples, so
+/// a radius below one preview sample shows less sharpening than full detail.
 #[crate::node(id = "sharpen", name = "Sharpen", tags = [tag::LOOK], contract = contract, stencil = UNSHARP, references = [
-    ("[1] darktable developers, sharpen.c, 2026", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/sharpen.c"),
+    ("darktable developers, sharpen.c, 2026", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/sharpen.c"),
 ])]
 pub fn compute(
     p: &Settings,

@@ -1,15 +1,43 @@
-//! The memo: materialized outputs kept across evaluations, keyed by content.
+//! The evaluator's memo: materialized outputs kept across demands, keyed by
+//! content.
 //!
 //! An edit usually changes a few nodes, so most outputs of the next demand
-//! equal outputs the evaluator already computed. Each output's [`Key`] hashes
-//! what determines it: the producer's kind and version, its [`Identity`],
-//! the scale for a scaled kind, and the keys of its inputs. A reduction to
-//! the requested scale and a region of an image have keys of their own.
-//! Evaluation runs a node only when a demanded output is missing. The store keeps rasters within the runtime's [`Budget`] per
-//! side and evicts the least durable, least recently used representations
-//! first. It also runs foreign nodes as jobs on their own threads, one per
-//! key, and keeps the outputs of `foreign = disk` nodes in a [`Disk`]
-//! directory that outlives the evaluator.
+//! equal outputs the evaluator already computed. Evaluation runs a node only
+//! when a demanded output is missing here. The store also runs foreign nodes
+//! as jobs and keeps the outputs of `foreign = disk` nodes in a [`Disk`]
+//! directory that outlives the process.
+//!
+//! # Rules
+//!
+//! - **Keys.** An output's key is a SHA-256 over the producer's kind ID and
+//!   `Kind::version`, its [`Identity`], the requested scale when the kind's
+//!   shape is scaled, and the keys of its inputs in port order. A computed
+//!   node's identity is its parameter JSON with object keys sorted. A foreign
+//!   node's is its parameters and the stamps (path, length, modification
+//!   time) of the input files they name, without the scale. Bound data has a
+//!   random identity per instance, and keys derived from it never reach the
+//!   disk. An image reduced to the requested scale and the part a region
+//!   covers have keys derived from the image's. Equal keys mean equal
+//!   samples, so equal nodes in two graphs share an entry.
+//! - **Entries.** Entries are materialized rasters, never replaced. A
+//!   deferred image enters once a consumer has materialized it, so the store
+//!   never holds a plan's input.
+//! - **Eviction.** Each side stays within the runtime's [`Budget`], device
+//!   first. Over a budget the store drops a representation from the least
+//!   [`Durability`], least recently used entry. Dropping the device side
+//!   keeps the host one, and an entry with neither leaves. A kind's
+//!   durability is `High` for foreign nodes and bound data, otherwise the
+//!   most durable of its tags, `Low` without tags.
+//! - **Jobs.** One thread per foreign node key. A failed job stays, so its
+//!   key repeats the error without running again. A job writes its disk files
+//!   before it calls the wake callback.
+//! - **Disk.** One file per output, named by its key in hexadecimal, holding
+//!   the line `drip store 1`, the payload name and the payload's `Persist`
+//!   stream. Files are renamed into place, a file that fails to read is
+//!   deleted and counts as a miss, and over the budget the least recently
+//!   used files go first.
+//! - **Expansions.** The expansions of the 64 meta nodes used last, by the
+//!   meta node's key.
 use crate::{
     Error, Result,
     definition::{Durability, FileStamp, Identity, Kind},
