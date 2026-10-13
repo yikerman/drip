@@ -18,9 +18,10 @@ use serde_json::json;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-const TIMEOUT: Duration = Duration::from_secs(5);
-// The compute client is shared with full-RAW GUI tests. Allow their
-// queued work and cold kernel compilation; channel gates stay short.
+// The compute client is shared with full-RAW GUI tests, and a CI runner
+// schedules every test thread of the binary on a few cores. A gate that
+// waits for the test thread, or a test that waits for the worker, allows
+// that load as well as cold kernel compilation.
 const COMPUTE_TIMEOUT: Duration = Duration::from_secs(90);
 
 fn preview(generation: u64, graph: Graph, level: u8, targets: Vec<NodeId>) -> Demand {
@@ -270,7 +271,7 @@ mod latest_targets_win_and_a_replaced_worker_skips_queued_work_fixture {
             let gate = GATE.lock().unwrap();
             let (started, release) = gate.as_ref().unwrap();
             started.send(()).unwrap();
-            release.recv_timeout(TIMEOUT).unwrap();
+            release.recv_timeout(COMPUTE_TIMEOUT).unwrap();
         }
         image.host()[0] = [p.value, 1.0, 0.0];
         Ok(())
@@ -293,7 +294,7 @@ mod latest_targets_win_and_a_replaced_worker_skips_queued_work_fixture {
         let (mut graph, source, preview, histogram) = graph(source_kind);
         graph.set_param(source, "block", json!(true)).unwrap();
         worker.request(&graph, 1, vec![preview]).unwrap();
-        entered.recv_timeout(TIMEOUT).unwrap();
+        entered.recv_timeout(COMPUTE_TIMEOUT).unwrap();
         graph.set_param(source, "block", json!(false)).unwrap();
         for value in [2, 3] {
             graph.set_param(source, "value", json!(value)).unwrap();
@@ -338,7 +339,7 @@ mod latest_targets_win_and_a_replaced_worker_skips_queued_work_fixture {
         );
         graph.set_param(source, "block", json!(true)).unwrap();
         old.request(&graph, 1, vec![preview]).unwrap();
-        entered.recv_timeout(TIMEOUT).unwrap();
+        entered.recv_timeout(COMPUTE_TIMEOUT).unwrap();
         graph.set_param(source, "block", json!(false)).unwrap();
         graph.set_param(source, "value", json!(4)).unwrap();
         old.action(&graph, tiff, action(&graph, tiff)).unwrap();
@@ -442,7 +443,7 @@ mod a_preview_waits_for_foreign_work_and_runs_again_when_it_ends_fixture {
     #[drip::node(id = "test-slow-foreign", name = "slow", foreign = memory)]
     fn slow(p: &Slow, image: Publish<'_, Rgb>) -> drip::Result<()> {
         CALLS.lock().unwrap().push(p.value);
-        GATE.lock().unwrap().as_ref().unwrap().recv_timeout(TIMEOUT).unwrap();
+        GATE.lock().unwrap().as_ref().unwrap().recv_timeout(COMPUTE_TIMEOUT).unwrap();
         let desc = RgbDesc::new(Extent { width: 1, height: 1 }, Coordinates::Space(REC2020_D65));
         image.set(desc, vec![[p.value, 1.0, 0.0]].into())
     }
@@ -548,7 +549,7 @@ mod panic_wakes_the_ui_and_ends_the_busy_state_fixture {
             None,
         );
         worker.request(&graph, 0, vec![id]).unwrap();
-        woke.recv_timeout(TIMEOUT).unwrap();
+        woke.recv_timeout(COMPUTE_TIMEOUT).unwrap();
         assert!(worker.poll().iter().any(|notice| matches!(notice, Notice::Failed)));
         assert!(!worker.busy());
         assert!(worker.request(&graph, 0, vec![id]).is_err());
