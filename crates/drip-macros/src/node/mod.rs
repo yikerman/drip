@@ -1,4 +1,5 @@
-//! Parse a concrete kernel declaration, then generate its graph adapter.
+//! `#[node]`: parse a node function's declaration, then generate its graph
+//! adapter.
 use proc_macro2::TokenStream;
 use syn::spanned::Spanned;
 
