@@ -5,8 +5,8 @@ use crate::{
     Error, Result,
     definition::{Kind, Node},
     node::{
-        bayer_2x2, bayer_gains, camera_to_rgb, chromatic_adaptation, export, exposure, field,
-        highlights, orientation, raw, rcd, reduce, sigmoid,
+        bayer_2x2, bayer_gains, camera_to_rgb, chromatic_adaptation, export, exposure, highlights,
+        orientation, perspective, raw, rcd, reduce, resample, sigmoid,
     },
 };
 use std::sync::Arc;
@@ -32,7 +32,7 @@ pub mod tag {
         OUTPUT_TRANSFORM "output-transform" "Scene-referred to display-referred rendering, as an ACES Output Transform.";
         IO "io" "Reads or writes image files.";
         BAYER_RAW "bayer-raw" "Works on Bayer sensor data before demosaicing.";
-        DEMOSAIC "demosaic" "Interpolates full RGB from a color filter array.";
+        DEMOSAIC "demosaic" "Reconstructs full RGB from a color filter array.";
         RECOVERY "recovery" "Restores what the capture lost or distorted, such as clipped highlights.";
         GEOMETRY "geometry" "Changes pixel positions or sampling.";
         COLOR "color" "Converts color spaces or white points.";
@@ -55,9 +55,8 @@ pub static NODES: &[&Kind] = &[
     &camera_to_rgb::compute::KIND,
     &chromatic_adaptation::compute::KIND,
     &orientation::compute::KIND,
-    &field::interpolate::lift::KIND,
-    &field::perspective::transform::KIND,
-    &field::sample::realize::KIND,
+    &perspective::transform::KIND,
+    &resample::compute::KIND,
     &reduce::rgb::compute::KIND,
     &exposure::compute::KIND,
     &sigmoid::apply::KIND,

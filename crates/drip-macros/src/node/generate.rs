@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use super::parse::{Direction, Options, Port, Signature, View};
+use super::parse::{Deferred, Direction, Options, Port, Signature, View};
 
 pub(super) fn node(
     function: &syn::ItemFn,
@@ -18,15 +18,17 @@ pub(super) fn node(
     };
     let parameters = &signature.parameters;
     let kind = kind(function, options, signature, &vis);
-    let body = options
-        .map
-        .as_ref()
-        .map(|path| body(path, signature.map.as_ref().expect("a map has a constants type"), &vis));
+    let body = match (&options.deferred, &signature.result) {
+        (Some(Deferred::Map(path)), Some(constants)) => Some(body(path, constants, &vis)),
+        _ => None,
+    };
     let ports = ports(signature, &vis);
     let inputs = inputs(signature, &vis);
-    let (contract, run) = match (&options.map, signature.source) {
+    let (contract, run) = match (&options.deferred, signature.source) {
         (_, true) => (loaded_contract(), loaded_run(signature)),
-        (Some(_), _) => (contract(options, signature), map_run(name, signature)),
+        (Some(deferred), _) => {
+            (contract(options, signature), deferred_run(name, deferred, signature))
+        }
         (None, false) => (contract(options, signature), run(name, signature)),
     };
     // Files are read when first forced and kept with the node, error included.
@@ -135,9 +137,11 @@ fn kind(
     let parameters = &signature.parameters;
     let inputs = signature.inputs().map(port_spec);
     let outputs = signature.outputs().map(port_spec);
-    let shape = match (signature.source, &options.map) {
+    let shape = match (signature.source, &options.deferred) {
         (true, _) => quote!(::drip::shape::Shape::Source),
-        (false, Some(_)) => quote!(::drip::shape::Shape::Map(&BODY)),
+        (false, Some(Deferred::Map(_))) => quote!(::drip::shape::Shape::Map(&BODY)),
+        (false, Some(Deferred::Warp)) => quote!(::drip::shape::Shape::Warp),
+        (false, Some(Deferred::Resample)) => quote!(::drip::shape::Shape::Resample),
         (false, None) => quote!(::drip::shape::Shape::Kernel),
     };
     let action = match &options.action {
@@ -343,12 +347,13 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
     }
 }
 
-/// A map's adapter: materialize the `Read` inputs, call the host function on
-/// descriptions, and publish the mapped input extended by the body.
-fn map_run(name: &syn::Ident, signature: &Signature) -> TokenStream {
+/// The adapter of a map, warp or resample: materialize the `Read` inputs,
+/// call the host function on descriptions, and publish the deferred input
+/// extended by what it returns.
+fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -> TokenStream {
     let mut binds = Vec::new();
     let mut arguments = Vec::new();
-    let mut mapped = None;
+    let mut point = None;
     for port in &signature.ports {
         let local = &port.name;
         let index = port.index;
@@ -358,7 +363,7 @@ fn map_run(name: &syn::Ident, signature: &Signature) -> TokenStream {
         let missing = quote!(::drip::Error::MissingInput { node: KIND.id, port: #port_name });
         binds.push(match (port.view, port.direction) {
             (View::Point, Direction::Input) => {
-                mapped = Some((index, payload));
+                point = Some((index, payload));
                 quote! {
                     let #local = ::drip::ports::Point::<#payload, #requirement>::new(
                         inputs[#index].as_ref().ok_or(#missing)?.desc(),
@@ -380,7 +385,17 @@ fn map_run(name: &syn::Ident, signature: &Signature) -> TokenStream {
         });
         arguments.push(local);
     }
-    let (input, payload) = mapped.expect("a map has a mapped input");
+    let (input, payload) = point.expect("a deferred shape has a Point input");
+    let (result, publish) = match deferred {
+        Deferred::Map(_) => (
+            quote!(constants),
+            quote!(image.map::<#payload>(&BODY, &constants, outputs[0].clone())),
+        ),
+        Deferred::Warp => (quote!(warp), quote!(image.warp::<#payload>(&warp, outputs[0].clone()))),
+        Deferred::Resample => {
+            (quote!(filter), quote!(image.resample::<#payload>(filter, outputs[0].clone())))
+        }
+    };
     quote! {
         fn run(
             &self,
@@ -389,9 +404,9 @@ fn map_run(name: &syn::Ident, signature: &Signature) -> TokenStream {
             outputs: &[::drip::image::Description],
         ) -> ::drip::Result<Vec<::drip::image::Image>> {
             #(#binds)*
-            let constants = super::#name(&self.parameters, #(#arguments),*)?;
-            let image = inputs[#input].as_ref().expect("the mapped input is bound");
-            Ok(vec![image.map::<#payload>(&BODY, &constants, outputs[0].clone())?])
+            let #result = super::#name(&self.parameters, #(#arguments),*)?;
+            let image = inputs[#input].as_ref().expect("the Point input is bound");
+            Ok(vec![#publish?])
         }
     }
 }

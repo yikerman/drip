@@ -1,16 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The legacy sigmoid kernel below is adapted from darktable. Source pins and
 // numerical deviations: THIRD_PARTY.md.
-//! Map nodes run as fused kernels: results match the per-node kernels they
-//! replaced bit for bit, and each chain of maps launches once per consumer
-//! that needs its samples.
+//! Map, warp and resample nodes run as fused kernels: results match the
+//! per-node kernels they replaced bit for bit, each segment launches once per
+//! consumer that needs its samples, and segments cut only where composing
+//! would change the result.
 use cubecl::prelude::*;
 use drip::{
     Result,
     eval::Evaluator,
     graph::Dag,
     image::Description,
-    node::{self, chromatic_adaptation, data::*, exposure, sigmoid},
+    node::{
+        self, chromatic_adaptation,
+        data::*,
+        exposure,
+        filter::Filter,
+        orientation::{self, Orientation},
+        perspective::{self, Aspect},
+        resample::{self, Factor, Size},
+        sigmoid,
+    },
     ports::*,
     runtime::{GlobalContext, KernelContext, RuntimeContext},
     shape::{Pixel, Shape},
@@ -31,7 +41,7 @@ fn metadata() -> Arc<drip_raw::Metadata> {
     Arc::new(m)
 }
 
-/// Signed, zero, tiny, huge, infinite and NaN samples, then a ramp.
+/// Signed, zero, tiny, huge, infinite and NaN samples, then a ramp: 41 × 9.
 fn samples() -> Vec<[f32; 3]> {
     let special = [
         0.0,
@@ -67,7 +77,8 @@ fn chain() -> Chain {
     let m = metadata();
     let response = Response { camera: Camera::of(&m), balance: None };
     let pixels = samples();
-    let extent = Extent { width: pixels.len() as u32, height: 1 };
+    let extent = Extent { width: 41, height: 9 };
+    assert_eq!(extent.pixels(), pixels.len());
     let source =
         node::source::<Rgb>(&mut dag, RgbDesc::new(extent, Coordinates::Camera(response)), pixels)
             .unwrap();
@@ -81,14 +92,21 @@ fn sigmoid_settings() -> sigmoid::Settings {
     sigmoid::Settings { contrast: 2.0, skew: 0.3, preserve_hue: 0.6 }
 }
 
-/// Camera matrix, CAT16, exposure and sigmoid as map nodes.
-fn fused(chain: &mut Chain) -> Output<Rgb> {
+/// Camera matrix, CAT16, exposure and sigmoid as map nodes, after
+/// `orientation` if one is given.
+fn fused(chain: &mut Chain, orientation: Option<Orientation>) -> Output<Rgb> {
     let d = &mut chain.dag;
+    let mut input = chain.source;
+    if let Some(orientation) = orientation {
+        let node = orientation::add(d, orientation::Settings { orientation }).unwrap();
+        d.connect(input, node.image).unwrap();
+        input = node.output;
+    }
     let camera = node::camera_to_rgb::add(d, ()).unwrap();
     let cat = chromatic_adaptation::add(d, Default::default()).unwrap();
     let exposure = exposure::add(d, exposure_settings()).unwrap();
     let sigmoid = sigmoid::apply::add(d, sigmoid_settings()).unwrap();
-    d.connect(chain.source, camera.image).unwrap();
+    d.connect(input, camera.image).unwrap();
     d.connect(chain.metadata, camera.metadata).unwrap();
     d.connect(camera.output, cat.image).unwrap();
     d.connect(chain.metadata, cat.metadata).unwrap();
@@ -97,14 +115,21 @@ fn fused(chain: &mut Chain) -> Output<Rgb> {
     sigmoid.output
 }
 
-/// The same chain as kernel nodes launching the kernels the maps replaced.
-fn legacy(chain: &mut Chain) -> Output<Rgb> {
+/// The same chain as kernel nodes launching the kernels the maps and the
+/// warp replaced.
+fn legacy(chain: &mut Chain, orientation: Option<Orientation>) -> Output<Rgb> {
     let d = &mut chain.dag;
+    let mut input = chain.source;
+    if let Some(orientation) = orientation {
+        let node = legacy_orientation::add(d, orientation::Settings { orientation }).unwrap();
+        d.connect(input, node.image).unwrap();
+        input = node.output;
+    }
     let camera = legacy_camera::add(d, ()).unwrap();
     let cat = legacy_cat16::add(d, Default::default()).unwrap();
     let exposure = legacy_exposure::add(d, exposure_settings()).unwrap();
     let sigmoid = legacy_sigmoid::add(d, sigmoid_settings()).unwrap();
-    d.connect(chain.source, camera.image).unwrap();
+    d.connect(input, camera.image).unwrap();
     d.connect(chain.metadata, camera.metadata).unwrap();
     d.connect(camera.output, cat.image).unwrap();
     d.connect(chain.metadata, cat.metadata).unwrap();
@@ -118,16 +143,32 @@ fn bits(evaluator: &Evaluator, dag: &Dag, output: Output<Rgb>) -> Vec<[u32; 3]> 
     result.data.host().unwrap().iter().map(|p| p.map(f32::to_bits)).collect()
 }
 
+/// With and without an Orientation ahead of the maps, which joins their
+/// kernel as an exact reindex.
 fn fused_chain_matches_the_replaced_kernels(runtime: RuntimeContext) {
     let evaluator = Evaluator::new(runtime);
-    let mut chain = chain();
-    let fused = fused(&mut chain);
-    let legacy = legacy(&mut chain);
-    let result = evaluator.evaluate::<Rgb>(&chain.dag, &Default::default(), fused).unwrap();
-    assert_eq!(result.statistics.fused, 1);
-    let finite = result.data.host().unwrap().iter().flatten().filter(|v| v.is_finite()).count();
-    assert!(finite >= 600, "only {finite} finite samples");
-    assert_eq!(bits(&evaluator, &chain.dag, fused), bits(&evaluator, &chain.dag, legacy));
+    let orientations = [
+        None,
+        Some(Orientation::MirrorHorizontal),
+        Some(Orientation::Rotate180),
+        Some(Orientation::MirrorVertical),
+        Some(Orientation::Transpose),
+        Some(Orientation::Rotate90Clockwise),
+        Some(Orientation::Transverse),
+        Some(Orientation::Rotate90Counterclockwise),
+    ];
+    for orientation in orientations {
+        let mut chain = chain();
+        let fused = fused(&mut chain, orientation);
+        let legacy = legacy(&mut chain, orientation);
+        let result = evaluator.evaluate::<Rgb>(&chain.dag, &Default::default(), fused).unwrap();
+        assert_eq!(result.statistics.fused, 1);
+        let finite = result.data.host().unwrap().iter().flatten().filter(|v| v.is_finite()).count();
+        assert!(finite >= 600, "only {finite} finite samples");
+        let (fused, legacy) =
+            (bits(&evaluator, &chain.dag, fused), bits(&evaluator, &chain.dag, legacy));
+        assert_eq!(fused, legacy, "{orientation:?}");
+    }
 }
 
 fn copy_contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(RgbDesc,)> {
@@ -230,15 +271,15 @@ fn deferred_images_materialize_once_per_consumer_that_needs_samples(runtime: Run
     assert_eq!(**result.data.host().unwrap(), [[-0.25, 1.0, -3.0]; 3]);
 }
 
-/// The template's colour tail: camera matrix and CAT16 materialize for
-/// Orientation, then exposure and sigmoid run as one kernel.
-fn template_tail_launches_once_after_orientation(runtime: RuntimeContext) {
+/// The template's colour tail: Orientation between CAT16 and exposure is a
+/// reindex, so it joins the maps' kernel and the tail launches once.
+fn template_tail_launches_once(runtime: RuntimeContext) {
     let evaluator = Evaluator::new(runtime);
     let mut chain = chain();
     let d = &mut chain.dag;
     let camera = node::camera_to_rgb::add(d, ()).unwrap();
     let cat = chromatic_adaptation::add(d, Default::default()).unwrap();
-    let orientation = node::orientation::add(d, Default::default()).unwrap();
+    let orientation = orientation::add(d, Default::default()).unwrap();
     let exposure = exposure::add(d, exposure_settings()).unwrap();
     let sigmoid = sigmoid::apply::add(d, sigmoid_settings()).unwrap();
     d.connect(chain.source, camera.image).unwrap();
@@ -253,17 +294,121 @@ fn template_tail_launches_once_after_orientation(runtime: RuntimeContext) {
         evaluator.evaluate::<Rgb>(d, &Default::default(), orientation.output).unwrap();
     assert_eq!(to_orientation.statistics.fused, 1);
     let to_sigmoid = evaluator.evaluate::<Rgb>(d, &Default::default(), sigmoid.output).unwrap();
-    assert_eq!(to_sigmoid.statistics.fused, 2);
+    assert_eq!(to_sigmoid.statistics.fused, 1);
     assert_eq!(to_sigmoid.statistics.uploads, 1);
     for kind in [&exposure::compute::KIND, &sigmoid::apply::KIND] {
         assert!(matches!(kind.shape, Shape::Map(_)), "{}", kind.id);
     }
+    assert_eq!(orientation::compute::KIND.shape, Shape::Warp);
+    assert_eq!(resample::compute::KIND.shape, Shape::Resample);
+}
+
+fn half() -> resample::Settings {
+    resample::Settings { filter: Filter::Lanczos3, size: Size::Factor(Factor { factor: 0.5 }) }
+}
+fn resampled(dag: &mut Dag, input: Output<Rgb>, settings: resample::Settings) -> Output<Rgb> {
+    let node = resample::add(dag, settings).unwrap();
+    dag.connect(input, node.image).unwrap();
+    node.output
+}
+fn transformed(dag: &mut Dag, input: Output<Rgb>, quad: [[f64; 2]; 4]) -> Output<Rgb> {
+    let p = perspective::Settings::default().with_quad(quad, Aspect::Corners);
+    let node = perspective::add(dag, p).unwrap();
+    dag.connect(input, node.image).unwrap();
+    node.output
+}
+fn copied(dag: &mut Dag, input: Output<Rgb>) -> Output<Rgb> {
+    let node = host_copy::add(dag, ()).unwrap();
+    dag.connect(input, node.image).unwrap();
+    node.output
+}
+fn sigmoid(dag: &mut Dag, input: Output<Rgb>) -> Output<Rgb> {
+    let node = sigmoid::apply::add(dag, sigmoid_settings()).unwrap();
+    dag.connect(input, node.image).unwrap();
+    node.output
+}
+
+/// The fused launches evaluating `output` takes, and its sample bits.
+fn launches(evaluator: &Evaluator, dag: &Dag, output: Output<Rgb>) -> (usize, Vec<[u32; 3]>) {
+    let result = evaluator.evaluate::<Rgb>(dag, &Default::default(), output).unwrap();
+    let bits = result.data.host().unwrap().iter().map(|p| p.map(f32::to_bits)).collect();
+    (result.statistics.fused, bits)
+}
+
+/// A filtering step after a nonlinear map resamples the map's output in a
+/// second launch, with the bits a materialization between them gives. Before
+/// the map it fuses. A reindex joins the stage wherever it sits, and steps
+/// that move nothing launch nothing.
+fn segments_cut_only_where_composing_changes_the_result(runtime: RuntimeContext) {
+    let evaluator = Evaluator::new(runtime);
+    let launches = |dag: &Dag, output| launches(&evaluator, dag, output);
+    let mut dag = Dag::new();
+    let d = &mut dag;
+    let pixels: Vec<_> =
+        (0..12 * 8).map(|i| [i as f32 / 20.0, 1.0 - i as f32 / 50.0, 0.4]).collect();
+    let desc = RgbDesc::new(Extent { width: 12, height: 8 }, Coordinates::Space(REC2020_D65));
+    let source = node::source::<Rgb>(d, desc, pixels).unwrap();
+    let mapped = sigmoid(d, source);
+    let materialized = copied(d, mapped);
+
+    // A Resample after a map: two launches, as with a kernel between them.
+    let cut = resampled(d, mapped, half());
+    let separate = resampled(d, materialized, half());
+    let (fused, bits) = launches(d, cut);
+    assert_eq!(fused, 2);
+    assert_eq!(bits, launches(d, separate).1);
+
+    // A Resample before a map: one launch, with the bits of two kernels.
+    let first = resampled(d, source, half());
+    let after = sigmoid(d, first);
+    let first_copy = copied(d, first);
+    let separate = sigmoid(d, first_copy);
+    let (fused, bits) = launches(d, after);
+    assert_eq!(fused, 1);
+    assert_eq!(bits, launches(d, separate).1);
+
+    // Perspective Transform after a map: a rotation filters and cuts, while
+    // an integer crop is a reindex and joins the map's kernel.
+    let rotated = [[0.1, 0.0], [1.0, 0.1], [0.9, 1.0], [0.0, 0.9]];
+    let crop = [[0.25, 0.0], [0.75, 0.0], [0.75, 0.5], [0.25, 0.5]];
+    let rotation = transformed(d, mapped, rotated);
+    assert_eq!(launches(d, rotation).0, 2);
+    let cropped = transformed(d, mapped, crop);
+    let separate = transformed(d, materialized, crop);
+    let (fused, bits) = launches(d, cropped);
+    assert_eq!(fused, 1);
+    assert_eq!(bits, launches(d, separate).1);
+
+    // Warps compose with each other and with a Resample after them. A
+    // Resample fixes its lattice, so a filtering warp after it cuts.
+    let once = transformed(d, source, rotated);
+    let twice = transformed(d, once, rotated);
+    let both = resampled(d, twice, half());
+    assert_eq!(launches(d, both).0, 1);
+    let rotation = transformed(d, first, rotated);
+    assert_eq!(launches(d, rotation).0, 2);
+
+    // The identity, and two quarter turns that cancel, share the source.
+    let unchanged = launches(d, source);
+    assert_eq!(unchanged.0, 0);
+    let identity = transformed(d, source, [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+    assert_eq!(launches(d, identity), unchanged);
+    let clockwise = turned(d, source, Orientation::Rotate90Clockwise);
+    let back = turned(d, clockwise, Orientation::Rotate90Counterclockwise);
+    assert_eq!(launches(d, back), unchanged);
+}
+
+fn turned(dag: &mut Dag, input: Output<Rgb>, orientation: Orientation) -> Output<Rgb> {
+    let node = orientation::add(dag, orientation::Settings { orientation }).unwrap();
+    dag.connect(input, node.image).unwrap();
+    node.output
 }
 
 fn all(runtime: RuntimeContext) {
     fused_chain_matches_the_replaced_kernels(runtime.clone());
     deferred_images_materialize_once_per_consumer_that_needs_samples(runtime.clone());
-    template_tail_launches_once_after_orientation(runtime);
+    template_tail_launches_once(runtime.clone());
+    segments_cut_only_where_composing_changes_the_result(runtime);
 }
 #[cfg(feature = "cpu")]
 #[test]
@@ -376,9 +521,78 @@ fn legacy_sigmoid(
     launch(ctx, &image, &output, &k, image.desc.extent.pixels(), legacy::sigmoid::launch)
 }
 
+fn oriented(_: &GlobalContext, p: &orientation::Settings, image: &RgbDesc) -> Result<(RgbDesc,)> {
+    let mut output = image.clone();
+    if legacy_code(p.orientation) >= 5 {
+        std::mem::swap(&mut output.extent.width, &mut output.extent.height);
+        std::mem::swap(&mut output.full.width, &mut output.full.height);
+    }
+    Ok((output,))
+}
+fn legacy_code(orientation: Orientation) -> usize {
+    match orientation {
+        Orientation::FromMetadata | Orientation::Identity => 1,
+        Orientation::MirrorHorizontal => 2,
+        Orientation::Rotate180 => 3,
+        Orientation::MirrorVertical => 4,
+        Orientation::Transpose => 5,
+        Orientation::Rotate90Clockwise => 6,
+        Orientation::Transverse => 7,
+        Orientation::Rotate90Counterclockwise => 8,
+    }
+}
+#[drip::node(id = "legacy-orientation", contract = oriented)]
+fn legacy_orientation(
+    ctx: &KernelContext<'_>,
+    p: &orientation::Settings,
+    image: Read<'_, Rgb>,
+    output: Write<'_, Rgb>,
+) -> Result<()> {
+    let groups = image.desc.extent.pixels().div_ceil(256) as u32;
+    legacy::orient::launch(
+        ctx.client()?,
+        CubeCount::Static(groups, 1, 1),
+        CubeDim::new_1d(256),
+        image.data.device(ctx)?.argument(),
+        output.device(ctx)?.argument(),
+        image.desc.extent.width as usize,
+        image.desc.extent.height as usize,
+        legacy_code(p.orientation),
+    );
+    Ok(())
+}
+
 /// The per-node kernels of Drip 3479319, with unchanged arithmetic.
 mod legacy {
     use cubecl::prelude::*;
+
+    #[cube(launch)]
+    pub fn orient(
+        input: &[f32],
+        output: &mut [f32],
+        width: usize,
+        height: usize,
+        orientation: usize,
+    ) {
+        let i = ABSOLUTE_POS;
+        if i < width * height {
+            let mut x = i % width;
+            let mut y = i / width;
+            if orientation == 2 || orientation == 3 || orientation == 7 || orientation == 8 {
+                x = width - 1 - x;
+            }
+            if orientation == 3 || orientation == 4 || orientation == 6 || orientation == 7 {
+                y = height - 1 - y;
+            }
+            let mut target = y * width + x;
+            if orientation >= 5 {
+                target = x * height + y;
+            }
+            for c in 0..3 {
+                output[target * 3 + c] = input[i * 3 + c];
+            }
+        }
+    }
 
     #[cube(launch)]
     pub fn matrix(input: &[f32], coeff: &[f32], output: &mut [f32]) {

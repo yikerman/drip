@@ -1,19 +1,20 @@
-//! Interpolate → Sample against an independent f64 resampler.
+//! Resample and warps against an independent f64 resampler.
 use drip::{
     eval::Evaluator,
     graph::Dag,
+    image::{Description, Image, Raster},
     node::{
         self,
+        color::{self, Mat3},
         data::*,
-        field::{
-            Chain, Rect, RgbField, RgbFieldDesc, Stage,
-            sample::{Factor, LongEdge, Settings, Size},
-        },
         filter::Filter,
+        perspective,
+        resample::{Factor, LongEdge, Settings, Size},
     },
-    runtime::GlobalContext,
+    runtime::{GlobalContext, KernelContext},
+    shape::Warp,
 };
-use std::f64::consts::PI;
+use std::{f64::consts::PI, sync::Arc};
 
 const FILTERS: [Filter; 5] =
     [Filter::Lanczos3, Filter::Mitchell, Filter::CatmullRom, Filter::Triangle, Filter::Box];
@@ -41,7 +42,7 @@ fn pattern(width: u32, height: u32) -> Vec<[f32; 3]> {
         .collect()
 }
 
-/// Source → Interpolate → Sample, evaluated under `global`.
+/// Source → Resample, evaluated under `global`.
 fn resample(
     evaluator: &Evaluator,
     global: &GlobalContext,
@@ -51,27 +52,50 @@ fn resample(
 ) -> (RgbDesc, Vec<[f32; 3]>) {
     let mut dag = Dag::new();
     let source = node::source::<Rgb>(&mut dag, desc, pixels).unwrap();
-    let field = node::field::interpolate::add(&mut dag, ()).unwrap();
-    let sample = node::field::sample::add(&mut dag, p).unwrap();
-    dag.connect(source, field.image).unwrap();
-    dag.connect(field.output, sample.field).unwrap();
-    let result = evaluator.evaluate::<Rgb>(&dag, global, sample.output).unwrap();
+    let resample = node::resample::add(&mut dag, p).unwrap();
+    dag.connect(source, resample.image).unwrap();
+    let result = evaluator.evaluate::<Rgb>(&dag, global, resample.output).unwrap();
     (result.desc.clone(), result.data.host().unwrap().to_vec())
 }
 
-/// Sample a field built directly, so maps can differ per channel.
-fn sample_field(
+/// Per-channel maps from the rectangle `origin + [0, size]` into the plane of
+/// `source`, as the reference resampler reads them.
+#[derive(Clone)]
+struct Warped {
+    source: RgbDesc,
+    origin: [f64; 2],
+    size: [f64; 2],
+    maps: [Mat3; 3],
+}
+
+/// `warped` through a warp whose maps differ per channel, then a Resample by
+/// `p`, through the image API. The rectangle's size is whole pixels.
+fn resample_warped(
     evaluator: &Evaluator,
-    field: RgbFieldDesc,
+    warped: &Warped,
     pixels: Vec<[f32; 3]>,
     p: Settings,
 ) -> (RgbDesc, Vec<[f32; 3]>) {
-    let mut dag = Dag::new();
-    let source = node::source::<RgbField>(&mut dag, field, pixels).unwrap();
-    let sample = node::field::sample::add(&mut dag, p).unwrap();
-    dag.connect(source, sample.field).unwrap();
-    let result = evaluator.evaluate::<Rgb>(&dag, &Default::default(), sample.output).unwrap();
-    (result.desc.clone(), result.data.host().unwrap().to_vec())
+    let Size::Factor(Factor { factor }) = p.size else { unreachable!() };
+    let global = GlobalContext::default();
+    let ctx = KernelContext::new(&global, evaluator.runtime());
+    let source = Raster::<Rgb>::from_host(warped.source.clone(), pixels.into()).unwrap();
+    let [x, y] = warped.origin;
+    let shift = [[1.0, 0.0, x], [0.0, 1.0, y], [0.0, 0.0, 1.0]];
+    let warp = Warp::filtered(warped.maps.map(|m| color::mul(&m, &shift)), p.filter.body());
+    let extent = |scale: f64| {
+        let [w, h] = warped.size.map(|v| (v * scale).round() as u32);
+        let desc: Description = Arc::new(RgbDesc::new(
+            Extent { width: w, height: h },
+            warped.source.coordinates.clone(),
+        ));
+        desc
+    };
+    let image = Image::from(source).warp::<Rgb>(&warp, extent(1.0)).unwrap();
+    let output = extent(factor);
+    let image = image.resample::<Rgb>(p.filter.body(), output.clone()).unwrap();
+    let raster = image.raster::<Rgb>(&ctx).unwrap();
+    (raster.desc().clone(), raster.host().unwrap().to_vec())
 }
 
 fn identity_is_exact_for_interpolating_filters(evaluator: &Evaluator) {
@@ -90,13 +114,7 @@ fn identity_is_exact_for_interpolating_filters(evaluator: &Evaluator) {
         );
         assert_eq!((out.extent, out.full), (extent.clone(), extent.clone()));
         assert_eq!(out.coordinates, desc.coordinates);
-        // Bit-exact, signed zeros included; arithmetic may canonicalize NaN payloads.
-        let bits = |v: &[[f32; 3]]| {
-            v.iter()
-                .flatten()
-                .map(|v| if v.is_nan() { None } else { Some(v.to_bits()) })
-                .collect::<Vec<_>>()
-        };
+        // Bit-exact, signed zeros included.
         assert_eq!(bits(&data), bits(&pixels), "{filter:?}");
     }
 }
@@ -107,15 +125,11 @@ fn constants_survive_any_map_and_scale(evaluator: &Evaluator) {
     let pixels = vec![value; (width * height) as usize];
     let source = RgbDesc::new(Extent { width, height }, Coordinates::Space(REC2020_D65));
     let maps = [rotation(0.2, [6.5, 5.5]), rotation(-0.1, [6.5, 5.5]), shear(0.3)];
-    let field = RgbFieldDesc {
-        source,
-        domain: Rect { origin: [3.0, 3.0], size: [7.0, 5.0] },
-        maps: maps.map(|m| Chain(vec![Stage::Projective(m)])),
-    };
+    let warped = Warped { source, origin: [3.0, 3.0], size: [7.0, 5.0], maps };
     for filter in FILTERS {
         for factor in [0.37, 1.0, 2.5] {
             let (_, data) =
-                sample_field(evaluator, field.clone(), pixels.clone(), settings(filter, factor));
+                resample_warped(evaluator, &warped, pixels.clone(), settings(filter, factor));
             for pixel in &data {
                 for c in 0..3 {
                     let error = (pixel[c] - value[c]).abs() / value[c].abs();
@@ -156,11 +170,7 @@ fn per_channel_maps_match_the_reference(evaluator: &Evaluator) {
     };
     let perspective = [[1.0, 0.05, -0.4], [0.02, 0.95, 0.3], [0.004, -0.003, 1.0]];
     let maps = [rotation(0.3, [9.0, 7.0]), perspective, shear(-0.2)];
-    let field = RgbFieldDesc {
-        source,
-        domain: Rect { origin: [1.5, -2.0], size: [16.0, 15.0] },
-        maps: maps.map(|m| Chain(vec![Stage::Projective(m)])),
-    };
+    let warped = Warped { source, origin: [1.5, -2.0], size: [16.0, 15.0], maps };
     let magnitude = pixels.iter().flatten().fold(1.0f32, |m, v| m.max(v.abs()));
     // Box is discontinuous at its edge: f32 and f64 positions disagree on which
     // taps sit exactly there. The exact tests above cover it.
@@ -168,8 +178,8 @@ fn per_channel_maps_match_the_reference(evaluator: &Evaluator) {
         let filter = *filter;
         for factor in [0.3, 0.6, 1.7] {
             let (out, data) =
-                sample_field(evaluator, field.clone(), pixels.clone(), settings(filter, factor));
-            let expected = reference(&field, &pixels, &out.extent, filter);
+                resample_warped(evaluator, &warped, pixels.clone(), settings(filter, factor));
+            let expected = reference(&warped, &pixels, &out.extent, filter);
             for (i, (actual, expected)) in data.iter().zip(&expected).enumerate() {
                 for c in 0..3 {
                     let error = (f64::from(actual[c]) - expected[c]).abs();
@@ -219,23 +229,34 @@ fn preview_keeps_framing(evaluator: &Evaluator) {
 }
 
 fn perspective_crops_exactly_and_matches_the_reference(evaluator: &Evaluator) {
-    use node::field::perspective::{self, Aspect};
+    use perspective::Aspect;
     let (width, height) = (8, 6);
     let pixels = pattern(width, height);
     let desc = RgbDesc::new(Extent { width, height }, Coordinates::Space(REC2020_D65));
+    // Perspective Transform alone, and followed by Resample at factor one.
     let run = |quad, global: &GlobalContext| {
         let mut dag = Dag::new();
         let source = node::source::<Rgb>(&mut dag, desc.clone(), pixels.clone()).unwrap();
-        let field = node::field::interpolate::add(&mut dag, ()).unwrap();
         let p = perspective::Settings::default().with_quad(quad, Aspect::Corners);
-        let transform = perspective::add(&mut dag, p).unwrap();
-        let sample = node::field::sample::add(&mut dag, settings(Filter::Lanczos3, 1.0)).unwrap();
-        dag.connect(source, field.image).unwrap();
-        dag.connect(field.output, transform.field).unwrap();
-        dag.connect(transform.output, sample.field).unwrap();
-        let field = evaluator.evaluate::<RgbField>(&dag, global, transform.output).unwrap();
-        let result = evaluator.evaluate::<Rgb>(&dag, global, sample.output).unwrap();
-        (field.desc.clone(), result.desc.clone(), result.data.host().unwrap().to_vec())
+        let transform = perspective::add(&mut dag, p.clone()).unwrap();
+        let resample = node::resample::add(&mut dag, settings(Filter::Lanczos3, 1.0)).unwrap();
+        dag.connect(source, transform.image).unwrap();
+        dag.connect(transform.output, resample.image).unwrap();
+        let alone = evaluator.evaluate::<Rgb>(&dag, global, transform.output).unwrap();
+        let result = evaluator.evaluate::<Rgb>(&dag, global, resample.output).unwrap();
+        // The warp and the Resample run as one launch, with the same filter.
+        assert_eq!(result.statistics.fused, 1);
+        let data = result.data.host().unwrap().to_vec();
+        assert_eq!(alone.desc, result.desc);
+        assert_eq!(bits(alone.data.host().unwrap()), bits(&data));
+        let frame = perspective::frame(&p, perspective::plane(&desc)).unwrap();
+        let warped = Warped {
+            source: desc.clone(),
+            origin: [0.0, 0.0],
+            size: frame.size,
+            maps: [frame.map; 3],
+        };
+        (warped, result.desc.clone(), data)
     };
     // Columns 2..6, rows 0..3.
     let crop = [[0.25, 0.0], [0.75, 0.0], [0.75, 0.5], [0.25, 0.5]];
@@ -251,8 +272,8 @@ fn perspective_crops_exactly_and_matches_the_reference(evaluator: &Evaluator) {
     );
 
     let keystone = [[0.1, 0.0], [0.9, 0.05], [1.0, 1.0], [0.0, 0.9]];
-    let (field, out, data) = run(keystone, &Default::default());
-    let expected = reference(&field, &pixels, &out.extent, Filter::Lanczos3);
+    let (warped, out, data) = run(keystone, &Default::default());
+    let expected = reference(&warped, &pixels, &out.extent, Filter::Lanczos3);
     for (actual, expected) in data.iter().zip(&expected) {
         for c in 0..3 {
             assert!(
@@ -261,6 +282,11 @@ fn perspective_crops_exactly_and_matches_the_reference(evaluator: &Evaluator) {
             );
         }
     }
+}
+
+/// Sample bits, with NaN payloads, which arithmetic may canonicalize, as `None`.
+fn bits(v: &[[f32; 3]]) -> Vec<Option<u32>> {
+    v.iter().flatten().map(|v| if v.is_nan() { None } else { Some(v.to_bits()) }).collect()
 }
 
 fn rotation(angle: f64, [cx, cy]: [f64; 2]) -> [[f64; 3]; 3] {
@@ -300,24 +326,18 @@ fn weight(filter: Filter, x: f64) -> f64 {
     }
 }
 
-/// Plane geometry written out directly: output pixel centre → domain → map →
+/// Plane geometry written out directly: output pixel centre → rectangle → map →
 /// source plane → source index, with a numerically differentiated footprint.
-fn reference(
-    field: &RgbFieldDesc,
-    pixels: &[[f32; 3]],
-    out: &Extent,
-    filter: Filter,
-) -> Vec<[f64; 3]> {
-    let source = &field.source;
+fn reference(warped: &Warped, pixels: &[[f32; 3]], out: &Extent, filter: Filter) -> Vec<[f64; 3]> {
+    let source = &warped.source;
     let (w, h) = (source.extent.width as i64, source.extent.height as i64);
-    let support = filter.support() as f64;
+    let support = f64::from(filter.body().support);
     let mut result = vec![[0.0; 3]; out.pixels()];
-    for (c, chain) in field.maps.iter().enumerate() {
-        let [Stage::Projective(m)] = chain.0.as_slice() else { unreachable!() };
+    for (c, m) in warped.maps.iter().enumerate() {
         let index = |j: f64, k: f64| -> Option<[f64; 2]> {
             let y = [
-                field.domain.origin[0] + (j + 0.5) * field.domain.size[0] / f64::from(out.width),
-                field.domain.origin[1] + (k + 0.5) * field.domain.size[1] / f64::from(out.height),
+                warped.origin[0] + (j + 0.5) * warped.size[0] / f64::from(out.width),
+                warped.origin[1] + (k + 0.5) * warped.size[1] / f64::from(out.height),
             ];
             let q = m.map(|r| r[0] * y[0] + r[1] * y[1] + r[2]);
             (q[2] > 0.0).then(|| {

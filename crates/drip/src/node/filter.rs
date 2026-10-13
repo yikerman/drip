@@ -4,7 +4,8 @@
 //! by the footprint scale) and returns an unnormalized weight. Callers
 //! normalize the weights of each output sample, which also absorbs Lanczos'
 //! small deviation from a partition of unity. Kernels are symmetric and zero
-//! outside their support. See `agent-docs/FIELD.md` for how Sample uses them.
+//! outside their support. [`Filter::body`] registers one with the fused
+//! kernel's resampling stage (`plan.rs`).
 //!
 //! \[1\] D. P. Mitchell and A. N. Netravali, “Reconstruction filters in
 //! computer graphics,” *Comput. Graph. (Proc. SIGGRAPH)*, vol. 22, no. 4,
@@ -16,6 +17,7 @@
 //!
 //! \[3\] W3C, *WebGPU Shading Language*, sec. 15.7.4, “Floating point
 //! accuracy.” \[Online\]. Available: <https://www.w3.org/TR/WGSL/>
+use crate::shape::FilterBody;
 use cubecl::prelude::*;
 use std::f32::consts::PI;
 
@@ -28,8 +30,7 @@ pub const MITCHELL_NETRAVALI_SUPPORT: f32 = 2.0;
 /// Support radius of [`lanczos3`].
 pub const LANCZOS3_SUPPORT: f32 = 3.0;
 
-/// A filter by name, for parameters; kernels receive [`Filter::id`], the
-/// declaration index that [`weight`] dispatches on.
+/// A filter by name, for parameters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, crate::Choice)]
 pub enum Filter {
     #[default]
@@ -51,35 +52,48 @@ pub enum Filter {
 }
 
 impl Filter {
-    pub fn id(self) -> u32 {
-        self as u32
-    }
-    pub fn support(self) -> f32 {
+    /// The kernel as the fused resampling stage calls it.
+    pub fn body(self) -> &'static FilterBody {
         match self {
-            Self::Lanczos3 => LANCZOS3_SUPPORT,
-            Self::Mitchell | Self::CatmullRom => MITCHELL_NETRAVALI_SUPPORT,
-            Self::Triangle => TRIANGLE_SUPPORT,
-            Self::Box => BOX_SUPPORT,
+            Self::Lanczos3 => &LANCZOS3_BODY,
+            Self::Mitchell => &MITCHELL_BODY,
+            Self::CatmullRom => &CATMULL_ROM_BODY,
+            Self::Triangle => &TRIANGLE_BODY,
+            Self::Box => &BOX_BODY,
         }
     }
 }
 
-/// The weight of the filter `Filter::id` names. The id is uniform across a
-/// dispatch, so the branch does not diverge.
-#[cube]
-pub fn weight(filter: u32, x: f32) -> f32 {
-    if filter == 0u32 {
-        lanczos3(x)
-    } else if filter == 1u32 {
-        mitchell_netravali(x, 1.0f32 / 3.0f32, 1.0f32 / 3.0f32)
-    } else if filter == 2u32 {
-        mitchell_netravali(x, 0.0f32, 0.5f32)
-    } else if filter == 3u32 {
-        triangle(x)
-    } else {
-        box_filter(x)
-    }
-}
+static LANCZOS3_BODY: FilterBody = FilterBody {
+    name: "lanczos3",
+    support: LANCZOS3_SUPPORT,
+    interpolating: true,
+    expand: lanczos3::expand,
+};
+static MITCHELL_BODY: FilterBody = FilterBody {
+    name: "mitchell",
+    support: MITCHELL_NETRAVALI_SUPPORT,
+    interpolating: false,
+    expand: mitchell::expand,
+};
+static CATMULL_ROM_BODY: FilterBody = FilterBody {
+    name: "catmull_rom",
+    support: MITCHELL_NETRAVALI_SUPPORT,
+    interpolating: true,
+    expand: catmull_rom::expand,
+};
+static TRIANGLE_BODY: FilterBody = FilterBody {
+    name: "triangle",
+    support: TRIANGLE_SUPPORT,
+    interpolating: true,
+    expand: triangle::expand,
+};
+static BOX_BODY: FilterBody = FilterBody {
+    name: "box",
+    support: BOX_SUPPORT,
+    interpolating: true,
+    expand: box_filter::expand,
+};
 
 /// Box: one on `[−½, ½]`. Scaled by a minification footprint it is an area
 /// average; both ends are closed, so a sample exactly between two pixels
@@ -122,6 +136,18 @@ pub fn mitchell_netravali(x: f32, b: f32, c: f32) -> f32 {
         weight = u * u * ((b + 6.0f32 * c) * u - 6.0f32 * c);
     }
     weight / 6.0f32
+}
+
+/// Mitchell–Netravali with `B = C = 1/3`.
+#[cube]
+pub fn mitchell(x: f32) -> f32 {
+    mitchell_netravali(x, 1.0f32 / 3.0f32, 1.0f32 / 3.0f32)
+}
+
+/// Catmull–Rom: Mitchell–Netravali with `B = 0, C = 1/2`.
+#[cube]
+pub fn catmull_rom(x: f32) -> f32 {
+    mitchell_netravali(x, 0.0f32, 0.5f32)
 }
 
 /// Lanczos-3: `sinc(x) sinc(x / 3)` for `|x| < 3` \[2\]. It interpolates:
@@ -270,24 +296,29 @@ mod tests {
         }
     }
 
+    const FILTERS: [Filter; 5] =
+        [Filter::Lanczos3, Filter::Mitchell, Filter::CatmullRom, Filter::Triangle, Filter::Box];
+
+    /// The host evaluation of each filter's kernel, in [`FILTERS`] order.
+    fn weights(x: f32) -> [f32; 5] {
+        [lanczos3(x), mitchell(x), catmull_rom(x), triangle(x), box_filter(x)]
+    }
+
     #[test]
-    fn filters_dispatch_by_id_within_their_support() {
-        let filters =
-            [Filter::Lanczos3, Filter::Mitchell, Filter::CatmullRom, Filter::Triangle, Filter::Box];
+    fn bodies_declare_their_support_and_interpolation() {
         for x in distances() {
-            let expected = [
-                lanczos3(x),
-                mitchell_netravali(x, MITCHELL.0, MITCHELL.1),
-                mitchell_netravali(x, CATMULL_ROM.0, CATMULL_ROM.1),
-                triangle(x),
-                box_filter(x),
-            ];
-            for (filter, expected) in filters.into_iter().zip(expected) {
-                assert_eq!(weight(filter.id(), x), expected, "{filter:?}");
-                if x.abs() > filter.support() {
-                    assert_eq!(expected, 0.0, "{filter:?} at {x}");
+            for (filter, weight) in FILTERS.into_iter().zip(weights(x)) {
+                if x.abs() > filter.body().support {
+                    assert_eq!(weight, 0.0, "{filter:?} at {x}");
                 }
             }
+        }
+        assert_eq!(mitchell(0.5), mitchell_netravali(0.5, MITCHELL.0, MITCHELL.1));
+        assert_eq!(catmull_rom(0.5), mitchell_netravali(0.5, CATMULL_ROM.0, CATMULL_ROM.1));
+        for (filter, at_zero) in FILTERS.into_iter().zip(weights(0.0)) {
+            let at_integers = (1..=4).flat_map(|k| [k as f32, -(k as f32)]).map(weights);
+            let zeros = at_integers.map(|w| w[filter as usize]).all(|w| w == 0.0);
+            assert_eq!(filter.body().interpolating, at_zero == 1.0 && zeros, "{filter:?}");
         }
     }
 
@@ -304,9 +335,11 @@ mod tests {
     fn evaluate(x: &[f32], output: &mut [f32]) {
         let i = ABSOLUTE_POS;
         if i < x.len() {
-            for f in 0..5u32 {
-                output[i * 5 + f as usize] = weight(f, x[i]);
-            }
+            output[i * 5] = lanczos3(x[i]);
+            output[i * 5 + 1] = mitchell(x[i]);
+            output[i * 5 + 2] = catmull_rom(x[i]);
+            output[i * 5 + 3] = triangle(x[i]);
+            output[i * 5 + 4] = box_filter(x[i]);
         }
     }
 
@@ -323,8 +356,7 @@ mod tests {
         let bytes = client.read_one(output.handle.clone()).unwrap();
         let actual: &[f32] = bytemuck::cast_slice(&bytes);
         for (i, &x) in x.iter().enumerate() {
-            let expected = (0..5).map(|f| weight(f, x));
-            for (actual, expected) in actual[i * 5..i * 5 + 5].iter().zip(expected) {
+            for (actual, expected) in actual[i * 5..i * 5 + 5].iter().zip(weights(x)) {
                 assert!((actual - expected).abs() < 1e-6, "x = {x}: {actual} vs {expected}");
             }
         }

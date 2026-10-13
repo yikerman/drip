@@ -255,20 +255,6 @@
       }
     },
     {
-      "kind": "interpolate",
-      "parameters": null,
-      "ui": {
-        "external": [],
-        "name": "Interpolate",
-        "ui": {
-          "pos": [
-            2160.0,
-            720.0
-          ]
-        }
-      }
-    },
-    {
       "kind": "perspective-transform",
       "parameters": {
         "aspect": "corners",
@@ -297,7 +283,7 @@
       }
     },
     {
-      "kind": "sample",
+      "kind": "resample",
       "parameters": {
         "filter": "lanczos3",
         "size": {
@@ -308,7 +294,7 @@
       },
       "ui": {
         "external": [],
-        "name": "Sample",
+        "name": "Resample",
         "ui": {
           "pos": [
             2640.0,
@@ -451,7 +437,7 @@
     ],
     [
       {
-        "node": 16,
+        "node": 15,
         "port": "output"
       },
       {
@@ -471,7 +457,7 @@
     ],
     [
       {
-        "node": 16,
+        "node": 15,
         "port": "output"
       },
       {
@@ -481,7 +467,7 @@
     ],
     [
       {
-        "node": 16,
+        "node": 15,
         "port": "output"
       },
       {
@@ -491,7 +477,7 @@
     ],
     [
       {
-        "node": 16,
+        "node": 15,
         "port": "output"
       },
       {
@@ -501,7 +487,7 @@
     ],
     [
       {
-        "node": 16,
+        "node": 15,
         "port": "output"
       },
       {
@@ -526,17 +512,7 @@
       },
       {
         "node": 15,
-        "port": "field"
-      }
-    ],
-    [
-      {
-        "node": 15,
-        "port": "output"
-      },
-      {
-        "node": 16,
-        "port": "field"
+        "port": "image"
       }
     ]
   ],

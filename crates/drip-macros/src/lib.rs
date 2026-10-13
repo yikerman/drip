@@ -30,11 +30,14 @@ use documentation::documentation;
 /// contract; it loads its outputs once, when first evaluated.
 /// A map, `#[node(map = body, ...)]`, is
 /// `fn(&parameters, Point<In>, Read<Payload>..., Point<Out>) -> Result<[f32; N]>`
-/// without a context. The first `Point` is the mapped input and the second the
+/// without a context. The first `Point` is the input and the second the
 /// output. The function sees their descriptions and returns the `N` constants
-/// `body` reads. `body` is `#[cube] fn(px: Pixel, k: &[f32]) -> Pixel`. The
-/// output is a deferred image, and consecutive maps run as one kernel when a
-/// consumer needs samples. `Read` inputs arrive materialized.
+/// `body` reads. `body` is `#[cube] fn(px: Pixel, k: &[f32]) -> Pixel`. A warp,
+/// `#[node(warp, ...)]`, has the same ports and returns `Result<Warp>`, and a
+/// resample, `#[node(resample, ...)]`, returns `Result<&'static FilterBody>`.
+/// Their output is a deferred image, and the segment compiler runs warps, a
+/// resample and maps as one kernel when a consumer needs samples. `Read`
+/// inputs arrive materialized.
 #[proc_macro_attribute]
 pub fn node(args: TokenStream, item: TokenStream) -> TokenStream {
     node::expand(args.into(), parse_macro_input!(item as syn::ItemFn))

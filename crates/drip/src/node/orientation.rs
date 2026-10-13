@@ -3,7 +3,8 @@ use crate::{
     node::data::*,
     ports::*,
     registry::tag,
-    runtime::{GlobalContext, KernelContext, dispatch_dims},
+    runtime::GlobalContext,
+    shape::{Projective, Warp},
 };
 pub use compute::{Definition, Ports, add, definition};
 
@@ -84,66 +85,46 @@ fn orientation_contract(
 /// reflects across the other diagonal. Quarter turns and diagonal reflections
 /// exchange width and height. Samples and color interpretation are preserved,
 /// without resampling or clipping. Apply once after demosaic and color conversion.
-#[crate::node(id="orientation", name="Orientation", tags = [tag::GEOMETRY], contract=orientation_contract)]
+#[crate::node(id="orientation", name="Orientation", tags = [tag::GEOMETRY], contract=orientation_contract, warp)]
 pub fn compute(
-    ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Rgb>,
+    image: Point<'_, Rgb>,
     metadata: Option<Read<'_, CaptureMetadata>>,
-    output: Write<'_, Rgb>,
-) -> Result<()> {
+    _output: Point<'_, Rgb>,
+) -> Result<Warp> {
     let orientation =
         p.orientation.resolve(metadata.map(|m| m.data.host().map(|m| &**m)).transpose()?);
-    let (count, dim) = dispatch_dims(image.desc.extent.pixels());
-    kernel::orient::launch(
-        ctx.client()?,
-        count,
-        dim,
-        image.data.device(ctx)?.argument(),
-        output.device(ctx)?.argument(),
-        image.desc.extent.width as usize,
-        image.desc.extent.height as usize,
-        orientation as usize,
-    );
-    Ok(())
+    Ok(Warp::reindex(map(orientation, &image.desc.full)))
 }
 
-mod kernel {
-    use cubecl::prelude::*;
-
-    #[cube(launch)]
-    pub fn orient(
-        input: &[f32],
-        output: &mut [f32],
-        width: usize,
-        height: usize,
-        orientation: usize,
-    ) {
-        let i = ABSOLUTE_POS;
-        if i < width * height {
-            let mut x = i % width;
-            let mut y = i / width;
-            if orientation == 2 || orientation == 3 || orientation == 7 || orientation == 8 {
-                x = width - 1 - x;
-            }
-            if orientation == 3 || orientation == 4 || orientation == 6 || orientation == 7 {
-                y = height - 1 - y;
-            }
-            let mut target = y * width + x;
-            if orientation >= 5 {
-                target = x * height + y;
-            }
-            for c in 0..3 {
-                output[target * 3 + c] = input[i * 3 + c];
-            }
-        }
+/// The output plane to the input plane of `full` size for EXIF
+/// `orientation`. Orientations 2, 3, 7 and 8 mirror the input's x, and 3, 4,
+/// 6 and 7 its y. From 5 on the output's axes are the input's swapped.
+fn map(orientation: u8, full: &Extent) -> Projective {
+    let [w, h] = [f64::from(full.width), f64::from(full.height)];
+    let mirror = |flip: bool, extent: f64| if flip { (-1.0, extent) } else { (1.0, 0.0) };
+    let (sx, tx) = mirror(matches!(orientation, 2 | 3 | 7 | 8), w);
+    let (sy, ty) = mirror(matches!(orientation, 3 | 4 | 6 | 7), h);
+    if orientation >= 5 {
+        [[0.0, sx, tx], [sy, 0.0, ty], [0.0, 0.0, 1.0]]
+    } else {
+        [[sx, 0.0, tx], [0.0, sy, ty], [0.0, 0.0, 1.0]]
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{image::Raster, runtime::RuntimeContext};
+    use crate::{
+        eval::Evaluator,
+        graph::Dag,
+        node::{
+            filter::Filter,
+            resample::{self, Factor, Size},
+            source,
+        },
+        runtime::RuntimeContext,
+    };
     use std::sync::Arc;
 
     const EXPLICIT: [Orientation; 8] = [
@@ -191,10 +172,11 @@ mod tests {
     }
 
     fn permutations(runtime: RuntimeContext) {
+        let evaluator = &Evaluator::new(runtime);
         // Row-major source: [0 1 2; 3 4 5]. Explicit destination orders make
         // clockwise/counterclockwise and both diagonal reflections distinct.
         fixture(
-            &runtime,
+            evaluator,
             3,
             2,
             [
@@ -209,7 +191,7 @@ mod tests {
             ],
         );
         fixture(
-            &runtime,
+            evaluator,
             1,
             3,
             [
@@ -224,7 +206,7 @@ mod tests {
             ],
         );
         fixture(
-            &runtime,
+            evaluator,
             3,
             1,
             [
@@ -238,42 +220,67 @@ mod tests {
                 &[2, 1, 0],
             ],
         );
-        fixture(&runtime, 1, 1, [&[0]; 8]);
+        fixture(evaluator, 1, 1, [&[0]; 8]);
     }
 
-    fn fixture(runtime: &RuntimeContext, width: u32, height: u32, expected: [&[usize]; 8]) {
-        let image = RgbDesc::new(Extent { width, height }, image_desc().coordinates);
+    /// Every orientation through the graph, from metadata and explicit, alone
+    /// and followed by a Resample at factor one with Lanczos-3 and with Box.
+    /// Interpolating filters reproduce a reindex bit for bit. A source whose
+    /// `full` exceeds its extent, as at preview scale, composes through
+    /// inexact f64 scales and must still reindex exactly.
+    fn fixture(evaluator: &Evaluator, width: u32, height: u32, expected: [&[usize]; 8]) {
+        let extent = Extent { width, height };
+        let preview = Extent { width: 2 * width + 1, height: 2 * height + 1 };
+        let resample =
+            |filter| resample::Settings { filter, size: Size::Factor(Factor { factor: 1.0 }) };
+        let variants = [
+            (extent.clone(), None),
+            (preview, None),
+            (extent.clone(), Some(resample(Filter::Lanczos3))),
+            (extent.clone(), Some(resample(Filter::Box))),
+        ];
         let samples: Vec<[f32; 3]> =
-            (0..image.extent.pixels()).map(|i| [i as f32, -(i as f32), 8.0]).collect();
-        let input = Raster::<Rgb>::from_host(image.clone(), samples.clone().into()).unwrap();
-        let ctx = KernelContext { global: &GlobalContext::default(), runtime };
-        for (index, orientation) in EXPLICIT.into_iter().enumerate() {
-            // Exercise both metadata resolution and replacement of a conflicting
-            // metadata orientation, using the same exact pixel expectations.
-            for mode in 0..if index == 0 { 3 } else { 2 } {
-                let p = Settings {
-                    orientation: if mode == 1 { orientation } else { Orientation::FromMetadata },
-                };
-                let metadata = metadata(if mode == 0 { index as u8 + 1 } else { 1 });
-                let metadata = (mode != 2).then_some(&metadata);
-                let (output_desc,) =
-                    orientation_contract(ctx.global, &p, &image, metadata).unwrap();
-                let metadata = metadata.map(|m| Raster::from_host(m.clone(), m.clone()).unwrap());
-                let mut output = OutputSlot::<Rgb>::new(output_desc);
-                compute(
-                    &ctx,
-                    &p,
-                    Read::new(&input),
-                    metadata.as_ref().map(Read::new),
-                    output.write(),
-                )
-                .unwrap();
-                let output = output.finish().unwrap();
-                let actual = output.downcast::<Rgb>().unwrap().host().unwrap();
-                assert_eq!(actual.len(), expected[index].len());
-                for (actual, &source) in actual.iter().zip(expected[index]) {
-                    for (actual, expected) in actual.iter().zip(samples[source]) {
-                        assert_eq!(actual.to_bits(), expected.to_bits(), "{orientation:?}");
+            (0..extent.pixels()).map(|i| [i as f32, -(i as f32), 8.0]).collect();
+        for (full, resample) in variants {
+            let image = RgbDesc { extent: extent.clone(), full, ..image_desc() };
+            for (index, orientation) in EXPLICIT.into_iter().enumerate() {
+                // Exercise both metadata resolution and replacement of a conflicting
+                // metadata orientation, using the same exact pixel expectations.
+                for mode in 0..if index == 0 { 3 } else { 2 } {
+                    let p = Settings {
+                        orientation: if mode == 1 {
+                            orientation
+                        } else {
+                            Orientation::FromMetadata
+                        },
+                    };
+                    let metadata = metadata(if mode == 0 { index as u8 + 1 } else { 1 });
+                    let mut dag = Dag::new();
+                    let input = source::<Rgb>(&mut dag, image.clone(), samples.clone()).unwrap();
+                    let node = add(&mut dag, p).unwrap();
+                    dag.connect(input, node.image).unwrap();
+                    if mode != 2 {
+                        let metadata =
+                            source::<CaptureMetadata>(&mut dag, metadata.clone(), metadata)
+                                .unwrap();
+                        dag.connect(metadata, node.metadata).unwrap();
+                    }
+                    let mut output = node.output;
+                    if let Some(settings) = resample.clone() {
+                        let resample = resample::add(&mut dag, settings).unwrap();
+                        dag.connect(output, resample.image).unwrap();
+                        output = resample.output;
+                    }
+                    let result =
+                        evaluator.evaluate::<Rgb>(&dag, &Default::default(), output).unwrap();
+                    // The identity copies nothing. Every other orientation is one launch.
+                    assert_eq!(result.statistics.fused, usize::from(index != 0), "{orientation:?}");
+                    let actual = result.data.host().unwrap();
+                    assert_eq!(actual.len(), expected[index].len());
+                    for (actual, &source) in actual.iter().zip(expected[index]) {
+                        for (actual, expected) in actual.iter().zip(samples[source]) {
+                            assert_eq!(actual.to_bits(), expected.to_bits(), "{orientation:?}");
+                        }
                     }
                 }
             }

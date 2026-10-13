@@ -568,6 +568,38 @@ fn maps_return_constants_for_a_registered_body() {
 }
 
 #[test]
+fn warps_and_resamples_publish_what_their_host_function_returns() {
+    for (options, result, shape, publish) in [
+        (
+            quote!(id = "x", contract = c, warp),
+            quote!(Warp),
+            quote!(::drip::shape::Shape::Warp),
+            "image . warp :: < Rgb > (& warp , outputs [0] . clone ())",
+        ),
+        (
+            quote!(id = "x", contract = c, resample),
+            quote!(&'static FilterBody),
+            quote!(::drip::shape::Shape::Resample),
+            "image . resample :: < Rgb > (filter , outputs [0] . clone ())",
+        ),
+    ] {
+        let function = syn::parse2(quote! {
+            fn x(p: &P, image: Point<'_, Rgb>, metadata: Option<Read<'_, Facts>>, _output: Point<'_, Rgb>) -> Result<#result> {
+                unimplemented!()
+            }
+        })
+        .unwrap();
+        let module = generated_module(expand(options, function).unwrap());
+        let kind = kind_field(&module, "shape");
+        assert_eq!(quote!(#kind).to_string(), shape.to_string());
+        let run = generated_method(&module, "run");
+        let run = quote!(#run).to_string();
+        assert_eq!(run.matches("materialize").count(), 1);
+        assert!(run.contains(publish), "{run}");
+    }
+}
+
+#[test]
 fn rejects_malformed_maps() {
     for (options, declaration, message) in [
         (
@@ -575,35 +607,35 @@ fn rejects_malformed_maps() {
             quote!(
                 fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "a map names its #[cube] body: map = body",
+            "Point ports declare a map = body, warp or resample",
         ),
         (
             quote!(id = "x", contract = c, map = body),
             quote!(
                 fn x(c: &C, p: &P, a: Read<A>, b: Write<A>) {}
             ),
-            "a map declares its mapped input and output as Point ports",
+            "a map declares its input and output as Point ports",
         ),
         (
             quote!(id = "x", contract = c, map = body),
             quote!(
                 fn x(p: &P, a: Point<A>, b: Write<A>) -> Result<[f32; 1]> {}
             ),
-            "a map's output is its second Point, computed by the body",
+            "a map, warp or resample has its second Point as output",
         ),
         (
             quote!(id = "x", contract = c, map = body),
             quote!(
                 fn x(p: &P, a: Point<A>, b: Point<A>, d: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "a map has one mapped input and one output, both Point",
+            "a map, warp or resample has one input and one output Point",
         ),
         (
             quote!(id = "x", contract = c, map = body),
             quote!(
                 fn x(p: &P, a: Option<Point<A>>, b: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "a map has one mapped input and one output, both Point",
+            "a map, warp or resample has one input and one output Point",
         ),
         (
             quote!(id = "x", contract = c, map = body),
@@ -611,6 +643,34 @@ fn rejects_malformed_maps() {
                 fn x(p: &P, a: Point<A>, b: Point<A>) {}
             ),
             "a map returns Result<[f32; N]>, the constants of its body",
+        ),
+        (
+            quote!(id = "x", contract = c, warp),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Point<A>) {}
+            ),
+            "a warp returns Result<Warp>",
+        ),
+        (
+            quote!(id = "x", contract = c, resample),
+            quote!(
+                fn x(c: &C, p: &P, a: Read<A>, b: Write<A>) {}
+            ),
+            "a resample declares its input and output as Point ports",
+        ),
+        (
+            quote!(id = "x", contract = c, map = body, warp),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
+            ),
+            "a node is at most one of map, warp and resample",
+        ),
+        (
+            quote!(id = "x", contract = c, warp, warp),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<Warp> {}
+            ),
+            "expected a single `warp` flag",
         ),
         (
             quote!(id = "x", contract = c, map = "body"),

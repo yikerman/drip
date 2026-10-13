@@ -1,10 +1,18 @@
-use super::{Rect, RgbField, RgbFieldDesc, Stage};
+//! Perspective Transform: crop, rotation and keystone as one projective warp
+//! defined by four corners and an output aspect. The host functions here
+//! (the corner solver, Fit and Keep inside) also serve frontends that edit
+//! the corners. Design: `agent-docs/FIELD.md`, "Perspective Transform".
 use crate::{
     Error, Result,
-    node::color::{self, Mat3},
+    node::{
+        color::{self, Mat3},
+        data::*,
+        filter::Filter,
+    },
     ports::*,
     registry::tag,
-    runtime::{GlobalContext, KernelContext},
+    runtime::GlobalContext,
+    shape::Warp,
 };
 pub use transform::{Definition, Ports, add, definition};
 
@@ -26,8 +34,8 @@ pub enum Aspect {
     Ratio(Ratio),
 }
 
-/// The output's corners on the input, normalized to the input field's domain
-/// (0 to 1 across its width and height), and the output aspect.
+/// The output's corners on the input, normalized to the input's full-detail
+/// extent (0 to 1 across its width and height), and the output aspect.
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 #[validate(validate)]
@@ -124,22 +132,27 @@ pub fn square_to_quad(q: [[f64; 2]; 4]) -> Option<Mat3> {
     ])
 }
 
-/// The output's domain and its map into the input plane.
+/// The output rectangle `[0, size]` and its map into the input plane, both
+/// in full-detail pixels.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
     pub map: Mat3,
-    pub domain: Rect,
+    pub size: [f64; 2],
 }
 
-/// The quad in the input plane of a field whose domain is `input`.
-pub fn plane_quad(p: &Settings, input: &Rect) -> [[f64; 2]; 4] {
-    p.quad()
-        .map(|[x, y]| [input.origin[0] + x * input.size[0], input.origin[1] + y * input.size[1]])
+/// The input plane's size: the image's full-detail extent.
+pub fn plane(image: &RgbDesc) -> [f64; 2] {
+    [f64::from(image.full.width), f64::from(image.full.height)]
+}
+
+/// The quad in the plane of an input of `size`.
+pub fn plane_quad(p: &Settings, [w, h]: [f64; 2]) -> [[f64; 2]; 4] {
+    p.quad().map(|[x, y]| [x * w, y * h])
 }
 
 /// The output is `aspect × 1` scaled so its height is the quad's mean side
 /// length: corners of a rectangular quad keep their pixel density.
-pub fn frame(p: &Settings, input: &Rect) -> Result<Frame> {
+pub fn frame(p: &Settings, input: [f64; 2]) -> Result<Frame> {
     let q = plane_quad(p, input);
     let length = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).hypot(a[1] - b[1]);
     let height = (length(q[0], q[3]) + length(q[1], q[2])) / 2.0;
@@ -150,16 +163,21 @@ pub fn frame(p: &Settings, input: &Rect) -> Result<Frame> {
     let square = square_to_quad(q)
         .ok_or_else(|| Error::Contract("three corners on one line define no transform".into()))?;
     let unit = [[1.0 / width, 0.0, 0.0], [0.0, 1.0 / height, 0.0], [0.0, 0.0, 1.0]];
-    Ok(Frame {
-        map: color::mul(&square, &unit),
-        domain: Rect { origin: [0.0, 0.0], size: [width, height] },
-    })
+    Ok(Frame { map: color::mul(&square, &unit), size: [width, height] })
 }
 
-fn contract(_: &GlobalContext, p: &Settings, field: &RgbFieldDesc) -> Result<(RgbFieldDesc,)> {
-    let Frame { map, domain } = frame(p, &field.domain)?;
-    let maps = field.maps.each_ref().map(|chain| chain.after(Stage::Projective(map)));
-    Ok((RgbFieldDesc { domain, maps, ..field.clone() },))
+/// The full-detail output extent: the frame rounded to whole pixels.
+fn output_extent(frame: &Frame) -> Result<Extent> {
+    let side = |v: f64| v.round().clamp(1.0, f64::from(u32::MAX)) as u32;
+    let full = Extent { width: side(frame.size[0]), height: side(frame.size[1]) };
+    full.validate()?;
+    Ok(full)
+}
+
+fn contract(global: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(RgbDesc,)> {
+    let full = output_extent(&frame(p, plane(image))?)?;
+    let extent = full.reduced(global.scale);
+    Ok((RgbDesc { extent, full, coordinates: image.coordinates.clone() },))
 }
 
 /// Crop, rotate and correct perspective in one map: the output is the
@@ -171,17 +189,18 @@ fn contract(_: &GlobalContext, p: &Settings, field: &RgbFieldDesc) -> Result<(Rg
 /// ratio for a photographed rectangle whose true proportions differ. Three
 /// corners on a line are rejected. Regions outside the input, and anything
 /// beyond the horizon a crossed or concave quad puts inside the frame, are
-/// black. Nothing is resampled here; a later Sample filters once.
-#[crate::node(id = "perspective-transform", name = "Perspective Transform", tags = [tag::GEOMETRY], contract = contract, references = [
+/// black. The image is resampled once with Lanczos-3, together with the
+/// warps next to it. A Resample after it chooses the filter and size instead.
+#[crate::node(id = "perspective-transform", name = "Perspective Transform", tags = [tag::GEOMETRY], contract = contract, warp, references = [
     ("[1] Heckbert, Fundamentals of texture mapping and image warping", "https://www2.eecs.berkeley.edu/Pubs/TechRpts/1989/5504.html"),
 ])]
-pub fn transform(
-    _: &KernelContext<'_>,
-    _: &Settings,
-    field: Read<'_, RgbField>,
-    output: Forward<'_, RgbField>,
-) -> Result<()> {
-    output.set(field.data)
+pub fn transform(p: &Settings, image: Point<'_, Rgb>, output: Point<'_, Rgb>) -> Result<Warp> {
+    let frame = frame(p, plane(image.desc))?;
+    // The output plane spans the rounded extent, so scale it onto the frame.
+    let full = &output.desc.full;
+    let [sx, sy] = [frame.size[0] / f64::from(full.width), frame.size[1] / f64::from(full.height)];
+    let map = color::mul(&frame.map, &[[sx, 0.0, 0.0], [0.0, sy, 0.0], [0.0, 0.0, 1.0]]);
+    Ok(Warp::filtered([map; 3], Filter::Lanczos3.body()))
 }
 
 /// What Fit keeps while it enlarges the frame.
@@ -194,15 +213,14 @@ pub enum Fit {
 }
 
 /// The same projective map with the largest output rectangle inside the
-/// input domain, or `None` when the input's image is unbounded (the map's
-/// vanishing line crosses it). The aspect is returned as a ratio, since
-/// corners of the new frame no longer average to it.
-pub fn fit(p: &Settings, input: &Rect, mode: Fit) -> Option<Settings> {
-    let Frame { map, domain } = frame(p, input).ok()?;
+/// input plane of `input` size, or `None` when the input's image is unbounded
+/// (the map's vanishing line crosses it). The aspect is returned as a ratio,
+/// since corners of the new frame no longer average to it.
+pub fn fit(p: &Settings, input: [f64; 2], mode: Fit) -> Option<Settings> {
+    let Frame { map, size } = frame(p, input).ok()?;
     let inverse = color::inverse(&map);
-    let [ox, oy] = input.origin;
-    let [w, h] = input.size;
-    let corners = [[ox, oy], [ox + w, oy], [ox + w, oy + h], [ox, oy + h]];
+    let [w, h] = input;
+    let corners = [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]];
     let mut region = [[0.0; 2]; 4];
     for (corner, point) in corners.iter().zip(&mut region) {
         let [x, y, z] = color::apply(&inverse, [corner[0], corner[1], 1.0]);
@@ -212,7 +230,7 @@ pub fn fit(p: &Settings, input: &Rect, mode: Fit) -> Option<Settings> {
         }
         *point = [x / z, y / z];
     }
-    let current = domain.size[0] / domain.size[1];
+    let current = size[0] / size[1];
     let (aspect, [cx, cy, s]) = match mode {
         Fit::OriginalFormat => (current, inscribed(&region, current)?),
         Fit::LargestArea => largest_area(&region)?,
@@ -221,7 +239,7 @@ pub fn fit(p: &Settings, input: &Rect, mode: Fit) -> Option<Settings> {
         .map(|[dx, dy]| [cx + dx * s * aspect / 2.0, cy + dy * s / 2.0]);
     let quad = rect.map(|[x, y]| {
         let [x, y, z] = color::apply(&map, [x, y, 1.0]);
-        [(x / z - ox) / w, (y / z - oy) / h]
+        [x / z / w, y / z / h]
     });
     Some(p.with_quad(quad, Aspect::Ratio(Ratio { ratio: aspect })))
 }
@@ -305,7 +323,7 @@ fn largest_area(region: &[[f64; 2]; 4]) -> Option<(f64, [f64; 3])> {
 }
 
 /// Whether the output lies inside the input: a convex quad with every corner
-/// within the input domain, allowing for rounding of fitted corners.
+/// within the input plane, allowing for rounding of fitted corners.
 pub fn inside(p: &Settings) -> bool {
     let q = p.quad();
     let cross = |i: usize| {
@@ -321,8 +339,8 @@ pub fn inside(p: &Settings) -> bool {
 mod tests {
     use super::*;
 
-    fn input() -> Rect {
-        Rect { origin: [0.0, 0.0], size: [400.0, 300.0] }
+    fn input() -> [f64; 2] {
+        [400.0, 300.0]
     }
 
     fn project(m: &Mat3, [x, y]: [f64; 2]) -> [f64; 2] {
@@ -336,8 +354,8 @@ mod tests {
 
     #[test]
     fn default_corners_are_the_identity() {
-        let Frame { map, domain } = frame(&Settings::default(), &input()).unwrap();
-        assert_eq!(domain, input());
+        let Frame { map, size } = frame(&Settings::default(), input()).unwrap();
+        assert_eq!(size, input());
         for (i, row) in map.iter().enumerate() {
             for (j, v) in row.iter().enumerate() {
                 assert!((v - f64::from(u8::from(i == j))).abs() < 1e-15, "{map:?}");
@@ -349,8 +367,8 @@ mod tests {
     fn an_inset_rectangle_crops_without_scaling() {
         let p = Settings::default()
             .with_quad([[0.25, 0.0], [0.75, 0.0], [0.75, 0.5], [0.25, 0.5]], Aspect::Corners);
-        let Frame { map, domain } = frame(&p, &input()).unwrap();
-        assert_eq!(domain.size, [200.0, 150.0]);
+        let Frame { map, size } = frame(&p, input()).unwrap();
+        assert_eq!(size, [200.0, 150.0]);
         assert_eq!(map, [[1.0, 0.0, 100.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
     }
 
@@ -359,9 +377,9 @@ mod tests {
         let quad = [[0.1, 0.05], [0.95, 0.2], [0.8, 0.9], [-0.1, 0.7]];
         for aspect in [Aspect::Corners, Aspect::Ratio(Ratio { ratio: 0.8 })] {
             let p = Settings::default().with_quad(quad, aspect);
-            let Frame { map, domain } = frame(&p, &input()).unwrap();
-            let [w, h] = domain.size;
-            let expected = plane_quad(&p, &input());
+            let Frame { map, size } = frame(&p, input()).unwrap();
+            let [w, h] = size;
+            let expected = plane_quad(&p, input());
             for (corner, expected) in [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]].iter().zip(expected)
             {
                 assert!(close(project(&map, *corner), expected));
@@ -380,8 +398,8 @@ mod tests {
             [x / 400.0, y / 300.0]
         });
         let p = Settings::default().with_quad(corners, Aspect::Ratio(Ratio { ratio: w / h }));
-        let Frame { map: recovered, domain } = frame(&p, &input()).unwrap();
-        let scale = domain.size[1] / h;
+        let Frame { map: recovered, size } = frame(&p, input()).unwrap();
+        let scale = size[1] / h;
         for (x, y) in [(0.0, 0.0), (w, 0.0), (37.0, 91.0), (w, h)] {
             assert!(close(project(&recovered, [x * scale, y * scale]), project(&map, [x, y])));
         }
@@ -392,7 +410,7 @@ mod tests {
         let p = Settings::default()
             .with_quad([[0.0, 0.0], [0.5, 0.5], [1.0, 1.0], [0.0, 1.0]], Aspect::Corners);
         assert!(validate(&p).is_err());
-        assert!(frame(&p, &input()).is_err());
+        assert!(frame(&p, input()).is_err());
         assert!(validate(&Settings::default()).is_ok());
         // Crossed quads are valid maps.
         let crossed = Settings::default()
@@ -415,13 +433,13 @@ mod tests {
     fn fit_keeps_the_map_and_touches_the_input() {
         let p = rotated(0.15);
         assert!(!inside(&p));
-        let before = frame(&p, &input()).unwrap();
+        let before = frame(&p, input()).unwrap();
         for mode in [Fit::OriginalFormat, Fit::LargestArea] {
-            let fitted = fit(&p, &input(), mode).unwrap();
+            let fitted = fit(&p, input(), mode).unwrap();
             assert!(inside(&fitted), "{mode:?}: {:?}", fitted.quad());
-            let after = frame(&fitted, &input()).unwrap();
+            let after = frame(&fitted, input()).unwrap();
             if mode == Fit::OriginalFormat {
-                let ratio = |f: &Frame| f.domain.size[0] / f.domain.size[1];
+                let ratio = |f: &Frame| f.size[0] / f.size[1];
                 assert!((ratio(&after) - ratio(&before)).abs() < 1e-9);
             }
             // The same rotation: directions in the output keep their angle.
@@ -435,10 +453,10 @@ mod tests {
             let touching = q.iter().flatten().any(|v| v.abs() < 1e-7 || (v - 1.0).abs() < 1e-7);
             assert!(touching, "{mode:?}: {q:?}");
         }
-        let original = fit(&p, &input(), Fit::OriginalFormat).unwrap();
-        let largest = fit(&p, &input(), Fit::LargestArea).unwrap();
+        let original = fit(&p, input(), Fit::OriginalFormat).unwrap();
+        let largest = fit(&p, input(), Fit::LargestArea).unwrap();
         let area = |p: &Settings| {
-            let size = frame(p, &input()).unwrap().domain.size;
+            let size = frame(p, input()).unwrap().size;
             size[0] * size[1]
         };
         assert!(area(&largest) >= area(&original) * (1.0 - 1e-9));
@@ -448,7 +466,7 @@ mod tests {
     fn fit_of_an_inside_rectangle_fills_the_input() {
         let p = Settings::default()
             .with_quad([[0.2, 0.2], [0.6, 0.2], [0.6, 0.5], [0.2, 0.5]], Aspect::Corners);
-        let fitted = fit(&p, &input(), Fit::LargestArea).unwrap();
+        let fitted = fit(&p, input(), Fit::LargestArea).unwrap();
         for (a, b) in fitted.quad().iter().zip([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]) {
             assert!(close(*a, b), "{:?}", fitted.quad());
         }
@@ -462,6 +480,6 @@ mod tests {
             [[0.45, 0.5], [0.55, 0.5], [1.0, 0.6], [0.0, 0.6]],
             Aspect::Ratio(Ratio { ratio: 1.0 }),
         );
-        assert!(fit(&p, &input(), Fit::OriginalFormat).is_none());
+        assert!(fit(&p, input(), Fit::OriginalFormat).is_none());
     }
 }

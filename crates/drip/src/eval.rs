@@ -1,9 +1,9 @@
 //! Evaluate the requested dependency subgraph. Values live for one run, in
 //! the run's `Store`.
 //!
-//! Nodes run in graph order. A map node publishes a deferred image. A kernel
-//! node, the consumers of `evaluate_inputs` and the target of `evaluate`
-//! materialize what they receive, so each chain of maps runs as one fused
+//! Nodes run in graph order. Map, warp and resample nodes publish deferred
+//! images. A kernel node, the consumers of `evaluate_inputs` and the target of
+//! `evaluate` materialize what they receive, so each segment runs as one fused
 //! kernel at its first consumer that needs samples.
 use crate::{
     Error, Result,
@@ -40,7 +40,9 @@ pub struct Statistics {
     pub uploads: usize,
     /// Rasters copied from device to host.
     pub downloads: usize,
-    /// Fused map kernels launched, one per materialized deferred image.
+    /// Fused kernels launched, one per deferred image materialized, including
+    /// the images a plan cuts at. A plan that neither moves nor maps samples
+    /// launches none.
     pub fused: usize,
 }
 /// The target output's raster, where its node produced it. A deferred target

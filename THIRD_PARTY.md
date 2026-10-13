@@ -312,10 +312,11 @@ at the support edge, and `sin(πx)` uses range reduction and a Taylor series
 because WGSL bounds `sin` only on `[−π, π]` [25]. Tests compare both against
 f64 evaluations of the original formulas.
 
-`node/field/sample.rs` resamples after Heckbert [26]: inverse mapping, one
-reconstruction/prefilter kernel scaled by the map's local derivative.
-Original implementation; it scales the filter per source axis by the length
-of each Jacobian row instead of fitting Heckbert's elliptical (EWA) footprint.
+The resampling stage of the fused kernel in `plan.rs` follows Heckbert [26]:
+inverse mapping, one reconstruction/prefilter kernel scaled by the map's
+local derivative. Original implementation; it scales the filter per source
+axis by the length of each Jacobian row instead of fitting Heckbert's
+elliptical (EWA) footprint.
 
 [23] D. P. Mitchell and A. N. Netravali, “Reconstruction filters in computer
 graphics,” *Comput. Graph. (Proc. SIGGRAPH)*, vol. 22, no. 4, pp. 221–228,

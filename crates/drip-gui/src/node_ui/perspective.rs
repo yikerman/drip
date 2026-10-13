@@ -1,9 +1,9 @@
 //! Perspective Transform's editing view (agent-docs/FIELD.md, "Editing
-//! view"). Preparation samples the transform's input twice with drip's
-//! Sample kernel: as it is, for placing corners, and through the current map
-//! over the input's whole image, for framing. Handles are drawn and edited
-//! through the map the shown image was sampled with, so they stay on its
-//! pixels while a newer evaluation is pending.
+//! view"). Preparation warps the transform's input twice through the
+//! library's resampling: as it is, for placing corners, and through the
+//! current map over the input's whole image, for framing. Handles are drawn
+//! and edited through the map the shown image was warped with, so they stay
+//! on its pixels while a newer evaluation is pending.
 
 use super::{ControlCx, GuiNode, Prepare, data::HostImage, data::PrepareContext, image_view};
 use crate::editing::NodeCx;
@@ -15,15 +15,12 @@ use crate::theme::{self, Tip};
 use drip::{
     node::{
         color::{self, Mat3},
-        data::{Extent, Raster, Rgb, RgbDesc},
-        field::{
-            Rect as Plane, RgbField, RgbFieldDesc, Stage,
-            perspective::{self, Aspect, Fit, Frame, Ratio, Settings},
-            sample,
-        },
+        data::{Extent, Rgb, RgbDesc},
         filter::Filter,
+        perspective::{self, Aspect, Fit, Frame, Ratio, Settings},
     },
     ports::Read,
+    shape::Warp,
 };
 use egui::{Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, Ui, pos2, vec2};
 use std::sync::Arc;
@@ -32,11 +29,19 @@ use std::sync::Arc;
 const MAX_SIDE: u32 = 4096;
 /// Pointer distance, in points, within which a handle is grabbed.
 const GRAB: f32 = 10.0;
+const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 impl GuiNode for perspective::Definition {
     type Presentation = Prepared;
     const PREPARE: Option<Prepare<Self>> =
-        Some(|node, inputs, ctx| prepare(&node.parameters, &inputs.field, ctx));
+        Some(|node, inputs, ctx| prepare(&node.parameters, &inputs.image, ctx));
+}
+
+/// An axis-aligned rectangle in a plane, in full-detail pixels.
+#[derive(Clone, Debug, PartialEq)]
+struct Plane {
+    origin: [f64; 2],
+    size: [f64; 2],
 }
 
 pub struct Prepared {
@@ -48,44 +53,42 @@ pub struct Prepared {
     output: Plane,
 }
 
-fn prepare(
-    p: &Settings,
-    field: &Read<'_, RgbField>,
-    ctx: &PrepareContext,
-) -> drip::Result<Prepared> {
+fn prepare(p: &Settings, image: &Read<'_, Rgb>, ctx: &PrepareContext) -> drip::Result<Prepared> {
     let kernels = ctx.kernels();
-    let samples = field.data.device(&kernels)?;
-    let render = |desc: &RgbFieldDesc| -> drip::Result<HostImage> {
-        let [w, h] = desc.domain.size.map(|v| v.round().clamp(1.0, f64::from(u32::MAX)) as u32);
+    let input = drip::image::Image::from(image.data.clone());
+    // The area `plane` of a plane that `map` takes into the input, warped
+    // with Lanczos-3 onto at most `MAX_SIDE` samples a side.
+    let render = |map: &Mat3, plane: &Plane| -> drip::Result<HostImage> {
+        let [w, h] = plane.size.map(|v| v.round().clamp(1.0, f64::from(u32::MAX)) as u32);
         let divisor = ctx.global.scale.max(w.max(h).div_ceil(MAX_SIDE));
-        let extent = Extent { width: w.div_ceil(divisor), height: h.div_ceil(divisor) };
-        let desc_out = RgbDesc {
-            extent: extent.clone(),
-            full: Extent { width: w, height: h },
-            coordinates: desc.source.coordinates.clone(),
-        };
-        let output = kernels.device_buffer::<Rgb>(&desc_out)?;
-        sample::render(&kernels, desc, samples, Filter::Lanczos3, &extent, &output)?;
-        let pixels = Raster::from_device(desc_out, output, &kernels)?.host()?.clone();
+        let full = Extent { width: w, height: h };
+        let extent = full.reduced(divisor);
+        let coordinates = image.desc.coordinates.clone();
+        let desc = RgbDesc { extent: extent.clone(), full, coordinates };
+        // The warp's output plane spans `full`, so place it over `plane` first.
+        let [sx, sy] = [plane.size[0] / f64::from(w), plane.size[1] / f64::from(h)];
+        let place = [[sx, 0.0, plane.origin[0]], [0.0, sy, plane.origin[1]], [0.0, 0.0, 1.0]];
+        let warp = Warp::filtered([color::mul(map, &place); 3], Filter::Lanczos3.body());
+        let warped = input.warp::<Rgb>(&warp, Arc::new(desc))?.raster::<Rgb>(&kernels)?;
         Ok(HostImage {
             width: extent.width as usize,
             height: extent.height as usize,
             requested_scale: ctx.global.scale,
-            color_space: desc.source.coordinates.to_string(),
-            pixels,
+            color_space: image.desc.coordinates.to_string(),
+            pixels: warped.host()?.clone(),
         })
     };
-    let Frame { map, domain } = perspective::frame(p, &field.desc.domain)?;
-    let view = view_bounds(&map, &domain, &field.desc.domain);
-    let maps = field.desc.maps.each_ref().map(|chain| chain.after(Stage::Projective(map)));
-    let framed = RgbFieldDesc { domain: view.clone(), maps, ..field.desc.clone() };
+    let input_plane = Plane { origin: [0.0, 0.0], size: perspective::plane(image.desc) };
+    let Frame { map, size } = perspective::frame(p, input_plane.size)?;
+    let output = Plane { origin: [0.0, 0.0], size };
+    let view = view_bounds(&map, &output, &input_plane);
     Ok(Prepared {
-        source: render(field.desc)?,
-        input: field.desc.domain.clone(),
-        framed: render(&framed)?,
+        source: render(&IDENTITY, &input_plane)?,
+        framed: render(&map, &view)?,
+        input: input_plane,
         view,
         map,
-        output: domain,
+        output,
     })
 }
 
@@ -246,7 +249,7 @@ impl Drawable for TransformView {
                 (Fit::LargestArea, "Fit largest", "Largest frame of any aspect"),
             ] {
                 if ui.button(label).tip(tip).clicked() {
-                    match perspective::fit(&current, &self.input, mode) {
+                    match perspective::fit(&current, self.input.size, mode) {
                         Some(fitted) => node.set(&fitted),
                         None => state.unbounded = true,
                     }
@@ -292,7 +295,7 @@ impl TransformView {
     /// `None` while the shown image predates a perspective edit.
     fn frame_of(&self, p: &Settings) -> Option<Box> {
         let inverse = color::inverse(&self.map);
-        let quad = perspective::plane_quad(p, &self.input);
+        let quad = perspective::plane_quad(p, self.input.size);
         let mut points = [[0.0; 2]; 4];
         for (q, point) in quad.iter().zip(&mut points) {
             *point = project(&inverse, *q)?;
@@ -417,7 +420,7 @@ impl TransformView {
         current: &Settings,
         state: &mut State,
     ) -> Option<Settings> {
-        let quad = perspective::plane_quad(current, &self.input);
+        let quad = perspective::plane_quad(current, self.input.size);
         let screen = quad.map(|p| placement.to_screen(p));
         overlay(painter, shown.area, &screen, convex(&screen));
         for corner in screen {

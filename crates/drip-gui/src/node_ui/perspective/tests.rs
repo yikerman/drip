@@ -13,16 +13,14 @@ fn pixels(width: u32, height: u32) -> Vec<[f32; 3]> {
     (0..width * height).map(|i| [i as f32, -(i as f32) / 4.0, (i % 7) as f32]).collect()
 }
 
-/// Source → Interpolate → Perspective Transform, prepared as the worker does.
+/// Source → Perspective Transform, prepared as the worker does.
 fn prepared(p: Settings, scale: u32) -> (Prepared, Vec<[f32; 3]>) {
     let (width, height) = (6, 4);
     let mut dag = Dag::new();
     let desc = RgbDesc::new(Extent { width, height }, Coordinates::Space(REC2020_D65));
     let source = node::source::<Rgb>(&mut dag, desc, pixels(width, height)).unwrap();
-    let field = node::field::interpolate::add(&mut dag, ()).unwrap();
     let transform = perspective::add(&mut dag, p).unwrap();
-    dag.connect(source, field.image).unwrap();
-    dag.connect(field.output, transform.field).unwrap();
+    dag.connect(source, transform.image).unwrap();
     let evaluator = Evaluator::new(RuntimeContext::from_env().unwrap());
     let global = drip::runtime::GlobalContext { scale };
     let id = transform.node;
@@ -71,9 +69,9 @@ fn view_bounds_stop_at_an_unbounded_input() {
         [[0.45, 0.5], [0.55, 0.5], [1.0, 0.6], [0.0, 0.6]],
         Aspect::Ratio(Ratio { ratio: 1.0 }),
     );
-    let Frame { map, domain } = perspective::frame(&p, &INPUT).unwrap();
-    let bounds = view_bounds(&map, &domain, &INPUT);
-    let [w, h] = domain.size;
+    let Frame { map, size } = perspective::frame(&p, INPUT.size).unwrap();
+    let bounds = view_bounds(&map, &Plane { origin: [0.0, 0.0], size }, &INPUT);
+    let [w, h] = size;
     assert_eq!(bounds, Plane { origin: [-w, -h], size: [3.0 * w, 3.0 * h] });
 }
 
@@ -90,8 +88,6 @@ fn view(map: Mat3) -> TransformView {
         output: INPUT,
     }
 }
-
-const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 fn crop() -> Settings {
     Settings::default()
@@ -153,7 +149,7 @@ fn keep_inside_stops_moves_at_the_edge_and_shrinks_rotations() {
     let turning = drag(&view, Grip::Rotate, &full);
     let kept = view.settings(&full, &turning, turning.frame.rotated(0.1), true, true);
     assert!(perspective::inside(&kept));
-    let size = perspective::frame(&kept, &INPUT).unwrap().domain.size;
+    let size = perspective::frame(&kept, INPUT.size).unwrap().size;
     assert!(size[0] < 400.0 && (size[0] / size[1] - 4.0 / 3.0).abs() < 1e-9);
     // Touching the edge, not merely inside it.
     assert!(kept.quad().iter().flatten().any(|v| v.abs() < 1e-6 || (v - 1.0).abs() < 1e-6));

@@ -4,9 +4,9 @@
 //! placement. `Read` borrows an input [`Raster`] and the node asks it for
 //! `host()` or `device(ctx)`. `Write` creates the output where the node writes
 //! it; `Forward` publishes samples the node already holds; `Load` sets a
-//! source's output. A map's host function sees its mapped input and output as
-//! `Point`, a description without samples. Type erasure is confined to the
-//! generated node adapter.
+//! source's output. The host function of a map, warp or resample sees its
+//! input and output as `Point`, a description without samples. Type erasure is
+//! confined to the generated node adapter.
 use crate::{
     Error, Result,
     image::{Description, Image, Raster},
@@ -48,9 +48,9 @@ impl<'a, P: Payload, R> Read<'a, P, R> {
     }
 }
 
-/// The mapped input or the output of a map node, as its host function sees
-/// them: the description only. The samples exist once a consumer materializes
-/// the output, computed by the node's body. `desc` is checked against `R`.
+/// The input or the output of a map, warp or resample, as its host function
+/// sees them: the description only. The samples exist once a consumer
+/// materializes the output. `desc` is checked against `R`.
 pub struct Point<'a, P: Payload, R = Any> {
     pub desc: &'a P::Desc,
     requirement: PhantomData<R>,

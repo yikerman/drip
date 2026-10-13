@@ -2,8 +2,9 @@
 //!
 //! Graph edits check ports only. Evaluation runs the contracts of the nodes it
 //! forces and hands each node its input images; a node asks them for host or
-//! device samples and writes its outputs where it computes them. Map nodes
-//! publish deferred images instead, and a chain of them runs as one kernel.
+//! device samples and writes its outputs where it computes them. Map, warp and
+//! resample nodes publish deferred images instead, and a segment of them runs
+//! as one kernel.
 //! Passing a contract establishes declared compatibility, not physical accuracy.
 
 extern crate self as drip;

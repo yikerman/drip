@@ -82,7 +82,7 @@ impl RuntimeContext {
         (self.counts.uploads.load(Relaxed), self.counts.downloads.load(Relaxed))
     }
 
-    /// Fused map kernels launched on this runtime so far.
+    /// Fused kernels launched on this runtime so far.
     pub(crate) fn fused(&self) -> usize {
         self.counts.fused.load(Relaxed)
     }
@@ -126,8 +126,8 @@ pub struct KernelContext<'a> {
     pub(crate) runtime: &'a RuntimeContext,
 }
 impl<'a> KernelContext<'a> {
-    /// For frontends that run node kernels outside evaluation, such as a view
-    /// sampling a field.
+    /// For frontends that run kernels or materialize images outside
+    /// evaluation, such as a view resampling its input.
     pub fn new(global: &'a GlobalContext, runtime: &'a RuntimeContext) -> Self {
         Self { global, runtime }
     }

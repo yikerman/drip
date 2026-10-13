@@ -14,8 +14,30 @@ pub(super) struct Options {
     pub action: Option<syn::Path>,
     /// The parameters implement `drip::definition::Assets`, loaded when first used.
     pub assets: bool,
-    /// A map's `#[cube]` body, `fn(Pixel, &[f32]) -> Pixel`.
-    pub map: Option<syn::Path>,
+    /// How a node with `Point` ports publishes its output.
+    pub deferred: Option<Deferred>,
+}
+
+/// The shapes whose host function sees descriptions and returns what the
+/// segment compiler composes.
+pub(super) enum Deferred {
+    /// `map = body`: a `#[cube]` body `fn(Pixel, &[f32]) -> Pixel`, with the
+    /// constants the host function returns.
+    Map(syn::Path),
+    /// `warp`: the host function returns a `Warp`.
+    Warp,
+    /// `resample`: the host function returns a `&'static FilterBody`.
+    Resample,
+}
+impl Deferred {
+    /// The shape as messages name it.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Map(_) => "map",
+            Self::Warp => "warp",
+            Self::Resample => "resample",
+        }
+    }
 }
 
 impl Options {
@@ -29,18 +51,20 @@ impl Options {
         let mut references = None;
         let mut action = None;
         let mut map = None;
-        let mut assets = false;
+        let mut flags = Vec::new();
 
         for entry in entries {
             let name = entry
                 .path()
                 .get_ident()
                 .ok_or_else(|| syn::Error::new(entry.span(), "expected option name"))?;
-            if name == "assets" {
-                if assets || !matches!(entry, syn::Meta::Path(_)) {
-                    return Err(syn::Error::new(entry.span(), "expected a single `assets` flag"));
+            if ["assets", "warp", "resample"].iter().any(|flag| name == flag) {
+                let flag = name.to_string();
+                if flags.contains(&flag) || !matches!(entry, syn::Meta::Path(_)) {
+                    let message = format!("expected a single `{flag}` flag");
+                    return Err(syn::Error::new(entry.span(), message));
                 }
-                assets = true;
+                flags.push(flag);
                 continue;
             }
             let option = match name.to_string().as_str() {
@@ -74,6 +98,18 @@ impl Options {
         };
         let action = action.map(|expr| function_path(expr, "an action")).transpose()?;
         let map = map.map(|expr| function_path(expr, "a #[cube] body")).transpose()?;
+        let flag = |name: &str| flags.iter().any(|flag| flag == name);
+        let mut shapes = [
+            map.map(Deferred::Map),
+            flag("warp").then_some(Deferred::Warp),
+            flag("resample").then_some(Deferred::Resample),
+        ]
+        .into_iter()
+        .flatten();
+        let deferred = shapes.next();
+        if shapes.next().is_some() {
+            return Err(syn::Error::new(span, "a node is at most one of map, warp and resample"));
+        }
         Ok(Self {
             name: display_name.unwrap_or_else(|| id.clone()),
             tags,
@@ -81,8 +117,8 @@ impl Options {
             contract,
             references: references.unwrap_or_else(|| syn::parse_quote!([])),
             action,
-            assets,
-            map,
+            assets: flag("assets"),
+            deferred,
         })
     }
 }
@@ -101,7 +137,7 @@ pub(super) enum View {
     /// The node sets the output from samples it holds.
     Forward,
     Load,
-    /// A map's mapped input, then its output: descriptions only.
+    /// The input, then the output, of a map, warp or resample: descriptions only.
     Point,
 }
 
@@ -124,9 +160,11 @@ pub(super) struct Signature {
     pub ports: Vec<Port>,
     /// `fn(&Params, Load<Payload>...)`: outputs loaded once, when first forced.
     pub source: bool,
-    /// `fn(&Params, Point<In>, Read..., Point<Out>) -> Result<[f32; N]>`: the
-    /// constants type `[f32; N]` of a map's host function.
-    pub map: Option<syn::Type>,
+    /// `fn(&Params, Point<In>, Read..., Point<Out>) -> Result<T>`: the host
+    /// function of a map, warp or resample.
+    pub point: bool,
+    /// `T` in the function's `-> Result<T>`, if it returns one.
+    pub result: Option<syn::Type>,
 }
 
 impl Signature {
@@ -142,9 +180,9 @@ impl Signature {
             ));
         }
         let source = signature.inputs.iter().any(|argument| is_view(argument, "Load"));
-        let map = signature.inputs.iter().any(|argument| is_view(argument, "Point"));
+        let point = signature.inputs.iter().any(|argument| is_view(argument, "Point"));
         let mut arguments = signature.inputs.iter();
-        if !source && !map {
+        if !source && !point {
             arguments.next(); // Rust checks the context type when compiling the generated call.
         }
         let parameters = arguments
@@ -163,15 +201,15 @@ impl Signature {
                 ));
             }
             let mut port = Port::parse(argument)?;
-            if map && matches!(port.view, View::Write | View::Forward) {
-                let message = "a map's output is its second Point, computed by the body";
+            if point && matches!(port.view, View::Write | View::Forward) {
+                let message = "a map, warp or resample has its second Point as output";
                 return Err(syn::Error::new(argument.span(), message));
             }
             if port.view == View::Point {
                 // The first Point is the mapped input and the second the output.
                 points += 1;
                 if port.optional || points > 2 {
-                    let message = "a map has one mapped input and one output, both Point";
+                    let message = "a map, warp or resample has one input and one output Point";
                     return Err(syn::Error::new(argument.span(), message));
                 }
                 if points == 2 {
@@ -186,15 +224,12 @@ impl Signature {
             *count += 1;
             ports.push(port);
         }
-        let map = match map {
-            false => None,
-            true if points != 2 => {
-                let message = "a map has one mapped input and one output, both Point";
-                return Err(syn::Error::new(signature.span(), message));
-            }
-            true => Some(constants_type(&signature.output)?),
-        };
-        Ok(Self { parameters, ports, source, map })
+        if point && points != 2 {
+            let message = "a map, warp or resample has one input and one output Point";
+            return Err(syn::Error::new(signature.span(), message));
+        }
+        let result = result_type(&signature.output);
+        Ok(Self { parameters, ports, source, point, result })
     }
 
     pub fn inputs(&self) -> impl Iterator<Item = &Port> {
@@ -218,17 +253,14 @@ fn is_view(argument: &syn::FnArg, view: &str) -> bool {
     })
 }
 
-/// `T` in a map's `-> Result<T>`, the constants it returns.
-fn constants_type(output: &syn::ReturnType) -> syn::Result<syn::Type> {
-    let message = "a map returns Result<[f32; N]>, the constants of its body";
-    let syn::ReturnType::Type(_, ty) = output else {
-        return Err(syn::Error::new(output.span(), message));
-    };
+/// `T` in `-> Result<T>`.
+fn result_type(output: &syn::ReturnType) -> Option<syn::Type> {
+    let syn::ReturnType::Type(_, ty) = output else { return None };
     match wrapper_type(ty, ty.span()) {
         Ok((wrapper, types)) if wrapper.ident == "Result" && types.len() == 1 => {
-            Ok(types[0].clone())
+            Some(types[0].clone())
         }
-        _ => Err(syn::Error::new(ty.span(), message)),
+        _ => None,
     }
 }
 

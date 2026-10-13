@@ -5,7 +5,7 @@ use syn::spanned::Spanned;
 mod generate;
 mod parse;
 
-use parse::{Options, Signature};
+use parse::{Deferred, Options, Signature};
 
 pub(crate) fn expand(args: TokenStream, function: syn::ItemFn) -> syn::Result<TokenStream> {
     let options = Options::parse(args, function.sig.span())?;
@@ -14,14 +14,24 @@ pub(crate) fn expand(args: TokenStream, function: syn::ItemFn) -> syn::Result<To
         let message = "a source loads its outputs itself; remove assets";
         return Err(syn::Error::new(function.sig.ident.span(), message));
     }
-    match (&options.map, &signature.map) {
-        (Some(body), None) => {
-            let message = "a map declares its mapped input and output as Point ports";
-            return Err(syn::Error::new(body.span(), message));
+    let span = function.sig.ident.span();
+    match (&options.deferred, signature.point) {
+        (Some(deferred), false) => {
+            let message =
+                format!("a {} declares its input and output as Point ports", deferred.name());
+            return Err(syn::Error::new(span, message));
         }
-        (None, Some(_)) => {
-            let message = "a map names its #[cube] body: map = body";
-            return Err(syn::Error::new(function.sig.ident.span(), message));
+        (None, true) => {
+            let message = "Point ports declare a map = body, warp or resample";
+            return Err(syn::Error::new(span, message));
+        }
+        (Some(deferred), true) if signature.result.is_none() => {
+            let message = match deferred {
+                Deferred::Map(_) => "a map returns Result<[f32; N]>, the constants of its body",
+                Deferred::Warp => "a warp returns Result<Warp>",
+                Deferred::Resample => "a resample returns Result<&'static FilterBody>",
+            };
+            return Err(syn::Error::new(function.sig.output.span(), message));
         }
         _ => {}
     }

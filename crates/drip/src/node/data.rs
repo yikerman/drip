@@ -1,6 +1,10 @@
 //! Concrete image and calibration payloads shared by processing nodes.
 use crate::{
-    Error, Result, node::color, payload::decode_array, ports::Requirement, shape::MapPayload,
+    Error, Result,
+    node::color,
+    payload::decode_array,
+    ports::Requirement,
+    shape::{Lattice, MapPayload},
 };
 pub use crate::{
     image::Raster,
@@ -17,6 +21,11 @@ pub struct Extent {
 impl Extent {
     pub fn pixels(&self) -> usize {
         self.width as usize * self.height as usize
+    }
+    /// The samples stored of a full-detail extent at `GlobalContext::scale`:
+    /// one per started `scale × scale` block.
+    pub fn reduced(&self, scale: u32) -> Self {
+        Self { width: self.width.div_ceil(scale), height: self.height.div_ceil(scale) }
     }
     pub fn validate(&self) -> Result<()> {
         // Kernels use 32-bit indices, including the packed RGB layout.
@@ -140,7 +149,11 @@ impl DeviceLayout for Rgb {
     }
 }
 
-impl MapPayload for Rgb {}
+impl MapPayload for Rgb {
+    fn lattice(d: &RgbDesc) -> Lattice {
+        Lattice { extent: [d.extent.width, d.extent.height], full: [d.full.width, d.full.height] }
+    }
+}
 
 /// RGB samples in linear Rec.2020/D65 coordinates.
 pub struct Rec2020;

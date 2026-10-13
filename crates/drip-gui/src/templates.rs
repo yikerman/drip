@@ -38,6 +38,13 @@ mod tests {
         }
     }
 
+    /// Repository templates that are not built in still load as saved.
+    #[test]
+    fn repository_templates_load_as_saved() {
+        let text = include_str!("../../../templates/straighten-and-resize.drip-template");
+        assert_eq!(Project::from_json(text).unwrap().to_json().unwrap(), text);
+    }
+
     #[test]
     fn raw_adjustments_are_shared_by_views_and_export_and_survive_reopening() {
         let mut project = default_project();
