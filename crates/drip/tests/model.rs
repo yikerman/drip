@@ -25,7 +25,7 @@ fn camera(m: &drip_raw::Metadata) -> Response {
     Response { camera: Camera::of(m), balance: None }
 }
 fn image_desc() -> RgbDesc {
-    RgbDesc { extent: Extent { width: 2, height: 1 }, coordinates: Coordinates::Space(REC2020_D65) }
+    RgbDesc::new(Extent { width: 2, height: 1 }, Coordinates::Space(REC2020_D65))
 }
 fn image(dag: &mut Dag) -> Output<Rgb> {
     node::source::<Rgb>(dag, image_desc(), vec![[0.1, -0.2, 2.0]; 2]).unwrap()
@@ -68,8 +68,7 @@ fn sources_check_actual_storage_at_admission() {
 fn connections_check_payloads_and_contracts_check_interpretations() {
     let mut d = Dag::new();
     let a = metadata("A");
-    let desc =
-        RgbDesc { extent: image_desc().extent, coordinates: Coordinates::Camera(camera(&a)) };
+    let desc = RgbDesc::new(image_desc().extent, Coordinates::Camera(camera(&a)));
     let camera_image = node::source::<Rgb>(&mut d, desc.clone(), vec![[0.5; 3]; 2]).unwrap();
     let other = capture(&mut d, metadata("B"));
     let n = node::camera_to_rgb::add(&mut d, ()).unwrap();
@@ -524,7 +523,7 @@ fn optional_input_is_absent_only_when_disconnected() {
 }
 
 fn context_contract(global: &drip::runtime::GlobalContext, _: &()) -> Result<(RgbDesc,)> {
-    Ok((RgbDesc { extent: Extent { width: global.scale, height: 1 }, ..image_desc() },))
+    Ok((RgbDesc::new(Extent { width: global.scale, height: 1 }, image_desc().coordinates),))
 }
 #[node(id="test-global-context",contract=context_contract)]
 fn context_source(context: &KernelContext<'_>, _: &(), output: Write<'_, Cpu<Rgb>>) -> Result<()> {

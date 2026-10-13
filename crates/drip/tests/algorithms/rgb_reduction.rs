@@ -42,15 +42,11 @@ fn check_case(evaluator: &Evaluator, width: u32, height: u32, factor: i64, pixel
     });
     let color = Coordinates::Space(REC2020_D65);
     let mut dag = Dag::new();
-    let camera_source = node::source::<Rgb>(
-        &mut dag,
-        RgbDesc { extent: extent.clone(), coordinates: camera.clone() },
-        pixels.clone(),
-    )
-    .unwrap();
-    let color_source =
-        node::source::<Rgb>(&mut dag, RgbDesc { extent, coordinates: color.clone() }, pixels)
+    let camera_source =
+        node::source::<Rgb>(&mut dag, RgbDesc::new(extent.clone(), camera.clone()), pixels.clone())
             .unwrap();
+    let color_source =
+        node::source::<Rgb>(&mut dag, RgbDesc::new(extent, color.clone()), pixels).unwrap();
     let camera_node = node::reduce::rgb::add(&mut dag, node::reduce::Settings { factor }).unwrap();
     let color_node = node::reduce::rgb::add(&mut dag, node::reduce::Settings { factor }).unwrap();
     dag.connect(camera_source, camera_node.image).unwrap();
@@ -61,6 +57,7 @@ fn check_case(evaluator: &Evaluator, width: u32, height: u32, factor: i64, pixel
     let b = evaluator.evaluate::<Cpu<Rgb>>(&dag, &context, color_node.output).unwrap();
     assert_eq!(a.desc.extent, output_extent);
     assert_eq!(b.desc.extent, output_extent);
+    assert_eq!(a.desc.full, output_extent);
     assert_eq!(a.desc.coordinates, camera);
     assert_eq!(b.desc.coordinates, color);
     for result in [&*a.data, &*b.data] {
@@ -108,10 +105,7 @@ fn resident_chain(evaluator: &Evaluator) {
     let mut dag = Dag::new();
     let source = node::source::<Rgb>(
         &mut dag,
-        RgbDesc {
-            extent: Extent { width: 5, height: 3 },
-            coordinates: Coordinates::Space(REC2020_D65),
-        },
+        RgbDesc::new(Extent { width: 5, height: 3 }, Coordinates::Space(REC2020_D65)),
         vec![[0.25; 3]; 15],
     )
     .unwrap();

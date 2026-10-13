@@ -75,12 +75,22 @@ impl fmt::Display for Coordinates {
     }
 }
 
+/// `full` is the extent of the same image at full detail
+/// (`GlobalContext::scale` 1); preview requests store fewer samples. Stored
+/// pixel `i` covers full-detail plane position `(i + 0.5) · full / extent`
+/// along each axis, approximately where a reduction dropped or averaged
+/// partial edge blocks.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RgbDesc {
     pub extent: Extent,
+    pub full: Extent,
     pub coordinates: Coordinates,
 }
 impl RgbDesc {
+    /// An image stored at full detail.
+    pub fn new(extent: Extent, coordinates: Coordinates) -> Self {
+        Self { full: extent.clone(), extent, coordinates }
+    }
     /// The camera responses these samples hold, if they are camera RGB.
     pub fn response(&self) -> Result<&Response> {
         match &self.coordinates {
@@ -96,7 +106,12 @@ impl Payload for Rgb {
     type Desc = RgbDesc;
     type Host = HostBuffer<[f32; 3]>;
     fn validate(d: &RgbDesc) -> Result<()> {
-        d.extent.validate()
+        d.extent.validate()?;
+        d.full.validate()?;
+        if d.extent.width > d.full.width || d.extent.height > d.full.height {
+            return Err(Error::Contract("RGB stores more samples than its full detail".into()));
+        }
+        Ok(())
     }
     fn check(d: &RgbDesc, host: &Self::Host) -> Result<()> {
         if host.len() != d.extent.pixels() {
@@ -240,5 +255,21 @@ impl Payload for CaptureMetadata {
     }
     fn allocate(d: &Self::Desc) -> Self::Host {
         d.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgb_never_stores_more_than_its_full_detail() {
+        let mut desc =
+            RgbDesc::new(Extent { width: 4, height: 3 }, Coordinates::Space(REC2020_D65));
+        assert!(Rgb::validate(&desc).is_ok());
+        desc.full = Extent { width: 4, height: 2 };
+        assert!(Rgb::validate(&desc).is_err());
+        desc.full = Extent { width: 0, height: 8 };
+        assert!(Rgb::validate(&desc).is_err());
     }
 }

@@ -123,10 +123,10 @@ pub(crate) mod tests {
         let mut dag = Dag::new();
         let input = node::source::<Rgb>(
             &mut dag,
-            RgbDesc {
-                extent: Extent { width: pixels.len() as u32, height: 1 },
-                coordinates: Coordinates::Space(REC2020_D65),
-            },
+            RgbDesc::new(
+                Extent { width: pixels.len() as u32, height: 1 },
+                Coordinates::Space(REC2020_D65),
+            ),
             pixels,
         )
         .unwrap();

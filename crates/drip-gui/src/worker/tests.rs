@@ -6,10 +6,7 @@ use drip::{
 };
 use serde::{Deserialize, Serialize};
 fn image_contract<P>(_: &drip::runtime::GlobalContext, _: &P) -> drip::Result<(RgbDesc,)> {
-    Ok((RgbDesc {
-        extent: Extent { width: 1, height: 1 },
-        coordinates: Coordinates::Space(REC2020_D65),
-    },))
+    Ok((RgbDesc::new(Extent { width: 1, height: 1 }, Coordinates::Space(REC2020_D65)),))
 }
 fn empty_contract<P>(_: &drip::runtime::GlobalContext, _: &P) -> drip::Result<()> {
     Ok(())

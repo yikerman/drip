@@ -4,10 +4,7 @@ use drip::{eval::Evaluator, graph::Dag, node, node::data::*, ports::*, runtime::
 mod rgb_reduction;
 
 fn algorithms(runtime: RuntimeContext) {
-    let descriptor = RgbDesc {
-        extent: Extent { width: 2, height: 1 },
-        coordinates: Coordinates::Space(REC2020_D65),
-    };
+    let descriptor = RgbDesc::new(Extent { width: 2, height: 1 }, Coordinates::Space(REC2020_D65));
     let bits = [[0x80000000, 0x7fc01234, 0x7f800000], [1, 0xff800000, 0x3f800000]];
     let pixels: Vec<[f32; 3]> = bits.map(|p| p.map(f32::from_bits)).to_vec();
     let device = drip::payload::upload::<Rgb>(&descriptor, &pixels.into(), &runtime).unwrap();
@@ -80,10 +77,7 @@ fn algorithms(runtime: RuntimeContext) {
     let mut dag = Dag::new();
     let source = node::source::<Rgb>(
         &mut dag,
-        RgbDesc {
-            extent: Extent { width: 5, height: 1 },
-            coordinates: Coordinates::Space(REC2020_D65),
-        },
+        RgbDesc::new(Extent { width: 5, height: 1 }, Coordinates::Space(REC2020_D65)),
         vec![[0.; 3], [0.18; 3], [1.; 3], [f32::MAX; 3], [-0.2, 0.1, 0.5]],
     )
     .unwrap();

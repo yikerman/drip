@@ -185,10 +185,7 @@ mod tests {
         }
         assert!(matrix(&Settings::default(), None).is_err());
         assert!(matrix(&Settings::default(), Some(&drip_raw::Metadata::default())).is_err());
-        let desc = RgbDesc {
-            extent: Extent { width: 1, height: 1 },
-            coordinates: Coordinates::Space(REC2020_D65),
-        };
+        let desc = RgbDesc::new(Extent { width: 1, height: 1 }, Coordinates::Space(REC2020_D65));
         assert!(contract(&Default::default(), &custom(color::D65), &desc, None).is_ok());
         let unusable = Arc::new(drip_raw::Metadata::default());
         assert!(
@@ -198,10 +195,7 @@ mod tests {
 
     fn device_reference(runtime: RuntimeContext) {
         let mut dag = Dag::new();
-        let desc = RgbDesc {
-            extent: Extent { width: 4, height: 1 },
-            coordinates: Coordinates::Space(REC2020_D65),
-        };
+        let desc = RgbDesc::new(Extent { width: 4, height: 1 }, Coordinates::Space(REC2020_D65));
         let input = crate::node::source::<Rgb>(
             &mut dag,
             desc,

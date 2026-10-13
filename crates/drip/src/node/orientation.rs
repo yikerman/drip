@@ -73,6 +73,7 @@ fn orientation_contract(
     let mut output = image.clone();
     if p.orientation.resolve(metadata.map(|m| &**m)) >= 5 {
         std::mem::swap(&mut output.extent.width, &mut output.extent.height);
+        std::mem::swap(&mut output.full.width, &mut output.full.height);
     }
     Ok((output,))
 }
@@ -159,10 +160,7 @@ mod tests {
     ];
 
     fn image_desc() -> RgbDesc {
-        RgbDesc {
-            extent: Extent { width: 3, height: 2 },
-            coordinates: Coordinates::Space(REC2020_D65),
-        }
+        RgbDesc::new(Extent { width: 3, height: 2 }, Coordinates::Space(REC2020_D65))
     }
     fn metadata(orientation: u8) -> Arc<drip_raw::Metadata> {
         Arc::new(drip_raw::Metadata { orientation, ..Default::default() })
@@ -171,7 +169,7 @@ mod tests {
     #[test]
     fn metadata_defaults_and_explicit_override_preserve_interpretation() {
         let global = GlobalContext::default();
-        let image = image_desc();
+        let image = RgbDesc { full: Extent { width: 6, height: 4 }, ..image_desc() };
         let automatic = Settings::default();
         let (output,) = orientation_contract(&global, &automatic, &image, None).unwrap();
         assert_eq!(output.extent, image.extent);
@@ -182,6 +180,8 @@ mod tests {
             let expected =
                 if i < 4 { image.extent.clone() } else { Extent { width: 2, height: 3 } };
             assert_eq!(output.extent, expected);
+            let full = if i < 4 { image.full.clone() } else { Extent { width: 4, height: 6 } };
+            assert_eq!(output.full, full);
             assert_eq!(output.coordinates, image.coordinates);
             assert_eq!(orientation.resolve(None), metadata.orientation);
             let identity = Settings { orientation: Orientation::Identity };
@@ -244,7 +244,7 @@ mod tests {
     }
 
     fn fixture(runtime: &RuntimeContext, width: u32, height: u32, expected: [&[usize]; 8]) {
-        let image = RgbDesc { extent: Extent { width, height }, ..image_desc() };
+        let image = RgbDesc::new(Extent { width, height }, image_desc().coordinates);
         let samples: Vec<[f32; 3]> =
             (0..image.extent.pixels()).map(|i| [i as f32, -(i as f32), 8.0]).collect();
         let input = upload::<Rgb>(&image, &samples.clone().into(), runtime).unwrap();

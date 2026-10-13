@@ -18,7 +18,7 @@ fn camera_to_rgb_contract(
         return Err(Error::Contract("image camera differs from the capture metadata".into()));
     }
     camera::matrix(metadata, response.balance)?;
-    Ok((RgbDesc { extent: image.extent.clone(), coordinates: Coordinates::Space(REC2020_D65) },))
+    Ok((RgbDesc { coordinates: Coordinates::Space(REC2020_D65), ..image.clone() },))
 }
 /// Convert camera RGB to linear Rec.2020/D65 with the capture's camera matrix.
 /// The image's balance is replaced by D65 reference gains inside the matrix, so

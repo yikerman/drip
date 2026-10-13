@@ -106,10 +106,7 @@ fn export_reads_its_profile_file_when_first_used() {
 
 #[test]
 fn tiff_profile_extent_and_pixels_survive_encoding() {
-    let desc = RgbDesc {
-        extent: Extent { width: 2, height: 1 },
-        coordinates: Coordinates::Space(REC2020_D65),
-    };
+    let desc = RgbDesc::new(Extent { width: 2, height: 1 }, Coordinates::Space(REC2020_D65));
     let export = drip::node::export::Export::default();
     let output = drip::definition::Assets::load(&export).unwrap();
     let encode = |desc, metadata| {

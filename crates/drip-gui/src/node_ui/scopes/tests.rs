@@ -22,7 +22,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
     let extent = Extent { width: 2, height: 2 };
     let working = drip::node::source::<Rgb>(
         &mut dag,
-        RgbDesc { extent: extent.clone(), coordinates: Coordinates::Space(REC2020_D65) },
+        RgbDesc::new(extent.clone(), Coordinates::Space(REC2020_D65)),
         pixels.pixels.to_vec(),
     )
     .unwrap();
@@ -32,7 +32,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
     };
     let camera = drip::node::source::<Rgb>(
         &mut dag,
-        RgbDesc { extent, coordinates: Coordinates::Camera(response) },
+        RgbDesc::new(extent, Coordinates::Camera(response)),
         pixels.pixels.to_vec(),
     )
     .unwrap();
@@ -142,10 +142,10 @@ pub(crate) fn context() -> PrepareContext {
 }
 
 pub(crate) fn device(image: &HostImage, ctx: &PrepareContext) -> crate::node_ui::data::DeviceRgb {
-    let desc = RgbDesc {
-        extent: Extent { width: image.width as u32, height: image.height as u32 },
-        coordinates: Coordinates::Space(REC2020_D65),
-    };
+    let desc = RgbDesc::new(
+        Extent { width: image.width as u32, height: image.height as u32 },
+        Coordinates::Space(REC2020_D65),
+    );
     let runtime = RuntimeContext::from_client(ctx.client().unwrap().clone());
     let pixels = drip::payload::upload::<Rgb>(&desc, &image.pixels, &runtime).unwrap();
     crate::node_ui::data::DeviceRgb { desc, pixels }

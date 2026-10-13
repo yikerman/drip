@@ -12,8 +12,10 @@ fn bin2x2_contract(global: &GlobalContext, _: &(), image: &BayerDesc) -> Result<
         return Err(Error::Contract("Bayer 2x2 demosaic needs at least 2x2 samples".into()));
     }
     let extent = reduce::demosaic_extent(global, &image.extent);
+    let half = |e: &Extent| Extent { width: e.width / 2, height: e.height / 2 };
     Ok((RgbDesc {
-        extent: Extent { width: extent.width / 2, height: extent.height / 2 },
+        extent: half(&extent),
+        full: half(&image.extent),
         coordinates: Coordinates::Camera(image.response.clone()),
     },))
 }
@@ -73,5 +75,26 @@ mod kernel {
             output[i * 3 + 1] = rgb[1] * 0.5f32;
             output[i * 3 + 2] = rgb[2];
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_keeps_the_full_detail_extent() {
+        let response = Response {
+            camera: Camera { make: "test".into(), model: "camera".into() },
+            balance: None,
+        };
+        let image = BayerDesc {
+            extent: Extent { width: 6025, height: 4016 },
+            phase: BayerPhase::Rggb,
+            response,
+        };
+        let (preview,) = bin2x2_contract(&GlobalContext { scale: 8 }, &(), &image).unwrap();
+        assert_eq!(preview.extent, Extent { width: 376, height: 251 });
+        assert_eq!(preview.full, Extent { width: 3012, height: 2008 });
     }
 }

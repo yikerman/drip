@@ -10,7 +10,7 @@ use exif::{In, Tag, Value};
 use std::{io::Cursor, sync::Arc};
 
 fn description(width: u32, height: u32) -> RgbDesc {
-    RgbDesc { extent: Extent { width, height }, coordinates: Coordinates::Space(REC2020_D65) }
+    RgbDesc::new(Extent { width, height }, Coordinates::Space(REC2020_D65))
 }
 
 #[test]

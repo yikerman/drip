@@ -378,7 +378,8 @@ GUI changes this needs:
 Each step is one self-contained commit series.
 
 1. `RgbDesc::full` and the pixel-centre convention through demosaic, reduction,
-   Orientation, camera conversion and their tests.
+   Orientation, camera conversion and their tests. Done; `RgbDesc::new` builds
+   full-detail descriptions, and validation rejects storing more than `full`.
 2. Pass-through outputs in `#[node]`, with adapter tests.
 3. Shared filters as `#[cube]` functions in `node/filter.rs`. Mitchell–Netravali
    (any B, C) and Lanczos-3 are implemented and tested on the host, CPU, WGPU

@@ -32,10 +32,7 @@ fn empty_contract<P>(_: &drip::runtime::GlobalContext, _: &P) -> drip::Result<()
 const PIXELS: [[f32; 3]; 4] = [[1.0; 3], [0.18; 3], [0.0, 1.0, 0.0], [0.0; 3]];
 
 fn source_contract(_: &drip::runtime::GlobalContext, _: &()) -> drip::Result<(RgbDesc,)> {
-    Ok((RgbDesc {
-        extent: Extent { width: 2, height: 2 },
-        coordinates: Coordinates::Space(REC2020_D65),
-    },))
+    Ok((RgbDesc::new(Extent { width: 2, height: 2 }, Coordinates::Space(REC2020_D65)),))
 }
 #[drip::node(id="test-proof-source", name="display", contract=source_contract)]
 pub fn display(_: &KernelContext<'_>, _: &(), image: Write<'_, Cpu<Rgb>>) -> drip::Result<()> {

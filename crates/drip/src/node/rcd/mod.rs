@@ -11,6 +11,7 @@ mod kernel;
 fn rcd_contract(global: &GlobalContext, _: &(), image: &BayerDesc) -> Result<(RgbDesc,)> {
     Ok((RgbDesc {
         extent: reduce::demosaic_extent(global, &image.extent),
+        full: image.extent.clone(),
         coordinates: Coordinates::Camera(image.response.clone()),
     },))
 }
@@ -109,4 +110,27 @@ pub fn compute(
         phase,
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_keeps_the_full_detail_extent() {
+        let response = Response {
+            camera: Camera { make: "test".into(), model: "camera".into() },
+            balance: None,
+        };
+        let image = BayerDesc {
+            extent: Extent { width: 6024, height: 4016 },
+            phase: BayerPhase::Rggb,
+            response,
+        };
+        let (full,) = rcd_contract(&GlobalContext::default(), &(), &image).unwrap();
+        assert_eq!((full.extent.clone(), full.full), (image.extent.clone(), image.extent.clone()));
+        let (preview,) = rcd_contract(&GlobalContext { scale: 8 }, &(), &image).unwrap();
+        assert_eq!(preview.extent, Extent { width: 752, height: 502 });
+        assert_eq!(preview.full, image.extent);
+    }
 }

@@ -9,11 +9,9 @@ use crate::{
 pub use compute::{Definition, Ports, add, definition};
 fn contract(_: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(RgbDesc,)> {
     let factor = p.factor as u32;
-    let extent = Extent {
-        width: image.extent.width.div_ceil(factor),
-        height: image.extent.height.div_ceil(factor),
-    };
-    Ok((RgbDesc { extent, ..image.clone() },))
+    let reduce =
+        |e: &Extent| Extent { width: e.width.div_ceil(factor), height: e.height.div_ceil(factor) };
+    Ok((RgbDesc { extent: reduce(&image.extent), full: reduce(&image.full), ..image.clone() },))
 }
 /// Reduce RGB by box averaging without changing its coordinates. The factor
 /// applies to both dimensions; partial edge blocks use available samples.
