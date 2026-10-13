@@ -1,14 +1,14 @@
 //! Auto exposure: meter the node's input at full detail with the library's
 //! [`exposure::meter`], then set its EV.
 use super::{Action, GuiNode};
-use drip::{image::Image, node::exposure};
+use drip::node::{data::Rec2020, exposure};
 
 impl GuiNode for exposure::Definition {
     type Presentation = ();
     const ACTION: Option<Action<Self>> = Some(Action {
         name: "Auto exposure",
         run: |_, inputs, ctx| {
-            let image = Image::from(inputs.image.data.clone());
+            let image = inputs.image.require::<Rec2020>()?;
             Ok(Some(exposure::meter(&image, &ctx.kernels())?))
         },
     });
@@ -24,7 +24,7 @@ pub(crate) mod tests {
         eval::Evaluator,
         graph::Dag,
         node::{self, color, data::*},
-        ports::NodeId,
+        ports::{NodeId, Read},
         runtime::{KernelContext, RuntimeContext},
     };
 
@@ -109,7 +109,8 @@ pub(crate) mod tests {
             assert_eq!(image.statistics.downloads, 0);
             let global = Default::default();
             let kernels = KernelContext::new(&global, evaluator.runtime());
-            let actual = exposure::mean_luminance(&Image::from(image.data), &kernels).unwrap();
+            let image = Read::new(&image.data).require::<Rec2020>().unwrap();
+            let actual = exposure::mean_luminance(&image, &kernels).unwrap();
             assert!(
                 (actual - expected).abs() <= expected.abs() * 2e-6,
                 "{count}: {actual} vs {expected}"

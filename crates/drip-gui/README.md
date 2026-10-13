@@ -62,14 +62,14 @@ declaration. Add GUI code only to override that. Auto exposure, in
 
 ```rust
 use super::{Action, GuiNode};
-use drip::{image::Image, node::exposure};
+use drip::node::{data::Rec2020, exposure};
 
 impl GuiNode for exposure::Definition {
     type Presentation = ();
     const ACTION: Option<Action<Self>> = Some(Action {
         name: "Auto exposure",
         run: |_, inputs, ctx| {
-            let image = Image::from(inputs.image.data.clone());
+            let image = inputs.image.require::<Rec2020>()?;
             Ok(Some(exposure::meter(&image, &ctx.kernels())?))
         },
     });

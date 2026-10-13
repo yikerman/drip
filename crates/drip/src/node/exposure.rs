@@ -44,10 +44,9 @@ pub fn compute(
 
 /// The exposure that brings the mean Rec.2020 luminance of the samples
 /// `image` holds to 18 % grey, for auto exposure. Bright or dark subjects
-/// may need a manual adjustment after it. Fails as [`mean_luminance`] does,
-/// when the mean is not positive, or when the exposure leaves the
-/// parameter's range.
-pub fn meter(image: &Image, ctx: &KernelContext<'_>) -> Result<Exposure> {
+/// may need a manual adjustment after it. Fails when the mean is not
+/// positive, or when the exposure leaves the parameter's range.
+pub fn meter(image: &Read<'_, Rgb, Rec2020>, ctx: &KernelContext<'_>) -> Result<Exposure> {
     // Like darktable's area exposure mapping [1], compare linear luminance
     // against a target. Here the area is the whole image and the target is
     // exactly Y=0.18, rather than its default L*=50 (Y≈0.1842).
@@ -66,20 +65,13 @@ pub fn meter(image: &Image, ctx: &KernelContext<'_>) -> Result<Exposure> {
     Ok(params)
 }
 
-/// The mean luminance Y of the samples `image` holds, which are linear
-/// Rec.2020/D65 `Rgb`. A deferred image is computed per pixel and not
-/// stored. Fails for other payloads or coordinates.
-pub fn mean_luminance(image: &Image, ctx: &KernelContext<'_>) -> Result<f64> {
-    let desc = image
-        .desc()
-        .downcast_ref::<RgbDesc>()
-        .ok_or_else(|| Error::Contract("auto exposure meters RGB".into()))?;
-    Rec2020::check(desc)
-        .map_err(|e| Error::Contract(format!("auto exposure requires {}: {e}", Rec2020::LABEL)))?;
+/// The mean luminance Y of the samples `image` holds.
+pub fn mean_luminance(image: &Read<'_, Rgb, Rec2020>, ctx: &KernelContext<'_>) -> Result<f64> {
     // Weights divided by the pixel count before summing keep HDR headroom: a
     // plain f32 sum of a bright image overflows where its mean does not.
-    let pixels = Rgb::lattice(desc).window.cells() as f64;
+    let pixels = Rgb::lattice(image.desc).window.cells() as f64;
     let weights = color::rgb_to_xyz(color::REC2020, color::D65)[1].map(|v| (v / pixels) as f32);
+    let image = Image::from(image.data.clone());
     Ok(f64::from(image.fold::<Rgb>(&MEAN_LUMINANCE, &weights, ctx)?[0]))
 }
 

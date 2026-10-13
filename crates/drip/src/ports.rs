@@ -43,9 +43,17 @@ pub struct Read<'a, P: Payload, R = Any> {
     pub data: &'a Raster<P>,
     requirement: PhantomData<R>,
 }
-impl<'a, P: Payload, R> Read<'a, P, R> {
+impl<'a, P: Payload> Read<'a, P> {
     pub fn new(data: &'a Raster<P>) -> Self {
         Self { desc: data.desc(), data, requirement: PhantomData }
+    }
+}
+impl<'a, P: Payload, R> Read<'a, P, R> {
+    /// The same input under requirement `S`, checked on its description,
+    /// for a function that states its own requirement.
+    pub fn require<S: Requirement<P>>(&self) -> Result<Read<'a, P, S>> {
+        S::check(self.desc).map_err(|e| Error::Contract(format!("expected {}: {e}", S::LABEL)))?;
+        Ok(Read { desc: self.desc, data: self.data, requirement: PhantomData })
     }
 }
 
@@ -157,7 +165,10 @@ pub mod adapter {
 
     /// View a materialized input.
     pub fn read<P: Payload, R>(image: Option<&Image>) -> Option<Read<'_, P, R>> {
-        image.map(|image| Read::new(image.downcast().expect("a bound input holds its payload")))
+        image.map(|image| {
+            let data: &Raster<P> = image.downcast().expect("a bound input holds its payload");
+            Read { desc: data.desc(), data, requirement: PhantomData }
+        })
     }
 
     pub fn point<P: Payload, R>(desc: &Description) -> Point<'_, P, R> {
