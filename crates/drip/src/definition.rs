@@ -6,6 +6,7 @@ use crate::{
     param::{ParamSpec, Parameters},
     ports::PortSpec,
     runtime::KernelContext,
+    shape::Shape,
 };
 use std::{any::Any, sync::Arc};
 
@@ -30,19 +31,6 @@ pub struct Kind {
     /// An effect run on evaluated inputs, such as writing a file. Any frontend,
     /// headless or interactive, runs it the same way.
     pub action: Option<Action>,
-}
-/// How evaluation runs a node kind. The segment compiler adds shapes it can
-/// fuse into one kernel (maps, warps) and derive regions and scale from;
-/// `Kernel` and `Source` stay opaque to it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Shape {
-    /// The node's function runs on every evaluation. It asks its inputs for
-    /// the residency it needs, and each output is materialized where the
-    /// node wrote it.
-    Kernel,
-    /// The node loads its outputs once, when first evaluated, and keeps them
-    /// with the admitted node.
-    Source,
 }
 /// A registered label for finding nodes by purpose, listed in `registry::TAGS`.
 pub struct Tag {
@@ -81,6 +69,7 @@ pub trait Node: Any + Send + Sync {
         inputs: &[Option<Description>],
     ) -> Result<Vec<Description>>;
     /// Produce every output described by the contract, in output order.
+    /// Inputs may be deferred. The node materializes those it reads as rasters.
     fn run(
         &self,
         context: &KernelContext<'_>,

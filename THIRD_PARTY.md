@@ -219,10 +219,12 @@ Round-trip criterion used to validate gamut warnings; MIT
 CubeCL 0.11.0 is used under MIT OR Apache-2.0; exact dependencies are pinned in
 Cargo.lock. [Online]. Available: <https://github.com/tracel-ai/cubecl/tree/v0.11.0>.
 
-The CubeCL Bayer 2x2 and exposure kernels live with their nodes under
-`crates/drip/src/node/`; the reusable matrix kernel is in
+The CubeCL Bayer 2x2 kernel and the exposure map body live with their nodes
+under `crates/drip/src/node/`, and the reusable matrix body is in
 `crates/drip/src/node/shared_kernel.rs`. They derive from Drip revision
 `b9b1045da65376fd5812b7b00362806cde37eaf0` through the validated runtime PoC.
+Map bodies run inside the fused kernel of `crates/drip/src/plan.rs` with the
+expression order of the kernels they replaced.
 RGB uses packed three-f32 pixels on both host and device. Bayer binning drops incomplete edge cells and averages the two greens.
 Explicit RGB box reduction also shares one CubeCL kernel across runtimes. It
 retains partial edge blocks and uses f32 accumulation with exponent scaling for
@@ -231,9 +233,11 @@ The same CubeCL source is used by each enabled computation runtime. The original
 PoC source and its complete notices are preserved in the external benchmark
 archive at `../drip-benchmark-results/2026-10-08/`.
 
-RCD in `crates/drip/src/node/rcd/kernel.rs` and sigmoid's kernel and coefficient
-preparation in `crates/drip/src/node/sigmoid.rs` retain the darktable
-GPL-3.0-or-later notices. The port is pinned to darktable commit
+RCD in `crates/drip/src/node/rcd/kernel.rs` and sigmoid's map body and
+coefficient preparation in `crates/drip/src/node/sigmoid.rs` retain the
+darktable GPL-3.0-or-later notices, as does the copy of the former per-node
+sigmoid kernel that `crates/drip/tests/fusion.rs` keeps as a test reference.
+The port is pinned to darktable commit
 `61dea294bedb3ab6c7cca1a45530b1ab5c0461f3`, using `src/iop/demosaicing/rcd.c`,
 `src/iop/sigmoid.c`, and `src/common/custom_primaries.c` [19].
 [Upstream license](https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/LICENSE).

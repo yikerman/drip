@@ -1,12 +1,13 @@
 //! Immutable, already loaded source values.
 use crate::{
     Result,
-    definition::{Kind, Node, Shape},
+    definition::{Kind, Node},
     graph::Dag,
     image::{Description, Image, Raster},
     payload::Payload,
     ports::*,
     runtime::{GlobalContext, KernelContext},
+    shape::Shape,
 };
 use std::sync::Arc;
 /// Bind immutable, already loaded data. Loading and decode remain outside pure nodes.

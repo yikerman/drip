@@ -29,9 +29,11 @@ read. A port names a payload, not where its samples live: an input is a
 output is materialized where the node writes it. A payload implements
 `DeviceLayout` only when a kernel reads it on the device; only then does
 `device` exist, and structured data stays on the host. Nodes flatten the
-numbers a kernel needs into `KernelContext::constants`. Interpretations are
-typed values in descriptions (camera responses or numeric RGB spaces, compared
-exactly). Ports declare requirements as type arguments, `Read<'_, Rgb,
+numbers a kernel needs into `KernelContext::constants`. A map node computes no
+samples itself: its host function sees the mapped input and the output as
+`Point` descriptions and returns the constants its body reads, and evaluation
+runs a chain of maps as one kernel. Interpretations are typed values in
+descriptions (camera responses or numeric RGB spaces, compared exactly). Ports declare requirements as type arguments, `Read<'_, Rgb,
 Rec2020>`; the checker, help and editor read the same declaration. Do not
 flatten unrelated ports merely to make storage uniform.
 
@@ -39,17 +41,22 @@ flatten unrelated ports merely to make storage uniform.
 
 The non-trivial files outside `node/`:
 
-- `definition.rs`: what `#[node]` generates against: `Kind` and its `Shape`,
-  `Tag`, the `Node`/`Typed` traits, `Action`, `Assets`.
+- `definition.rs`: what `#[node]` generates against: `Kind`, `Tag`, the
+  `Node`/`Typed` traits, `Action`, `Assets`.
+- `shape.rs`: how evaluation runs a kind (`Shape`: kernel, source or map) and
+  what a map registers: `MapBody`, the `Pixel` its body maps.
 - `registry.rs`: the hand-maintained `NODES`, `TAGS` and `Registry`.
 - `graph.rs`: `Dag` and transactional edits, checked on ports only.
 - `eval.rs`: `Evaluator`, demand-driven evaluation of the requested subgraph;
-  contracts run here.
-- `image.rs`: `Image`, the value on an edge, and `Raster`, its samples with
-  lazy host and device residency and counted transfers.
+  contracts run here, and results are materialized for their consumers.
+- `image.rs`: `Image`, the value on an edge, a raster or a deferred map output
+  materialized on first need, and `Raster`, samples with lazy host and device
+  residency and counted transfers.
+- `plan.rs`: the segment compiler: a `Plan` of map bodies and the fused kernel
+  that runs it.
 - `store.rs`: the values of one evaluation, kept until their last consumer.
-- `ports.rs`: port views (`Read`, `Write`, `Forward`, `Load`) and
-  interpretation requirements.
+- `ports.rs`: port views (`Read`, `Write`, `Forward`, `Load`, a map's
+  `Point`) and interpretation requirements.
 - `payload.rs`: payload families, their host types and device byte layouts.
 - `param.rs`: parameter schemas, encoding and validation.
 - `project.rs`: `.drip` persistence, loaded through a `Registry`.
@@ -116,6 +123,38 @@ mod kernel {
     }
 }
 ```
+
+A per-pixel operation is better declared as a map. Its host function returns
+the constants of a `#[cube]` body that maps one pixel. Evaluation runs a chain
+of maps, such as the template's exposure and sigmoid, as one kernel and stores
+only its result:
+
+```rust
+use crate::{Result, node::data::*, ports::*, registry::tag, runtime::GlobalContext};
+
+fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(RgbDesc,)> {
+    Ok((image.clone(),))
+}
+
+/// Double every RGB sample (+1 EV). Output keeps the input coordinates.
+#[crate::node(id = "double", name = "Double", tags = [tag::LOOK], contract = contract, map = kernel::double)]
+pub fn compute(_: &(), _image: Point<'_, Rgb>, _output: Point<'_, Rgb>) -> Result<[f32; 1]> {
+    Ok([2.0])
+}
+
+mod kernel {
+    use crate::shape::Pixel;
+    use cubecl::prelude::*;
+    #[cube]
+    pub fn double(px: Pixel, k: &[f32]) -> Pixel {
+        Pixel { r: px.r * k[0], g: px.g * k[0], b: px.b * k[0] }
+    }
+}
+```
+
+The first `Point` is the mapped input and the second the output. Other inputs
+are `Read` and arrive materialized, as Camera RGB to color RGB reads its
+`metadata`. A map has no `KernelContext` because it launches nothing.
 
 1. Declare the module: `pub mod double;` in `src/node/mod.rs`.
 2. List `&double::compute::KIND` in `registry::NODES`, at its pipeline

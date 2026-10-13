@@ -1,5 +1,6 @@
 //! One explicit compute device per evaluator. Host nodes remain ordinary Rust.
-//! The runtime counts image transfers, which `eval::Statistics` reports.
+//! The runtime counts image transfers and fused launches, which
+//! `eval::Statistics` reports.
 use crate::{
     Error, Result,
     payload::{DeviceBuffer, DeviceLayout},
@@ -35,17 +36,17 @@ impl GlobalContext {
 }
 
 /// A compute client, or none for host-only evaluation. Clones share the client
-/// and the transfer counts, so a raster keeps the runtime its device buffer
-/// belongs to.
+/// and the counts, so a raster keeps the runtime its device buffer belongs to.
 #[derive(Clone)]
 pub struct RuntimeContext {
     client: Option<Client>,
-    transfers: Arc<Transfers>,
+    counts: Arc<Counts>,
 }
 #[derive(Default)]
-struct Transfers {
+struct Counts {
     uploads: AtomicUsize,
     downloads: AtomicUsize,
+    fused: AtomicUsize,
 }
 
 impl RuntimeContext {
@@ -62,13 +63,13 @@ impl RuntimeContext {
     }
 
     pub fn host() -> Self {
-        Self { client: None, transfers: Default::default() }
+        Self { client: None, counts: Default::default() }
     }
 
     /// Adopt an explicitly initialized compute client. Device identity belongs
     /// to this context and its clones.
     pub fn from_client(client: Client) -> Self {
-        Self { client: Some(client), transfers: Default::default() }
+        Self { client: Some(client), counts: Default::default() }
     }
 
     pub fn client(&self) -> Result<&Client> {
@@ -78,19 +79,28 @@ impl RuntimeContext {
     /// Image uploads and downloads on this runtime so far. Constants and
     /// scratch are not counted.
     pub(crate) fn transfers(&self) -> (usize, usize) {
-        (self.transfers.uploads.load(Relaxed), self.transfers.downloads.load(Relaxed))
+        (self.counts.uploads.load(Relaxed), self.counts.downloads.load(Relaxed))
+    }
+
+    /// Fused map kernels launched on this runtime so far.
+    pub(crate) fn fused(&self) -> usize {
+        self.counts.fused.load(Relaxed)
+    }
+
+    pub(crate) fn count_fused(&self) {
+        self.counts.fused.fetch_add(1, Relaxed);
     }
 
     pub(crate) fn upload(&self, bytes: Bytes) -> Result<Handle> {
         let handle = self.client()?.create(bytes);
-        self.transfers.uploads.fetch_add(1, Relaxed);
+        self.counts.uploads.fetch_add(1, Relaxed);
         Ok(handle)
     }
 
     /// Waits for the queued work that writes `handle`.
     pub(crate) fn download(&self, handle: Handle) -> Result<Bytes> {
         let bytes = self.client()?.read_one(handle).map_err(|e| Error::Runtime(e.to_string()))?;
-        self.transfers.downloads.fetch_add(1, Relaxed);
+        self.counts.downloads.fetch_add(1, Relaxed);
         Ok(bytes)
     }
 

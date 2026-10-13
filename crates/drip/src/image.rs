@@ -4,41 +4,130 @@
 //! payloads only. A [`Raster`] holds a description and at most one host and
 //! one device representation; the missing one is made on first request and
 //! counted as a transfer on its runtime. An [`Image`] is the type-erased value
-//! that evaluation and the store pass between nodes. Every image is a raster
-//! until the segment compiler adds deferred images (fused maps, warps); ports
-//! and rasters keep their interface then.
+//! that evaluation and the store pass between nodes: a raster, or a deferred
+//! image that a map published, which `plan` materializes into a raster when a
+//! consumer first needs samples.
 use crate::{
     Error, Result,
     payload::{DeviceBuffer, DeviceLayout, Payload},
+    plan::Plan,
+    ports::typed,
     runtime::{KernelContext, RuntimeContext},
+    shape::{MapBody, MapPayload},
 };
 use cubecl::bytes::Bytes;
 use std::{
     any::Any,
-    sync::{Arc, OnceLock},
+    sync::{Arc, Mutex, OnceLock, PoisonError},
 };
 
 /// A type-erased payload description, as contracts receive and return it.
 pub type Description = Arc<dyn Any + Send + Sync>;
 
-/// The value an output publishes. Clones share it.
+/// The value an output publishes. Clones share it, including a deferred
+/// image's materialization.
 #[derive(Clone)]
 pub struct Image {
     desc: Description,
-    raster: Arc<dyn Any + Send + Sync>,
+    value: Arc<Value>,
 }
+struct Value {
+    /// A `Raster<P>`, set when the image is created or materialized.
+    raster: OnceLock<Box<dyn Any + Send + Sync>>,
+    /// The computation of a deferred image until it is materialized, which
+    /// releases the input raster.
+    pending: Mutex<Option<Deferred>>,
+}
+/// A plan over its input raster. `materialize` is captured where the payload
+/// type is known, like [`Resident`]'s `decode`.
+struct Deferred {
+    input: Box<dyn Any + Send + Sync>,
+    plan: Plan,
+    materialize: Materialize,
+}
+type Materialize =
+    fn(&Deferred, &Description, &KernelContext<'_>) -> Result<Box<dyn Any + Send + Sync>>;
+
 impl Image {
     pub fn desc(&self) -> &Description {
         &self.desc
     }
-    /// The samples as payload `P`, or `None` when the image holds another payload.
+
+    /// The samples as payload `P`. `None` when the image holds another
+    /// payload or is deferred and not yet materialized.
     pub fn downcast<P: Payload>(&self) -> Option<&Raster<P>> {
-        self.raster.downcast_ref()
+        self.value.raster.get()?.downcast_ref()
+    }
+
+    /// Run a deferred image's plan into a raster on `ctx`'s runtime. The
+    /// first call queues the kernel, and later calls and clones share its
+    /// result. A raster needs no work. Afterwards
+    /// [`downcast`](Self::downcast) returns the samples.
+    pub fn materialize(&self, ctx: &KernelContext<'_>) -> Result<()> {
+        // The lock is held while the kernel is queued, so concurrent
+        // consumers launch it once. A failed launch leaves the plan pending.
+        let mut pending = self.value.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(deferred) = pending.as_ref() {
+            let raster = (deferred.materialize)(deferred, &self.desc, ctx)?;
+            assert!(self.value.raster.set(raster).is_ok(), "a deferred image has no raster");
+            *pending = None;
+        }
+        Ok(())
+    }
+
+    /// The image `body` makes from this one with `constants`, described by
+    /// `desc`. A deferred input extends its plan, and a raster starts a new one.
+    /// Fails when `desc` holds a different number of pixels or `constants`
+    /// is not `body.constants` long.
+    pub fn map<P: MapPayload>(
+        &self,
+        body: &MapBody,
+        constants: &[f32],
+        desc: Description,
+    ) -> Result<Image> {
+        if constants.len() != body.constants {
+            return Err(Error::Contract(format!(
+                "{} reads {} constants",
+                body.name, body.constants
+            )));
+        }
+        let typed_desc = typed::<P::Desc>(&desc);
+        let pending = self.value.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        let (input, plan) = match pending.as_ref() {
+            Some(deferred) => (deferred.input::<P>().clone(), deferred.plan.then(body, constants)),
+            None => {
+                let raster = self.downcast::<P>().expect("map input payload is checked");
+                (raster.clone(), Plan::default().then(body, constants))
+            }
+        };
+        if P::byte_len(input.desc()) != P::byte_len(&typed_desc) {
+            return Err(Error::Contract(format!("a map keeps its input's {} extent", P::NAME)));
+        }
+        let deferred =
+            Deferred { input: Box::new(input), plan, materialize: Deferred::materialize::<P> };
+        let value = Value { raster: OnceLock::new(), pending: Mutex::new(Some(deferred)) };
+        Ok(Image { desc, value: Arc::new(value) })
     }
 }
 impl<P: Payload> From<Raster<P>> for Image {
     fn from(raster: Raster<P>) -> Self {
-        Self { desc: raster.description(), raster: Arc::new(raster) }
+        let desc = raster.description();
+        let raster: Box<dyn Any + Send + Sync> = Box::new(raster);
+        let value = Value { raster: OnceLock::from(raster), pending: Mutex::new(None) };
+        Self { desc, value: Arc::new(value) }
+    }
+}
+impl Deferred {
+    fn input<P: Payload>(&self) -> &Raster<P> {
+        self.input.downcast_ref().expect("deferred input payload is the map payload")
+    }
+
+    fn materialize<P: MapPayload>(
+        &self,
+        desc: &Description,
+        ctx: &KernelContext<'_>,
+    ) -> Result<Box<dyn Any + Send + Sync>> {
+        Ok(Box::new(self.plan.run(self.input::<P>(), typed(desc), ctx)?))
     }
 }
 

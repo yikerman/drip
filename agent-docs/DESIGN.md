@@ -81,7 +81,8 @@ Settled with the user on 2026-10-11 after a review against
   kernel reads. Structured data stays on the CPU; nodes flatten the numbers a
   kernel needs into per-invocation constants.
 - **Decided (2026-10-13):** Ports name payloads; residency left node
-  signatures. An edge carries an `Image`, today always a `Raster`: a
+  signatures. An edge carries an `Image`, a `Raster` or a deferred map output
+  (see Compute, 2026-10-13). A raster is a
   description with at most one host and one device representation, the
   missing one made once on request (`data.host()`, `data.device(ctx)`) and
   counted on the runtime. `device` exists only for `DeviceLayout` payloads, so
@@ -112,10 +113,12 @@ Settled with the user on 2026-10-11 after a review against
   inputs, `Option<&Desc>` for optional ones. Requirement checks run first in
   the same generated path. An unconnected optional input is incomplete wiring:
   a node that needs it in some mode (CAT16 As shot) reports it at evaluation.
-- **Decided:** Two declaration forms. Computation, view and action nodes:
+- **Decided:** Three declaration forms. Computation, view and action nodes:
   `fn(&KernelContext, &Params, Read..., Write...) -> Result<()>`, with an empty
   body for views and actions. Sources: `fn(&Params, Load<'_, P>...)`, run once
-  when first forced; `Load::set` validates at the boundary.
+  when first forced; `Load::set` validates at the boundary. Maps (2026-10-13):
+  `#[node(map = body)] fn(&Params, Point<In>, Read..., Point<Out>) ->
+  Result<[f32; N]>`, see Compute.
 - **Decided (2026-10-13):** An output may be `Forward` instead of `Write`: the
   node sets it from a raster it holds, typically an input, with
   `Forward::set`, which shares every existing representation under the
@@ -279,7 +282,46 @@ Settled with the user on 2026-10-11 after a review against
   the two; later shapes are added beside them. A run's values live in a
   `Store` keyed by output port with use counts; step 4 grows it into the memo.
   `image.rs` (`Image`, `Raster`) and `store.rs` hold the value model; nodes
-  reach values through their ports.
+  reach values through their ports. `Shape` moved to `shape.rs` in step 2.
+- **Decided (2026-10-13):** Step 2: the map shape and fused segment
+  kernels. A map node declares `#[node(map = body)]` on a host function
+  `fn(&Params, Point<In>, Read..., Point<Out>) -> Result<[f32; N]>`. The first
+  `Point` is the mapped input and the second the output, both descriptions
+  only. Other inputs are `Read` and arrive materialized. The contract still
+  describes the output, so every shape keeps one port and contract mechanism.
+  The body is `#[cube] fn(px: Pixel, k: &[f32]) -> Pixel` over the host
+  function's constants. `Shape::Map(&MapBody)` records the body's CubeCL
+  expansion function, its constant count and a name unique in the binary
+  (module path and body path). `Pixel` and `MapPayload` (packed `[f32; 3]`,
+  implemented by `Rgb`) live in `shape.rs` because the fused kernel loads and
+  stores them.
+- **Decided (2026-10-13):** A map's output is a deferred `Image`: the input
+  raster, a `Plan` (bodies and concatenated constants) and the description.
+  A map whose input is still deferred extends that plan. A map whose input is
+  a raster, or a deferred image already materialized, starts a plan.
+  Materialization is pulled: kernel adapters materialize their `Read` inputs,
+  map adapters their non-mapped `Read` inputs, and evaluation the
+  `InputValues` it returns and the target of `evaluate`. Clones share one
+  materialization, so several consumers that need samples launch the kernel
+  once. Maps after a fan-out each extend the shared plan and recompute it in
+  their own kernel instead of cutting the segment. This trades arithmetic for
+  bandwidth and keeps results independent of evaluation order. Materializing
+  drops the plan and its input raster, so peak memory does not grow.
+- **Decided (2026-10-13):** The fused kernel is one `#[cube(launch)]` shell
+  in `plan.rs` whose comptime argument is the body sequence. An `intrinsic!`
+  loop calls each body's expansion function on its constant window. The
+  sequence is part of CubeCL's `KernelId`, so each distinct sequence compiles
+  once and other constant values reuse it. The macro generates the
+  `CubeKernel` a hand-written implementation would repeat. Bodies keep the
+  expression order of the kernels they replace, so results are bit-identical:
+  tests compare against the old kernels on signed, zero, huge, infinite and
+  NaN samples, and the Sony fixture's output hashes match at scale 1 and 2.
+  `Statistics::fused` counts fused launches.
+- **Decided (2026-10-13):** Fusion pays for itself on the colour tail.
+  Camera matrix, CAT16, exposure and sigmoid on a device raster of the Sony
+  fixture take 6.6 ms as four kernels and 1.8 ms fused at full detail, and
+  1.8 ms and 0.62 ms at scale 2 (wgpu, RTX 3080, release, medians). Numbers
+  and commands are in [PROGRESS](PROGRESS.md#2026-10-13).
 - **Decided:** CubeCL computation with one kernel source per algorithm across
   runtimes; wgpu presentation and color management stay frontend-owned.
   `DRIP_BACKEND` selects explicitly and never falls back (crate README).

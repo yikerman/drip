@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use super::parse::{Direction, Options, Port, Signature};
+use super::parse::{Direction, Options, Port, Signature, View};
 
 pub(super) fn node(
     function: &syn::ItemFn,
@@ -18,12 +18,16 @@ pub(super) fn node(
     };
     let parameters = &signature.parameters;
     let kind = kind(function, options, signature, &vis);
+    let body = options
+        .map
+        .as_ref()
+        .map(|path| body(path, signature.map.as_ref().expect("a map has a constants type"), &vis));
     let ports = ports(signature, &vis);
     let inputs = inputs(signature, &vis);
-    let (contract, run) = if signature.source {
-        (loaded_contract(), loaded_run(signature))
-    } else {
-        (contract(options, signature), run(name, signature))
+    let (contract, run) = match (&options.map, signature.source) {
+        (_, true) => (loaded_contract(), loaded_run(signature)),
+        (Some(_), _) => (contract(options, signature), map_run(name, signature)),
+        (None, false) => (contract(options, signature), run(name, signature)),
     };
     // Files are read when first forced and kept with the node, error included.
     // They are assumed not to change, so the cache keeps the node pure; any
@@ -84,6 +88,7 @@ pub(super) fn node(
 
             #definition
             #kind
+            #body
             #ports
             #inputs
 
@@ -130,10 +135,10 @@ fn kind(
     let parameters = &signature.parameters;
     let inputs = signature.inputs().map(port_spec);
     let outputs = signature.outputs().map(port_spec);
-    let shape = if signature.source {
-        quote!(::drip::definition::Shape::Source)
-    } else {
-        quote!(::drip::definition::Shape::Kernel)
+    let shape = match (signature.source, &options.map) {
+        (true, _) => quote!(::drip::shape::Shape::Source),
+        (false, Some(_)) => quote!(::drip::shape::Shape::Map(&BODY)),
+        (false, None) => quote!(::drip::shape::Shape::Kernel),
     };
     let action = match &options.action {
         None => quote!(None),
@@ -305,7 +310,7 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
                 let payload = &port.payload;
                 let requirement = &port.requirement;
                 let slot = format_ident!("output_{index}");
-                let (kind, view) = if port.forward {
+                let (kind, view) = if port.view == View::Forward {
                     (quote!(ForwardSlot), quote!(forward))
                 } else {
                     (quote!(OutputSlot), quote!(write))
@@ -327,11 +332,79 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
             inputs: &[Option<::drip::image::Image>],
             outputs: &[::drip::image::Description],
         ) -> ::drip::Result<Vec<::drip::image::Image>> {
+            for image in inputs.iter().flatten() {
+                image.materialize(context)?;
+            }
             let inputs = <Definition as ::drip::definition::Typed>::bind(inputs)?;
             #(#slots)*
             super::#name(context, &self.parameters, #(#arguments),*)?;
             Ok(vec![#(#results),*])
         }
+    }
+}
+
+/// A map's adapter: materialize the `Read` inputs, call the host function on
+/// descriptions, and publish the mapped input extended by the body.
+fn map_run(name: &syn::Ident, signature: &Signature) -> TokenStream {
+    let mut binds = Vec::new();
+    let mut arguments = Vec::new();
+    let mut mapped = None;
+    for port in &signature.ports {
+        let local = &port.name;
+        let index = port.index;
+        let payload = &port.payload;
+        let requirement = &port.requirement;
+        let port_name = local.to_string();
+        let missing = quote!(::drip::Error::MissingInput { node: KIND.id, port: #port_name });
+        binds.push(match (port.view, port.direction) {
+            (View::Point, Direction::Input) => {
+                mapped = Some((index, payload));
+                quote! {
+                    let #local = ::drip::ports::Point::<#payload, #requirement>::new(
+                        inputs[#index].as_ref().ok_or(#missing)?.desc(),
+                    );
+                }
+            }
+            (View::Point, Direction::Output) => quote! {
+                let #local = ::drip::ports::Point::<#payload, #requirement>::new(&outputs[#index]);
+            },
+            _ => {
+                let image = quote!(inputs[#index].as_ref());
+                let read = quote!(::drip::ports::Read::<#payload, #requirement>::bind(#image));
+                let read = if port.optional { read } else { quote!(#read.ok_or(#missing)?) };
+                quote! {
+                    #image.map(|image| image.materialize(context)).transpose()?;
+                    let #local = #read;
+                }
+            }
+        });
+        arguments.push(local);
+    }
+    let (input, payload) = mapped.expect("a map has a mapped input");
+    quote! {
+        fn run(
+            &self,
+            context: &::drip::runtime::KernelContext<'_>,
+            inputs: &[Option<::drip::image::Image>],
+            outputs: &[::drip::image::Description],
+        ) -> ::drip::Result<Vec<::drip::image::Image>> {
+            #(#binds)*
+            let constants = super::#name(&self.parameters, #(#arguments),*)?;
+            let image = inputs[#input].as_ref().expect("the mapped input is bound");
+            Ok(vec![image.map::<#payload>(&BODY, &constants, outputs[0].clone())?])
+        }
+    }
+}
+
+/// A map's registered body. Its name is unique in the binary, so it can
+/// identify fused kernels.
+fn body(body: &syn::Path, constants: &syn::Type, vis: &TokenStream) -> TokenStream {
+    quote! {
+        #vis static BODY: ::drip::shape::MapBody = ::drip::shape::MapBody {
+            name: concat!(module_path!(), "::", stringify!(#body)),
+            constants: <#constants as ::drip::shape::Constants>::LEN,
+            expand: super::#body::expand,
+        };
     }
 }
 

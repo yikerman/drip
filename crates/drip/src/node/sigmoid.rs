@@ -13,12 +13,7 @@
 
 use crate::node::color::{D65, REC2020};
 use crate::{
-    Error, Result,
-    node::color,
-    node::data::*,
-    ports::*,
-    registry::tag,
-    runtime::{GlobalContext, KernelContext},
+    Error, Result, node::color, node::data::*, ports::*, registry::tag, runtime::GlobalContext,
 };
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
@@ -88,24 +83,14 @@ fn apply_contract(_: &GlobalContext, _: &Settings, image: &RgbDesc) -> Result<(R
 name="Sigmoid",
 tags = [tag::OUTPUT_TRANSFORM, tag::TONEMAP],
 contract=apply_contract,
-references=[("darktable sigmoid", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/sigmoid.c")])]
+references=[("darktable sigmoid", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/sigmoid.c")],
+map = kernel::sigmoid)]
 pub fn apply(
-    ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Rgb, Rec2020>,
-    output: Write<'_, Rgb, Rec2020>,
-) -> Result<()> {
-    let coefficients = ctx.constants(&prepare_values(p))?;
-    let (count, dim) = crate::runtime::dispatch_dims(image.desc.extent.pixels());
-    kernel::sigmoid::launch(
-        ctx.client()?,
-        count,
-        dim,
-        image.data.device(ctx)?.argument(),
-        coefficients.argument(),
-        output.device(ctx)?.argument(),
-    );
-    Ok(())
+    _image: Point<'_, Rgb, Rec2020>,
+    _output: Point<'_, Rgb, Rec2020>,
+) -> Result<[f32; 22]> {
+    Ok(prepare_values(p))
 }
 
 /// Rotate each spectral direction to the base triangle's edge, then attenuate.
@@ -131,7 +116,7 @@ fn primaries(scale: [f64; 3]) -> [[f64; 2]; 3] {
 mod kernel {
     // SPDX-License-Identifier: GPL-3.0-or-later
     // Source pins and numerical deviations: THIRD_PARTY.md.
-    use crate::node::shared_kernel::down64;
+    use crate::{node::shared_kernel::down64, shape::Pixel};
     use cubecl::prelude::*;
     #[cube]
     pub(crate) fn curve(value: f32, p: &[f32], log_scale: f32) -> f32 {
@@ -145,84 +130,85 @@ mod kernel {
     }
     // CubeCL expands scalar assignments; std::mem::swap is outside its kernel DSL.
     #[allow(clippy::manual_swap)]
-    #[cube(launch)]
-    pub fn sigmoid(input: &[f32], p: &[f32], output: &mut [f32]) {
-        let i = ABSOLUTE_POS * 3;
-        if i < input.len() {
-            let mut rgb = Array::<f32>::new(3usize);
-            let mut work = Array::<f32>::new(3usize);
-            let mut mapped = Array::<f32>::new(3usize);
-            let magnitude = input[i].abs().max(input[i + 1].abs()).max(input[i + 2].abs());
-            let input_scale = if magnitude > 1e20f32 { 18446744073709551616.0f32 } else { 1.0f32 };
-            let mut bounded = Array::<f32>::new(3usize);
-            for c in 0..3 {
-                bounded[c] = if magnitude > 1e20f32 { down64(input[i + c]) } else { input[i + c] };
-            }
-            let log_scale = input_scale.ln();
-            let average =
-                (bounded[0] / 3.0f32 + bounded[1] / 3.0f32 + bounded[2] / 3.0f32).max(0.0f32);
-            let minimum = bounded[0].min(bounded[1]).min(bounded[2]);
-            // Scale before subtraction, retaining the f64 CPU ratio's overflow protection.
-            let scale = average.max(-minimum);
-            let saturation = if minimum < 0.0f32 {
-                (average / scale) / (average / scale - minimum / scale)
-            } else {
-                1.0f32
-            };
-            for c in 0..3 {
-                rgb[c] = ((1.0f32 - saturation) * average + saturation * bounded[c]).max(0.0f32);
-            }
-            for c in 0..3 {
-                work[c] = p[4 + c * 3] * rgb[0] + p[5 + c * 3] * rgb[1] + p[6 + c * 3] * rgb[2];
-                mapped[c] = curve(work[c], p, log_scale);
-            }
-            let mut lo = 0usize;
-            let mut mid = 1usize;
-            let mut hi = 2usize;
-            if work[lo] > work[mid] {
-                let t = lo;
-                lo = mid;
-                mid = t;
-            }
-            if work[mid] > work[hi] {
-                let t = mid;
-                mid = hi;
-                hi = t;
-            }
-            if work[lo] > work[mid] {
-                let t = lo;
-                lo = mid;
-                mid = t;
-            }
-            let chroma = work[hi] - work[lo];
-            let fraction = if chroma != 0.0f32 { (work[mid] - work[lo]) / chroma } else { 0.0f32 };
-            let hue = p[3];
-            let corrected = mapped[lo] + (mapped[hi] - mapped[lo]) * fraction;
-            let naive = (1.0f32 - hue) * mapped[mid] + hue * corrected;
-            let scale2 = work[lo].max(work[mid]);
-            let blend = if scale2 != 0.0f32 {
-                2.0f32 * (work[lo] / scale2) / (work[lo] / scale2 + work[mid] / scale2)
-            } else {
-                0.0f32
-            };
-            let energy = blend * (mapped[0] + mapped[1] + mapped[2])
-                + (1.0f32 - blend) * (mapped[lo] + naive + mapped[hi]);
-            if naive <= mapped[mid] {
-                mapped[mid] = ((1.0f32 - hue) * mapped[mid]
-                    + hue * (fraction * mapped[hi] + (1.0f32 - fraction) * (energy - mapped[hi])))
-                    / (1.0f32 + hue * (1.0f32 - fraction));
-                mapped[lo] = energy - mapped[hi] - mapped[mid];
-            } else {
-                mapped[mid] = ((1.0f32 - hue) * mapped[mid]
-                    + hue * (mapped[lo] * (1.0f32 - fraction) + fraction * (energy - mapped[lo])))
-                    / (1.0f32 + hue * fraction);
-                mapped[hi] = energy - mapped[lo] - mapped[mid];
-            }
-            for c in 0..3 {
-                output[i + c] = p[13 + c * 3] * mapped[0]
-                    + p[14 + c * 3] * mapped[1]
-                    + p[15 + c * 3] * mapped[2];
-            }
+    #[cube]
+    pub fn sigmoid(px: Pixel, p: &[f32]) -> Pixel {
+        let mut input = Array::<f32>::new(3usize);
+        input[0] = px.r;
+        input[1] = px.g;
+        input[2] = px.b;
+        let mut rgb = Array::<f32>::new(3usize);
+        let mut work = Array::<f32>::new(3usize);
+        let mut mapped = Array::<f32>::new(3usize);
+        let magnitude = input[0].abs().max(input[1].abs()).max(input[2].abs());
+        let input_scale = if magnitude > 1e20f32 { 18446744073709551616.0f32 } else { 1.0f32 };
+        let mut bounded = Array::<f32>::new(3usize);
+        for c in 0..3 {
+            bounded[c] = if magnitude > 1e20f32 { down64(input[c]) } else { input[c] };
         }
+        let log_scale = input_scale.ln();
+        let average = (bounded[0] / 3.0f32 + bounded[1] / 3.0f32 + bounded[2] / 3.0f32).max(0.0f32);
+        let minimum = bounded[0].min(bounded[1]).min(bounded[2]);
+        // Scale before subtraction, retaining the f64 CPU ratio's overflow protection.
+        let scale = average.max(-minimum);
+        let saturation = if minimum < 0.0f32 {
+            (average / scale) / (average / scale - minimum / scale)
+        } else {
+            1.0f32
+        };
+        for c in 0..3 {
+            rgb[c] = ((1.0f32 - saturation) * average + saturation * bounded[c]).max(0.0f32);
+        }
+        for c in 0..3 {
+            work[c] = p[4 + c * 3] * rgb[0] + p[5 + c * 3] * rgb[1] + p[6 + c * 3] * rgb[2];
+            mapped[c] = curve(work[c], p, log_scale);
+        }
+        let mut lo = 0usize;
+        let mut mid = 1usize;
+        let mut hi = 2usize;
+        if work[lo] > work[mid] {
+            let t = lo;
+            lo = mid;
+            mid = t;
+        }
+        if work[mid] > work[hi] {
+            let t = mid;
+            mid = hi;
+            hi = t;
+        }
+        if work[lo] > work[mid] {
+            let t = lo;
+            lo = mid;
+            mid = t;
+        }
+        let chroma = work[hi] - work[lo];
+        let fraction = if chroma != 0.0f32 { (work[mid] - work[lo]) / chroma } else { 0.0f32 };
+        let hue = p[3];
+        let corrected = mapped[lo] + (mapped[hi] - mapped[lo]) * fraction;
+        let naive = (1.0f32 - hue) * mapped[mid] + hue * corrected;
+        let scale2 = work[lo].max(work[mid]);
+        let blend = if scale2 != 0.0f32 {
+            2.0f32 * (work[lo] / scale2) / (work[lo] / scale2 + work[mid] / scale2)
+        } else {
+            0.0f32
+        };
+        let energy = blend * (mapped[0] + mapped[1] + mapped[2])
+            + (1.0f32 - blend) * (mapped[lo] + naive + mapped[hi]);
+        if naive <= mapped[mid] {
+            mapped[mid] = ((1.0f32 - hue) * mapped[mid]
+                + hue * (fraction * mapped[hi] + (1.0f32 - fraction) * (energy - mapped[hi])))
+                / (1.0f32 + hue * (1.0f32 - fraction));
+            mapped[lo] = energy - mapped[hi] - mapped[mid];
+        } else {
+            mapped[mid] = ((1.0f32 - hue) * mapped[mid]
+                + hue * (mapped[lo] * (1.0f32 - fraction) + fraction * (energy - mapped[lo])))
+                / (1.0f32 + hue * fraction);
+            mapped[hi] = energy - mapped[lo] - mapped[mid];
+        }
+        let mut output = Array::<f32>::new(3usize);
+        for c in 0..3 {
+            output[c] =
+                p[13 + c * 3] * mapped[0] + p[14 + c * 3] * mapped[1] + p[15 + c * 3] * mapped[2];
+        }
+        Pixel { r: output[0], g: output[1], b: output[2] }
     }
 }

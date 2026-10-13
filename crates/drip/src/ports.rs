@@ -4,7 +4,9 @@
 //! placement. `Read` borrows an input [`Raster`] and the node asks it for
 //! `host()` or `device(ctx)`. `Write` creates the output where the node writes
 //! it; `Forward` publishes samples the node already holds; `Load` sets a
-//! source's output. Type erasure is confined to the generated node adapter.
+//! source's output. A map's host function sees its mapped input and output as
+//! `Point`, a description without samples. Type erasure is confined to the
+//! generated node adapter.
 use crate::{
     Error, Result,
     image::{Description, Image, Raster},
@@ -39,9 +41,24 @@ impl<'a, P: Payload, R> Read<'a, P, R> {
     pub fn new(data: &'a Raster<P>) -> Self {
         Self { desc: data.desc(), data, requirement: PhantomData }
     }
+    /// View a materialized input ([`Image::materialize`]).
     #[doc(hidden)]
     pub fn bind(image: Option<&'a Image>) -> Option<Self> {
         image.map(|image| Self::new(image.downcast().expect("typed node adapter invariant")))
+    }
+}
+
+/// The mapped input or the output of a map node, as its host function sees
+/// them: the description only. The samples exist once a consumer materializes
+/// the output, computed by the node's body. `desc` is checked against `R`.
+pub struct Point<'a, P: Payload, R = Any> {
+    pub desc: &'a P::Desc,
+    requirement: PhantomData<R>,
+}
+impl<'a, P: Payload, R> Point<'a, P, R> {
+    #[doc(hidden)]
+    pub fn new(desc: &'a Description) -> Self {
+        Self { desc: downcast(desc), requirement: PhantomData }
     }
 }
 

@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Source pins and numerical deviations: THIRD_PARTY.md.
+use crate::shape::Pixel;
 use cubecl::prelude::*;
 
-#[cube(launch)]
-pub fn matrix(input: &[f32], coeff: &[f32], output: &mut [f32]) {
-    let i = ABSOLUTE_POS * 3;
-    if i < input.len() {
-        let r = input[i];
-        let g = input[i + 1];
-        let b = input[i + 2];
-        for c in 0..3 {
-            output[i + c] = coeff[c * 3] * r + coeff[c * 3 + 1] * g + coeff[c * 3 + 2] * b;
-        }
+/// A 3×3 matrix, row-major in `k`, applied to one pixel.
+#[cube]
+pub fn matrix(px: Pixel, k: &[f32]) -> Pixel {
+    Pixel {
+        r: k[0] * px.r + k[1] * px.g + k[2] * px.b,
+        g: k[3] * px.r + k[4] * px.g + k[5] * px.b,
+        b: k[6] * px.r + k[7] * px.g + k[8] * px.b,
     }
 }
 #[cube]

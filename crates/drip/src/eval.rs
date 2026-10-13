@@ -1,5 +1,10 @@
 //! Evaluate the requested dependency subgraph. Values live for one run, in
 //! the run's `Store`.
+//!
+//! Nodes run in graph order. A map node publishes a deferred image. A kernel
+//! node, the consumers of `evaluate_inputs` and the target of `evaluate`
+//! materialize what they receive, so each chain of maps runs as one fused
+//! kernel at its first consumer that needs samples.
 use crate::{
     Error, Result,
     definition::{Kind, Typed},
@@ -25,9 +30,9 @@ pub struct NodeTiming {
     pub success: bool,
 }
 
-/// Work done by one `evaluate` call. Transfers are counted on the evaluator's
-/// runtime while the call runs; reading the result's other side afterwards
-/// is the caller's transfer.
+/// Work done by one `evaluate` call, counted on the evaluator's runtime while
+/// the call runs. Reading the result's other side afterwards is the caller's
+/// transfer.
 #[derive(Default, Debug)]
 pub struct Statistics {
     pub nodes: usize,
@@ -35,8 +40,11 @@ pub struct Statistics {
     pub uploads: usize,
     /// Rasters copied from device to host.
     pub downloads: usize,
+    /// Fused map kernels launched, one per materialized deferred image.
+    pub fused: usize,
 }
-/// The target output's raster, where its node produced it.
+/// The target output's raster, where its node produced it. A deferred target
+/// is materialized on the device.
 pub struct Evaluation<P: Payload> {
     pub desc: P::Desc,
     pub data: Raster<P>,
@@ -124,14 +132,16 @@ impl Evaluator {
         dag.output_of::<P>(target.id)?;
         global.validate()?;
         let (uploads, downloads) = self.runtime.transfers();
+        let fused = self.runtime.fused();
         let needed = required_nodes(dag, target.node())?;
         let mut run = Run::new(dag, &self.runtime, global, &needed);
         run.store.retain(target.id);
         for &index in dag.order.iter().filter(|i| needed.contains(i)) {
             run.execute(dag.entries[index].as_ref().unwrap())?;
         }
-        let data =
-            run.value(target.id)?.downcast::<P>().expect("output payload is checked").clone();
+        let image = run.value(target.id)?;
+        image.materialize(&run.kernels())?;
+        let data = image.downcast::<P>().expect("output payload is checked").clone();
         // One terminal wait; host consumers have already waited at read boundaries.
         self.runtime.finish()?;
         let (uploaded, downloaded) = self.runtime.transfers();
@@ -139,6 +149,7 @@ impl Evaluator {
             nodes: run.nodes,
             uploads: uploaded - uploads,
             downloads: downloaded - downloads,
+            fused: self.runtime.fused() - fused,
         };
         Ok(Evaluation { desc: data.desc().clone(), data, statistics })
     }
@@ -219,10 +230,16 @@ impl<'a, 't> Run<'a, 't> {
             Err(error.clone())
         } else {
             let kind = self.dag.entry(id)?.node.kind();
+            let kernels = self.kernels();
+            let value = |from| {
+                let image = self.value(from)?;
+                image.materialize(&kernels)?;
+                Ok(image.clone())
+            };
             request
                 .inputs
                 .iter()
-                .map(|from| from.map(|from| self.value(from).cloned()).transpose())
+                .map(|from| from.map(value).transpose())
                 .collect::<Result<Vec<_>>>()
                 .map(|values| InputValues { kind, values })
         };
@@ -230,6 +247,10 @@ impl<'a, 't> Run<'a, 't> {
             self.store.release(from);
         }
         result
+    }
+
+    fn kernels(&self) -> KernelContext<'a> {
+        KernelContext { runtime: self.runtime, global: self.global }
     }
 
     fn value(&self, from: PortId) -> Result<&Image> {
@@ -264,8 +285,7 @@ impl<'a, 't> Run<'a, 't> {
         if outputs.len() != specs.len() {
             return Err(Error::Runtime("node contract output arity mismatch".into()));
         }
-        let context = KernelContext { runtime: self.runtime, global: self.global };
-        let result = e.node.run(&context, &inputs, &outputs)?;
+        let result = e.node.run(&self.kernels(), &inputs, &outputs)?;
         if result.len() != specs.len() {
             return Err(Error::Runtime("node result arity mismatch".into()));
         }
@@ -283,7 +303,7 @@ impl<'a, 't> Run<'a, 't> {
     }
 }
 
-/// A node's evaluated inputs, in its input order.
+/// A node's evaluated inputs, in its input order, materialized.
 pub struct InputValues {
     kind: &'static Kind,
     values: Vec<Option<Image>>,

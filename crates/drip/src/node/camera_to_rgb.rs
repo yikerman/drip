@@ -3,7 +3,7 @@ use crate::{
     node::{camera, color, data::*},
     ports::*,
     registry::tag,
-    runtime::{GlobalContext, KernelContext, dispatch_dims},
+    runtime::GlobalContext,
 };
 pub use compute::{Definition, Ports, add, definition};
 use std::sync::Arc;
@@ -25,24 +25,13 @@ fn camera_to_rgb_contract(
 /// camera neutral under D65 maps to white; scene white balance is a separate
 /// adaptation. No clipping or normalization is applied. The image must come
 /// from the same camera make and model as the metadata.
-#[crate::node(id = "camera-to-color-rgb", name="Camera RGB to color RGB", tags = [tag::INPUT_TRANSFORM, tag::COLOR], contract = camera_to_rgb_contract)]
+#[crate::node(id = "camera-to-color-rgb", name="Camera RGB to color RGB", tags = [tag::INPUT_TRANSFORM, tag::COLOR], contract = camera_to_rgb_contract, map = super::shared_kernel::matrix)]
 pub fn compute(
-    ctx: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Rgb, CameraRgb>,
+    image: Point<'_, Rgb, CameraRgb>,
     metadata: Read<'_, CaptureMetadata>,
-    output: Write<'_, Rgb, Rec2020>,
-) -> Result<()> {
+    _output: Point<'_, Rgb, Rec2020>,
+) -> Result<[f32; 9]> {
     let matrix = camera::matrix(metadata.data.host()?, image.desc.response()?.balance)?;
-    let coefficients = ctx.constants(color::to_f32(&matrix).as_flattened())?;
-    let (count, dim) = dispatch_dims(image.desc.extent.pixels());
-    super::shared_kernel::matrix::launch(
-        ctx.client()?,
-        count,
-        dim,
-        image.data.device(ctx)?.argument(),
-        coefficients.argument(),
-        output.device(ctx)?.argument(),
-    );
-    Ok(())
+    Ok(bytemuck::cast(color::to_f32(&matrix)))
 }

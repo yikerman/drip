@@ -72,7 +72,7 @@ fn sources_load_host_outputs_without_a_contract() {
         ),
     );
     let shape = kind_field(&module, "shape");
-    assert_eq!(quote!(#shape).to_string(), quote!(::drip::definition::Shape::Source).to_string());
+    assert_eq!(quote!(#shape).to_string(), quote!(::drip::shape::Shape::Source).to_string());
     let items = &module.content.as_ref().unwrap().1;
     assert!(items.iter().any(|item| matches!(item, syn::Item::Fn(f) if f.sig.ident == "load")));
     let error = expand(quote!(id = "raw", contract = c), function).unwrap_err();
@@ -217,13 +217,13 @@ fn rejects_unsupported_signatures() {
             quote!(
                 fn x(c: &C, p: &P, a: Either<A, B>) {}
             ),
-            "expected Read, Write, Forward or Load; wrapper aliases are not resolved",
+            "expected Read, Write, Forward, Load or Point; wrapper aliases are not resolved",
         ),
         (
             quote!(
                 fn x(c: &C, p: &P, a: Alias<A>) {}
             ),
-            "expected Read, Write, Forward or Load; wrapper aliases are not resolved",
+            "expected Read, Write, Forward, Load or Point; wrapper aliases are not resolved",
         ),
         (
             quote!(
@@ -333,7 +333,7 @@ fn preserves_public_bindings_and_metadata() {
     }
     assert_eq!(literal(&module, "help"), "First line.\nSecond line.");
     let shape = kind_field(&module, "shape");
-    assert_eq!(quote!(#shape).to_string(), quote!(::drip::definition::Shape::Kernel).to_string());
+    assert_eq!(quote!(#shape).to_string(), quote!(::drip::shape::Shape::Kernel).to_string());
 }
 
 #[test]
@@ -460,10 +460,12 @@ fn forwarded_outputs_publish_storage_the_node_sets() {
     let module = generated_module(expand(quote!(id = "x", contract = c), function).unwrap());
     let run = generated_method(&module, "run");
     let statements: Vec<_> = run.block.stmts.iter().map(|s| quote!(#s).to_string()).collect();
-    assert!(statements[1].contains("ForwardSlot :: < B > :: new"));
-    assert!(statements[1].contains("typed (& outputs [0usize])"));
-    assert!(statements[2].contains("OutputSlot :: < C > :: new"));
-    assert!(statements[2].contains("typed (& outputs [1usize])"));
+    // Inputs are materialized and bound before the output slots.
+    assert!(statements[0].contains("image . materialize (context)"));
+    assert!(statements[2].contains("ForwardSlot :: < B > :: new"));
+    assert!(statements[2].contains("typed (& outputs [0usize])"));
+    assert!(statements[3].contains("OutputSlot :: < C > :: new"));
+    assert!(statements[3].contains("typed (& outputs [1usize])"));
     let call = kernel_call(run, "x");
     let arguments: Vec<_> = call.args.iter().skip(3).map(|a| quote!(#a).to_string()).collect();
     assert_eq!(
@@ -509,6 +511,117 @@ fn port_specs_carry_requirements_and_default_to_any() {
         ("outputs", quote!(::drip::ports::PortSpec::of::<Rgb, Rec2020>("output"))),
     ] {
         assert_port_specs(&module, method, expected);
+    }
+}
+
+#[test]
+fn maps_return_constants_for_a_registered_body() {
+    let function: syn::ItemFn = syn::parse_quote! {
+        fn x(
+            p: &P,
+            image: Point<'_, Rgb, CameraRgb>,
+            metadata: Option<Read<'_, Facts>>,
+            _output: Point<'_, Rgb, Rec2020>,
+        ) -> Result<[f32; 9]> { Ok([0.0; 9]) }
+    };
+    let signature = Signature::parse(&function.sig).unwrap();
+    let directions: Vec<_> = signature.ports.iter().map(|p| (p.direction, p.index)).collect();
+    assert!(directions == [(Direction::Input, 0), (Direction::Input, 1), (Direction::Output, 0)]);
+    let options = quote!(id = "x", contract = c, map = kernel::body);
+    let module = generated_module(expand(options, function).unwrap());
+    let shape = kind_field(&module, "shape");
+    assert_eq!(quote!(#shape).to_string(), quote!(::drip::shape::Shape::Map(&BODY)).to_string());
+    let body = module
+        .content
+        .as_ref()
+        .unwrap()
+        .1
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Static(item) if item.ident == "BODY" => Some(quote!(#item).to_string()),
+            _ => None,
+        })
+        .expect("generated BODY");
+    assert!(body.contains("< [f32 ; 9] as :: drip :: shape :: Constants > :: LEN"));
+    assert!(body.contains("super :: kernel :: body :: expand"));
+    assert_port_specs(
+        &module,
+        "inputs",
+        quote!(
+            ::drip::ports::PortSpec::of::<Rgb, CameraRgb>("image"),
+            ::drip::ports::PortSpec::of::<Facts, ::drip::ports::Any>("metadata").optional()
+        ),
+    );
+    assert_port_specs(
+        &module,
+        "outputs",
+        quote!(::drip::ports::PortSpec::of::<Rgb, Rec2020>("output")),
+    );
+    // Only the Read input is materialized. The mapped input stays deferred.
+    let run = generated_method(&module, "run");
+    let run = quote!(#run).to_string();
+    assert_eq!(run.matches("materialize").count(), 1);
+    assert!(
+        run.contains("inputs [1usize] . as_ref () . map (| image | image . materialize (context))")
+    );
+    assert!(run.contains("image . map :: < Rgb > (& BODY , & constants , outputs [0] . clone ())"));
+}
+
+#[test]
+fn rejects_malformed_maps() {
+    for (options, declaration, message) in [
+        (
+            quote!(id = "x", contract = c),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
+            ),
+            "a map names its #[cube] body: map = body",
+        ),
+        (
+            quote!(id = "x", contract = c, map = body),
+            quote!(
+                fn x(c: &C, p: &P, a: Read<A>, b: Write<A>) {}
+            ),
+            "a map declares its mapped input and output as Point ports",
+        ),
+        (
+            quote!(id = "x", contract = c, map = body),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Write<A>) -> Result<[f32; 1]> {}
+            ),
+            "a map's output is its second Point, computed by the body",
+        ),
+        (
+            quote!(id = "x", contract = c, map = body),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Point<A>, d: Point<A>) -> Result<[f32; 1]> {}
+            ),
+            "a map has one mapped input and one output, both Point",
+        ),
+        (
+            quote!(id = "x", contract = c, map = body),
+            quote!(
+                fn x(p: &P, a: Option<Point<A>>, b: Point<A>) -> Result<[f32; 1]> {}
+            ),
+            "a map has one mapped input and one output, both Point",
+        ),
+        (
+            quote!(id = "x", contract = c, map = body),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Point<A>) {}
+            ),
+            "a map returns Result<[f32; N]>, the constants of its body",
+        ),
+        (
+            quote!(id = "x", contract = c, map = "body"),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
+            ),
+            "expected a #[cube] body function path",
+        ),
+    ] {
+        let error = expand(options, syn::parse2(declaration).unwrap()).unwrap_err();
+        assert_eq!(error.to_string(), message);
     }
 }
 

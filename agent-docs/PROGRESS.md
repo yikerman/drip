@@ -4,6 +4,41 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-13
 
+- Explicit compute model, step 2: the `map` shape and fused segment kernels.
+  `shape.rs` holds `Shape` (now with `Map(&MapBody)`), `Pixel` and
+  `MapPayload`. `plan.rs` holds `Plan` and the fused kernel, a
+  `#[cube(launch)]` shell whose comptime body sequence calls each body's
+  CubeCL expansion function. A map output is a deferred `Image`, extended by
+  further maps and materialized once by the first consumer that needs
+  samples. Exposure, Camera RGB to color RGB, Chromatic adaptation and Sigmoid
+  are maps, and their per-node launches are gone. `tests/fusion.rs` compares the
+  fused chain against the replaced kernels, kept there verbatim, on 369
+  pixels with signed, zero, tiny, huge, infinite and NaN samples: bit
+  identical on wgpu (RTX 3080) and the CPU runtime. It also checks that a
+  fan-out materializes once, a kernel after two maps reads their samples,
+  `evaluate` materializes a map output, a plan without constants runs, and
+  the template's colour tail launches once after Orientation. Measured with
+  a release driver kept in `../drip-benchmark-results/2026-10-13-fusion/`:
+  RCD output of `fixtures/raw/sony-ilce-7rm3.arw` bound as a device raster,
+  then camera matrix, CAT16 (as shot), exposure and sigmoid evaluated to a
+  `Raster<Rgb>` with the terminal device wait, `DRIP_BACKEND=wgpu`,
+  `RAYON_NUM_THREADS=12`, one warm-up and five samples, three alternating
+  runs per build. Before is a worktree of 3479319, after is this change.
+  Medians (ranges) in ms:
+
+  | Scenario | Scale | Before | After |
+  |---|---|---|---|
+  | Colour tail | 1 | 6.60 (6.38–17.11) | 1.82 (1.64–2.09) |
+  | Colour tail | 2 | 1.80 (1.67–2.05) | 0.62 (0.58–0.69) |
+  | RAW to sigmoid, RAW decoded once | 1 | 50.37 (49.15–62.02) | 46.78 (45.89–58.41) |
+  | RAW to sigmoid, RAW decoded once | 2 | 36.54 (35.97–37.64) | 35.59 (34.94–36.07) |
+
+  Output hashes agree before and after in every scenario. Build each variant
+  with `CC=/usr/bin/cc CXX=/usr/bin/c++ CARGO_TARGET_DIR=$PWD/target cargo
+  build --release --offline` in its `before/` or `after/` directory and run
+  `DRIP_BACKEND=wgpu RAYON_NUM_THREADS=12 DRIP_BENCH_SAMPLES=5
+  DRIP_BENCH_RAW=<fixture> ./target/release/fusion-bench`. The full
+  workspace gate passes.
 - Explicit compute model, step 1: residency left node signatures. Ports name
   payloads (`Read<'_, Rgb, Rec2020>`); an edge carries an `Image`, today a
   `Raster` with lazy host and device representations; `Write` is materialized

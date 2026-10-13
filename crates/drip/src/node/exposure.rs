@@ -1,10 +1,4 @@
-use crate::{
-    Error, Result,
-    node::data::*,
-    ports::*,
-    registry::tag,
-    runtime::{GlobalContext, KernelContext, dispatch_dims},
-};
+use crate::{Error, Result, node::data::*, ports::*, registry::tag, runtime::GlobalContext};
 pub use compute::{Definition, Ports, add, definition};
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
@@ -27,34 +21,22 @@ fn exposure_contract(_: &GlobalContext, _: &Exposure, image: &RgbDesc) -> Result
 /// Adjust RGB exposure by multiplying linear samples by 2^EV. Output retains
 /// the input coordinates. Negative and above-one samples are allowed; this
 /// operation does not impose a scene/display processing order.
-#[crate::node(id = "exposure", name="Exposure", tags = [tag::LOOK], contract = exposure_contract)]
+#[crate::node(id = "exposure", name = "Exposure", tags = [tag::LOOK], contract = exposure_contract, map = kernel::exposure)]
 pub fn compute(
-    ctx: &KernelContext<'_>,
     params: &Exposure,
-    image: Read<'_, Rgb>,
-    output: Write<'_, Rgb>,
-) -> Result<()> {
-    let (count, dim) = dispatch_dims(image.desc.extent.pixels() * 3);
-    kernel::exposure::launch(
-        ctx.client()?,
-        count,
-        dim,
-        image.data.device(ctx)?.argument(),
-        output.device(ctx)?.argument(),
-        params.ev.exp2(),
-    );
-    Ok(())
+    _image: Point<'_, Rgb>,
+    _output: Point<'_, Rgb>,
+) -> Result<[f32; 1]> {
+    Ok([params.ev.exp2()])
 }
 
 mod kernel {
     // SPDX-License-Identifier: GPL-3.0-or-later
     // Source pins and numerical deviations: THIRD_PARTY.md.
+    use crate::shape::Pixel;
     use cubecl::prelude::*;
-    #[cube(launch)]
-    pub fn exposure(input: &[f32], output: &mut [f32], gain: f32) {
-        let i = ABSOLUTE_POS;
-        if i < input.len() {
-            output[i] = input[i] * gain;
-        }
+    #[cube]
+    pub fn exposure(px: Pixel, k: &[f32]) -> Pixel {
+        Pixel { r: px.r * k[0], g: px.g * k[0], b: px.b * k[0] }
     }
 }

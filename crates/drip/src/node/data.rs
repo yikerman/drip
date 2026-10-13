@@ -1,5 +1,7 @@
 //! Concrete image and calibration payloads shared by processing nodes.
-use crate::{Error, Result, node::color, payload::decode_array, ports::Requirement};
+use crate::{
+    Error, Result, node::color, payload::decode_array, ports::Requirement, shape::MapPayload,
+};
 pub use crate::{
     image::Raster,
     payload::{DeviceBuffer, DeviceLayout, HostBuffer, Payload},
@@ -137,6 +139,8 @@ impl DeviceLayout for Rgb {
         HostBuffer::from_bytes(bytes)
     }
 }
+
+impl MapPayload for Rgb {}
 
 /// RGB samples in linear Rec.2020/D65 coordinates.
 pub struct Rec2020;

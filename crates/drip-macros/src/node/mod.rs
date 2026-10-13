@@ -14,6 +14,17 @@ pub(crate) fn expand(args: TokenStream, function: syn::ItemFn) -> syn::Result<To
         let message = "a source loads its outputs itself; remove assets";
         return Err(syn::Error::new(function.sig.ident.span(), message));
     }
+    match (&options.map, &signature.map) {
+        (Some(body), None) => {
+            let message = "a map declares its mapped input and output as Point ports";
+            return Err(syn::Error::new(body.span(), message));
+        }
+        (None, Some(_)) => {
+            let message = "a map names its #[cube] body: map = body";
+            return Err(syn::Error::new(function.sig.ident.span(), message));
+        }
+        _ => {}
+    }
     match (&options.contract, signature.outputs().next()) {
         (Some(contract), _) if signature.source => {
             let message = "a source describes its outputs by loading them; remove the contract";

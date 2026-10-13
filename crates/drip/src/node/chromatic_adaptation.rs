@@ -7,7 +7,7 @@ use crate::{
     },
     ports::*,
     registry::tag,
-    runtime::{GlobalContext, KernelContext, dispatch_dims},
+    runtime::GlobalContext,
 };
 pub use compute::{Definition, Ports, add, definition};
 use std::sync::Arc;
@@ -116,26 +116,16 @@ fn contract(
 /// creative reinterpretation. Signed/HDR samples are preserved without clipping.
 #[crate::node(id="chromatic-adaptation", name="Chromatic adaptation", tags = [tag::INPUT_TRANSFORM, tag::COLOR], contract=contract,
     references=[("CAT16", "https://doi.org/10.1002/col.22131"),
-        ("Colour full adaptation", "https://colour.readthedocs.io/en/v0.4.7/generated/colour.adaptation.matrix_chromatic_adaptation_VonKries.html")])]
+        ("Colour full adaptation", "https://colour.readthedocs.io/en/v0.4.7/generated/colour.adaptation.matrix_chromatic_adaptation_VonKries.html")],
+    map = super::shared_kernel::matrix)]
 pub fn compute(
-    ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Rgb, Rec2020>,
+    _image: Point<'_, Rgb, Rec2020>,
     metadata: Option<Read<'_, CaptureMetadata>>,
-    output: Write<'_, Rgb, Rec2020>,
-) -> Result<()> {
+    _output: Point<'_, Rgb, Rec2020>,
+) -> Result<[f32; 9]> {
     let values = matrix(p, metadata.map(|m| m.data.host().map(|m| &**m)).transpose()?)?;
-    let coefficients = ctx.constants(values.as_flattened())?;
-    let (count, dim) = dispatch_dims(image.desc.extent.pixels());
-    super::shared_kernel::matrix::launch(
-        ctx.client()?,
-        count,
-        dim,
-        image.data.device(ctx)?.argument(),
-        coefficients.argument(),
-        output.device(ctx)?.argument(),
-    );
-    Ok(())
+    Ok(bytemuck::cast(values))
 }
 
 #[cfg(test)]
