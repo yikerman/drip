@@ -58,7 +58,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | End-to-end latency | Measured | Full-detail worker latency is 164–171 ms, with about 64 ms of CPU preview packing and 86 ms of GPU completion and readback. Profile display upload and consider device packing. |
 | Memory and drawing cost | Deferred | Measure retained RAWs, export buffers, duplicate uploads across windows and scope meshes before streaming or sharing textures. |
 | Evaluation performance | Deferred | Cooperative cancellation and backend tuning, driven by measured latency. |
-| Lens-correction metadata | Deferred | Crop factor, correction profiles, exposure focus distance and image-to-capture geometry. |
+| Lens-correction metadata | Deferred | Crop factor, Lensfun profiles, exposure focus distance and image-to-capture geometry. `drip-raw` reads embedded tables for darktable's vendor set, but not Nikon Z coefficients, which darktable does not read either. |
 | Capture metadata | Deferred | Time zone and maker-note passthrough, and a wider TIFF EXIF export. |
 | HDR | Deferred | Define headroom and metadata, and track Windows desktop SDR white. |
 | Native windows | Deferred | Pop-out parenting on Windows and macOS, pin control, and pacing and occlusion across windows. Retest hidden-window pacing and native dialogs. |

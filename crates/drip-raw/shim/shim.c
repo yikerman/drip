@@ -1,6 +1,7 @@
-/* The only code that touches LibRaw. Rust never mirrors LibRaw's own structs,
- * whose layout changes between releases; it sees only drip_raw_info below,
- * which this file fills by name against the headers it is compiled with. */
+/* The only code that touches LibRaw, with stream.cpp. Rust never mirrors
+ * LibRaw's own structs, whose layout changes between releases; it sees only
+ * drip_raw_info below, which this file fills by name against the headers it
+ * is compiled with. */
 
 #define _POSIX_C_SOURCE 200809L /* localtime_r under -std=c11 */
 
@@ -107,11 +108,19 @@ static int is_bayer(libraw_data_t *lr) {
          lr->sizes.left_margin + lr->sizes.width <= lr->sizes.raw_width;
 }
 
-int drip_raw_open(const char *path, void **handle, drip_raw_info *info) {
+/* LibRaw reports every TIFF IFD and maker note entry it parses to ifd_entry
+ * and note_entry with the context `entries`, during libraw_open_file only. */
+int drip_raw_open(const char *path, exif_parser_callback ifd_entry,
+                  exif_parser_callback note_entry, void *entries, void **handle,
+                  drip_raw_info *info) {
   libraw_data_t *lr = libraw_init(0);
   if (!lr)
     return LIBRAW_UNSUFFICIENT_MEMORY;
+  libraw_set_exifparser_handler(lr, ifd_entry, entries);
+  libraw_set_makernotes_handler(lr, note_entry, entries);
   int err = libraw_open_file(lr, path);
+  libraw_set_exifparser_handler(lr, NULL, NULL);
+  libraw_set_makernotes_handler(lr, NULL, NULL);
   if (!err)
     err = libraw_unpack(lr);
   if (!err && !is_bayer(lr))

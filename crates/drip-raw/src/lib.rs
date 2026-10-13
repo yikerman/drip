@@ -3,7 +3,10 @@
 //! copies everything Drip needs into owned values and closes LibRaw before
 //! returning, so no LibRaw state outlives a call or is shared between threads.
 //! Linking the reentrant `libraw_r` makes concurrent calls safe.
-//! [`Metadata`] derives serde, so callers can store decoded facts.
+//! [`Metadata`] derives serde, so callers can store decoded facts. Lens
+//! correction tables the camera embedded come back raw in
+//! [`Lens::correction`]: drip-raw decodes faithfully and leaves their
+//! interpretation to the caller.
 
 use std::ffi::{CStr, CString, c_char, c_int, c_longlong, c_uint, c_void};
 use std::fmt;
@@ -14,7 +17,7 @@ const CBLACK_SIZE: usize = 4104;
 /// What [`decode`] returns for a given file, as a number. Bump it with every
 /// change to the bundled LibRaw, its build options or the shim that can change
 /// decoded samples or metadata: Drip keys stored decodes by it.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 /// Mirrors `drip_raw_info` in `shim/shim.c`.
 #[repr(C)]
@@ -94,7 +97,14 @@ struct Info {
 }
 
 unsafe extern "C" {
-    fn drip_raw_open(path: *const c_char, handle: *mut *mut c_void, info: *mut Info) -> c_int;
+    fn drip_raw_open(
+        path: *const c_char,
+        ifd_entry: lens::EntryCallback,
+        note_entry: lens::EntryCallback,
+        entries: *mut c_void,
+        handle: *mut *mut c_void,
+        info: *mut Info,
+    ) -> c_int;
     fn drip_raw_copy(handle: *mut c_void, dst: *mut u16);
     fn drip_raw_close(handle: *mut c_void);
     fn drip_raw_strerror(err: c_int) -> *const c_char;
@@ -110,7 +120,9 @@ unsafe extern "C" {
     fn drip_free(p: *mut c_void);
 }
 
+mod lens;
 mod metadata;
+pub use lens::{Correction, DngVignette, DngWarp};
 pub use metadata::*;
 
 /// Visible Bayer samples in sensor order and their owned capture metadata.
@@ -189,9 +201,20 @@ pub fn decode(path: &Path) -> Result<Raw, Error> {
     // SAFETY: Info is plain integers and floats, for which all-zero is valid.
     let mut info: Box<Info> = Box::new(unsafe { std::mem::zeroed() });
     let mut handle = std::ptr::null_mut();
-    // SAFETY: valid NUL-terminated path and out-pointers; on success the shim
+    let mut entries = lens::Entries::default();
+    // SAFETY: valid NUL-terminated path and out-pointers, and callbacks whose
+    // context is `entries`, which outlives the call; on success the shim
     // hands over a handle that only `Handle` closes.
-    let code = unsafe { drip_raw_open(path.as_ptr(), &mut handle, &mut *info) };
+    let code = unsafe {
+        drip_raw_open(
+            path.as_ptr(),
+            lens::ifd_entry,
+            lens::note_entry,
+            (&raw mut entries).cast(),
+            &mut handle,
+            &mut *info,
+        )
+    };
     if code != 0 {
         return Err(error(code));
     }
@@ -285,6 +308,7 @@ pub fn decode(path: &Path) -> Result<Raw, Error> {
                 adapter_id: info.adapter_id,
                 attachment: text(&info.attachment),
                 attachment_id: info.attachment_id,
+                correction: entries.correction(),
             },
             gps: (info.gps_parsed != 0).then_some(Gps {
                 latitude: info.latitude,

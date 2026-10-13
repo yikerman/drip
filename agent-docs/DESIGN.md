@@ -229,6 +229,15 @@ decisions from the compute-model migration and later.
   distance. Correct before orientation or account for transformed
   coordinates. Distortion and lateral CA are per-channel coordinate maps,
   and vignetting is a per-pixel gain.
+- **Decided (2026-10-13):** `drip-raw` reads the lens correction tables
+  cameras embed, for darktable's vendor set: Sony, Fujifilm, DNG
+  `OpcodeList3`, Olympus and Panasonic. LibRaw parses these tags but keeps
+  none, so its TIFF and maker note callbacks hand each entry to Rust, which
+  picks the tags darktable reads by their exiv2 identity and validates them
+  as darktable does. `Lens::correction` keeps the stored values in
+  darktable's per-vendor layout, and interpreting them belongs to the lens
+  correction node, so decoding stays faithful. Malformed tables yield none. Nikon Z
+  coefficients wait until darktable reads them.
 - **Decided:** Multiple-frame operations consume collections of decoded
   values, with no frame-stack abstraction in the graph.
 

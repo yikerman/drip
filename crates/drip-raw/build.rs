@@ -21,7 +21,7 @@ fn main() {
     }
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build");
-    println!("cargo:rerun-if-changed=shim/shim.c");
+    println!("cargo:rerun-if-changed=shim");
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
     let jpeg = codecs::jpeg(&vendor);
@@ -37,6 +37,13 @@ fn main() {
         shim.define("DRIP_REFERENCE", None);
     }
     shim.compile("drip_raw_shim");
+    cc::Build::new()
+        .cpp(true)
+        .std("c++14")
+        .file("shim/stream.cpp")
+        .define("LIBRAW_NODLL", None)
+        .include(vendor.join("libraw/libraw"))
+        .compile("drip_raw_stream");
     libraw::build(&vendor.join("libraw"), &jpeg, &zlib, &target_os);
     jpeg.link();
     zlib.link();

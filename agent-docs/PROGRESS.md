@@ -5,6 +5,14 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
+- `drip-raw` reads embedded lens correction data (`Lens::correction`). On
+  the Sony A7R III fixture and new raw.pixls.us samples from a Fujifilm
+  GFX50S II, a Google Pixel 4 XL DNG, an OM System TG-7 and a Panasonic
+  DMC-TZ70, `decode` returns exactly the values exiftool 13.50 and exiv2
+  0.28.9 report (`reads_embedded_lens_corrections`). The A7S, E-3, LX7,
+  Leica M8, Ricoh GR and Nikon Z6 II fixtures return none. Unit tests feed
+  wrong types, lengths, knot counts, zero denominators, non-finite values
+  and truncated opcode lists, which all return none.
 - Warps carry a radial map and a vignetting gain (`body::Radial`). On the
   CPU runtime and on wgpu (`algorithms` tests), ratios of one reproduce the
   input bit for bit, constant ratios match the affine scaling about the

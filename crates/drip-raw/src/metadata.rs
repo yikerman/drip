@@ -149,6 +149,8 @@ pub struct Lens {
     pub adapter_id: u64,
     pub attachment: String,
     pub attachment_id: u64,
+    /// Correction data the camera embedded, as the file stores it.
+    pub correction: Option<crate::Correction>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]

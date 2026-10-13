@@ -445,6 +445,13 @@ mod tests {
         let mut facts = drip_raw::Metadata { make: "Fixture".into(), ..Default::default() };
         facts.calibration.as_shot = [2.123_456_7, 1.0, 1.7, 0.0];
         facts.sensor.pixel_aspect = 1.0 + f64::EPSILON;
+        facts.lens.correction = Some(drip_raw::Correction::Dng {
+            warp: Some(drip_raw::DngWarp {
+                planes: vec![[0.1 + 0.2, -1e-300, 0., 0., 0., 0.]; 3],
+                centre: [0.5, 1.0 / 3.0],
+            }),
+            vignette: None,
+        });
         let facts = Arc::new(facts);
         let mut stream = Vec::new();
         CaptureMetadata::write(&facts, &facts, &mut stream).unwrap();

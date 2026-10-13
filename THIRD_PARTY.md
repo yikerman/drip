@@ -17,6 +17,7 @@ beside each algorithm identify the source and explain changes made for Drip.
 | [darktable developers](https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3), including sigmoid and custom-primaries contributors | Sigmoid curve, hue/energy correction and primaries handling, adapted to Rust/CubeCL | GPL-3.0-or-later; [license text](https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/LICENSE) |
 | [Luis Sanz Rodríguez](https://github.com/LuisSR/RCD-Demosaicing), Ingo Weyrich, Hanno Schwalm and darktable contributors | RCD demosaicing, adapted from the pinned darktable revision above; bilinear border in Drip | Original RCD: GPL-3.0; darktable integration: GPL-3.0-or-later |
 | garagecoder and Iain (G’MIC), Hanno Schwalm and [darktable contributors](https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/hlreconstruct) | Inpaint-opposed highlight reconstruction; Bayer adaptation with complete edge neighborhoods | GPL-3.0-or-later |
+| [darktable developers](https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/common), including Freddie Witherden's embedded lens correction | Tag identities, per-vendor layouts and validation of embedded lens correction data, ported to Rust in `drip-raw` [28] | GPL-3.0-or-later |
 | [Dave Coffin, dcraw](https://www.dechifro.org/dcraw/) | Reference for camera matrix normalization and RAW black-level conventions, through LibRaw | dcraw's source contains multiple licensing options; credited here as an algorithm reference, not a vendored dependency |
 
 Further algorithm ports must add their authors, exact source revision and license
@@ -355,3 +356,22 @@ Jun. 1989. [Online]. Available:
 [27] darktable developers, “sharpen.c,” `src/iop/sharpen.c`, commit
 61dea294bedb3ab6c7cca1a45530b1ab5c0461f3, 2026. [Online]. Available:
 <https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/sharpen.c>
+
+## Embedded lens correction data
+
+`crates/drip-raw/src/lens.rs` ports darktable's reading of the correction
+tables cameras embed [28]: which tags hold them, by their exiv2 group and
+number, how each vendor lays them out, and when they are valid. LibRaw
+reports the tags through its metadata callbacks, and the values stay as the
+file stores them. Malformed tables yield nothing where darktable may read
+partial values, and Fujifilm tables come only from the RAF's raw IFD, since
+some bodies reuse a tag number in the maker note. The module documents
+each deviation. DNG opcode lists follow the DNG specification [29].
+
+[28] darktable developers, “exif.cc,” “dng_opcode.c” and “image.h,”
+`src/common/`, commit 61dea294bedb3ab6c7cca1a45530b1ab5c0461f3, 2026.
+[Online]. Available:
+<https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/common>
+
+[29] Adobe Inc., “Digital Negative (DNG) Specification,” ver. 1.7.1.0,
+Sep. 2023, ch. 7, “Opcode List Processing.”

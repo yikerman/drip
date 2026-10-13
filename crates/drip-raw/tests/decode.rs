@@ -1,7 +1,17 @@
 use std::path::{Path, PathBuf};
 
+use drip_raw::{Correction, DngWarp};
+
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw/sony-ilce-7rm3.arw")
+}
+
+fn pixls(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw/pixls").join(name)
+}
+
+fn correction(path: &Path) -> Option<Correction> {
+    drip_raw::decode(path).unwrap().metadata.lens.correction
 }
 
 #[test]
@@ -41,4 +51,108 @@ fn reports_errors() {
     let unsupported = drip_raw::decode(&not_raw).unwrap_err();
     assert!(unsupported.is_unsupported());
     std::fs::remove_file(not_raw).unwrap();
+}
+
+/// Each vendor's tags read back as exiftool 13.50 and exiv2 0.28 report them.
+#[test]
+fn reads_embedded_lens_corrections() {
+    assert_eq!(
+        correction(&fixture()),
+        Some(Correction::Sony {
+            distortion: vec![
+                7, 0, -10, -22, -38, -56, -76, -99, -123, -146, -168, -187, -203, -215, -221, -218
+            ],
+            ca_red: vec![
+                1152, 1152, 1152, 1152, 1152, 1152, 1152, 1024, 1024, 1024, 1024, 1024, 1024, 1024,
+                896, 896
+            ],
+            ca_blue: vec![
+                128, 128, 128, 0, 0, 128, 128, 128, 256, 384, 384, 512, 640, 768, 768, 768
+            ],
+            vignetting: vec![
+                0, 32, 128, 320, 544, 832, 1184, 1600, 2080, 2592, 3200, 3968, 4864, 5952, 7200,
+                8384
+            ],
+        })
+    );
+
+    let ratios = |n: &[i32], d: i32| n.iter().map(|&n| n as f32 / d as f32).collect::<Vec<_>>();
+    assert_eq!(
+        correction(&pixls("fujifilm-gfx50s-ii.raf")),
+        Some(Correction::Fuji {
+            knots: ratios(&[967, 1368, 1675, 1934, 2162, 2369, 2558, 2735, 2901], 2735),
+            distortion: ratios(&[1789, 3578, 4842, 5473, 5473, 4210, 3368, 947, 947], 65536),
+            ca_red: ratios(&[-4, -4, -2, -2, 0, 0, -2, -4, -6], 65536),
+            ca_blue: ratios(&[0, 0, -2, -2, 0, 0, 0, 2, 4], 65536),
+            vignetting: ratios(
+                &[178937, 163712, 152409, 142760, 133875, 124979, 116153, 108100, 108100],
+                2048
+            ),
+            crop_mode: Some(0),
+        })
+    );
+
+    assert_eq!(
+        correction(&pixls("google-pixel-4-xl.dng")),
+        Some(Correction::Dng {
+            warp: Some(DngWarp {
+                planes: vec![[
+                    0.9805405735969543,
+                    0.052180830389261246,
+                    -0.052247390151023865,
+                    0.01846814714372158,
+                    0.,
+                    0.
+                ]],
+                centre: [0.46570233319256754, 0.5025973165301685],
+            }),
+            vignette: None,
+        })
+    );
+
+    // exiftool prints these floats with 15 digits, which round back exactly.
+    let floats = |v: [f64; 6]| v.map(|v| v as f32);
+    let [d0, d1, d2, d3, ..] =
+        floats([-0.115105330944061, -0.00867846980690956, 0.00447992002591491, 1., 0., 0.]);
+    assert_eq!(
+        correction(&pixls("om-system-tg-7.orf")),
+        Some(Correction::Olympus {
+            distortion: Some([d0, d1, d2, d3]),
+            ca: Some(floats([
+                0.000397227006033063,
+                0.000129881504108198,
+                0.,
+                0.000526041607372463,
+                0.000298548198770732,
+                0.
+            ])),
+        })
+    );
+
+    // exiftool prints the Q15 words divided by 32768.
+    let Some(Correction::Panasonic { a, b, c, scale }) =
+        correction(&pixls("panasonic-dmc-tz70.rw2"))
+    else {
+        panic!("Panasonic DistortionInfo")
+    };
+    let q15 = |w: i16| w as f64 / 32768.;
+    assert_eq!(
+        [a, b, c, scale].map(q15),
+        [0.1810302734375, 0.335723876953125, -0.35101318359375, 0.]
+    );
+}
+
+#[test]
+fn files_without_lens_corrections_read_none() {
+    // Nikon Z bodies carry coefficients darktable does not read.
+    for name in [
+        "sony-ilce-7s.arw",
+        "olympus-e-3.orf",
+        "panasonic-dmc-lx7.rw2",
+        "leica-m8.dng",
+        "ricoh-gr.dng",
+        "nikon-z6ii.nef",
+    ] {
+        assert_eq!(correction(&pixls(name)), None, "{name}");
+    }
 }
