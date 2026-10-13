@@ -42,7 +42,7 @@ depth, 100 by default.
 | `model/` | `Graph`: the DAG plus names, template inputs and layout, and its persistence |
 | `worker.rs` | the background queue for previews, full-detail crops and actions |
 | `registry.rs` | the hand-kept `VIEWS`, `REGISTRY` and `BINDINGS` |
-| `templates.rs` | built-in templates, embedded from `templates/` |
+| `templates.rs` | built-in templates: a core chain plus views, laid out by depth |
 | `node_ui/` | node-specific controls, preparation and views |
 | `render/` | drawing prepared views and colour-managed presentation per window system |
 | `parent.rs` | pop-outs as child windows of the main window |

@@ -42,6 +42,15 @@ impl Node {
     }
 }
 impl Graph {
+    /// Takes over a DAG built in code, naming each node after its kind.
+    pub fn from_dag(dag: Dag) -> Self {
+        let mut graph = Self { dag, ..Self::default() };
+        let kinds: Vec<_> = graph.dag.nodes().map(|(id, node)| (id, node.kind())).collect();
+        for (id, kind) in kinds {
+            graph.initialize_state(id, kind);
+        }
+        graph
+    }
     pub fn kind(&self, id: NodeId) -> Option<&'static Kind> {
         self.dag.node(id).ok().map(|node| node.kind())
     }

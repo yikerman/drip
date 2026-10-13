@@ -371,7 +371,7 @@ decisions from the compute-model migration and later.
   Drip's normalization. A new evaluator reads the Sony decode from disk in
   89 ms instead of decoding in 398 ms.
 - **Decided (2026-10-13):** Hot pixel removal is a `foreign = memory` node.
-  The template does not include it.
+  Neutral correction and All include it.
 - **Decided:** CubeCL computation with one kernel source per algorithm
   across runtimes. wgpu presentation and colour management stay
   frontend-owned. `DRIP_BACKEND` selects explicitly and never falls back.
@@ -518,13 +518,16 @@ decisions from the compute-model migration and later.
   text is measured as shipped.
 - **Decided:** Inspector help joins Rustdoc source wraps and keeps
   paragraphs. Reflow belongs to presentation.
-- **Decided (2026-10-12):** Built-in templates are `.drip-template` files in
-  `templates/`, embedded and listed by hand, loaded through the same path as
-  a user's template. New creates the first, Neutral restore. A test requires
-  each to equal its re-serialization, so format changes regenerate them, and
-  they carry the crate's major version without migration. They contain GUI
-  view kinds, so a headless frontend cannot load them as they are, and the
-  core keeps only a test fixture of the RAW chain.
+- **Decided (2026-10-13):** Built-in templates are built in Rust.
+  `drip::templates` wires each processing chain, so a batch frontend runs the
+  same pipelines and a renamed parameter or port fails to compile. The GUI
+  adds its views and lays the graph out from each node's depth. Neutral
+  restore develops, applies Exposure and Sigmoid and exports a TIFF. Neutral
+  correction adds hot pixel removal, Sharpen and Perspective Transform, and
+  All adds Resample and a JPEG export. Perspective and Resample start as
+  identities. New creates Neutral restore. Built-ins skip the file a user's
+  template loads from, so a test saves and reopens each. A user's own
+  templates stay `.drip-template` files.
 - **Decided (2026-10-13):** The image view navigates in the full-detail
   plane, so 100 % shows one full-detail pixel per display pixel at every
   preview level. Magnified to 100 % or more past its preview, the window

@@ -11,6 +11,12 @@ stated, and report medians (ranges) in ms. Drivers and data are in
 `../drip-benchmark-results/2026-10-13-*/`. Each step passed the full
 workspace gate.
 
+- Built-in templates are Rust again: Neutral restore, Neutral correction and
+  All, replacing 969 lines of template JSON. Each chain develops the
+  Nikon D70s fixture into finite RGB at scale 8 on the CPU runtime
+  (`built_in_chains_develop_a_raw`), and each built-in saves and reopens
+  unchanged. A render of the editor through the test harness on the RTX
+  3080 showed no overlapping nodes and no metadata wire crossing a node.
 - Structure pass: one home for shapes, plan fronts, meta sub-graphs in the
   evaluator's own slots, `TargetValues`, per-call kernel counts. Production
   Rust lines (cloc, tests excluded): drip 7815 → 7891, drip-gui 5764 →
@@ -177,10 +183,6 @@ workspace gate.
 - Mitchell–Netravali and Lanczos-3 filter kernels (`node/filter.rs`): host
   results match f64 evaluations of the published formulas within 2e-7 and
   3e-7, and device results match host within 1e-6 on CPU, WGPU and Vulkan.
-- Built-in templates moved to `templates/*.drip-template`, generated from the
-  previous Rust builder, so layout and template inputs are unchanged. Tests
-  check each file equals its re-serialization. All 180 workspace tests and
-  three doctests pass with `DRIP_BACKEND=cpu` and `drip/cpu`.
 - Export JPEG: independent decoder tests cover pixels, ICC/EXIF, averaged
   chroma, dimension limits and project/action round trips. All 171 workspace
   tests pass with `DRIP_BACKEND=cpu` and `drip/cpu`.

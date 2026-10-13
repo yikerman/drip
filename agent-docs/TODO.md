@@ -45,7 +45,6 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Worker startup failures | Open | Report thread-creation failures in `Worker::new` without losing the worker. |
 | Sensor calibration | Open | Expose sample conventions and sensor coordinates before dark and flat correction ([DESIGN](DESIGN.md#processing)). |
 | Everyday image nodes | Proposed | Implement in the order under [Next image nodes](#next-image-nodes), outside the proof-of-concept gate. |
-| Geometry template | Follow-up | Decide whether to list `templates/straighten-and-resize.drip-template` among the built-in templates. |
 | Geometry extensions | Open | Single-channel geometry, maps shared by an image and its mask, registration onto another grid, EWA or a prefiltered pyramid beyond 16× reduction, and a derivation of repeated-resampling loss ([FIELD](FIELD.md#open-questions)). |
 | Later processing extensions | Deferred | Pixel math, general filtering, gain fields, registration and multi-frame work. Add payloads with their consumers. |
 | Chart calibration | Deferred | Fit reusable transforms from separate chart images ([DESIGN](DESIGN.md#processing)). |
