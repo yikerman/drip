@@ -28,7 +28,7 @@ them a node file may name.
 | `body.rs` | the bodies, filters and warps the segment compiler fuses, `Pixel`, and 3×3 `matrix` math |
 | `lattice.rs` | `Lattice` and `Rect`: where samples sit on the full-detail plane |
 | `plan.rs` | the segment compiler: composition rules, input windows, the fused kernel, reduction passes |
-| `eval.rs` | `Evaluator`: scale, keys, scheduling, regions, `Policy` and `InputValues` |
+| `eval/` | `Evaluator` and its rules (`mod.rs`), one call's scheduling (`run.rs`), meta expansion (`meta.rs`) and `InputValues` (`values.rs`) |
 | `store.rs` | content keys, eviction, foreign jobs, meta expansions and the `Disk` tier |
 | `expand.rs` | the `SubGraph` a meta node builds |
 | `image.rs` | `Image`, `Raster` and residency |

@@ -549,7 +549,7 @@ decisions from the compute-model migration and later.
 - **Decided (2026-10-13):** Each documentation level answers one question
   and points down. The crate index gives the parts and one example, a
   module doc says what the module owns and why, and states its rules when
-  it implements them (`plan.rs`, `store.rs`, `eval.rs`), and an item doc
+  it implements them (`plan.rs`, `store.rs`, `eval/mod.rs`), and an item doc
   states its contract. This file records decisions, and ARCHITECTURE gives
   the overview. The drip README's examples compile as doc tests through a
   `#[cfg(doctest)]` include in `lib.rs`.

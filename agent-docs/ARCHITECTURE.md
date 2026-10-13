@@ -141,7 +141,7 @@ demand ─► scale per node ─► key per value ─► Store ─┬─ hit ─
 
 A Sigmoid-only edit therefore runs the tail segment as one launch from the
 stored demosaic output, and an unchanged demand runs no node. The rules
-live in `eval.rs` (scale, keys, regions, policies, errors) and `store.rs`
+live in `eval/mod.rs` (scale, keys, regions, policies, errors) and `store.rs`
 (keys, eviction, jobs, disk).
 
 `Evaluator::evaluate` forces one output. `evaluate_batch` forces several
