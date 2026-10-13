@@ -11,6 +11,12 @@ stated, and report medians (ranges) in ms. Drivers and data are in
 `../drip-benchmark-results/2026-10-13-*/`. Each step passed the full
 workspace gate.
 
+- Structure pass: one home for shapes, plan fronts, meta sub-graphs in the
+  evaluator's own slots, `TargetValues`, per-call kernel counts. Production
+  Rust lines (cloc, tests excluded): drip 7815 → 7891, drip-gui 5764 →
+  5785, drip-macros 1360 → 1351. The gate passed after every commit, and
+  on the default wgpu runtime the workspace tests (220 passed, 25 ignored)
+  and the 15 `selected_backend` tests pass.
 - A demand repeated after the frontend read its view's input, Source →
   Exposure → view on 64 × 48 samples, CPU runtime
   (`eval::tests::cpu_repeated_demand`). At full detail the second call
