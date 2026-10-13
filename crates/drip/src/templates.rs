@@ -7,19 +7,20 @@
 //!
 //! ```text
 //! Bayer RAW ─► [Hot pixel removal] ─► Bayer site gains ─► Opposed highlights
-//!   ─► RCD demosaic ─► Camera RGB to color RGB ─► Chromatic adaptation
-//!   ─► Orientation ─► [Sharpen] ─► Exposure ─► Sigmoid
+//!   ─► RCD demosaic ─► [Lens correction] ─► Camera RGB to color RGB
+//!   ─► Chromatic adaptation ─► Orientation ─► [Sharpen] ─► Exposure ─► Sigmoid
 //!   ─► [Perspective Transform] ─► [Resample] ─► Export TIFF, [Export JPEG]
 //! ```
 //!
 //! | Template | Adds |
 //! |---|---|
 //! | [`neutral_restore`] | nothing |
-//! | [`neutral_correction`] | hot pixel removal, sharpening, perspective |
+//! | [`neutral_correction`] | hot pixel removal, lens correction, sharpening, perspective |
 //! | [`all`] | the corrections, resampling and a JPEG export |
 //!
-//! Added steps start where they change little or nothing: the perspective
-//! keeps the frame and the resample keeps the size.
+//! Lens correction applies the correction the camera embedded, if any. The
+//! other added steps start where they change little or nothing: the
+//! perspective keeps the frame and the resample keeps the size.
 use crate::{
     Result,
     graph::Dag,
@@ -42,6 +43,9 @@ pub struct Develop {
     pub gains: node::bayer_gains::Ports,
     pub highlights: node::highlights::reconstruct::Ports,
     pub demosaic: node::rcd::Ports,
+    /// Lens correction on the sensor's channels, in the templates that
+    /// correct.
+    pub lens: Option<node::lens::Ports>,
     pub color: node::camera_to_rgb::Ports,
     pub adaptation: node::chromatic_adaptation::Ports,
     pub orientation: node::orientation::Ports,
@@ -50,14 +54,14 @@ pub struct Develop {
 /// Develop, look and TIFF export, nothing else.
 pub fn neutral_restore(dag: &mut Dag) -> Result<Chain> {
     let raw = node::raw::add(dag, Default::default())?;
-    let develop = develop(dag, raw.mosaic, raw.metadata)?;
+    let develop = develop(dag, raw.mosaic, raw.metadata, false)?;
     let output = look(dag, develop.orientation.output)?;
     export(dag, raw, develop, output)
 }
 
 /// Neutral restore with the corrections a capture usually needs: hot pixel
-/// removal on the mosaic, sharpening before the look, and a perspective
-/// transform after it.
+/// removal on the mosaic, the camera's lens correction after demosaic,
+/// sharpening before the look, and a perspective transform after it.
 pub fn neutral_correction(dag: &mut Dag) -> Result<Chain> {
     let (raw, develop, output) = corrected(dag)?;
     export(dag, raw, develop, output)
@@ -78,7 +82,7 @@ fn corrected(dag: &mut Dag) -> Result<(node::raw::Ports, Develop, Output<Rgb>)> 
     let raw = node::raw::add(dag, Default::default())?;
     let hot_pixels = node::hot_pixels::add(dag, Default::default())?;
     dag.connect(raw.mosaic, hot_pixels.image)?;
-    let develop = develop(dag, hot_pixels.output, raw.metadata)?;
+    let develop = develop(dag, hot_pixels.output, raw.metadata, true)?;
     let sharpen = node::sharpen::add(dag, Default::default())?;
     dag.connect(develop.orientation.output, sharpen.image)?;
     let finished = look(dag, sharpen.output)?;
@@ -91,10 +95,12 @@ fn develop(
     dag: &mut Dag,
     mosaic: Output<Bayer>,
     metadata: Output<CaptureMetadata>,
+    correct_lens: bool,
 ) -> Result<Develop> {
     let gains = node::bayer_gains::add(dag, ())?;
     let highlights = node::highlights::reconstruct::add(dag, Default::default())?;
     let demosaic = node::rcd::add(dag, ())?;
+    let lens = correct_lens.then(|| node::lens::add(dag, Default::default())).transpose()?;
     let color = node::camera_to_rgb::add(dag, ())?;
     let adaptation = node::chromatic_adaptation::add(dag, Default::default())?;
     let orientation = node::orientation::add(dag, Default::default())?;
@@ -104,14 +110,21 @@ fn develop(
         edit.connect(gains.levels, highlights.levels)?;
         edit.connect(gains.output, highlights.image)?;
         edit.connect(highlights.output, demosaic.image)?;
-        edit.connect(demosaic.output, color.image)?;
+        match &lens {
+            Some(lens) => {
+                edit.connect(demosaic.output, lens.image)?;
+                edit.connect(metadata, lens.metadata)?;
+                edit.connect(lens.output, color.image)?;
+            }
+            None => edit.connect(demosaic.output, color.image)?,
+        }
         edit.connect(metadata, color.metadata)?;
         edit.connect(color.output, adaptation.image)?;
         edit.connect(metadata, adaptation.metadata)?;
         edit.connect(adaptation.output, orientation.image)?;
         edit.connect(metadata, orientation.metadata)
     })?;
-    Ok(Develop { gains, highlights, demosaic, color, adaptation, orientation })
+    Ok(Develop { gains, highlights, demosaic, lens, color, adaptation, orientation })
 }
 
 /// Exposure, then Sigmoid's tone curve to display range.

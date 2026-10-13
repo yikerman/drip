@@ -5,6 +5,13 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
+- Neutral correction and All correct the lens after RCD demosaic. Through
+  Neutral correction at scale 8, on the CPU runtime and on wgpu, the Sony
+  fixture develops to finite RGB, and its 16 × 16 corner blocks sum 1.56
+  times higher than with every correction off, from the vignetting gain
+  (`neutral_correction_corrects_the_lens`). The Nikon D70s carries no
+  table, so All still matches Neutral correction within 1e-4, and every
+  built-in still saves and reopens unchanged.
 - Lens correction (`node::lens`) turns embedded tables into one radial
   warp. At darktable's knots, the Sony A7R III fixture's ratios and gain
   equal `_init_coeffs_md_v2` within 1e-15, the Fujifilm GFX50S II, Pixel

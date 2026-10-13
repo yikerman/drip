@@ -248,6 +248,10 @@ decisions from the compute-model migration and later.
   to green, so switches and fine-tunes mean the same for every vendor.
   Panasonic's inversion converges, where darktable's two iterations miss by
   up to 0.5 % of the radius on the DMC-TZ70 fixture.
+- **Decided (2026-10-13):** Neutral correction and All run Lens correction
+  between RCD demosaic and Camera RGB to color RGB, with the RAW file's
+  metadata, so TCA acts on the sensor's channels and a DNG centre is in the
+  sensor's orientation. Neutral restore stays without it.
 - **Decided (2026-10-13):** Lens correction's `fit` is `fill` by default:
   the least zoom about the centre at which every channel of every output
   pixel reads inside the input, which may be below one. `keep` does not

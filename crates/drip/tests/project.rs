@@ -212,3 +212,40 @@ fn built_in_chains_develop_a_raw() {
         .fold(0.0, f32::max);
     assert!(worst < 1e-4, "{worst}");
 }
+
+/// Neutral correction applies the lens correction the Sony fixture embeds:
+/// at a preview scale the output is finite, and the vignetting gain
+/// brightens the corners against the same chain with every correction off.
+#[test]
+fn neutral_correction_corrects_the_lens() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/raw/sony-ilce-7rm3.arw");
+    let evaluator = Evaluator::new(RuntimeContext::from_env().unwrap());
+    let global = drip::runtime::GlobalContext { scale: 8 };
+    let mut dag = drip::graph::Dag::new();
+    let chain = templates::neutral_correction(&mut dag).unwrap();
+    dag.set_parameters(chain.raw.node, json!({ "path": fixture })).unwrap();
+    let corners = |dag: &drip::graph::Dag| {
+        let result = evaluator.evaluate::<Rgb>(dag, &global, chain.output).unwrap();
+        let pixels = result.data.host().unwrap();
+        assert!(pixels.iter().flatten().all(|v| v.is_finite()));
+        let Extent { width, height } = result.desc.extent;
+        let (w, h) = (width as usize, height as usize);
+        let block = |x0: usize, y0: usize| {
+            let rows = (y0..y0 + 16).flat_map(|y| (x0..x0 + 16).map(move |x| y * w + x));
+            rows.map(|i| pixels[i].iter().sum::<f32>()).sum::<f32>()
+        };
+        block(0, 0) + block(w - 16, 0) + block(0, h - 16) + block(w - 16, h - 16)
+    };
+    let corrected = corners(&dag);
+    let lens = chain.develop.lens.as_ref().expect("Neutral correction corrects the lens");
+    let off = node::lens::Settings {
+        distortion: false,
+        chromatic_aberration: false,
+        vignetting: false,
+        ..Default::default()
+    };
+    dag.set_parameters(lens.node, serde_json::to_value(off).unwrap()).unwrap();
+    let uncorrected = corners(&dag);
+    assert!(corrected > 1.1 * uncorrected, "{corrected} {uncorrected}");
+}
