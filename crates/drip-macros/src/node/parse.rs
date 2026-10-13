@@ -17,15 +17,22 @@ pub(super) struct Options {
     pub action: Option<syn::Path>,
     /// The parameters implement `drip::definition::Assets`, loaded when first used.
     pub assets: bool,
-    /// A kernel that produces its outputs at the requested scale itself.
-    pub scaled: bool,
-    /// How a node with `Point` ports publishes its output.
-    pub deferred: Option<Deferred>,
+    pub shape: ShapeDecl,
+}
+
+/// The shape the options declare, which the signature's [`Family`] must
+/// implement.
+pub(super) enum ShapeDecl {
+    /// No shape option. `scaled` claims the kernel reaches the requested
+    /// scale itself.
+    Kernel { scaled: bool },
     /// `foreign = memory` or `foreign = disk`: where the store keeps the
     /// outputs of a node with `Publish` ports.
-    pub foreign: Option<Foreign>,
+    Foreign(Foreign),
+    /// How a node with `Point` ports publishes its output.
+    Deferred(Deferred),
     /// `meta`: the function wires a sub-graph to `Inlet` and `Outlet` ports.
-    pub meta: bool,
+    Meta,
 }
 
 /// Where a foreign node's outputs are kept beside memory.
@@ -157,18 +164,20 @@ impl Options {
             stencil.map(Deferred::Stencil),
         ]
         .into_iter()
-        .flatten();
-        let deferred = shapes.next();
-        let others = [deferred.is_some(), foreign.is_some(), flag("meta")];
-        if shapes.next().is_some() || others.iter().filter(|&&shape| shape).count() > 1 {
-            let message = "a node is at most one of map, warp, resample, reduce, bins, stencil, \
-                           foreign and meta";
-            return Err(syn::Error::new(span, message));
-        }
-        if flag("scaled") && others.contains(&true) {
-            let message = "only a kernel claims scaled";
-            return Err(syn::Error::new(span, message));
-        }
+        .flatten()
+        .map(ShapeDecl::Deferred)
+        .chain(foreign.map(ShapeDecl::Foreign))
+        .chain(flag("meta").then_some(ShapeDecl::Meta));
+        let shape = match (shapes.next(), shapes.next()) {
+            (None, _) => ShapeDecl::Kernel { scaled: flag("scaled") },
+            (Some(shape), None) if !flag("scaled") => shape,
+            (Some(_), None) => return Err(syn::Error::new(span, "only a kernel claims scaled")),
+            (Some(_), Some(_)) => {
+                let message = "a node is at most one of map, warp, resample, reduce, bins, \
+                               stencil, foreign and meta";
+                return Err(syn::Error::new(span, message));
+            }
+        };
         Ok(Self {
             name: display_name.unwrap_or_else(|| id.clone()),
             tags,
@@ -178,10 +187,7 @@ impl Options {
             references: references.unwrap_or_else(|| syn::parse_quote!([])),
             action,
             assets: flag("assets"),
-            scaled: flag("scaled"),
-            deferred,
-            foreign,
-            meta: flag("meta"),
+            shape,
         })
     }
 }
@@ -228,17 +234,25 @@ pub(super) struct Port {
 pub(super) struct Signature {
     pub parameters: syn::Type,
     pub ports: Vec<Port>,
-    /// `fn(&Params, Read<In>..., Publish<Out>...)`: a foreign node, which
-    /// describes its outputs as it publishes them.
-    pub foreign: bool,
-    /// `fn(&Params, Point<In>, Read..., Point<Out>) -> Result<T>`: the host
-    /// function of a map, warp, resample, reduce, bins or stencil node.
-    pub point: bool,
-    /// `fn(&Params, &mut SubGraph, Inlet..., Outlet...) -> Result<()>`: the
-    /// expansion of a meta node.
-    pub meta: bool,
+    pub family: Family,
     /// `T` in the function's `-> Result<T>`, if it returns one.
     pub result: Option<syn::Type>,
+}
+
+/// The port views a signature uses, which decide the shape it implements.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Family {
+    /// `fn(&Context, &Params, Read..., Write | Forward...)`: a kernel.
+    Context,
+    /// `fn(&Params, Read<In>..., Publish<Out>...)`: a foreign node, which
+    /// describes its outputs as it publishes them.
+    Publish,
+    /// `fn(&Params, Point<In>, Read..., Point<Out>) -> Result<T>`: the host
+    /// function of a map, warp, resample, reduce, bins or stencil node.
+    Point,
+    /// `fn(&Params, &mut SubGraph, Inlet..., Outlet...) -> Result<()>`: the
+    /// expansion of a meta node.
+    Inlet,
 }
 
 impl Signature {
@@ -253,18 +267,25 @@ impl Signature {
                 "node must be a concrete synchronous safe function",
             ));
         }
-        let foreign = signature.inputs.iter().any(|argument| is_view(argument, "Publish"));
-        let point = signature.inputs.iter().any(|argument| is_view(argument, "Point"));
-        let meta = signature.inputs.iter().any(is_meta_port);
+        let any = |view: &str| signature.inputs.iter().any(|argument| is_view(argument, view));
+        let family = if any("Publish") {
+            Family::Publish
+        } else if any("Inlet") || any("Outlet") {
+            Family::Inlet
+        } else if any("Point") {
+            Family::Point
+        } else {
+            Family::Context
+        };
         let mut arguments = signature.inputs.iter();
-        if !foreign && !point && !meta {
+        if family == Family::Context {
             arguments.next(); // Rust checks the context type when compiling the generated call.
         }
         let parameters = arguments
             .next()
             .ok_or_else(|| syn::Error::new(signature.span(), "expected context and &parameters"))?;
         let parameters = parameter_type(parameters)?;
-        if meta {
+        if family == Family::Inlet {
             arguments.next(); // Rust checks the sub-graph type when compiling the generated call.
         }
         let mut inputs = 0;
@@ -272,18 +293,20 @@ impl Signature {
         let mut ports = Vec::new();
         let mut points = 0;
         for argument in arguments {
-            if foreign && !["Read", "Publish"].iter().any(|view| is_view(argument, view)) {
+            if family == Family::Publish
+                && !["Read", "Publish"].iter().any(|view| is_view(argument, view))
+            {
                 let message = "a foreign node takes &parameters, Read inputs and Publish outputs, \
                                without a context";
                 return Err(syn::Error::new(argument.span(), message));
             }
-            if meta && !is_meta_port(argument) {
+            if family == Family::Inlet && !is_meta_port(argument) {
                 let message = "a meta node takes &parameters, &mut SubGraph, Inlet inputs and \
                                Outlet outputs";
                 return Err(syn::Error::new(argument.span(), message));
             }
             let mut port = Port::parse(argument)?;
-            if point && matches!(port.view, View::Write | View::Forward) {
+            if family == Family::Point && matches!(port.view, View::Write | View::Forward) {
                 let message = "a node with Point ports has its second Point as output";
                 return Err(syn::Error::new(argument.span(), message));
             }
@@ -306,12 +329,12 @@ impl Signature {
             *count += 1;
             ports.push(port);
         }
-        if point && points != 2 {
+        if family == Family::Point && points != 2 {
             let message = "a node with Point ports has one input and one output Point";
             return Err(syn::Error::new(signature.span(), message));
         }
         let result = result_type(&signature.output);
-        Ok(Self { parameters, ports, foreign, point, meta, result })
+        Ok(Self { parameters, ports, family, result })
     }
 
     pub fn inputs(&self) -> impl Iterator<Item = &Port> {

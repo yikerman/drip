@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use super::parse::{Deferred, Direction, Foreign, Options, Port, Signature, View};
+use super::parse::{Deferred, Direction, Foreign, Options, Port, ShapeDecl, Signature, View};
 
 pub(super) fn node(
     function: &syn::ItemFn,
@@ -18,26 +18,32 @@ pub(super) fn node(
     };
     let parameters = &signature.parameters;
     let kind = kind(function, options, signature, &vis);
-    let body = match (&options.deferred, &signature.result) {
-        (Some(Deferred::Map(path)), Some(constants)) => Some(body(path, constants, &vis)),
+    let body = match (&options.shape, &signature.result) {
+        (ShapeDecl::Deferred(Deferred::Map(path)), Some(constants)) => {
+            Some(body(path, constants, &vis))
+        }
         _ => None,
     };
     let ports = ports(signature, &vis);
     let inputs = inputs(signature, &vis);
-    let run = match (&options.deferred, signature.foreign) {
-        _ if signature.meta => meta(name, signature),
-        (_, true) => foreign_run(name, signature),
-        (Some(deferred), _) => deferred_run(name, deferred, signature),
-        (None, false) => run(name, signature),
+    let run = match &options.shape {
+        ShapeDecl::Kernel { .. } => run(name, signature),
+        ShapeDecl::Foreign(_) => foreign_run(name, signature),
+        ShapeDecl::Deferred(deferred) => deferred_run(name, deferred, signature),
+        ShapeDecl::Meta => meta(name, signature),
     };
     // A meta node's sub-graph describes its outputs.
-    let contract = (!signature.meta).then(|| contract(options, signature));
+    let contract = match options.shape {
+        ShapeDecl::Meta => None,
+        _ => Some(contract(options, signature)),
+    };
     // A foreign node's outputs are the same at every scale. The file stamps
     // in its identity key them to the files' current contents.
-    let identity = if signature.foreign {
-        quote!(::drip::definition::Identity::foreign(&KIND, self.parameters()?))
-    } else {
-        quote!(Ok(::drip::definition::Identity::Computed(self.parameters()?)))
+    let identity = match options.shape {
+        ShapeDecl::Foreign(_) => {
+            quote!(::drip::definition::Identity::foreign(&KIND, self.parameters()?))
+        }
+        _ => quote!(Ok(::drip::definition::Identity::Computed(self.parameters()?))),
     };
     let (definition, admission) = if options.assets {
         let loaded = quote!(<#parameters as ::drip::definition::Assets>::Loaded);
@@ -133,26 +139,27 @@ fn kind(
         let payload = &port.payload;
         quote!(::drip::shape::Codec::of::<#payload>())
     });
-    let shape = match (options.foreign, &options.deferred) {
-        (Some(Foreign::Memory), _) => {
+    let shape = match &options.shape {
+        ShapeDecl::Kernel { scaled } => quote!(::drip::shape::Shape::Kernel { scaled: #scaled }),
+        ShapeDecl::Foreign(Foreign::Memory) => {
             quote!(::drip::shape::Shape::Foreign(::drip::shape::Cache::Memory))
         }
-        (Some(Foreign::Disk), _) => {
+        ShapeDecl::Foreign(Foreign::Disk) => {
             quote!(::drip::shape::Shape::Foreign(::drip::shape::Cache::Disk(&[#(#codecs),*])))
         }
-        (None, Some(Deferred::Map(_))) => quote!(::drip::shape::Shape::Map(&BODY)),
-        (None, Some(Deferred::Warp)) => quote!(::drip::shape::Shape::Warp),
-        (None, Some(Deferred::Resample)) => quote!(::drip::shape::Shape::Resample),
-        (None, Some(Deferred::Reduce(body))) => quote!(::drip::shape::Shape::Reduce(&super::#body)),
-        (None, Some(Deferred::Bins(body))) => quote!(::drip::shape::Shape::Bins(&super::#body)),
-        (None, Some(Deferred::Stencil(body))) => {
+        ShapeDecl::Deferred(Deferred::Map(_)) => quote!(::drip::shape::Shape::Map(&BODY)),
+        ShapeDecl::Deferred(Deferred::Warp) => quote!(::drip::shape::Shape::Warp),
+        ShapeDecl::Deferred(Deferred::Resample) => quote!(::drip::shape::Shape::Resample),
+        ShapeDecl::Deferred(Deferred::Reduce(body)) => {
+            quote!(::drip::shape::Shape::Reduce(&super::#body))
+        }
+        ShapeDecl::Deferred(Deferred::Bins(body)) => {
+            quote!(::drip::shape::Shape::Bins(&super::#body))
+        }
+        ShapeDecl::Deferred(Deferred::Stencil(body)) => {
             quote!(::drip::shape::Shape::Stencil(&super::#body))
         }
-        (None, None) if options.meta => quote!(::drip::shape::Shape::Meta),
-        (None, None) => {
-            let scaled = options.scaled;
-            quote!(::drip::shape::Shape::Kernel { scaled: #scaled })
-        }
+        ShapeDecl::Meta => quote!(::drip::shape::Shape::Meta),
     };
     let action = match &options.action {
         None => quote!(None),
@@ -321,7 +328,8 @@ fn contract(options: &Options, signature: &Signature) -> TokenStream {
     let checks = input_checks(signature);
     let arguments: Vec<_> = signature.inputs().map(|port| &port.name).collect();
     // A foreign node describes its outputs when it publishes them.
-    let outputs = signature.outputs().filter(|_| !signature.foreign).map(|port| {
+    let foreign = matches!(options.shape, ShapeDecl::Foreign(_));
+    let outputs = signature.outputs().filter(|_| !foreign).map(|port| {
         let name = port.name.to_string();
         let index = syn::Index::from(port.index);
         let payload = &port.payload;

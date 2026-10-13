@@ -3,7 +3,7 @@ use quote::quote;
 
 use super::{
     expand,
-    parse::{Direction, Signature},
+    parse::{Direction, Family, Signature},
 };
 
 #[test]
@@ -61,7 +61,7 @@ fn foreign_nodes_publish_host_outputs_without_a_contract() {
         }
     };
     let signature = Signature::parse(&function.sig).unwrap();
-    assert!(signature.foreign);
+    assert_eq!(signature.family, Family::Publish);
     let module =
         generated_module(expand(quote!(id = "raw", foreign = disk), function.clone()).unwrap());
     assert_port_specs(
@@ -791,7 +791,7 @@ fn meta_nodes_expand_through_their_function_and_neither_describe_nor_run() {
         }
     };
     let signature = Signature::parse(&function.sig).unwrap();
-    assert!(signature.meta);
+    assert_eq!(signature.family, Family::Inlet);
     let module = generated_module(expand(quote!(id = "x", meta), function.clone()).unwrap());
     let shape = kind_field(&module, "shape");
     assert_eq!(quote!(#shape).to_string(), quote!(::drip::shape::Shape::Meta).to_string());
