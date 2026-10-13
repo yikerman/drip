@@ -18,11 +18,10 @@
 //! \[3\] W3C, *WebGPU Shading Language*, sec. 15.7.4, “Floating point
 //! accuracy.” \[Online\]. Available: <https://www.w3.org/TR/WGSL/>
 use crate::shape::FilterBody;
+pub use crate::shape::{BOX_SUPPORT, box_filter};
 use cubecl::prelude::*;
 use std::f32::consts::PI;
 
-/// Support radius of [`box_filter`].
-pub const BOX_SUPPORT: f32 = 0.5;
 /// Support radius of [`triangle`].
 pub const TRIANGLE_SUPPORT: f32 = 1.0;
 /// Support radius of [`mitchell_netravali`].
@@ -59,7 +58,7 @@ impl Filter {
             Self::Mitchell => &MITCHELL_BODY,
             Self::CatmullRom => &CATMULL_ROM_BODY,
             Self::Triangle => &TRIANGLE_BODY,
-            Self::Box => &BOX_BODY,
+            Self::Box => &crate::shape::BOX,
         }
     }
 }
@@ -88,25 +87,6 @@ static TRIANGLE_BODY: FilterBody = FilterBody {
     interpolating: true,
     expand: triangle::expand,
 };
-static BOX_BODY: FilterBody = FilterBody {
-    name: "box",
-    support: BOX_SUPPORT,
-    interpolating: true,
-    expand: box_filter::expand,
-};
-
-/// Box: one on `[−½, ½]`. Scaled by a minification footprint it is an area
-/// average; both ends are closed, so a sample exactly between two pixels
-/// averages them instead of receiving no weight.
-#[cube]
-pub fn box_filter(x: f32) -> f32 {
-    let mut weight = 0.0f32;
-    if x.abs() <= 0.5f32 {
-        weight = 1.0f32;
-    }
-    weight
-}
-
 /// Triangle (tent): `1 − |x|` on `[−1, 1]`; bilinear interpolation when
 /// magnifying.
 #[cube]

@@ -141,7 +141,10 @@ fn kind(
         (None, Some(Deferred::Map(_))) => quote!(::drip::shape::Shape::Map(&BODY)),
         (None, Some(Deferred::Warp)) => quote!(::drip::shape::Shape::Warp),
         (None, Some(Deferred::Resample)) => quote!(::drip::shape::Shape::Resample),
-        (None, None) => quote!(::drip::shape::Shape::Kernel),
+        (None, None) => {
+            let scaled = options.scaled;
+            quote!(::drip::shape::Shape::Kernel { scaled: #scaled })
+        }
     };
     let action = match &options.action {
         None => quote!(None),
@@ -153,7 +156,7 @@ fn kind(
                 name: #label,
                 run: |node, inputs| {
                     let node = <Definition as ::drip::definition::Typed>::of(node)?;
-                    super::#path(&node.parameters, #assets inputs.bind::<Definition>()?)
+                    super::#path(&node.parameters, #assets inputs)
                 },
             }))
         }

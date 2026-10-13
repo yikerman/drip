@@ -17,14 +17,23 @@
 //! - A Resample fixes the stage's lattice, so a filtering step after it
 //!   resamples again.
 //!
-//! Preview scale reduces samples early, in demosaic. That approximation is
-//! preview-only: at full detail, as export runs, every resampling follows
-//! these rules.
+//! A plan computes the window of its output lattice that a consumer asks
+//! for, and [`Plan::input_window`] bounds what that window reads: the same
+//! window through loads, the reindexed corners through gathers, and through a
+//! filter the mapped corners grown by the filter's support times its
+//! footprint. A projective map keeps lines straight, so the corners bound the
+//! window's image. The kernel positions samples on whole lattices, so a
+//! window's samples equal the same samples of the whole image bit for bit.
+//!
+//! Preview scale reduces samples once, early: in demosaic, or where
+//! evaluation reduces a finer image with [`BOX`](crate::shape::BOX). That
+//! approximation is preview-only: at full detail, as export runs, every
+//! resampling follows these rules.
 use crate::{
     Error, Result,
     image::Raster,
     runtime::{KernelContext, dispatch_dims},
-    shape::{FilterBody, Lattice, MapBody, MapPayload, Pixel, Projective, Warp},
+    shape::{FilterBody, Lattice, MapBody, MapPayload, Pixel, Projective, Rect, Warp},
 };
 use cubecl::prelude::*;
 use std::sync::Arc;
@@ -107,8 +116,11 @@ impl Plan {
         !self.resampled && self.bodies.is_empty()
     }
 
-    /// Run the plan on `input` into a new raster described by `desc`. A plan
-    /// that neither moves nor maps samples shares the input's samples instead.
+    /// Run the plan on `input` into a new raster described by `desc`, which
+    /// may hold a window of its lattice. `input` holds at least
+    /// [`input_window`](Self::input_window) of its own. A plan that neither
+    /// moves nor maps samples shares the input's samples when the windows
+    /// agree.
     pub fn run<P: MapPayload>(
         &self,
         input: &Raster<P>,
@@ -117,7 +129,7 @@ impl Plan {
     ) -> Result<Raster<P>> {
         let (from, to) = (P::lattice(input.desc()), P::lattice(&desc));
         let (stage, maps) = self.stage(from, to)?;
-        if stage == Stage::Load && self.bodies.is_empty() {
+        if stage == Stage::Load && self.bodies.is_empty() && from.window == to.window {
             return input.share_as(desc);
         }
         let mut constants: Vec<f32> = match stage {
@@ -132,9 +144,11 @@ impl Plan {
         constants.extend_from_slice(&self.constants);
         let constants = ctx.constants(&constants)?;
         let output = Raster::from_device(desc.clone(), ctx.device_buffer::<P>(&desc)?, ctx)?;
-        let [width, height] = from.extent.map(|v| v as usize);
-        let out_width = to.extent[0] as usize;
-        let (count, dim) = dispatch_dims(out_width * to.extent[1] as usize);
+        let [x, y] = from.window.origin.map(|v| v as usize);
+        let [width, height] = from.window.extent.map(|v| v as usize);
+        let [lattice_width, lattice_height] = from.extent.map(|v| v as usize);
+        let [out_x, out_y] = to.window.origin.map(|v| v as usize);
+        let (count, dim) = dispatch_dims(to.window.cells());
         kernel::fused::launch(
             ctx.client()?,
             count,
@@ -142,13 +156,57 @@ impl Plan {
             input.device(ctx)?.argument(),
             constants.argument(),
             output.device(ctx)?.argument(),
-            width,
-            height,
-            out_width,
+            kernel::WindowLaunch::new(x, y, width, height, lattice_width, lattice_height),
+            out_x,
+            out_y,
+            to.window.extent[0] as usize,
             Kernel { stage, bodies: self.bodies.clone() },
         );
-        ctx.runtime.count_fused();
+        ctx.runtime.count_fused(to.window.cells());
         Ok(output)
+    }
+
+    /// The window of the input lattice `from` that computing the window of
+    /// the output lattice `to` reads, clamped to the input. Where the maps
+    /// take a corner beyond the horizon, the whole input.
+    pub fn input_window(&self, from: Lattice, to: Lattice) -> Result<Rect> {
+        let (stage, maps) = self.stage(from, to)?;
+        let support = match stage {
+            Stage::Load => return Ok(to.window),
+            Stage::Gather => None,
+            Stage::Filter(filter) => Some(filter.support),
+        };
+        let whole = Rect { origin: [0; 2], extent: from.extent };
+        let [x0, y0] = to.window.origin.map(f64::from);
+        let [x1, y1] = to.window.end().map(|end| f64::from(end) - 1.0);
+        let (mut low, mut high) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+        for m in &maps {
+            for [x, y] in [[x0, y0], [x1, y0], [x0, y1], [x1, y1]] {
+                let w = m[2][0] * x + m[2][1] * y + m[2][2];
+                // Also a NaN `w`, which no comparison orders.
+                if w.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+                    return Ok(whole);
+                }
+                for axis in 0..2 {
+                    let at = (m[axis][0] * x + m[axis][1] * y + m[axis][2]) / w;
+                    // The kernel's taps reach `support · footprint` samples
+                    // from a position, and its f32 positions differ from
+                    // these by far less than one sample.
+                    let reach = support
+                        .map_or(0.0, |support| f64::from(support) * footprint(m, axis) + 1.0);
+                    low[axis] = low[axis].min(at - reach);
+                    high[axis] = high[axis].max(at + reach);
+                }
+            }
+        }
+        let axis = |a: usize| {
+            let last = f64::from(from.extent[a]) - 1.0;
+            let start = low[a].floor().clamp(0.0, last);
+            let end = high[a].ceil().clamp(start, last);
+            (start as u32, end as u32 - start as u32 + 1)
+        };
+        let ((x, width), (y, height)) = (axis(0), axis(1));
+        Ok(Rect { origin: [x, y], extent: [width, height] })
     }
 
     /// How the kernel reads the input from lattice `from` onto `to`, and the
@@ -226,6 +284,17 @@ fn reindex(m: &Projective, from: Lattice, to: Lattice) -> Option<Projective> {
     (permutation && inside).then_some(s)
 }
 
+/// Input samples per output sample along `axis` of the index map `m`, as
+/// the kernel clamps it. An affine map's is constant, a projective map's
+/// varies, so its bound is the clamp.
+fn footprint(m: &Projective, axis: usize) -> f64 {
+    let max = f64::from(MAX_FOOTPRINT);
+    if m[2][0] != 0.0 || m[2][1] != 0.0 {
+        return max;
+    }
+    m[axis][0].hypot(m[axis][1]).clamp(1.0, max)
+}
+
 fn compose(a: &[Projective; 3], b: &[Projective; 3]) -> [Projective; 3] {
     std::array::from_fn(|c| mul(&a[c], &b[c]))
 }
@@ -265,19 +334,26 @@ mod kernel {
     use super::*;
 
     /// One output pixel per invocation: resample, then apply the bodies.
+    /// The output holds `out_width` samples per row from `(out_x, out_y)`
+    /// of its lattice. Positions are whole-lattice indices, so a window
+    /// computes the same values as the whole image.
     #[cube(launch)]
+    #[allow(clippy::too_many_arguments)]
     pub fn fused(
         input: &[f32],
         k: &[f32],
         output: &mut [f32],
-        width: usize,
-        height: usize,
+        window: Window,
+        out_x: usize,
+        out_y: usize,
         out_width: usize,
         #[comptime] kernel: Kernel,
     ) {
         let p = ABSOLUTE_POS;
         if p * 3 < output.len() {
-            let px = sample(input, k, p, width, height, out_width, comptime!(kernel.stage));
+            let x = p % out_width + out_x;
+            let y = p / out_width + out_y;
+            let px = sample(input, k, x, y, &window, comptime!(kernel.stage));
             let px = apply(px, k, &kernel);
             output[p * 3] = px.r;
             output[p * 3 + 1] = px.g;
@@ -285,30 +361,43 @@ mod kernel {
         }
     }
 
+    /// Where the input's samples sit: `width × height` stored from `(x, y)`
+    /// of a lattice of `lattice_width × lattice_height` samples.
+    #[derive(CubeType, CubeLaunch)]
+    pub struct Window {
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        lattice_width: usize,
+        lattice_height: usize,
+    }
+
     #[cube]
     fn sample(
         input: &[f32],
         k: &[f32],
-        p: usize,
-        width: usize,
-        height: usize,
-        out_width: usize,
+        x: usize,
+        y: usize,
+        window: &Window,
         #[comptime] stage: Stage,
     ) -> Pixel {
-        let x = f32::cast_from(p % out_width);
-        let y = f32::cast_from(p / out_width);
+        let (fx, fy) = (f32::cast_from(x), f32::cast_from(y));
         #[comptime]
         match stage {
-            Stage::Load => Pixel { r: input[p * 3], g: input[p * 3 + 1], b: input[p * 3 + 2] },
+            Stage::Load => {
+                let i = ((y - window.y) * window.width + x - window.x) * 3;
+                Pixel { r: input[i], g: input[i + 1], b: input[i + 2] }
+            }
             Stage::Gather => Pixel {
-                r: gather(input, k, x, y, width, 0usize),
-                g: gather(input, k, x, y, width, 1usize),
-                b: gather(input, k, x, y, width, 2usize),
+                r: gather(input, k, fx, fy, window, 0usize),
+                g: gather(input, k, fx, fy, window, 1usize),
+                b: gather(input, k, fx, fy, window, 2usize),
             },
             Stage::Filter(filter) => Pixel {
-                r: filtered(input, k, x, y, width, height, 0usize, filter),
-                g: filtered(input, k, x, y, width, height, 1usize, filter),
-                b: filtered(input, k, x, y, width, height, 2usize, filter),
+                r: filtered(input, k, fx, fy, window, 0usize, filter),
+                g: filtered(input, k, fx, fy, window, 1usize, filter),
+                b: filtered(input, k, fx, fy, window, 2usize, filter),
             },
         }
     }
@@ -317,28 +406,35 @@ mod kernel {
     /// sample `(x, y)` to. Reindexes are affine with integer entries, so the
     /// position is an exact integer in f32.
     #[cube]
-    fn gather(input: &[f32], k: &[f32], x: f32, y: f32, width: usize, #[comptime] c: usize) -> f32 {
+    fn gather(
+        input: &[f32],
+        k: &[f32],
+        x: f32,
+        y: f32,
+        window: &Window,
+        #[comptime] c: usize,
+    ) -> f32 {
         let m = c * 9;
-        let u = k[m] * x + k[m + 1] * y + k[m + 2];
-        let v = k[m + 3] * x + k[m + 4] * y + k[m + 5];
-        input[(usize::cast_from(v) * width + usize::cast_from(u)) * 3 + c]
+        let u = usize::cast_from(k[m] * x + k[m + 1] * y + k[m + 2]) - window.x;
+        let v = usize::cast_from(k[m + 3] * x + k[m + 4] * y + k[m + 5]) - window.y;
+        input[(v * window.width + u) * 3 + c]
     }
 
     /// Channel `c` at output sample `(x, y)` resampled after Heckbert: the
     /// projective map in `k` takes it to the input, where `filter` is centred
     /// and widened by the map's local derivative, so magnifying interpolates
     /// and minifying antialiases with one filter. Weights are normalized.
-    /// Positions outside the input or beyond the map's horizon (`w ≤ 0`) are
-    /// black, and taps beyond the edge repeat the edge sample.
+    /// Positions outside the input lattice or beyond the map's horizon
+    /// (`w ≤ 0`) are black, and taps beyond its edge repeat the edge sample.
+    /// Taps clamp to the stored window, which holds every tap inside the
+    /// lattice ([`Plan::input_window`]).
     #[cube]
-    #[allow(clippy::too_many_arguments)]
     fn filtered(
         input: &[f32],
         k: &[f32],
         x: f32,
         y: f32,
-        width: usize,
-        height: usize,
+        window: &Window,
         #[comptime] c: usize,
         #[comptime] filter: FilterBody,
     ) -> f32 {
@@ -349,8 +445,8 @@ mod kernel {
         if hw > 0.0f32 {
             let u = (k[m] * x + k[m + 1] * y + k[m + 2]) / hw;
             let v = (k[m + 3] * x + k[m + 4] * y + k[m + 5]) / hw;
-            let last_u = f32::cast_from(width) - 0.5f32;
-            let last_v = f32::cast_from(height) - 0.5f32;
+            let last_u = f32::cast_from(window.lattice_width) - 0.5f32;
+            let last_v = f32::cast_from(window.lattice_height) - 0.5f32;
             if u >= -0.5f32 && u <= last_u && v >= -0.5f32 && v <= last_v {
                 // Derivatives of the projective map: the source extent of
                 // one output step along each source axis sets the footprint.
@@ -366,20 +462,23 @@ mod kernel {
                 let u1 = i32::cast_from((u + support * su).floor());
                 let v0 = i32::cast_from((v - support * sv).ceil());
                 let v1 = i32::cast_from((v + support * sv).floor());
-                let max_col = i32::cast_from(width) - 1i32;
-                let max_row = i32::cast_from(height) - 1i32;
+                let min_col = i32::cast_from(window.x);
+                let min_row = i32::cast_from(window.y);
+                let max_col = min_col + i32::cast_from(window.width) - 1i32;
+                let max_row = min_row + i32::cast_from(window.height) - 1i32;
                 // −0 is the additive identity, so an exact hit keeps −0.
                 let mut sum = f32::reinterpret(0x8000_0000u32);
                 let mut total = 0.0f32;
                 for b in v0..v1 + 1 {
                     let wy = weight((f32::cast_from(b) - v) / sv, filter);
-                    let row = usize::cast_from(i32::clamp(b, 0i32, max_row)) * width;
+                    let row =
+                        usize::cast_from(i32::clamp(b, min_row, max_row) - min_row) * window.width;
                     for a in u0..u1 + 1 {
                         let w = weight((f32::cast_from(a) - u) / su, filter) * wy;
                         // Zero weights skip their tap, so non-finite
                         // neighbours of an exact hit cannot leak in.
                         if w != 0.0f32 {
-                            let col = usize::cast_from(i32::clamp(a, 0i32, max_col));
+                            let col = usize::cast_from(i32::clamp(a, min_col, max_col) - min_col);
                             sum += w * input[(row + col) * 3 + c];
                             total += w;
                         }

@@ -64,7 +64,7 @@ fn prepare(p: &Settings, image: &Read<'_, Rgb>, ctx: &PrepareContext) -> drip::R
         let full = Extent { width: w, height: h };
         let extent = full.reduced(divisor);
         let coordinates = image.desc.coordinates.clone();
-        let desc = RgbDesc { extent: extent.clone(), full, coordinates };
+        let desc = RgbDesc { extent: extent.clone(), full, window: None, coordinates };
         // The warp's output plane spans `full`, so place it over `plane` first.
         let [sx, sy] = [plane.size[0] / f64::from(w), plane.size[1] / f64::from(h)];
         let place = [[sx, 0.0, plane.origin[0]], [0.0, sy, plane.origin[1]], [0.0, 0.0, 1.0]];

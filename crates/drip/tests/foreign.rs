@@ -213,9 +213,10 @@ fn a_deferred_demand_reports_pending_and_wakes_when_the_job_ends() {
         (sink::add(&mut dag, ()).unwrap(), sink::add(&mut dag, ()).unwrap());
     dag.connect(slow.image, waiting.image).unwrap();
     dag.connect(bound, independent.image).unwrap();
-    let targets = [waiting.node, independent.node];
-    let batch =
-        || evaluator.evaluate_batch(&dag, &Default::default(), &targets, Policy::Defer, None);
+    let targets = [waiting.node.into(), independent.node.into()];
+    let batch = || {
+        evaluator.evaluate_batch(&dag, &Default::default(), &targets, Policy::Defer, None).inputs
+    };
     for _ in 0..2 {
         let values = batch();
         assert!(

@@ -62,8 +62,9 @@ Settled with the user on 2026-10-11 and revised by the compute model
 - **Decided:** One sequential queue with one evaluator runs previews, export
   and auto exposure. Edits read no files, and project open reads only the
   project JSON. A preview or an action is a demand: a graph snapshot forced
-  under one `GlobalContext` in one batch, whose effect then consumes the
-  inputs. Actions use full detail. Demands are not merged. A later demand
+  under one `GlobalContext` in one batch, with an optional region per target
+  (2026-10-13), whose effect then consumes the inputs. Actions use full
+  detail. Demands are not merged. A later demand
   reuses what the evaluator's store kept from earlier ones (2026-10-13). A
   GUI action may return node parameters, applied as an ordinary edit.
 - **Decided (2026-10-13):** A preview does not wait for foreign work. It
@@ -99,13 +100,21 @@ Settled with the user on 2026-10-11 and revised by the compute model
   `BayerLevels` (`[f32; 4]`) and host-only `CaptureMetadata`, whose `Desc` is
   the shared `Arc` of the decoded facts. Samples are linear. There is no scale
   or encoding descriptor until a producer differs.
-- **Decided:** `RgbDesc { extent, full, coordinates }` with
+- **Decided:** `RgbDesc { extent, full, window, coordinates }` with
   `Coordinates::{Camera(Response), Space(RgbSpace)}`. `Response { camera,
   balance }` holds make/model identity and the applied gains. Applying gains
   to balanced data composes the balance. `full` records the full-detail
   extent beside the stored one, so contracts derive preview geometry instead
   of reconstructing it from `extent · scale`, which is inexact after
   `div_ceil` reductions. `Display` impls supply every interpretation label.
+- **Decided (2026-10-13):** A raster holding part of its image states it in
+  its description: `RgbDesc::window` holds the lattice index of the first
+  stored sample and the whole lattice's extent, and `extent` keeps counting
+  the stored samples, so every kernel that sizes its launch by `extent`
+  stays correct. `None` means the whole lattice, and a window covering it is
+  rejected, so equal samples have one description. Contracts describe whole
+  images: only frontends and actions receive windows. The compiler reads
+  the same geometry as `shape::Lattice { extent, full, window }`.
 - **Decided:** Requirements are port type arguments,
   `Read<'_, Rgb, Rec2020>`, defaulting to `Any`. On outputs they are
   guarantees checked on contract output. The checker, help and canvas labels
@@ -133,7 +142,9 @@ Settled with the user on 2026-10-11 and revised by the compute model
 - **Decided:** Headless actions are declared with the node,
   `#[node(action = export)]`. A kind has at most one action, a `GuiNode` extra
   or the node's. TIFF export is such a node in `drip`, and projects carry no
-  separate export target. The CLI is a scaffold until batch work.
+  separate export target. The CLI is a scaffold until batch work. An action
+  receives `&InputValues` and binds them whole, or by region when an input
+  exceeds the device budget (2026-10-13).
 - **Decided:** RAW outputs `mosaic` and facts-only metadata. Consumers derive
   what they apply: Bayer gains from as-shot WB, Camera RGB conversion from
   `xyz_to_cam` and the image's balance, CAT16 the as-shot white. A user matrix
@@ -270,7 +281,8 @@ Settled with the user on 2026-10-11 and revised by the compute model
   declare a shape, evaluation fuses segments between materialization points,
   derives regions and preview scale from shapes, and memoizes in one store.
   It is executed in eight steps. Step 4 replaced the no-cache requirement
-  under Performance with the store, and step 5 adds its disk tier.
+  under Performance with the store, step 5 added its disk tier, and step 6
+  regions and the scale rule.
 - **Decided (2026-10-13):** Step 1. `Kind::shape` declares how evaluation runs
   a kind, `Kernel` or `Source`, and later shapes are added beside them. A
   run's values lived in a `Store`, which step 4 grew into the memo.
@@ -301,11 +313,8 @@ Settled with the user on 2026-10-11 and revised by the compute model
   launch, because a weighted average of sigmoid values is not the sigmoid of
   the average. The compiler does not special-case linear maps. Before any
   map, warps and a Resample compose into one stage. A Resample fixes its
-  lattice, so a filtering step after it resamples again. Preview scale
-  reduces samples early, in demosaic. That is a preview-only approximation:
-  export runs at full detail, and a Resample sets its lattice from
-  full-detail extents instead of reducing. Step 6 moves the reduction to the
-  first materialization finer than requested.
+  lattice, so a filtering step after it resamples again. The preview
+  reduction is a preview-only approximation (step 6, below).
 - **Decided (2026-10-13):** The stage loads samples when the composed map is
   the identity on an equal lattice and the filter interpolates, copies them
   when only reindexes composed, and filters otherwise. Its kind and filter
@@ -323,13 +332,15 @@ Settled with the user on 2026-10-11 and revised by the compute model
   materialized values across demands, keyed by content. An output's key is a
   SHA-256 over the producer's kind ID and `version`, its identity and the
   keys of its inputs in port order. A computed node's identity is its
-  canonical parameter JSON (object keys sorted) and the global scale. A
-  foreign node's is its parameters and the stamps of the input files they
-  name, without the scale. Bound in-memory data hashes a per-instance random
-  identity, and keys derived from it stay off the disk. The kind ID determines a map's body, so input keys cover a
-  plan's body sequence and constants without hashing them. `version` is
-  bumped by hand when a kernel's numerics change. Equal nodes share one
-  entry, and a new evaluator, as each GUI project has, starts empty.
+  canonical parameter JSON (object keys sorted), and step 6 adds the scale
+  for a kind whose shape reads it. A foreign node's is its parameters and
+  the stamps of the input files they name, without the scale. Bound
+  in-memory data hashes a per-instance random identity, and keys derived
+  from it stay off the disk. The kind ID determines a map's body, so input
+  keys cover a plan's body sequence and constants without hashing them.
+  `version` is bumped by hand when a kernel's numerics change. Equal nodes
+  share one entry, and a new evaluator, as each GUI project has, starts
+  empty.
 - **Decided (2026-10-13):** Durability orders eviction: Low first, then
   Medium, then High, least recently used first within a class. A kind's
   durability is High for a foreign node or bound data, otherwise the most
@@ -367,12 +378,69 @@ Settled with the user on 2026-10-11 and revised by the compute model
   downstream like any full-detail raster. Its outputs are High entries. A
   failed job stays with its key and repeats its error, so a deferred
   preview does not rerun a failing decode in a loop.
-- **Tentative (2026-10-13):** A foreign node's inputs come from the demand,
-  so one placed after a scale-dependent node (demosaic, Resample) receives
-  reduced samples under a scale-dependent key. Step 6 moves the preview
-  reduction to the first materialization finer than requested, which keeps
-  every input of a foreign node at full detail. Until then, place foreign
-  nodes on full-detail data, as Hot pixel removal on the RAW mosaic is.
+- **Decided (2026-10-13):** Step 6. A demand is a `GlobalContext` holding
+  the scale and targets, each with an optional region: a rectangle of the
+  plane of the target's inputs in full-detail pixels (`shape::Rect`).
+  `evaluate_batch` takes `Target`s and returns a `Batch` of inputs and
+  statistics. One shared scale with per-target regions is the smaller API,
+  since every frontend demand has one scale. Contracts still receive the
+  scale through `GlobalContext`. Only a node without outputs takes a region:
+  a node computed from part of its inputs would publish part of its
+  outputs under a whole-image key.
+- **Decided (2026-10-13):** Regions propagate backward inside fused
+  segments. `Plan::input_window` maps a window of the output lattice to the
+  input: the same window through a load, the reindexed corners through a
+  gather, and through a filter the corners mapped by the projective index
+  maps, grown by the support times the footprint (`MAX_FOOTPRINT` for a
+  projective map) plus one sample. A projective map keeps lines straight,
+  so the corners bound the image, and a corner beyond the horizon takes the
+  whole input. The kernel positions samples by whole-lattice index and
+  clamps taps to the stored window, so a window equals the same samples of
+  the whole image bit for bit, which tiled export relies on. Keys derive a
+  region's entry from the image's (`Key::region`), so two crops are two
+  entries and the whole image a third. A crop of a stored whole raster is
+  copied from it in one launch: kernels read dense buffers, so a strided
+  view would need every kernel to take strides.
+- **Open (2026-10-13):** Kernel halos. Kernels, foreign nodes and sources
+  receive and produce whole images, so a region bounds only the segments
+  after the last of them. Running a kernel on its output region plus a
+  declared `halo` needs that region before the kernel runs, but warps
+  between it and the target describe their maps only when their host
+  functions run, after the kernel. It needs lazily run kernels, or a pass
+  that describes the graph before running it, and Bayer windows aligned to
+  CFA cells. RCD and the 2×2 demosaic therefore run whole and declare no
+  halo. At 100 % the whole RCD output is computed once at scale 1 and
+  stored, and pans recompute only the tail. Step 8's stencils need the same
+  machinery.
+- **Decided (2026-10-13):** Scale dependence derives from shapes. From the
+  targets every node is read at the requested scale, and a foreign node
+  reads its inputs at scale 1, so its inputs and outputs are full detail
+  wherever it sits and evaluation reduces after it. A node read at the
+  requested scale runs at it when its shape is scaled (a `scaled` kernel, a
+  warp, a resample) or it reads an image on a plane, which arrives reduced or
+  from a node that runs at the scale. Every other node runs at scale 1 and
+  is keyed without it, so the RAW, its gains and Opposed highlights are
+  stored once for all preview levels. Nodes that do not read the scale
+  receive scale 1, so a key without the scale hides no dependence on it.
+  Keys hash the scale only
+  for scaled shapes and derive a reduced image's key from the image's
+  (`Key::reduced`).
+- **Decided (2026-10-13):** The preview reduction is compiler work with one
+  claimed exception. Where a node reads an image on a plane at a scale
+  coarser than 1 and the image's lattice is finer than `div_ceil(full,
+  scale)`, evaluation reduces it with the box filter `shape::BOX` as a
+  resampling stage of the consumer's plan, so an RGB source feeding maps is
+  reduced and mapped in one launch. A kernel declared `#[node(scaled)]`
+  claims to produce its output at the requested scale itself, and its
+  output is trusted: RCD and the 2×2 demosaic keep reducing each CFA phase
+  plane in `reduce::for_demosaic`, which no box filter on RGB can match. A
+  consumer with a scaled shape reaches the scale itself and reads its input
+  unreduced: Perspective Transform and Resample filter full-detail input
+  onto their reduced lattice in one stage. A warp's output is still checked,
+  since Orientation keeps the sampling of a full-detail input. The reduction
+  is a preview approximation: it never applies at scale 1, export runs at
+  scale 1, and a stage clamps footprints at `MAX_FOOTPRINT`, so reductions
+  beyond 16 alias. This replaces demosaic reducing for the whole graph.
 - **Decided (2026-10-13):** `Policy::Wait` blocks on a running job, for
   headless evaluation, actions and tests. `Policy::Defer` fails the job's
   node and its consumers with `Error::Pending`, inside the `Error::Node` that
@@ -432,6 +500,18 @@ Settled with the user on 2026-10-11 and revised by the compute model
   kernels and read back counts or one f32 until step 7 adds `reduce`.
   Softproof, gamut check and preview packing stay on the CPU. Packing uses
   Rayon over disjoint RGBA f16 slices.
+
+- **Decided (2026-10-13):** Export TIFF writes an image larger than the
+  device budget in bands. A target's input on a plane over the budget stays
+  deferred in its `InputValues`, holding the rasters its plan reads, since
+  the store would not keep it. The action asks `InputValues::bands` for
+  bands of whole rows, each within the budget, and binds
+  `InputValues::region` per band, top to bottom. The file equals the export
+  in one piece byte for byte. Two limits: whole kernels upstream, RCD
+  first, still allocate whole images on the device, and the TIFF encoder
+  receives the converted image in one buffer, because tiff 0.11.3's
+  `write_strip` does not set the writer's compression. Host memory holds
+  the encoded file either way, as before. JPEG export binds its input whole.
 
 ## Performance
 

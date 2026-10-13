@@ -143,9 +143,7 @@ fn actions_are_declared_with_the_node_and_named_from_their_function() {
     let action = kind_field(&module, "action");
     let action = quote!(#action).to_string();
     assert!(action.starts_with("Some (:: drip :: definition :: Action { name : \"Write file\""));
-    assert!(action.contains(
-        "super :: write_file (& node . parameters , inputs . bind :: < Definition > () ?"
-    ));
+    assert!(action.contains("super :: write_file (& node . parameters , inputs)"));
     let function = syn::parse_quote! { fn x(c: &Context, p: &P) -> Result<()> { Ok(()) } };
     let module = generated_module(expand(quote!(id = "x"), function).unwrap());
     let action = kind_field(&module, "action");
@@ -160,9 +158,11 @@ fn assets_load_when_first_used_and_reach_the_action() {
     let options = quote!(id = "x", action = export, assets);
     let module = generated_module(expand(options, function.clone()).unwrap());
     let action = kind_field(&module, "action");
-    assert!(quote!(#action).to_string().contains(
-        "super :: export (& node . parameters , node . assets () ? , inputs . bind :: < Definition > () ?"
-    ));
+    assert!(
+        quote!(#action)
+            .to_string()
+            .contains("super :: export (& node . parameters , node . assets () ? , inputs)")
+    );
     let items = &module.content.as_ref().unwrap().1;
     let admit = items
         .iter()
@@ -378,7 +378,38 @@ fn preserves_public_bindings_and_metadata() {
     }
     assert_eq!(literal(&module, "help"), "First line.\nSecond line.");
     let shape = kind_field(&module, "shape");
-    assert_eq!(quote!(#shape).to_string(), quote!(::drip::shape::Shape::Kernel).to_string());
+    assert_eq!(
+        quote!(#shape).to_string(),
+        quote!(::drip::shape::Shape::Kernel { scaled: false }).to_string()
+    );
+}
+
+#[test]
+fn a_kernel_claims_the_scale_with_scaled() {
+    let function = syn::parse_quote! {
+        fn x(c: &Context, p: &Params, image: Read<Bayer>, output: Write<Rgb>) -> Result<()> { Ok(()) }
+    };
+    let module =
+        generated_module(expand(quote!(id = "x", contract = c, scaled), function).unwrap());
+    let shape = kind_field(&module, "shape");
+    assert_eq!(
+        quote!(#shape).to_string(),
+        quote!(::drip::shape::Shape::Kernel { scaled: true }).to_string()
+    );
+    let message = "only a kernel claims scaled; warps and resamples read the scale anyway";
+    for options in
+        [quote!(id = "x", contract = c, warp, scaled), quote!(id = "x", foreign = memory, scaled)]
+    {
+        let function = syn::parse_quote! {
+            fn x(p: &Params, image: Point<Rgb>, output: Point<Rgb>) -> Result<Warp> { Ok(()) }
+        };
+        assert_eq!(expand(options, function).unwrap_err().to_string(), message);
+    }
+    let function = syn::parse_quote! {
+        fn x(c: &Context, p: &Params) -> Result<()> { Ok(()) }
+    };
+    let error = expand(quote!(id = "x", scaled, scaled), function).unwrap_err();
+    assert_eq!(error.to_string(), "expected a single `scaled` flag");
 }
 
 #[test]

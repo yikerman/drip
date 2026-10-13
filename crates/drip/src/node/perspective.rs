@@ -177,7 +177,7 @@ fn output_extent(frame: &Frame) -> Result<Extent> {
 fn contract(global: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(RgbDesc,)> {
     let full = output_extent(&frame(p, plane(image))?)?;
     let extent = full.reduced(global.scale);
-    Ok((RgbDesc { extent, full, coordinates: image.coordinates.clone() },))
+    Ok((RgbDesc { extent, full, window: None, coordinates: image.coordinates.clone() },))
 }
 
 /// Crop, rotate and correct perspective in one map: the output is the

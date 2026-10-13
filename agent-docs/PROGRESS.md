@@ -5,6 +5,42 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
+- Explicit compute model, step 6: regions, windows and the scale rule.
+  `tests/regions.rs` checks on the CPU runtime and wgpu (RTX 3080) that a
+  13 × 9 crop of six chains over a 61 × 47 source (maps, a reindex, a
+  projective Perspective Transform, Resample after a map, a magnifying
+  Resample, and three warps) equals the same samples of the whole output bit
+  for bit, and that a chain launching once writes only the crop's 117
+  samples. A region at scale 4 selects the samples its cells meet, a region
+  beyond the plane fails, and a crop is stored under its region: the same
+  region again runs only the sink, another runs the tail on its crop alone,
+  and a crop of a stored whole image is one copy launch. On the template's
+  processing from a 96 × 64 mosaic (RCD, camera matrix, CAT16, Orientation,
+  Exposure, Sigmoid) a 24 × 20 crop launches the tail once over 480 samples
+  and a pan reuses the stored RCD output. Export TIFF of the same graph
+  with Perspective Transform after the tail, under a device budget of ten
+  rows, writes more than three bands and the same bytes as the export in
+  one piece. At scale 2 an RGB source feeding Exposure is box-reduced in the
+  same launch, matching the 2 × 2 block means, and after Orientation too. A
+  Bayer negation before a 2×2 demosaic and a foreign copy after it run once
+  across scales 1 and 4: the copy reads full detail and its consumer
+  receives it reduced. Three tests
+  changed on purpose: the explicit RGB reduction is checked at full detail,
+  since a preview scale now reduces its source first; the scale test's
+  source claims `scaled` and describes a plane that no scale reduces; and a
+  file-reading test kernel keeps its first read for the export, since its
+  key no longer holds the scale. Timed with a release driver kept in
+  `../drip-benchmark-results/2026-10-13-regions/` on the Sony fixture with
+  `DRIP_BACKEND=wgpu` and `RAYON_NUM_THREADS=12`, a new Exposure per sample,
+  so the tail runs as one launch from the stored RCD output, five samples
+  after a warm-up. Medians (ranges) in ms:
+
+  | Request | Samples | Evaluate | With host read |
+  |---|---|---|---|
+  | Whole, 7968 × 5320 | 42 389 760 | 10.67 (10.61–10.83) | 105.95 (105.59–109.40) |
+  | 100 % crop, 1600 × 1000 | 1 600 000 | 0.43 (0.24–0.53) | 4.42 (4.08–6.61) |
+
+  The full workspace gate passes.
 - Explicit compute model, step 5: foreign nodes, the pending policy and the
   store's disk tier. RAW decode is a `foreign = disk` node and Hot pixel
   removal a `foreign = memory` one. `tests/foreign.rs` checks on the host

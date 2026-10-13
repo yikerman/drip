@@ -51,10 +51,10 @@ fn check_case(evaluator: &Evaluator, width: u32, height: u32, factor: i64, pixel
     let color_node = node::reduce::rgb::add(&mut dag, node::reduce::Settings { factor }).unwrap();
     dag.connect(camera_source, camera_node.image).unwrap();
     dag.connect(color_source, color_node.image).unwrap();
-    // Explicit reduction uses its parameter, not the request's demosaic scale.
-    let context = drip::runtime::GlobalContext { scale: 4 };
-    let a = evaluator.evaluate::<Rgb>(&dag, &context, camera_node.output).unwrap();
-    let b = evaluator.evaluate::<Rgb>(&dag, &context, color_node.output).unwrap();
+    // At full detail the explicit factor alone reduces. A preview scale
+    // reduces the full-detail source before it.
+    let a = evaluator.evaluate::<Rgb>(&dag, &Default::default(), camera_node.output).unwrap();
+    let b = evaluator.evaluate::<Rgb>(&dag, &Default::default(), color_node.output).unwrap();
     assert_eq!(a.desc.extent, output_extent);
     assert_eq!(b.desc.extent, output_extent);
     assert_eq!(a.desc.full, output_extent);

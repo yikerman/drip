@@ -368,9 +368,9 @@ mod exports_read_current_files_at_full_detail_fixture {
         #[param(open = [])]
         path: Option<std::path::PathBuf>,
     }
-    // Reads its file whenever it runs, unlike a source, which stamps and keeps
-    // its files. The store keys the output by path and scale only, so a new
-    // scale or a new path reads the file again.
+    // Reads its file whenever it runs, unlike a foreign node, which stamps
+    // its files. The store keys the output by path only, since the kernel
+    // does not claim the scale, so only a new path reads the file again.
     #[drip::node(id="test-file", name="file", contract=image_contract)]
     fn file(_: &KernelContext<'_>, p: &FileKernel, mut image: Write<'_, Rgb>) -> drip::Result<()> {
         let path = p.path.as_ref().ok_or_else(|| KernelError::Contract("choose a file".into()))?;
@@ -399,7 +399,8 @@ mod exports_read_current_files_at_full_detail_fixture {
         let before = pixel(&worker, preview);
         std::fs::write(&input, "2").unwrap();
         perform(&mut worker, &graph, export);
-        assert_eq!(std::fs::read_to_string(&output).unwrap(), "[2.0, 1.0, 0.0]");
+        // The preview's read serves the export at full detail too.
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), "[1.0, 1.0, 0.0]");
         assert_eq!(pixel(&worker, preview), before, "export leaves preview intact");
         let chosen = input.with_extension("chosen");
         std::fs::write(&chosen, "3").unwrap();

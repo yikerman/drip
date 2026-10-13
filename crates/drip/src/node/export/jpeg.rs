@@ -2,6 +2,7 @@
 use crate::{
     Error, Result,
     definition::Assets,
+    eval::InputValues,
     node::{
         data::{CaptureMetadata, Rec2020, Rgb, RgbDesc},
         profile,
@@ -88,8 +89,9 @@ pub fn write(
     Ok(())
 }
 
-fn export(p: &Export, output: &profile::Output, inputs: write::Inputs<'_>) -> Result<()> {
+fn export(p: &Export, output: &profile::Output, inputs: &InputValues) -> Result<()> {
     let path = p.path.as_ref().ok_or_else(|| Error::Contract("no output file chosen".into()))?;
+    let inputs = inputs.bind::<write::Definition>()?;
     let metadata = inputs.metadata.map(|m| m.data.host().map(|m| &**m)).transpose()?;
     let bytes = encode(p, output, inputs.image.desc, inputs.image.data.host()?, metadata)?;
     std::fs::write(path, bytes).map_err(|e| Error::Runtime(format!("{}: {e}", path.display())))

@@ -1,7 +1,7 @@
 //! One explicit compute device per evaluator. Host nodes remain ordinary Rust.
-//! The runtime counts image transfers and fused launches, which
-//! `eval::Statistics` reports, and states the byte budgets of the evaluator's
-//! store.
+//! The runtime counts image transfers, fused launches and the samples they
+//! write, which `eval::Statistics` reports, and states the byte budgets of
+//! the evaluator's store.
 use crate::{
     Error, Result,
     payload::{DeviceBuffer, DeviceLayout},
@@ -14,9 +14,11 @@ use std::sync::{
 
 mod backend;
 
-/// Processing request shared by every node and its contract. A scale of one
-/// requests full detail. Demosaic applies this spatial reduction internally;
-/// other nodes may preserve their input sampling or define their own policy.
+/// The scale a demand requests and a scaled node's contract and kernel
+/// receive. One requests full detail. A kernel declared `scaled` (demosaic),
+/// a warp or a resample produces its output at this scale itself, and
+/// evaluation reduces other images finer than it. Every other node receives
+/// scale 1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GlobalContext {
     /// Requested spatial reduction factor. One means full detail.
@@ -63,6 +65,7 @@ struct Counts {
     uploads: AtomicUsize,
     downloads: AtomicUsize,
     fused: AtomicUsize,
+    samples: AtomicUsize,
 }
 
 impl RuntimeContext {
@@ -111,13 +114,15 @@ impl RuntimeContext {
         (self.counts.uploads.load(Relaxed), self.counts.downloads.load(Relaxed))
     }
 
-    /// Fused kernels launched on this runtime so far.
-    pub(crate) fn fused(&self) -> usize {
-        self.counts.fused.load(Relaxed)
+    /// Fused kernels launched on this runtime so far, and the output
+    /// samples they wrote.
+    pub(crate) fn fused(&self) -> (usize, usize) {
+        (self.counts.fused.load(Relaxed), self.counts.samples.load(Relaxed))
     }
 
-    pub(crate) fn count_fused(&self) {
+    pub(crate) fn count_fused(&self, samples: usize) {
         self.counts.fused.fetch_add(1, Relaxed);
+        self.counts.samples.fetch_add(samples, Relaxed);
     }
 
     pub(crate) fn upload(&self, bytes: Bytes) -> Result<Handle> {

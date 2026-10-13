@@ -74,7 +74,7 @@ fn full_extent(p: &Settings, full: &Extent) -> Result<Extent> {
 fn contract(global: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(RgbDesc,)> {
     let full = full_extent(p, &image.full)?;
     let extent = full.reduced(global.scale);
-    Ok((RgbDesc { extent, full, coordinates: image.coordinates.clone() },))
+    Ok((RgbDesc { extent, full, window: None, coordinates: image.coordinates.clone() },))
 }
 
 /// Reconstruct the image and sample it on a new grid, with one filter for

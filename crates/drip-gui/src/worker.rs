@@ -15,7 +15,7 @@ use std::time::Instant;
 use crate::model::{Graph, NodeId};
 use crate::node_ui::NodeAction;
 use drip::Error as NodeError;
-use drip::eval::{Evaluator, InputValues, NodeTiming, Policy};
+use drip::eval::{Evaluator, InputValues, NodeTiming, Policy, Target};
 use drip::runtime::{GlobalContext, RuntimeContext};
 use drip::store::Disk;
 use serde_json::Value as Json;
@@ -391,14 +391,18 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
         Effect::Perform { .. } => Policy::Wait,
     };
     let mut inputs = match evaluator {
-        Ok(evaluator) => evaluator.evaluate_batch(
-            &demand.graph.dag,
-            &demand.global,
-            &targets,
-            policy,
-            trace.then_some(&mut timings),
-        ),
-        Err(error) => targets.iter().map(|&id| (id, Err(error.clone()))).collect(),
+        Ok(evaluator) => {
+            evaluator
+                .evaluate_batch(
+                    &demand.graph.dag,
+                    &demand.global,
+                    &targets,
+                    policy,
+                    trace.then_some(&mut timings),
+                )
+                .inputs
+        }
+        Err(error) => targets.iter().map(|target| (target.node, Err(error.clone()))).collect(),
     };
     demand.log_timings("evaluate", &timings);
     match demand.effect {
@@ -408,7 +412,7 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
             let mut pending = BTreeMap::new();
             let mut views: Snapshot = targets
                 .iter()
-                .filter_map(|&id| {
+                .filter_map(|&Target { node: id, .. }| {
                     let node = demand.graph.dag.node(id).ok()?;
                     let result = match inputs.remove(&id) {
                         Some(inputs) => inputs.and_then(|inputs| {
@@ -473,10 +477,10 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
 
 impl Demand {
     /// The nodes the effect forces and whose inputs it consumes.
-    fn targets(&self) -> Vec<NodeId> {
+    fn targets(&self) -> Vec<Target> {
         match &self.effect {
-            Effect::Preview { targets, .. } => targets.clone(),
-            Effect::Perform { id, .. } => vec![*id],
+            Effect::Preview { targets, .. } => targets.iter().map(|&id| id.into()).collect(),
+            Effect::Perform { id, .. } => vec![(*id).into()],
         }
     }
 

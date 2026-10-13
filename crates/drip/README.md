@@ -40,22 +40,29 @@ The non-trivial files outside `node/`:
   `Node`/`Typed` traits, `Action`, `Assets`, and the `Identity` and
   `Durability` the store keys and evicts by.
 - `shape.rs`: how evaluation runs a kind (`Shape`: kernel, bound source,
-  foreign, map, warp or resample), where a foreign node's outputs are kept
-  (`Cache`, `Codec`), and what the segment compiler composes: `MapBody` and
-  the `Pixel` it maps, `Warp`, `FilterBody`, and the `Lattice` of a
-  `MapPayload`.
+  foreign, map, warp or resample, and whether it reads the scale), where a
+  foreign node's outputs are kept (`Cache`, `Codec`), and what the segment
+  compiler composes: `MapBody` and the `Pixel` it maps, `Warp`,
+  `FilterBody` and the `BOX` filter that reduces to the requested scale,
+  and the `Lattice` of a `MapPayload` with the window a raster holds, in
+  `Rect`s.
 - `registry.rs`: the hand-maintained `NODES`, `TAGS` and `Registry`.
 - `graph.rs`: `Dag` and transactional edits, checked on ports only.
 - `eval.rs`: `Evaluator`, demand-driven evaluation of the requested subgraph;
   contracts run here, nodes whose outputs the store holds are skipped, and
-  results are materialized for their consumers. `Policy` says whether a run
-  waits for a foreign job or reports it pending.
+  results are materialized for their consumers. It decides the scale each
+  node runs at, reduces full-detail images to the requested scale and cuts a
+  `Target`'s inputs to its region. `Policy` says whether a run waits for a
+  foreign job or reports it pending, and `InputValues` hands frontends and
+  actions the inputs, whole or in bands.
 - `image.rs`: `Image`, the value on an edge, a raster or the deferred output of
-  a map, warp or resample, materialized on first need, and `Raster`, samples
-  with lazy host and device residency and counted transfers.
+  a map, warp or resample, materialized on first need, whole or by window
+  (`Image::crop`), `Raster`, samples with lazy host and device residency and
+  counted transfers, and `Plane`, what evaluation does to an image on a
+  plane without its type.
 - `plan.rs`: the segment compiler: a `Plan` of one resampling stage and map
-  bodies, the rules for composing steps into it, and the fused kernel that
-  runs it.
+  bodies, the rules for composing steps into it, the input window a window of
+  its output reads, and the fused kernel that runs it on a window.
 - `store.rs`: the evaluator's memo of materialized values across demands:
   content keys, eviction by durability and recency within per-side byte
   budgets, foreign jobs, and the `Disk` tier.
@@ -209,6 +216,14 @@ and reads `image.data.host()?`. The raster transfers what the next node asks
 for. An output declared `Forward<'_, P>` instead of `Write` is set from samples
 the node already holds, `output.set(image.data)`, so a node that only changes
 the description copies nothing.
+A kernel receives whole inputs and scale 1. At a preview scale its RGB
+inputs arrive reduced. Declare
+`scaled` (`#[node(..., scaled)]`) only for a kernel that reaches the
+requested scale itself, cheaper or better than evaluation's box reduction,
+as the demosaics do with `reduce::for_demosaic`. Its contract and function
+then receive `GlobalContext::scale`, its output is taken as produced at that
+scale, and its outputs are keyed by it. Kernels declare no `halo` yet: they
+run whole, and a region bounds only the fused segments after them.
 The ID is the persistence key, so keep it once projects use it. The
 evaluator stores outputs under keys that include `version`, 1 by default:
 add `version = 2` to `#[node]` when a change alters what the node computes

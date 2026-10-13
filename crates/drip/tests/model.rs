@@ -429,13 +429,15 @@ fn device_chain(runtime: RuntimeContext) {
     // only the sink where the store holds its input.
     for (eval, expected) in [(Evaluator::new(eval.runtime().clone()), 8), (eval, 1)] {
         let mut timings = Vec::new();
-        let values = eval.evaluate_batch(
-            &d,
-            &Default::default(),
-            &[observer.node],
-            Policy::Wait,
-            Some(&mut timings),
-        );
+        let values = eval
+            .evaluate_batch(
+                &d,
+                &Default::default(),
+                &[observer.node.into()],
+                Policy::Wait,
+                Some(&mut timings),
+            )
+            .inputs;
         let inputs = values[&observer.node].as_ref().unwrap().bind::<sink::Definition>().unwrap();
         assert_eq!(inputs.image.data.host().unwrap(), result.data.host().unwrap());
         assert_eq!(timings.len(), expected);
@@ -539,14 +541,11 @@ fn batch_shares_ancestors_and_isolates_failures() {
     dag.connect(failure.output, downstream.image).unwrap();
     let incomplete = sink::add(&mut dag, ()).unwrap();
     let targets = [producer.node, a.node, b.node, failure.node, downstream.node, incomplete.node];
+    let targets = targets.map(Into::into);
     let mut timings = Vec::new();
-    let values = Evaluator::new(RuntimeContext::host()).evaluate_batch(
-        &dag,
-        &Default::default(),
-        &targets,
-        Policy::Wait,
-        Some(&mut timings),
-    );
+    let values = Evaluator::new(RuntimeContext::host())
+        .evaluate_batch(&dag, &Default::default(), &targets, Policy::Wait, Some(&mut timings))
+        .inputs;
     assert_eq!(timings.len(), 7); // Shared nodes once; nodes after a failure skipped.
     assert_eq!(timings.iter().filter(|t| t.node == producer.node).count(), 1);
     let position = |id| timings.iter().position(|t| t.node == id).unwrap();
@@ -594,10 +593,14 @@ fn optional_input_is_absent_only_when_disconnected() {
     assert!(bind(values[&observer.node].as_ref().unwrap()));
 }
 
+/// As many samples as the scale, over a plane wide enough that no scale up
+/// to 256 reduces them further.
 fn context_contract(global: &drip::runtime::GlobalContext, _: &()) -> Result<(RgbDesc,)> {
-    Ok((RgbDesc::new(Extent { width: global.scale, height: 1 }, image_desc().coordinates),))
+    let desc = RgbDesc::new(Extent { width: global.scale, height: 1 }, image_desc().coordinates);
+    Ok((RgbDesc { full: Extent { width: 256 * 256, height: 1 }, ..desc },))
 }
-#[node(id="test-global-context",contract=context_contract)]
+/// Claims the scale, so it receives the request's.
+#[node(id="test-global-context",contract=context_contract,scaled)]
 fn context_source(context: &KernelContext<'_>, _: &(), mut output: Write<'_, Rgb>) -> Result<()> {
     assert_eq!(output.desc.extent.width, context.global.scale);
     output.host().fill([context.global.scale as f32; 3]);

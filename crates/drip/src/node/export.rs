@@ -3,6 +3,7 @@ pub mod jpeg;
 use crate::{
     Error, Result,
     definition::Assets,
+    eval::InputValues,
     node::data::{CaptureMetadata, Rec2020, Rgb, RgbDesc},
     node::profile,
     payload::Payload,
@@ -82,8 +83,10 @@ impl Assets for Export {
 /// Write linear Rec.2020/D65 RGB to TIFF through an RGB ICC profile.
 /// u8/u16 clip to the output range; f32 retains the profile's floating-point range.
 /// Connected capture metadata is copied when present. Export uses full processing
-/// detail, independently of preview detail. Compression is lossless. A profile
-/// file is read at the first export; choose it again to pick up changes.
+/// detail, independently of preview detail. An image larger than the device
+/// budget is computed in bands of rows and written as one file, equal to an
+/// export in one piece. Compression is lossless. A profile file is read at the
+/// first export; choose it again to pick up changes.
 #[crate::node(
     id = "export-tiff",
     name = "Export TIFF",
@@ -99,11 +102,21 @@ pub fn tiff(
 ) -> Result<()> {
     Ok(())
 }
-/// Encode and write the file named by the settings.
-fn export(p: &Export, output: &profile::Output, inputs: tiff::Inputs<'_>) -> Result<()> {
+/// Encode and write the file named by the settings, computing the image in
+/// bands within the device budget.
+fn export(p: &Export, output: &profile::Output, inputs: &InputValues) -> Result<()> {
     let path = p.path.as_ref().ok_or_else(|| Error::Contract("no output file chosen".into()))?;
-    let metadata = inputs.metadata.map(|m| m.data.host().map(|m| &**m)).transpose()?;
-    let bytes = encode(p, output, inputs.image.desc, inputs.image.data.host()?, metadata)?;
+    let mut bands = inputs.bands(inputs.budget()).into_iter().map(|band| inputs.region(band));
+    let first = bands.next().ok_or_else(|| Error::Contract("no image to export".into()))??;
+    let first = first.bind::<tiff::Definition>()?;
+    let metadata = first.metadata.map(|m| m.data.host().map(|m| &**m)).transpose()?;
+    // Each later band is computed when the encoder reaches it.
+    let rest = bands.map(|band| {
+        let band = band?;
+        Ok(Cow::Owned(band.bind::<tiff::Definition>()?.image.data.host()?.to_vec()))
+    });
+    let rows = std::iter::once(Ok(Cow::Borrowed(&**first.image.data.host()?))).chain(rest);
+    let bytes = encode_rows(p, output, &first.image.desc.whole(), metadata, rows)?;
     std::fs::write(path, bytes).map_err(|e| Error::Runtime(format!("{}: {e}", path.display())))
 }
 
@@ -117,6 +130,18 @@ pub fn encode(
     pixels: &[[f32; 3]],
     metadata: Option<&drip_raw::Metadata>,
 ) -> Result<Vec<u8>> {
+    encode_rows(p, output, desc, metadata, std::iter::once(Ok(Cow::Borrowed(pixels))))
+}
+
+/// [`encode`] with the pixels of `desc` in bands of whole rows, top to
+/// bottom.
+fn encode_rows<'a>(
+    p: &Export,
+    output: &profile::Output,
+    desc: &RgbDesc,
+    metadata: Option<&drip_raw::Metadata>,
+    rows: impl Iterator<Item = Result<Cow<'a, [[f32; 3]]>>>,
+) -> Result<Vec<u8>> {
     let compression = match &p.compression {
         CompressionMode::None => Compression::Uncompressed,
         CompressionMode::Deflate(settings) => Compression::Deflate(match settings.level {
@@ -127,15 +152,13 @@ pub fn encode(
     };
     Rgb::validate(desc)?;
     Rec2020::check(desc)?;
-    if pixels.len() != desc.extent.pixels() {
-        return Err(Error::Contract("TIFF export pixels do not match the image extent".into()));
-    }
     let mut bytes = Cursor::new(Vec::new());
     let err = |e: ::tiff::TiffError| Error::Runtime(e.to_string());
     let mut encoder = TiffEncoder::new(&mut bytes).map_err(err)?.with_compression(compression);
+    let count = desc.extent.pixels();
     match p.depth {
         Depth::U8 => {
-            let pixels: Vec<[u8; 3]> = output.convert(PixelFormat::RGB_8, pixels)?;
+            let pixels: Vec<[u8; 3]> = converted(output, PixelFormat::RGB_8, rows, count)?;
             write_image::<RGB8>(
                 &mut encoder,
                 &desc.extent,
@@ -146,7 +169,7 @@ pub fn encode(
             .map_err(err)?;
         }
         Depth::F32 => {
-            let pixels: Vec<[f32; 3]> = output.convert(PixelFormat::RGB_FLT, pixels)?;
+            let pixels: Vec<[f32; 3]> = converted(output, PixelFormat::RGB_FLT, rows, count)?;
             write_image::<RGB32Float>(
                 &mut encoder,
                 &desc.extent,
@@ -157,7 +180,7 @@ pub fn encode(
             .map_err(err)?;
         }
         Depth::U16 => {
-            let pixels: Vec<[u16; 3]> = output.convert(PixelFormat::RGB_16, pixels)?;
+            let pixels: Vec<[u16; 3]> = converted(output, PixelFormat::RGB_16, rows, count)?;
             write_image::<RGB16>(
                 &mut encoder,
                 &desc.extent,
@@ -169,6 +192,24 @@ pub fn encode(
         }
     }
     Ok(bytes.into_inner())
+}
+
+/// `rows` converted through `output` into `format`, which must hold `count`
+/// pixels in all.
+fn converted<'a, T: lcms2::Pod + Default + Send>(
+    output: &profile::Output,
+    format: PixelFormat,
+    rows: impl Iterator<Item = Result<Cow<'a, [[f32; 3]]>>>,
+    count: usize,
+) -> Result<Vec<[T; 3]>> {
+    let mut pixels = Vec::with_capacity(count);
+    for band in rows {
+        pixels.extend(output.convert(format, &band?)?);
+    }
+    if pixels.len() != count {
+        return Err(Error::Contract("TIFF export pixels do not match the image extent".into()));
+    }
+    Ok(pixels)
 }
 
 type Tiff<'a> = TiffEncoder<&'a mut Cursor<Vec<u8>>>;

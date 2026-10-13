@@ -11,11 +11,14 @@ pub(super) struct Options {
     /// Required when the node has outputs; checked against the signature.
     pub contract: Option<syn::Expr>,
     pub references: syn::Expr,
-    /// `fn(&Params, Inputs<'_>) -> Result<()>`, run on evaluated inputs; with
-    /// `assets`, `fn(&Params, &Loaded, Inputs<'_>)`.
+    /// `fn(&Params, &InputValues) -> Result<()>`, run on evaluated inputs,
+    /// which it binds whole or by region. With `assets`,
+    /// `fn(&Params, &Loaded, &InputValues)`.
     pub action: Option<syn::Path>,
     /// The parameters implement `drip::definition::Assets`, loaded when first used.
     pub assets: bool,
+    /// A kernel that produces its outputs at the requested scale itself.
+    pub scaled: bool,
     /// How a node with `Point` ports publishes its output.
     pub deferred: Option<Deferred>,
     /// `foreign = memory` or `foreign = disk`: where the store keeps the
@@ -72,7 +75,7 @@ impl Options {
                 .path()
                 .get_ident()
                 .ok_or_else(|| syn::Error::new(entry.span(), "expected option name"))?;
-            if ["assets", "warp", "resample"].iter().any(|flag| name == flag) {
+            if ["assets", "warp", "resample", "scaled"].iter().any(|flag| name == flag) {
                 let flag = name.to_string();
                 if flags.contains(&flag) || !matches!(entry, syn::Meta::Path(_)) {
                     let message = format!("expected a single `{flag}` flag");
@@ -134,6 +137,10 @@ impl Options {
             let message = "a node is at most one of map, warp, resample and foreign";
             return Err(syn::Error::new(span, message));
         }
+        if flag("scaled") && (deferred.is_some() || foreign.is_some()) {
+            let message = "only a kernel claims scaled; warps and resamples read the scale anyway";
+            return Err(syn::Error::new(span, message));
+        }
         Ok(Self {
             name: display_name.unwrap_or_else(|| id.clone()),
             tags,
@@ -143,6 +150,7 @@ impl Options {
             references: references.unwrap_or_else(|| syn::parse_quote!([])),
             action,
             assets: flag("assets"),
+            scaled: flag("scaled"),
             deferred,
             foreign,
         })

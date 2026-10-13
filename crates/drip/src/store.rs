@@ -2,9 +2,10 @@
 //!
 //! An edit usually changes a few nodes, so most outputs of the next demand
 //! equal outputs the evaluator already computed. Each output's [`Key`] hashes
-//! what determines it: the producer's kind and version, its [`Identity`] and
-//! the keys of its inputs. Evaluation runs a node only when a demanded output
-//! is missing. The store keeps rasters within the runtime's [`Budget`] per
+//! what determines it: the producer's kind and version, its [`Identity`],
+//! the scale for a scaled kind, and the keys of its inputs. A reduction to
+//! the requested scale and a region of an image have keys of their own.
+//! Evaluation runs a node only when a demanded output is missing. The store keeps rasters within the runtime's [`Budget`] per
 //! side and evicts the least durable, least recently used representations
 //! first. It also runs foreign nodes as jobs on their own threads, one per
 //! key, and keeps the outputs of `foreign = disk` nodes in a [`Disk`]
@@ -14,8 +15,8 @@ use crate::{
     definition::{Durability, FileStamp, Identity, Kind},
     image::{Image, Side},
     payload::{read_json, write_json},
-    runtime::{Budget, GlobalContext},
-    shape::{Cache, Codec},
+    runtime::Budget,
+    shape::{Cache, Codec, Rect},
 };
 use serde_json::Value as Json;
 use sha2::{Digest, Sha256};
@@ -44,14 +45,9 @@ pub(crate) struct Key {
 
 impl Key {
     /// The key of a node's outputs: `kind` and its version, `identity`, the
-    /// global scale for a computed identity, and the key of each input in
-    /// port order, `None` where the input is unconnected.
-    pub fn node(
-        kind: &Kind,
-        identity: &Identity,
-        global: &GlobalContext,
-        inputs: &[Option<Key>],
-    ) -> Self {
+    /// requested `scale` for a kind whose shape is scaled, and the key of
+    /// each input in port order, `None` where the input is unconnected.
+    pub fn node(kind: &Kind, identity: &Identity, scale: u32, inputs: &[Option<Key>]) -> Self {
         let mut hash = Hasher::new(b"drip node");
         let local = matches!(identity, Identity::Bound(_))
             || inputs.iter().flatten().any(|input| input.local);
@@ -61,7 +57,9 @@ impl Key {
             Identity::Computed(parameters) => {
                 hash.tag(0);
                 hash.json(parameters);
-                hash.u64(global.scale.into());
+                if kind.shape.scaled() {
+                    hash.u64(scale.into());
+                }
             }
             Identity::Foreign(parameters, files) => {
                 hash.tag(1);
@@ -92,6 +90,23 @@ impl Key {
         let mut hash = Hasher::new(b"drip output");
         hash.0.update(self.hash);
         hash.u64(index as u64);
+        hash.finish(self.local)
+    }
+
+    /// The key of the image keyed `self` reduced to `scale`.
+    pub fn reduced(self, scale: u32) -> Self {
+        let mut hash = Hasher::new(b"drip reduced");
+        hash.0.update(self.hash);
+        hash.u64(scale.into());
+        hash.finish(self.local)
+    }
+
+    /// The key of the samples of the image keyed `self` that cover `region`
+    /// of its plane, in full-detail pixels.
+    pub fn region(self, region: Rect) -> Self {
+        let mut hash = Hasher::new(b"drip region");
+        hash.0.update(self.hash);
+        region.origin.iter().chain(&region.extent).for_each(|&v| hash.u64(v.into()));
         hash.finish(self.local)
     }
 

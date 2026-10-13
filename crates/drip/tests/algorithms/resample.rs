@@ -166,6 +166,7 @@ fn per_channel_maps_match_the_reference(evaluator: &Evaluator) {
     let source = RgbDesc {
         extent: Extent { width, height },
         full: Extent { width: 18, height: 14 },
+        window: None,
         coordinates: Coordinates::Space(REC2020_D65),
     };
     let perspective = [[1.0, 0.05, -0.4], [0.02, 0.95, 0.3], [0.004, -0.003, 1.0]];

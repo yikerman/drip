@@ -2,7 +2,7 @@
 //! A payload names its Rust host type and description; `DeviceLayout` adds
 //! the byte layout kernels read, and `Persist` the byte stream the store's
 //! disk tier keeps. Residency and transfers live in `image`.
-use crate::Result;
+use crate::{Result, image::Plane};
 use cubecl::{bytes::Bytes, prelude::BufferArg, server::Handle};
 use std::{
     fmt::Debug,
@@ -29,6 +29,11 @@ pub trait Payload: Send + Sync + Sized + 'static {
     /// budgets. A [`DeviceLayout`] payload states its layout's exact length,
     /// a host-only payload an estimate.
     fn byte_len(desc: &Self::Desc) -> usize;
+    /// [`Plane::of`] for a [`MapPayload`](crate::shape::MapPayload), so
+    /// evaluation reduces its images to the requested scale and computes
+    /// windows of them. `None`, the default, keeps every image whole and at
+    /// the detail its producer chose.
+    const PLANE: Option<Plane> = None;
 }
 
 /// A payload kernels read on the device. Numeric buffers keep their host element

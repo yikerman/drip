@@ -7,15 +7,17 @@
 //! that evaluation and the store pass between nodes: a raster, or a deferred
 //! image that a map, warp or resample published. `plan` decides how each step
 //! composes, and materializes a deferred image into a raster when a consumer
-//! first needs samples. A materialized image reports its bytes per side to
-//! the store, which may keep it without one side.
+//! first needs samples, whole or only a window of it ([`Image::crop`]). A
+//! payload's [`Plane`] lets evaluation reduce and crop images without their
+//! type. A materialized image reports its bytes per side to the store, which
+//! may keep it without one side.
 use crate::{
     Error, Result,
     payload::{DeviceBuffer, DeviceLayout, Payload},
     plan::{self, Plan},
     ports::typed,
     runtime::{KernelContext, RuntimeContext},
-    shape::{FilterBody, MapBody, MapPayload, Warp},
+    shape::{self, FilterBody, Lattice, MapBody, MapPayload, Rect, Warp},
 };
 use cubecl::bytes::Bytes;
 use std::{
@@ -32,6 +34,23 @@ pub type Description = Arc<dyn Any + Send + Sync>;
 pub struct Image {
     desc: Description,
     value: Arc<Value>,
+    plane: Option<Plane>,
+}
+
+/// What evaluation does to an image of a payload on a plane without knowing
+/// its type, captured where the type is known: a [`MapPayload`] sets
+/// [`Payload::PLANE`] to [`Plane::of`] itself.
+#[derive(Clone, Copy)]
+pub struct Plane {
+    lattice: fn(&Description) -> Lattice,
+    bytes: fn(&Description) -> usize,
+    reduce: fn(&Image, u32) -> Result<Image>,
+    crop: fn(&Image, Rect, &KernelContext<'_>) -> Result<Image>,
+}
+impl Plane {
+    pub const fn of<P: MapPayload>() -> Self {
+        Self { lattice: lattice::<P>, bytes: bytes::<P>, reduce: reduce::<P>, crop: crop::<P> }
+    }
 }
 struct Value {
     /// A `Raster<P>`, set when the image is created or materialized.
@@ -101,7 +120,44 @@ impl Image {
     pub(crate) fn without(&self, side: Side) -> Option<Image> {
         let raster = self.value.raster.get()?.without(side)?;
         let value = Value { raster: OnceLock::from(raster), pending: Mutex::new(None) };
-        Some(Image { desc: self.desc.clone(), value: Arc::new(value) })
+        Some(Image { desc: self.desc.clone(), value: Arc::new(value), plane: self.plane })
+    }
+
+    /// Whether `other` is a clone of this image.
+    pub(crate) fn is(&self, other: &Image) -> bool {
+        Arc::ptr_eq(&self.value, &other.value)
+    }
+
+    /// The image's lattice and the window it holds, for a payload on a plane.
+    pub fn lattice(&self) -> Option<Lattice> {
+        self.plane.map(|plane| (plane.lattice)(&self.desc))
+    }
+
+    /// The bytes its samples occupy once materialized, for a payload on a
+    /// plane.
+    pub(crate) fn byte_len(&self) -> Option<usize> {
+        self.plane.map(|plane| (plane.bytes)(&self.desc))
+    }
+
+    /// This image at `scale`: resampled with [`shape::BOX`] onto
+    /// `full.div_ceil(scale)` samples per axis when its lattice is finer, as
+    /// a deferred image, otherwise the image itself. Images of a payload
+    /// without a plane stay as they are. The image must hold its whole
+    /// lattice.
+    pub(crate) fn reduce(&self, scale: u32) -> Result<Image> {
+        match self.plane {
+            Some(plane) => (plane.reduce)(self, scale),
+            None => Ok(self.clone()),
+        }
+    }
+
+    /// The samples in `window` of this image's lattice, materialized on
+    /// `ctx`'s runtime. A deferred image runs its plan on that window alone,
+    /// and a raster holding more copies the window in one launch. Fails for
+    /// a payload without a plane or a window this image does not hold.
+    pub fn crop(&self, window: Rect, ctx: &KernelContext<'_>) -> Result<Image> {
+        let plane = self.plane.ok_or_else(|| Error::Contract("image has no plane".into()))?;
+        (plane.crop)(self, window, ctx)
     }
 
     /// Run a deferred image's plan into a raster on `ctx`'s runtime, its
@@ -187,7 +243,29 @@ impl Image {
         });
         let deferred = Deferred { input, plan, materialize: Deferred::materialize::<P> };
         let value = Value { raster: OnceLock::new(), pending: Mutex::new(Some(deferred)) };
-        Image { desc, value: Arc::new(value) }
+        Image { desc, value: Arc::new(value), plane: P::PLANE }
+    }
+
+    /// A raster of payload `P` that holds `window` of this image's lattice:
+    /// the whole image when `window` is all of it, the window alone when the
+    /// image is deferred, otherwise the raster itself. Fails when the image
+    /// is a raster without `window`.
+    fn covering<P: MapPayload>(&self, window: Rect, ctx: &KernelContext<'_>) -> Result<Raster<P>> {
+        let lattice = P::lattice(&typed(&self.desc));
+        if lattice.with(window).is_whole() {
+            return self.raster(ctx);
+        }
+        // Held while the window's kernels are queued, as in `materialize`.
+        let pending = self.value.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(deferred) = pending.as_ref() {
+            return deferred.run::<P>(&self.desc, window, ctx);
+        }
+        drop(pending);
+        let raster = self.raster::<P>(ctx)?;
+        if !P::lattice(raster.desc()).window.contains(&window) {
+            return Err(Error::Contract(format!("{} raster does not hold the window", P::NAME)));
+        }
+        Ok(raster)
     }
 }
 impl<P: Payload> From<Raster<P>> for Image {
@@ -195,7 +273,7 @@ impl<P: Payload> From<Raster<P>> for Image {
         let desc = raster.description();
         let raster: Box<dyn Stored> = Box::new(raster);
         let value = Value { raster: OnceLock::from(raster), pending: Mutex::new(None) };
-        Self { desc, value: Arc::new(value) }
+        Self { desc, value: Arc::new(value), plane: P::PLANE }
     }
 }
 impl Deferred {
@@ -204,9 +282,57 @@ impl Deferred {
         desc: &Description,
         ctx: &KernelContext<'_>,
     ) -> Result<Box<dyn Stored>> {
-        let input = self.input.raster::<P>(ctx)?;
-        Ok(Box::new(self.plan.run(&input, typed(desc), ctx)?))
+        let window = P::lattice(&typed(desc)).window;
+        Ok(Box::new(self.run::<P>(desc, window, ctx)?))
     }
+
+    /// Run the plan for `window` of the lattice `desc` describes, on the
+    /// part of the input that window reads.
+    fn run<P: MapPayload>(
+        &self,
+        desc: &Description,
+        window: Rect,
+        ctx: &KernelContext<'_>,
+    ) -> Result<Raster<P>> {
+        let desc: Arc<P::Desc> = typed(desc);
+        let to = P::lattice(&desc).with(window);
+        let from = P::lattice(&typed(&self.input.desc));
+        let input = self.input.covering::<P>(self.plan.input_window(from, to)?, ctx)?;
+        self.plan.run(&input, Arc::new(P::on(&desc, to)), ctx)
+    }
+}
+
+fn lattice<P: MapPayload>(desc: &Description) -> Lattice {
+    P::lattice(&typed(desc))
+}
+
+fn bytes<P: MapPayload>(desc: &Description) -> usize {
+    P::byte_len(&typed(desc))
+}
+
+fn reduce<P: MapPayload>(image: &Image, scale: u32) -> Result<Image> {
+    let lattice = P::lattice(&typed(&image.desc));
+    let reduced = lattice.full.map(|side| side.div_ceil(scale));
+    if (0..2).all(|axis| lattice.extent[axis] <= reduced[axis]) {
+        return Ok(image.clone());
+    }
+    let desc = P::on(&typed(&image.desc), Lattice::whole(reduced, lattice.full));
+    image.resample::<P>(&shape::BOX, Arc::new(desc))
+}
+
+fn crop<P: MapPayload>(image: &Image, window: Rect, ctx: &KernelContext<'_>) -> Result<Image> {
+    let lattice = P::lattice(&typed(&image.desc));
+    let whole = Rect { origin: [0; 2], extent: lattice.extent };
+    if !whole.contains(&window) || window.cells() == 0 {
+        return Err(Error::Contract(format!("window lies outside the {} lattice", P::NAME)));
+    }
+    let raster = image.covering::<P>(window, ctx)?;
+    if P::lattice(raster.desc()).window == window {
+        return Ok(raster.into());
+    }
+    // The empty plan loads the window from the raster that holds it.
+    let desc = P::on(raster.desc(), lattice.with(window));
+    Ok(Plan::default().run(&raster, Arc::new(desc), ctx)?.into())
 }
 
 /// Materialized samples of payload `P`, immutable and shared by clones. At

@@ -220,6 +220,9 @@ pub struct PortSpec {
     pub requirement: &'static str,
     pub optional: bool,
     pub(crate) payload_type: TypeId,
+    /// The payload has a [`Plane`](crate::image::Plane), so evaluation may
+    /// reduce and crop values on this port.
+    pub(crate) planar: bool,
 }
 impl PortSpec {
     pub const fn of<P: Payload, R: Requirement<P>>(name: &'static str) -> Self {
@@ -229,6 +232,7 @@ impl PortSpec {
             requirement: R::LABEL,
             optional: false,
             payload_type: TypeId::of::<P>(),
+            planar: P::PLANE.is_some(),
         }
     }
     pub const fn optional(mut self) -> Self {

@@ -24,6 +24,15 @@ use documentation::documentation;
 /// registered `Tag` statics (see `drip::registry`). `version = N`, 1 by default,
 /// is bumped by hand when the node's numerics change, so outputs the evaluator
 /// stored under the previous version no longer match.
+/// `scaled` declares a kernel that produces its outputs at the requested
+/// scale itself, as demosaic does. Its contract and function receive the
+/// request's `GlobalContext`, and evaluation keys its outputs by the scale.
+/// Every other kernel receives scale 1, and evaluation reduces the images on
+/// a plane it reads to the requested scale.
+/// `action = f` runs `fn(&Params, &InputValues) -> Result<()>` on the
+/// evaluated inputs, with `&Loaded` after the parameters when the node
+/// declares `assets`. The action binds the inputs whole, or by region when an
+/// input exceeds the device budget.
 /// The parameter type supplies its schema through `Parameters` (usually derived).
 /// Use `&()` for nodes without parameters.
 /// `Option<Read<Payload>>` declares an optional input; output ports remain required.

@@ -1,10 +1,11 @@
 //! Concrete image and calibration payloads shared by processing nodes.
 use crate::{
     Error, Result,
+    image::Plane,
     node::color,
     payload::{Persist, decode_array, read_json, write_json},
     ports::Requirement,
-    shape::{Lattice, MapPayload},
+    shape::{Lattice, MapPayload, Rect},
 };
 pub use crate::{
     image::Raster,
@@ -94,21 +95,46 @@ impl fmt::Display for Coordinates {
     }
 }
 
-/// `full` is the extent of the same image at full detail
-/// (`GlobalContext::scale` 1); preview requests store fewer samples. Stored
-/// pixel `i` covers full-detail plane position `(i + 0.5) · full / extent`
-/// along each axis, approximately where a reduction dropped or averaged
-/// partial edge blocks.
+/// RGB samples on a lattice over the image's plane. `full` is the extent of
+/// the same image at full detail (`GlobalContext::scale` 1), and preview
+/// requests store fewer samples. A raster holding the whole lattice stores
+/// `extent` samples, and pixel `i` covers full-detail plane position
+/// `(i + 0.5) · full / extent` along each axis, approximately where a
+/// reduction dropped or averaged partial edge blocks. A raster holding part
+/// of it, a crop or an export tile, states its `window`, and stored pixel `i`
+/// is lattice sample `window.origin + i`. Contracts describe whole images.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RgbDesc {
+    /// Samples stored per axis.
     pub extent: Extent,
     pub full: Extent,
+    /// Where the stored samples sit on the image's lattice, `None` when they
+    /// are all of it.
+    #[serde(default)]
+    pub window: Option<Window>,
     pub coordinates: Coordinates,
+}
+/// Part of an image's lattice.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Window {
+    /// The lattice index of the first stored sample.
+    pub origin: [u32; 2],
+    /// Samples of the whole image on the lattice.
+    pub lattice: Extent,
 }
 impl RgbDesc {
     /// An image stored at full detail.
     pub fn new(extent: Extent, coordinates: Coordinates) -> Self {
-        Self { full: extent.clone(), extent, coordinates }
+        Self { full: extent.clone(), extent, window: None, coordinates }
+    }
+    /// The description of the whole image these samples are part of.
+    pub fn whole(&self) -> RgbDesc {
+        match &self.window {
+            Some(window) => {
+                RgbDesc { extent: window.lattice.clone(), window: None, ..self.clone() }
+            }
+            None => self.clone(),
+        }
     }
     /// The camera responses these samples hold, if they are camera RGB.
     pub fn response(&self) -> Result<&Response> {
@@ -124,11 +150,27 @@ impl Payload for Rgb {
     const NAME: &'static str = "RGB";
     type Desc = RgbDesc;
     type Host = HostBuffer<[f32; 3]>;
+    const PLANE: Option<Plane> = Some(Plane::of::<Self>());
     fn validate(d: &RgbDesc) -> Result<()> {
         d.extent.validate()?;
         d.full.validate()?;
-        if d.extent.width > d.full.width || d.extent.height > d.full.height {
+        let lattice = d.window.as_ref().map_or(&d.extent, |window| &window.lattice);
+        lattice.validate()?;
+        if lattice.width > d.full.width || lattice.height > d.full.height {
             return Err(Error::Contract("RGB stores more samples than its full detail".into()));
+        }
+        if let Some(window) = &d.window {
+            let fits = |origin: u32, extent: u32, lattice: u32| {
+                u64::from(origin) + u64::from(extent) <= u64::from(lattice)
+            };
+            let [x, y] = window.origin;
+            if !fits(x, d.extent.width, lattice.width) || !fits(y, d.extent.height, lattice.height)
+            {
+                return Err(Error::Contract("RGB window lies outside its lattice".into()));
+            }
+            if window.origin == [0, 0] && d.extent == *lattice {
+                return Err(Error::Contract("an RGB window of the whole lattice is none".into()));
+            }
         }
         Ok(())
     }
@@ -168,7 +210,24 @@ impl Persist for Rgb {
 
 impl MapPayload for Rgb {
     fn lattice(d: &RgbDesc) -> Lattice {
-        Lattice { extent: [d.extent.width, d.extent.height], full: [d.full.width, d.full.height] }
+        let stored = [d.extent.width, d.extent.height];
+        let (origin, extent) = match &d.window {
+            Some(window) => (window.origin, [window.lattice.width, window.lattice.height]),
+            None => ([0, 0], stored),
+        };
+        let full = [d.full.width, d.full.height];
+        Lattice { extent, full, window: Rect { origin, extent: stored } }
+    }
+    fn on(d: &RgbDesc, lattice: Lattice) -> RgbDesc {
+        let extent = |[width, height]: [u32; 2]| Extent { width, height };
+        let window = (!lattice.is_whole())
+            .then(|| Window { origin: lattice.window.origin, lattice: extent(lattice.extent) });
+        RgbDesc {
+            extent: extent(lattice.window.extent),
+            full: extent(lattice.full),
+            window,
+            coordinates: d.coordinates.clone(),
+        }
     }
 }
 
@@ -364,5 +423,28 @@ mod tests {
         assert!(Rgb::validate(&desc).is_err());
         desc.full = Extent { width: 0, height: 8 };
         assert!(Rgb::validate(&desc).is_err());
+    }
+
+    /// A window lies inside its lattice and is not the whole of it, so equal
+    /// samples have one description.
+    #[test]
+    fn rgb_windows_lie_inside_their_lattice() {
+        let whole = RgbDesc::new(Extent { width: 8, height: 6 }, Coordinates::Space(REC2020_D65));
+        let lattice = Rgb::lattice(&whole);
+        assert!(lattice.is_whole());
+        let crop = Rgb::on(&whole, lattice.with(Rect { origin: [2, 1], extent: [5, 4] }));
+        assert_eq!(crop.extent, Extent { width: 5, height: 4 });
+        assert_eq!(crop.window, Some(Window { origin: [2, 1], lattice: whole.extent.clone() }));
+        assert!(Rgb::validate(&crop).is_ok());
+        assert_eq!(Rgb::lattice(&crop), lattice.with(Rect { origin: [2, 1], extent: [5, 4] }));
+        assert_eq!(Rgb::on(&crop, lattice), whole);
+        let outside = RgbDesc { extent: Extent { width: 7, height: 4 }, ..crop.clone() };
+        assert!(Rgb::validate(&outside).is_err());
+        let all = RgbDesc {
+            extent: whole.extent.clone(),
+            window: Some(Window { origin: [0, 0], lattice: whole.extent.clone() }),
+            ..crop
+        };
+        assert!(Rgb::validate(&all).is_err());
     }
 }
