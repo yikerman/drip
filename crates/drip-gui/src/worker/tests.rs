@@ -558,7 +558,7 @@ mod panic_wakes_the_ui_and_ends_the_busy_state_fixture {
 mod a_magnified_view_shows_a_full_detail_crop_over_its_preview_fixture {
     use super::*;
     use crate::node_ui::preview::ImageView;
-    use drip::shape::Rect;
+    use drip::lattice::Rect;
 
     #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
     struct Ramp {

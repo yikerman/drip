@@ -66,7 +66,7 @@ pub(super) struct Shown {
     pub response: egui::Response,
     /// The visible region of the plane in full-detail pixels, when the view
     /// magnifies a preview coarser than full detail to 100 % or more.
-    pub detail: Option<drip::shape::Rect>,
+    pub detail: Option<drip::lattice::Rect>,
 }
 
 /// Navigable image, with `detail`, a full-detail crop of it, drawn over it.
@@ -163,7 +163,7 @@ pub(super) fn show(
 
 /// The cells of a plane of `plane` full-detail pixels, drawn over `rect`,
 /// that meet `area`.
-fn visible(area: Rect, rect: Rect, plane: Vec2) -> Option<drip::shape::Rect> {
+fn visible(area: Rect, rect: Rect, plane: Vec2) -> Option<drip::lattice::Rect> {
     let shown = area.intersect(rect);
     if !shown.is_positive() {
         return None;
@@ -176,7 +176,7 @@ fn visible(area: Rect, rect: Rect, plane: Vec2) -> Option<drip::shape::Rect> {
         (start as u32, (end - start) as u32)
     };
     let ((x, width), (y, height)) = (axis(min.x, max.x, plane.x), axis(min.y, max.y, plane.y));
-    Some(drip::shape::Rect { origin: [x, y], extent: [width, height] })
+    Some(drip::lattice::Rect { origin: [x, y], extent: [width, height] })
 }
 
 /// Retain enough precision to distinguish a wheel zoom from nearby presets.

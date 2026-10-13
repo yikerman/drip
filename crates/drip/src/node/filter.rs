@@ -17,8 +17,8 @@
 //!
 //! \[3\] W3C, *WebGPU Shading Language*, sec. 15.7.4, “Floating point
 //! accuracy.” \[Online\]. Available: <https://www.w3.org/TR/WGSL/>
-use crate::shape::FilterBody;
-pub use crate::shape::{BOX_SUPPORT, box_filter};
+use crate::body::FilterBody;
+pub use crate::body::{BOX_SUPPORT, box_filter};
 use cubecl::prelude::*;
 use std::f32::consts::PI;
 
@@ -55,7 +55,7 @@ impl Filter {
             Self::Mitchell => &MITCHELL_BODY,
             Self::CatmullRom => &CATMULL_ROM_BODY,
             Self::Triangle => &TRIANGLE_BODY,
-            Self::Box => &crate::shape::BOX,
+            Self::Box => &crate::body::BOX,
         }
     }
 }

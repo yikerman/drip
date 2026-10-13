@@ -9,6 +9,7 @@ use drip::{
     Result,
     eval::{Evaluator, InputValues, Policy, Statistics, Target},
     graph::Dag,
+    lattice::Rect,
     node::{
         self, chromatic_adaptation,
         data::*,
@@ -21,7 +22,6 @@ use drip::{
     },
     ports::*,
     runtime::{Budget, GlobalContext, KernelContext, RuntimeContext},
-    shape::Rect,
 };
 use std::sync::{Arc, Mutex};
 

@@ -15,6 +15,24 @@ measurements. [COMPUTE_MODEL](COMPUTE_MODEL.md), [FIELD](FIELD.md) and
 | `drip-gui` | interactive frontend on winit, wgpu and egui |
 | `drip-cli` | batch frontend, a scaffold for now |
 
+## Modules
+
+The `drip` library splits into what a node is written against and what
+runs it. The [drip README](../crates/drip/README.md#files) lists every file.
+
+```text
+node-facing    ports  payload  body  lattice  runtime  expand::SubGraph
+               definition::Assets  eval::InputValues  registry::tag
+               ───────────────────────────────────────────────────────
+evaluation     shape  plan  eval  store  image  graph  definition  registry
+```
+
+A node file names only the node-facing modules above, the `Parameters`
+trait of its own parameters, and the shared image code in `node/`, such as
+`data.rs`, `color.rs` and `filter.rs`. A payload on a plane also names
+`image::Plane`, which `Payload::PLANE` holds. Files outside `node/` name no
+concrete node or payload, except `registry.rs`, which lists the kinds.
+
 ## Values
 
 A node computes context × parameters × inputs → outputs. Each port names a

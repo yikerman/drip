@@ -31,7 +31,7 @@ pub trait Payload: Send + Sync + Sized + 'static {
     /// budgets. A [`DeviceLayout`] payload states its layout's exact length,
     /// a host-only payload an estimate.
     fn byte_len(desc: &Self::Desc) -> usize;
-    /// [`Plane::of`] for a [`MapPayload`](crate::shape::MapPayload), so
+    /// [`Plane::of`] for a [`MapPayload`](crate::body::MapPayload), so
     /// evaluation reduces its images to the requested scale and computes
     /// windows of them. `None`, the default, keeps every image whole and at
     /// the detail its producer chose.

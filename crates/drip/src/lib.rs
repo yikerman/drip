@@ -32,9 +32,11 @@
 //! - **Values.** [`payload`] defines payload families, and [`image`] the
 //!   [`Image`](image::Image) on an edge and the [`Raster`](image::Raster)
 //!   that holds its samples on the host, the device or both.
-//! - **Shapes and fusion.** [`shape`] says how evaluation runs each kind. The
-//!   segment compiler (`plan.rs`, private) composes the deferred steps of
-//!   maps, warps, resamples and stencils into one kernel per segment.
+//! - **Shapes and fusion.** [`shape`] says how evaluation runs each kind,
+//!   [`body`] holds what the deferred shapes hand the segment compiler, and
+//!   [`lattice`] where samples sit. The compiler (`plan.rs`, private)
+//!   composes the deferred steps of maps, warps, resamples and stencils into
+//!   one kernel per segment.
 //! - **Evaluation.** [`eval`] forces demands, [`store`] keeps their values
 //!   and runs foreign nodes, and [`expand`] builds the sub-graphs of meta
 //!   nodes.
@@ -71,11 +73,13 @@
 
 extern crate self as drip;
 
+pub mod body;
 pub mod definition;
 pub mod eval;
 pub mod expand;
 pub mod graph;
 pub mod image;
+pub mod lattice;
 pub mod node;
 pub mod param;
 pub mod payload;
@@ -85,6 +89,7 @@ pub mod project;
 pub mod registry;
 pub mod runtime;
 pub mod shape;
+mod source;
 pub mod store;
 
 pub use drip_macros::{Choice, Parameters, node};

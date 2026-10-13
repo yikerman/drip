@@ -63,12 +63,13 @@
 //!   since the CPU runtime runs a host worker per lane.
 use crate::{
     Error, Result,
-    image::Raster,
-    runtime::{KernelContext, dispatch_dims},
-    shape::{
-        Bin, BinsBody, FilterBody, Lattice, MapBody, MapPayload, Pixel, Position, Projective, Rect,
-        ReduceBody, StencilBody, Warp, Window,
+    body::{
+        Bin, BinsBody, FilterBody, MapBody, MapPayload, Pixel, Position, Projective, ReduceBody,
+        StencilBody, Warp, Window,
     },
+    image::Raster,
+    lattice::{Lattice, Rect},
+    runtime::{KernelContext, dispatch_dims},
 };
 use cubecl::prelude::*;
 use std::sync::Arc;
@@ -1169,10 +1170,10 @@ mod tests {
 
     #[test]
     fn a_stencil_starts_a_plan_and_only_maps_join_it() {
-        let filtered = Plan::default().resample(&crate::shape::BOX, LATTICE, LATTICE).unwrap();
+        let filtered = Plan::default().resample(&crate::body::BOX, LATTICE, LATTICE).unwrap();
         assert!(filtered.stencil(&BODY, 1.0, &[]).is_none());
         let plan = Plan::default().stencil(&BODY, 1.0, &[]).unwrap();
-        assert!(plan.resample(&crate::shape::BOX, LATTICE, LATTICE).is_none());
+        assert!(plan.resample(&crate::body::BOX, LATTICE, LATTICE).is_none());
         let reindex = Warp::reindex(IDENTITY);
         assert!(plan.warp(&reindex, true).is_none());
         assert_eq!(plan.stage(LATTICE, LATTICE).unwrap().0, Stage::Stencil(BODY));
@@ -1184,7 +1185,7 @@ mod tests {
     static BODY: StencilBody = StencilBody {
         name: "plan::tests::centre",
         constants: 0,
-        border: crate::shape::Border::Zero,
+        border: crate::body::Border::Zero,
         expand: centre::expand,
     };
 

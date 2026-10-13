@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Source pins and numerical deviations: THIRD_PARTY.md.
-use crate::shape::Pixel;
+use crate::body::Pixel;
 use cubecl::prelude::*;
 
 /// A 3×3 matrix, row-major in `k`, applied to one pixel.

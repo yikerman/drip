@@ -22,5 +22,4 @@ pub mod resample;
 mod shared_kernel;
 pub mod sharpen;
 pub mod sigmoid;
-pub mod source;
-pub use source::source;
+pub use crate::source::source;

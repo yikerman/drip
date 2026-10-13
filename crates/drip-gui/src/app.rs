@@ -171,7 +171,7 @@ impl App {
     }
 
     /// Asks the worker for the full-detail crop a view's window wants.
-    fn detail(&mut self, node: NodeId, region: Option<drip::shape::Rect>) {
+    fn detail(&mut self, node: NodeId, region: Option<drip::lattice::Rect>) {
         if let Err(error) = self.worker.detail(&self.project.graph, node, region) {
             self.report(Err(error));
         }

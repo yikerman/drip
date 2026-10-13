@@ -8,10 +8,10 @@ use drip::{
     eval::{Evaluator, Policy, Statistics, Target},
     graph::Dag,
     image::Description,
+    lattice::Rect,
     node::{self, data::*, pyramid},
     ports::*,
     runtime::{GlobalContext, KernelContext, RuntimeContext},
-    shape::Rect,
 };
 use std::sync::Arc;
 

@@ -4,13 +4,14 @@
 //! fused kernel and downloads nothing.
 use drip::{
     Result,
+    body::{BinsBody, ReduceBody},
     eval::{Evaluator, Policy, Target},
     graph::Dag,
     image::Image,
+    lattice::Rect,
     node::{self, data::*, exposure, sigmoid},
     ports::*,
     runtime::{GlobalContext, KernelContext, RuntimeContext},
-    shape::{BinsBody, Rect, ReduceBody},
 };
 
 /// Tenths of `[0, 1)` per channel. Other values, NaN included, count nothing.
@@ -43,7 +44,7 @@ mod body {
     // CubeCL expands comparisons, not `Range::contains`.
     #![allow(clippy::manual_range_contains)]
     use cubecl::prelude::*;
-    use drip::shape::{Bin, Pixel, Position};
+    use drip::body::{Bin, Pixel, Position};
 
     #[cube]
     fn tenth(v: f32) -> u32 {

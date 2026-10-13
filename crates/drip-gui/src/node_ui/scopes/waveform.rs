@@ -4,7 +4,7 @@ use super::{ExposureRange, SIZE, Scale, Scope, ScopeAxes, scope};
 use crate::node_ui::data::HostImage;
 use crate::node_ui::{GuiNode, Prepare};
 use drip::registry::tag;
-use drip::{Result, node::data::*, ports::*, runtime::GlobalContext, shape::BinsBody};
+use drip::{Result, body::BinsBody, node::data::*, ports::*, runtime::GlobalContext};
 #[cfg(test)]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -49,7 +49,7 @@ static WAVEFORM: BinsBody = BinsBody {
 mod kernel {
     use crate::node_ui::scopes::stop;
     use cubecl::prelude::*;
-    use drip::shape::{Bin, Pixel, Position};
+    use drip::body::{Bin, Pixel, Position};
 
     /// Image column `x` falls in scope column `⌊256 · x / width⌋`, so the
     /// scope columns split the image columns as evenly as integers allow.

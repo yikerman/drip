@@ -7,10 +7,10 @@ use drip::{
     Result,
     eval::{Evaluator, Policy, Statistics, Target},
     graph::Dag,
+    lattice::Rect,
     node::{self, data::*, exposure, sharpen},
     ports::*,
     runtime::{GlobalContext, KernelContext, RuntimeContext},
-    shape::Rect,
 };
 
 fn rgb(width: u32, height: u32) -> RgbDesc {

@@ -9,7 +9,7 @@ use super::{SIZE, Scope, ScopeAxes, scope};
 use crate::node_ui::{GuiNode, Prepare};
 use drip::node::color::{self, D65, REC2020};
 use drip::registry::tag;
-use drip::{Result, node::data::*, ports::*, runtime::GlobalContext, shape::BinsBody};
+use drip::{Result, body::BinsBody, node::data::*, ports::*, runtime::GlobalContext};
 #[cfg(test)]
 use rayon::prelude::*;
 use std::sync::Arc;
@@ -45,7 +45,7 @@ static VECTORSCOPE: BinsBody = BinsBody {
 
 mod kernel {
     use cubecl::prelude::*;
-    use drip::shape::{Bin, Pixel, Position};
+    use drip::body::{Bin, Pixel, Position};
 
     #[cube]
     fn positive(v: f32) -> f32 {

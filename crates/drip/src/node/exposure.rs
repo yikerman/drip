@@ -3,13 +3,13 @@
 //! calls on the node's input and applies as new parameters.
 use crate::{
     Error, Result,
+    body::{MapPayload, ReduceBody},
     image::Image,
     node::{color, data::*},
     param::Parameters,
     ports::*,
     registry::tag,
     runtime::{GlobalContext, KernelContext},
-    shape::{MapPayload, ReduceBody},
 };
 pub use compute::{Definition, Ports, add, definition};
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
@@ -96,7 +96,7 @@ static MEAN_LUMINANCE: ReduceBody = ReduceBody {
 mod kernel {
     // SPDX-License-Identifier: GPL-3.0-or-later
     // Source pins and numerical deviations: THIRD_PARTY.md.
-    use crate::shape::Pixel;
+    use crate::body::Pixel;
     use cubecl::prelude::*;
     #[cube]
     pub fn exposure(px: Pixel, k: &[f32]) -> Pixel {
@@ -105,7 +105,7 @@ mod kernel {
 }
 
 mod luminance {
-    use crate::shape::Pixel;
+    use crate::body::Pixel;
     use cubecl::prelude::*;
 
     #[cube]

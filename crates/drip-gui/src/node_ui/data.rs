@@ -1,10 +1,10 @@
 //! Images prepared for GUI views. Processing payloads remain in `drip`.
 use drip::{
     Result,
+    body::MapPayload,
     node::data::{HostBuffer, Rgb},
     ports::Read,
     runtime::{GlobalContext, KernelContext, RuntimeContext},
-    shape::MapPayload,
 };
 
 /// Host pixels prepared for presentation, with the labels views show.

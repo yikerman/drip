@@ -22,7 +22,7 @@
 //!   scale, so a RAW and its gains are stored once for every preview level.
 //! - **Reduction.** An image on a plane read at scale `s > 1` whose lattice
 //!   is finer than `div_ceil(full, s)` is reduced with
-//!   [`BOX`](crate::shape::BOX) as a stage of its consumer's plan, unless a
+//!   [`BOX`](crate::body::BOX) as a stage of its consumer's plan, unless a
 //!   `scaled` kernel produced it or the consumer's shape is scaled. The
 //!   reduction is a preview approximation and never applies at scale 1.
 //! - **Keys and hits.** A run keys every needed node in `Dag::order`, which
@@ -64,10 +64,11 @@ use crate::{
     expand::Source,
     graph::{Dag, Entry},
     image::{Description, Image, Raster},
+    lattice::Rect,
     payload::Payload,
     ports::*,
     runtime::{GlobalContext, KernelContext, RuntimeContext},
-    shape::{Cache, Codec, Rect, Shape},
+    shape::{Cache, Codec, Shape},
     store::{Disk, Key, Store},
 };
 use std::{

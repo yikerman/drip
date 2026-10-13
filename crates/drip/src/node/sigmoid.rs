@@ -116,7 +116,7 @@ fn primaries(scale: [f64; 3]) -> [[f64; 2]; 3] {
 mod kernel {
     // SPDX-License-Identifier: GPL-3.0-or-later
     // Source pins and numerical deviations: THIRD_PARTY.md.
-    use crate::{node::shared_kernel::down64, shape::Pixel};
+    use crate::{body::Pixel, node::shared_kernel::down64};
     use cubecl::prelude::*;
     #[cube]
     pub(crate) fn curve(value: f32, p: &[f32], log_scale: f32) -> f32 {

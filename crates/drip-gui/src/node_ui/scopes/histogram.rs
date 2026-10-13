@@ -3,7 +3,7 @@
 use super::{ExposureRange, SIZE, Scale};
 use crate::node_ui::{GuiNode, Prepare};
 use drip::registry::tag;
-use drip::{Result, node::data::*, ports::*, runtime::GlobalContext, shape::BinsBody};
+use drip::{Result, body::BinsBody, node::data::*, ports::*, runtime::GlobalContext};
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -61,7 +61,7 @@ static HISTOGRAM: BinsBody = BinsBody {
 mod kernel {
     use crate::node_ui::scopes::stop;
     use cubecl::prelude::*;
-    use drip::shape::{Bin, Pixel, Position};
+    use drip::body::{Bin, Pixel, Position};
 
     #[cube]
     pub fn histogram(px: Pixel, _at: Position, k: &[f32]) -> Bin {

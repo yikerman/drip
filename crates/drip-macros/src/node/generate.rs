@@ -536,9 +536,9 @@ fn meta(name: &syn::Ident, signature: &Signature) -> TokenStream {
 /// identify fused kernels.
 fn body(body: &syn::Path, constants: &syn::Type, vis: &TokenStream) -> TokenStream {
     quote! {
-        #vis static BODY: ::drip::shape::MapBody = ::drip::shape::MapBody {
+        #vis static BODY: ::drip::body::MapBody = ::drip::body::MapBody {
             name: concat!(module_path!(), "::", stringify!(#body)),
-            constants: <#constants as ::drip::shape::Constants>::LEN,
+            constants: <#constants as ::drip::body::Constants>::LEN,
             expand: super::#body::expand,
         };
     }

@@ -114,6 +114,11 @@ decisions from the compute-model migration and later.
   calibration needs it.
 - **Decided:** One generated `static Kind` per kind, compared by identity.
   Frontend extras bind through the generated typed `Inputs` and `Typed`.
+- **Decided (2026-10-13):** A node file names only the node-facing API:
+  `ports`, `payload`, `runtime`, `body`, `lattice`, `expand::SubGraph`,
+  `definition::Assets`, the action values type and `registry::tag`. Bodies,
+  warps and lattices are that API by design, so they left `shape.rs`, which
+  keeps what only evaluation reads.
 - **Decided:** Kinds and tags are listed by hand, without link-time
   registration: explicit lists are readable and avoid linker-section
   portability risks.

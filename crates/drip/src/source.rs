@@ -1,4 +1,9 @@
-//! Immutable, already loaded source values.
+//! Bound sources: values loaded outside the graph, bound to a node with
+//! [`source`] and handed unchanged to each run.
+//!
+//! A bound source is infrastructure, a hand-written [`Node`] with
+//! [`Shape::Source`]. Its public path is `node::source`, beside the nodes
+//! that consume it.
 use crate::{
     Result,
     definition::{Identity, Kind, Node},

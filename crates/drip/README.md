@@ -17,17 +17,22 @@ colorimetry (`color.rs`, `camera.rs`, `profile.rs`), resampling filters
 matrix multiplication and Bayer reduction, never unrelated node kernels.
 
 Modules outside `node/` are infrastructure and name no concrete node or
-payload, except `registry.rs`, which lists the kinds by hand:
+payload, except `registry.rs`, which lists the kinds by hand.
+[ARCHITECTURE](../../agent-docs/ARCHITECTURE.md#modules) states which of
+them a node file may name.
 
 | File | Owns |
 |---|---|
 | `definition.rs` | `Kind`, `Tag`, the `Node` and `Typed` traits, actions, assets, and the `Identity` and `Durability` the store keys and evicts by |
-| `shape.rs` | `Shape` and the bodies the segment compiler fuses |
+| `shape.rs` | `Shape`: how evaluation runs a kind, and the disk `Codec`s |
+| `body.rs` | the bodies, filters and warps the segment compiler fuses, and `Pixel` |
+| `lattice.rs` | `Lattice` and `Rect`: where samples sit on the full-detail plane |
 | `plan.rs` | the segment compiler: composition rules, input windows, the fused kernel, reduction passes |
 | `eval.rs` | `Evaluator`: scale, keys, scheduling, regions, `Policy` and `InputValues` |
 | `store.rs` | content keys, eviction, foreign jobs, meta expansions and the `Disk` tier |
 | `expand.rs` | the `SubGraph` a meta node builds |
 | `image.rs` | `Image`, `Raster` and residency |
+| `source.rs` | bound sources, public as `node::source` |
 | `ports.rs` | port views and requirements |
 | `payload.rs` | payload traits, device layouts and `Persist` streams |
 | `graph.rs` | `Dag` and transactional edits checked on ports |
@@ -170,7 +175,7 @@ pub fn compute(_: &(), _image: Point<'_, Rgb>, _output: Point<'_, Rgb>) -> Resul
 
 mod kernel {
     use cubecl::prelude::*;
-    use drip::shape::Pixel;
+    use drip::body::Pixel;
     #[cube]
     pub fn double(px: Pixel, k: &[f32]) -> Pixel {
         Pixel { r: px.r * k[0], g: px.g * k[0], b: px.b * k[0] }
@@ -219,7 +224,7 @@ no image. This one counts samples by tenths of each channel. The scopes in
 `drip-gui/src/node_ui/scopes/` are real bins nodes.
 
 ```rust
-use drip::{Result, node::data::*, ports::*, runtime::GlobalContext, shape::BinsBody};
+use drip::{Result, body::BinsBody, node::data::*, ports::*, runtime::GlobalContext};
 
 fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(CountsDesc,)> {
     Ok((CountsDesc { bins: 10, channels: 3, coordinates: image.coordinates.clone() },))
@@ -236,7 +241,7 @@ static TENTHS: BinsBody =
 
 mod kernel {
     use cubecl::prelude::*;
-    use drip::shape::{Bin, Pixel, Position};
+    use drip::body::{Bin, Pixel, Position};
     #[cube]
     fn tenth(v: f32) -> u32 {
         let mut bin = 10u32; // counts nothing
@@ -270,10 +275,10 @@ is the real one.
 ```rust
 use drip::{
     Result,
+    body::{Border, Stencil, StencilBody},
     node::data::*,
     ports::*,
     runtime::GlobalContext,
-    shape::{Border, Stencil, StencilBody},
 };
 
 fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(RgbDesc,)> {
@@ -291,7 +296,7 @@ static MEAN: StencilBody =
 
 mod kernel {
     use cubecl::prelude::*;
-    use drip::shape::{Pixel, Window};
+    use drip::body::{Pixel, Window};
     #[cube]
     pub fn mean(w: &Window, _k: &[f32]) -> Pixel {
         let mut r = 0.0f32;

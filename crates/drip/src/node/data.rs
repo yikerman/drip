@@ -1,11 +1,12 @@
 //! Concrete image and calibration payloads shared by processing nodes.
 use crate::{
     Error, Result,
+    body::MapPayload,
     image::Plane,
+    lattice::{Lattice, Rect},
     node::color,
     payload::{Persist, decode_array, read_json, write_json},
     ports::Requirement,
-    shape::{Lattice, MapPayload, Rect},
 };
 pub use crate::{
     image::Raster,
@@ -260,7 +261,7 @@ pub struct CountsDesc {
     pub coordinates: Coordinates,
 }
 /// Sample counts per bin and channel, bin-major: count `i` of channel `c` at
-/// `i · channels + c`, as [`BinsBody`](crate::shape::BinsBody) defines them.
+/// `i · channels + c`, as [`BinsBody`](crate::body::BinsBody) defines them.
 pub struct Counts;
 impl Payload for Counts {
     const NAME: &'static str = "Counts";

@@ -201,7 +201,7 @@ fn a_magnified_preview_reports_its_visible_region() {
         let image =
             Arc::new(Image { width: 500, height: 400, requested_scale, plane, texels: vec![] });
         let mut h = Harness::builder().with_size(vec2(500.0, 400.0)).build_ui_state(
-            move |ui, detail: &mut Option<drip::shape::Rect>| {
+            move |ui, detail: &mut Option<drip::lattice::Rect>| {
                 crate::theme::fonts(ui.ctx());
                 let state = ViewState { zoom, center: pos2(0.5, 0.5) };
                 ui.data_mut(|data| data.insert_temp(ui.id().with("image view"), state));

@@ -3,11 +3,11 @@
 //! composes it into the fused resampling stage (`plan.rs`).
 use crate::{
     Error, Result,
+    body::FilterBody,
     node::{data::*, filter::Filter},
     ports::*,
     registry::tag,
     runtime::GlobalContext,
-    shape::FilterBody,
 };
 pub use compute::{Definition, Ports, add, definition};
 

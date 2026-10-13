@@ -1,5 +1,6 @@
 //! Resample and warps against an independent f64 resampler.
 use drip::{
+    body::Warp,
     eval::Evaluator,
     graph::Dag,
     image::{Description, Image, Raster},
@@ -12,7 +13,6 @@ use drip::{
         resample::{Factor, LongEdge, Settings, Size},
     },
     runtime::{GlobalContext, KernelContext},
-    shape::Warp,
 };
 use std::{f64::consts::PI, sync::Arc};
 

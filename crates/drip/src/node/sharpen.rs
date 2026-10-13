@@ -4,11 +4,11 @@
 //! it at amount −1 as its blur.
 use crate::{
     Error, Result,
+    body::{Border, Stencil, StencilBody},
     node::data::*,
     ports::*,
     registry::tag,
     runtime::GlobalContext,
-    shape::{Border, Stencil, StencilBody},
 };
 pub use compute::{Definition, Ports, add, definition};
 
@@ -67,7 +67,7 @@ static UNSHARP: StencilBody = StencilBody {
 };
 
 mod kernel {
-    use crate::shape::{Pixel, Window};
+    use crate::body::{Pixel, Window};
     use cubecl::prelude::*;
 
     /// `k[0]` is the standard deviation in full-detail pixels and `k[1]` the

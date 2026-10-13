@@ -13,6 +13,7 @@ use crate::render::{
 };
 use crate::theme::{self, Tip};
 use drip::{
+    body::Warp,
     node::{
         color::{self, Mat3},
         data::{Extent, Rgb, RgbDesc},
@@ -20,7 +21,6 @@ use drip::{
         perspective::{self, Aspect, Fit, Frame, Ratio, Settings},
     },
     ports::Read,
-    shape::Warp,
 };
 use egui::{Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, Ui, pos2, vec2};
 use std::sync::Arc;

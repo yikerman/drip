@@ -8,6 +8,7 @@
 use cubecl::prelude::*;
 use drip::{
     Result,
+    body::Pixel,
     eval::Evaluator,
     graph::Dag,
     image::Description,
@@ -23,7 +24,7 @@ use drip::{
     },
     ports::*,
     runtime::{GlobalContext, KernelContext, RuntimeContext},
-    shape::{Pixel, Shape},
+    shape::Shape,
 };
 use std::sync::Arc;
 

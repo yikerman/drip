@@ -19,8 +19,8 @@ use crate::model::{Graph, NodeId};
 use crate::node_ui::NodeAction;
 use drip::Error as NodeError;
 use drip::eval::{Evaluator, InputValues, NodeTiming, Policy, Target};
+use drip::lattice::Rect;
 use drip::runtime::{GlobalContext, RuntimeContext};
-use drip::shape::Rect;
 use drip::store::Disk;
 use serde_json::Value as Json;
 

@@ -18,13 +18,11 @@
 //! type.
 use crate::{
     Error, Result,
+    body::{self, BinsBody, FilterBody, MapBody, MapPayload, ReduceBody, StencilBody, Warp},
+    lattice::{Lattice, Rect},
     payload::{DeviceBuffer, DeviceLayout, Payload},
     plan::{self, Plan},
     runtime::{KernelContext, RuntimeContext},
-    shape::{
-        self, BinsBody, FilterBody, Lattice, MapBody, MapPayload, Rect, ReduceBody, StencilBody,
-        Warp,
-    },
 };
 use cubecl::bytes::Bytes;
 use std::{
@@ -156,7 +154,7 @@ impl Image {
         self.plane.map(|plane| (plane.bytes)(&self.desc))
     }
 
-    /// This image at `scale`: resampled with [`shape::BOX`] onto
+    /// This image at `scale`: resampled with [`body::BOX`] onto
     /// `full.div_ceil(scale)` samples per axis when its lattice is finer, as
     /// a deferred image, otherwise the image itself. Images of a payload
     /// without a plane stay as they are. The image must hold its whole
@@ -418,7 +416,7 @@ fn reduce<P: MapPayload>(image: &Image, scale: u32) -> Result<Image> {
         return Ok(image.clone());
     }
     let desc = P::on(downcast(&image.desc), Lattice::whole(reduced, lattice.full));
-    image.resample::<P>(&shape::BOX, Arc::new(desc))
+    image.resample::<P>(&body::BOX, Arc::new(desc))
 }
 
 fn crop<P: MapPayload>(image: &Image, window: Rect, ctx: &KernelContext<'_>) -> Result<Image> {
@@ -442,8 +440,18 @@ fn crop<P: MapPayload>(image: &Image, window: Rect, ctx: &KernelContext<'_>) -> 
 /// Only payloads with a device layout have a device representation:
 ///
 /// ```compile_fail
-/// use drip::{image::Raster, node::data::CaptureMetadata, runtime::KernelContext};
-/// fn device(raster: &Raster<CaptureMetadata>, ctx: &KernelContext<'_>) {
+/// use drip::{Result, image::Raster, payload::Payload, runtime::KernelContext};
+/// struct Note;
+/// impl Payload for Note {
+///     const NAME: &'static str = "note";
+///     type Desc = ();
+///     type Host = String;
+///     fn validate(_: &()) -> Result<()> { Ok(()) }
+///     fn check(_: &(), _: &String) -> Result<()> { Ok(()) }
+///     fn allocate(_: &()) -> String { String::new() }
+///     fn byte_len(_: &()) -> usize { 0 }
+/// }
+/// fn device(raster: &Raster<Note>, ctx: &KernelContext<'_>) {
 ///     let _ = raster.device(ctx);
 /// }
 /// ```

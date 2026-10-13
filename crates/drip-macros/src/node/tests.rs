@@ -658,7 +658,7 @@ fn maps_return_constants_for_a_registered_body() {
             _ => None,
         })
         .expect("generated BODY");
-    assert!(body.contains("< [f32 ; 9] as :: drip :: shape :: Constants > :: LEN"));
+    assert!(body.contains("< [f32 ; 9] as :: drip :: body :: Constants > :: LEN"));
     assert!(body.contains("super :: kernel :: body :: expand"));
     assert_port_specs(
         &module,

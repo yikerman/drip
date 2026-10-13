@@ -6,7 +6,7 @@ use crate::node_ui::{Part, Popped};
 use crate::render::node_views::Drawable;
 use crate::ui_state::LayoutField;
 use crate::worker::ViewResult;
-use drip::shape::Rect;
+use drip::lattice::Rect;
 use egui::Vec2;
 use serde_json::Value as Json;
 use std::collections::BTreeSet;

@@ -43,9 +43,10 @@ use crate::{
     definition::{Durability, FileStamp, Identity, Kind},
     expand::SubGraph,
     image::{Image, Side},
+    lattice::Rect,
     payload::{read_json, write_json},
     runtime::Budget,
-    shape::{Cache, Codec, Rect},
+    shape::{Cache, Codec},
 };
 use serde_json::Value as Json;
 use sha2::{Digest, Sha256};
