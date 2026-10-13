@@ -74,7 +74,7 @@ pub struct Sensor {
 pub struct Calibration {
     /// Local Bayer sites: 0 R, 1 G, 2 B, 3 second G.
     pub cfa: [[u8; 2]; 2],
-    /// Black = common + channel_black[CFA] + repeating pattern.
+    /// Black level of a site: `black + channel_black[cfa] + pattern` at its position.
     pub black: u32,
     pub channel_black: [u32; 4],
     pub pattern: BlackPattern,
