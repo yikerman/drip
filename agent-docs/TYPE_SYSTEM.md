@@ -53,6 +53,8 @@ User statements, paraphrased.
 - DAG checks run on the CPU. Metadata, interpretations and constraints are
   logically grouped with a buffer but physically separate from image storage.
 - Placement is known at connect time; the evaluator owns CPU/GPU movement.
+  Superseded 2026-10-13: ports name payloads and a node chooses residency
+  when it runs; see [DESIGN](DESIGN.md#payloads-and-ports).
 - Same-placement edges and fan-out share immutable storage. Evaluation
   materializes a missing representation once per output within a run.
 - Keep concrete Rust types: uniform movement does not mean homogeneous buffers
