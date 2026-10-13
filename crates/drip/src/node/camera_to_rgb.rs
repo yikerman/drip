@@ -21,11 +21,13 @@ fn camera_to_rgb_contract(
     camera::matrix(metadata, response.balance)?;
     Ok((RgbDesc { coordinates: Coordinates::Space(REC2020_D65), ..image.clone() },))
 }
-/// Convert camera RGB to linear Rec.2020/D65 with the capture's camera matrix.
-/// The image's balance is replaced by D65 reference gains inside the matrix, so
-/// camera neutral under D65 maps to white; scene white balance is a separate
-/// adaptation. No clipping or normalization is applied. The image must come
-/// from the same camera make and model as the metadata.
+/// Convert camera RGB to linear Rec.2020 with the camera's color matrix from
+/// the metadata. White balance happens in Chromatic adaptation, after this
+/// node. Values are not clipped. The metadata must come from the same camera
+/// as the image.
+// The matrix replaces the image's balance with D65 reference gains, so camera
+// neutral under D65 maps to white and scene white balance stays a separate
+// adaptation.
 #[crate::node(id = "camera-to-color-rgb", name="Camera RGB to color RGB", tags = [tag::INPUT_TRANSFORM, tag::COLOR], contract = camera_to_rgb_contract, map = super::shared_kernel::matrix)]
 pub fn compute(
     _: &(),

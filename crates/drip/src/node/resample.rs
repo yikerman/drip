@@ -14,24 +14,24 @@ pub use compute::{Definition, Ports, add, definition};
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Factor {
-    /// Output samples per full-detail pixel of the input.
+    /// Output size as a multiple of the input's.
     #[param(default = 1.0, range = 0.01..=16.0)]
     pub factor: f64,
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct LongEdge {
-    /// Output samples along the input's longer side.
+    /// Length of the output's longer side, in pixels.
     #[param(default = 2048, range = 1..=65535)]
     pub pixels: i64,
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Exact {
-    /// Output width in full-detail pixels.
+    /// Output width in pixels.
     #[param(default = 2048, range = 1..=65535)]
     pub width: i64,
-    /// Output height in full-detail pixels.
+    /// Output height in pixels.
     #[param(default = 2048, range = 1..=65535)]
     pub height: i64,
 }
@@ -53,11 +53,10 @@ pub enum Size {
 #[serde(deny_unknown_fields)]
 #[validate(validate)]
 pub struct Settings {
-    /// Reconstruction and antialiasing filter, scaled by each sample's footprint.
+    /// How pixels are rebuilt. Lanczos-3 is the sharpest and rings most.
     #[param]
     pub filter: Filter,
-    /// Full-detail output size, relative to the input, by its long edge, or
-    /// both sides.
+    /// Scale by a factor, fit the long edge, or set both sides.
     #[param]
     pub size: Size,
 }
@@ -94,20 +93,22 @@ fn contract(global: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(Rg
     Ok((RgbDesc { extent, full, window: None, coordinates: image.coordinates.clone() },))
 }
 
-/// Reconstruct RGB and sample it on a new grid with one filter for
-/// magnification and minification, after Heckbert: the filter is centred on
-/// each output sample's position in the input and widened by the local
-/// footprint, so magnifying interpolates and minifying antialiases. Weights
-/// are normalized, and taps beyond the edge repeat the edge sample. Size
-/// scales the input's full-detail extent, fits its long edge to a pixel
-/// count, or sets both sides, which stretches the image where the aspect
-/// ratio differs. Preview detail stores proportionally fewer samples of the
-/// same framing. Coordinates are kept.
+/// Change the image's size. Size scales by a factor, fits the long edge to a
+/// pixel count, or sets width and height, which stretches the image when the
+/// aspect ratio changes.
 ///
-/// Warps directly before it, such as Perspective Transform, resample once
-/// with this filter. After a tone or colour operation it resamples that
-/// operation's output. Lanczos-3, the default, is sharp but rings: in
-/// scene-linear HDR it leaves signed halos beside highlights, which are kept.
+/// Filter sets how pixels are rebuilt. Lanczos-3, the default, is the sharpest
+/// but leaves light and dark rings beside strong highlights. Mitchell rings
+/// less, and Catmull–Rom is a little sharper than Mitchell. Triangle and Box
+/// do not ring and are softer, and Box looks blocky when enlarging. Directly
+/// after Perspective Transform or Lens correction, it also sets their filter,
+/// and the image is still resampled once.
+// After Heckbert, the filter is centered on each output sample's position in
+// the input and widened by the local footprint, so magnifying interpolates and
+// minifying antialiases. Weights are normalized, and taps beyond the edge
+// repeat the edge sample. Preview detail stores proportionally fewer samples
+// of the same framing. After a tone or color operation it resamples that
+// operation's output. Coordinates are kept.
 #[crate::node(id = "resample", name = "Resample", tags = [tag::GEOMETRY], contract = contract, resample, references = [
     ("Heckbert, Fundamentals of texture mapping and image warping", "https://www2.eecs.berkeley.edu/Pubs/TechRpts/1989/5504.html"),
 ])]

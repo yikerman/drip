@@ -16,12 +16,13 @@ fn rcd_contract(global: &GlobalContext, _: &(), image: &BayerDesc) -> Result<(Rg
         coordinates: Coordinates::Camera(image.response.clone()),
     },))
 }
-/// Demosaic Bayer to camera RGB with ratio-corrected demosaicing (RCD).
-/// Requires an explicit Bayer phase. Requested preview detail first reduces each
-/// CFA phase plane, and full detail preserves the input grid. Negative samples
-/// are clipped to zero, and a ten-pixel border uses bilinear interpolation.
-/// Adapted from darktable RCD. Direction ties may differ slightly across
-/// backends.
+/// Demosaic Bayer data to camera RGB with ratio-corrected demosaicing (RCD),
+/// adapted from darktable. It keeps fine detail with few artifacts. Negative
+/// values are clipped to zero, and a ten-pixel border uses simpler bilinear
+/// interpolation.
+// At a preview scale the kernel first reduces each CFA phase plane, and full
+// detail keeps the input grid. Direction ties may differ slightly across
+// backends.
 #[crate::node(id="rcd-demosaic", name="RCD demosaic", tags = [tag::INPUT_TRANSFORM, tag::BAYER_RAW, tag::DEMOSAIC],contract=rcd_contract,scaled,references=[("RCD source", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/demosaicing/rcd.c")])]
 pub fn compute(
     ctx: &KernelContext<'_>,

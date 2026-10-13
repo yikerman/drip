@@ -95,11 +95,11 @@ impl Assets for Preview {
         }
     }
 }
-/// Display linear Rec.2020/D65 RGB. Softproof simulates an output profile, and
-/// Gamut check marks out-of-gamut colors in cyan. Each proof mode owns its
-/// output settings, and a profile file is read at the first preview.
-/// Interpolation selects bilinear or nearest-neighbor display sampling and
-/// does not alter processing pixels.
+/// Show the image as it will look on this display. Softproof simulates an
+/// output profile, and Gamut check marks colors outside that profile in cyan.
+/// Each mode keeps its own profile settings. A profile file is read when first
+/// used. Choose it again to pick up changes. Interpolation smooths the display
+/// when zoomed in and never changes processed pixels.
 #[drip::node(id = "preview", name = "Preview", tags = [tag::VIEW], assets)]
 pub fn observe(
     _: &KernelContext<'_>,

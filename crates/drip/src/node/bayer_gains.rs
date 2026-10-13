@@ -29,10 +29,12 @@ fn total_balance(image: &BayerDesc, metadata: &drip_raw::Metadata) -> Result<[f3
     let prior = image.response.balance.unwrap_or([1.; 4]);
     Ok(std::array::from_fn(|c| prior[c] * gains[c]))
 }
-/// Apply the capture's as-shot white balance to Bayer samples and derive their
-/// clipping levels. Outputs Bayer and BayerLevels in the same balanced
-/// coordinates. Gains compose with a balance the input already carries. No
-/// gains or CFA are inferred: missing as-shot balance prevents evaluation.
+/// Apply the camera's as-shot white balance to Bayer data, and find each
+/// channel's clipping level for Opposed highlights. Files without an as-shot
+/// white balance stop here with an error.
+// Gains compose with a balance the input already carries. No gains or CFA
+// layout are inferred. Bayer and BayerLevels come out in the same balanced
+// coordinates.
 #[crate::node(id="bayer-site-gains", name="Bayer site gains", tags = [tag::INPUT_TRANSFORM, tag::BAYER_RAW],contract=gain_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,

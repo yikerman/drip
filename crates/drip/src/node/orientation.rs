@@ -79,12 +79,12 @@ fn orientation_contract(
     Ok((output,))
 }
 
-/// Rotate or reflect RGB pixels using the capture metadata's orientation.
-/// Missing metadata means identity, and an explicit orientation replaces the
-/// metadata's. Transpose reflects across the top-left to bottom-right
-/// diagonal, and transverse across the other. Quarter turns and diagonal reflections
-/// exchange width and height. Samples and color interpretation are preserved,
-/// without resampling or clipping. Apply once after demosaic and color conversion.
+/// Rotate or flip the image to the orientation the camera recorded, or to one
+/// you choose. Without metadata, From metadata leaves the image as it is.
+/// Transpose flips across the top-left to bottom-right diagonal, and
+/// transverse across the other. Quarter turns swap width and height. Pixels
+/// are moved exactly, never resampled.
+// Samples and color interpretation are preserved, without clipping.
 #[crate::node(id="orientation", name="Orientation", tags = [tag::GEOMETRY], contract=orientation_contract, warp)]
 pub fn compute(
     p: &Settings,

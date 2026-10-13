@@ -16,7 +16,7 @@ pub use compute::{Definition, Ports, add, definition};
 #[serde(deny_unknown_fields)]
 #[validate(validate)]
 pub struct Settings {
-    /// Standard deviation of the Gaussian blur, in full-detail pixels.
+    /// Size of the detail to sharpen, in full-resolution pixels.
     #[param(default = 2.0, range = 0.25..=4.0)]
     pub radius: f32,
     /// How much of the detail to add. Negative values soften, and −1 is the
@@ -37,17 +37,17 @@ fn contract(_: &GlobalContext, _: &Settings, image: &RgbDesc) -> Result<(RgbDesc
     Ok((image.clone(),))
 }
 
-/// Sharpen RGB with an unsharp mask: each sample plus the amount times its
-/// difference from a Gaussian blur of its neighbourhood, after darktable's
-/// sharpen. The blur's standard deviation is the radius in full-detail
-/// pixels, and it reaches 2.5 radii. Negative amounts soften, and −1 outputs
-/// the blur. Coordinates are kept.
+/// Sharpen RGB with an unsharp mask, after darktable's sharpen. Radius sets
+/// the size of the detail it sharpens, in full-resolution pixels. Amount sets
+/// the strength. Negative amounts soften, and −1 gives the blur itself.
 ///
-/// Each channel is sharpened on its own in linear light, so strong amounts
-/// leave coloured halos along saturated edges and overshoot below zero beside
-/// highlights, which are kept. Past the image's edge the blur repeats the
-/// edge samples. A preview computes the same Gaussian on its own samples, so
-/// a radius below one preview sample shows less sharpening than full detail.
+/// Strong amounts leave colored halos on saturated edges and dark rims beside
+/// bright highlights. A radius below one preview pixel shows less sharpening
+/// in the preview than in the export.
+// The Gaussian's standard deviation is the radius, and it reaches 2.5 radii.
+// Each channel is sharpened on its own in linear light, and overshoot below
+// zero is kept. Past the image's edge the blur repeats the edge samples. A
+// preview computes the same Gaussian on its own samples.
 #[crate::node(id = "sharpen", name = "Sharpen", tags = [tag::LOOK], contract = contract, stencil = UNSHARP, references = [
     ("darktable developers, sharpen.c, 2026", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/sharpen.c"),
 ])]

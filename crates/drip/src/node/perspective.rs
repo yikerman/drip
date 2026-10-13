@@ -179,17 +179,17 @@ fn contract(global: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(Rg
     Ok((RgbDesc { extent, full, window: None, coordinates: image.coordinates.clone() },))
 }
 
-/// Crop, rotate and correct perspective in one map: the output is the
-/// content of a four-corner region of the input, made rectangular. Corners
-/// are fractions of the input's width and height, so the default corners
-/// leave the image unchanged, an inset rectangle crops and a rotated one
-/// straightens. Every perspective transform corresponds to exactly one set of
-/// corners and aspect. Aspect from corners averages opposite sides; set a
-/// ratio for a photographed rectangle whose true proportions differ. Three
-/// corners on a line are rejected. Regions outside the input, and anything
-/// beyond the horizon a crossed or concave quad puts inside the frame, are
-/// black. The image is resampled once with Lanczos-3, together with the
-/// warps next to it. A Resample after it chooses the filter and size instead.
+/// Crop, straighten and correct perspective in one step. Place the four
+/// corners on the region you want, and the node makes it rectangular. The
+/// default corners leave the image unchanged, an inset rectangle crops and a
+/// rotated one straightens. Aspect from corners averages opposite sides. Set a
+/// ratio when the photographed rectangle's true proportions differ. Three
+/// corners on a line are rejected, and areas outside the image are black.
+/// Samples are reconstructed with Lanczos-3. To choose another filter or an
+/// output size, put a Resample directly after it.
+// Every perspective transform corresponds to exactly one set of corners and
+// aspect. Anything beyond the horizon that a crossed or concave quad puts
+// inside the frame is black.
 #[crate::node(id = "perspective-transform", name = "Perspective Transform", tags = [tag::GEOMETRY], contract = contract, warp, references = [
     ("Heckbert, Fundamentals of texture mapping and image warping", "https://www2.eecs.berkeley.edu/Pubs/TechRpts/1989/5504.html"),
 ])]

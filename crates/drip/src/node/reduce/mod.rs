@@ -8,7 +8,7 @@ use crate::{
 #[serde(deny_unknown_fields)]
 #[validate(validate)]
 pub struct Settings {
-    /// Reduction factor in each dimension. Bayer averages each CFA phase separately.
+    /// How many times smaller along each side.
     #[param(default = 2, range = 1..=256)]
     pub factor: i64,
 }

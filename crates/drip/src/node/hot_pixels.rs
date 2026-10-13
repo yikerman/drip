@@ -7,18 +7,18 @@ pub use remove::{Definition, Ports, add, definition};
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
-    /// How far a sample may exceed its brightest same-colour neighbour before
-    /// it is replaced, in normalized sensor response (1 is the white level).
+    /// How much brighter than its brightest same-color neighbour a sample
+    /// must be to count as hot, where 1 is the sensor's white level.
     #[param(default = 0.05, range = 0.0..=1.0)]
     pub threshold: f32,
 }
 
-/// Replace hot pixels in a Bayer mosaic. A sample that exceeds the maximum of
-/// its eight same-colour neighbours (the 3×3 neighbourhood of its CFA plane,
-/// two sites apart) by more than the threshold becomes the median of those
-/// neighbours. Edge samples compare with the neighbours that exist. `image`
-/// and `output` are Bayer under one description, at full detail. A low
-/// threshold also flattens small specular highlights and stars.
+/// Remove hot pixels from a Bayer mosaic. A sample brighter than all eight
+/// nearest samples of its color by more than Threshold becomes their median. A
+/// low threshold also removes small specular highlights and stars.
+// Same-color neighbours are two sites apart. Edge samples compare with the
+// neighbours that exist. image and output share one description, at full
+// detail.
 #[crate::node(id = "hot-pixels", name = "Hot pixel removal", tags = [tag::BAYER_RAW, tag::RECOVERY], foreign = memory)]
 pub fn remove(p: &Settings, image: Read<'_, Bayer>, output: Publish<'_, Bayer>) -> Result<()> {
     let repaired = repair(image.data.host()?, &image.desc.extent, p.threshold);

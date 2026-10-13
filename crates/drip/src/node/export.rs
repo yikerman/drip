@@ -51,14 +51,14 @@ pub enum CompressionLevel {
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct DeflateSettings {
-    /// Trade encoding speed for compression ratio without changing pixels.
+    /// Slower settings make smaller files with identical pixels.
     #[param]
     pub level: CompressionLevel,
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Export {
-    /// Destination TIFF file, written at full processing detail.
+    /// The TIFF file to write.
     #[label("Output file")]
     #[param(save = ["tiff", "tif"])]
     #[external]
@@ -66,7 +66,8 @@ pub struct Export {
     #[param(flatten)]
     #[serde(flatten)]
     pub output: profile::Settings,
-    /// u8/u16 clip to the output range; f32 retains the profile floating-point range.
+    /// 8 and 16 bit clip to the profile's range. 32-bit float keeps values
+    /// beyond it.
     #[param]
     pub depth: Depth,
     /// Lossless TIFF compression, or None for an uncompressed file.
@@ -80,13 +81,13 @@ impl Assets for Export {
     }
 }
 
-/// Write linear Rec.2020/D65 RGB to TIFF through an RGB ICC profile. u8 and
-/// u16 clip to the output range, and f32 keeps the profile's floating-point range.
-/// Connected capture metadata is copied when present. Export uses full processing
-/// detail, independently of preview detail. An image larger than the device
-/// budget is computed in bands of rows and written as one file, equal to an
-/// export in one piece. Compression is lossless. A profile file is read at the
-/// first export; choose it again to pick up changes.
+/// Write the image to a TIFF file through an RGB output profile, at full
+/// resolution whatever the preview shows. 8- and 16-bit files clip to the
+/// profile's range, and 32-bit float keeps values beyond it. Compression is
+/// lossless. Capture metadata is copied when connected. A profile file is read
+/// at the first export. Choose it again to pick up changes.
+// An image larger than the device budget is computed in bands of rows and
+// written as one file, equal to an export in one piece.
 #[crate::node(
     id = "export-tiff",
     name = "Export TIFF",

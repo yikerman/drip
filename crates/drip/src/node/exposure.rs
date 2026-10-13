@@ -16,7 +16,7 @@ pub use compute::{Definition, Ports, add, definition};
 #[serde(deny_unknown_fields)]
 #[validate(validate)]
 pub struct Exposure {
-    /// Exposure adjustment in stops, applied as a positive multiplier.
+    /// Brightness change in stops. Each stop doubles or halves the light.
     #[param(default = 0.0, range = -32.0..=32.0)]
     #[label("Exposure (EV)")]
     pub ev: f32,
@@ -30,9 +30,8 @@ fn validate(p: &Exposure) -> Result<()> {
 fn exposure_contract(_: &GlobalContext, _: &Exposure, image: &RgbDesc) -> Result<(RgbDesc,)> {
     Ok((image.clone(),))
 }
-/// Adjust RGB exposure by multiplying linear samples by 2^EV. The output keeps
-/// the input coordinates. Negative and above-one samples are allowed, and the
-/// node imposes no scene or display processing order.
+/// Brighten or darken linear RGB by a number of stops. Values above 1 and
+/// below 0 pass through unclipped.
 #[crate::node(id = "exposure", name = "Exposure", tags = [tag::LOOK], contract = exposure_contract, map = kernel::exposure)]
 pub fn compute(
     params: &Exposure,

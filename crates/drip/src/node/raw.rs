@@ -18,17 +18,19 @@ use std::{path::PathBuf, sync::Arc};
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
-    /// The Bayer RAW to decode.
+    /// The RAW file to open.
     #[param(open = ["arw", "cr2", "cr3", "dng", "erf", "fff", "iiq", "kdc", "mef", "mos", "mrw", "nef", "nrw", "orf", "pef", "raf", "raw", "rw2", "rwl", "srw", "x3f"])]
     #[label("RAW file")]
     #[external]
     pub path: Option<PathBuf>,
 }
-/// Read a Bayer RAW, subtract black and normalize by a common white reference.
-/// Outputs Bayer camera responses and the decoded capture metadata, including
-/// native calibration. The store keeps the decode under the file's path,
-/// size and modification time, on disk when the evaluator has a disk tier,
-/// so a changed file decodes again. Calibration remains approximate.
+/// Open a Bayer RAW file. It outputs the sensor data, black-subtracted and
+/// scaled so the white level is 1, and the capture metadata other nodes read:
+/// white balance, color matrix, orientation and lens correction. A file is
+/// decoded once and decoded again when it changes on disk. X-Trans and other
+/// non-Bayer sensors are not supported.
+// The store keeps the decode under the file's path, size and modification
+// time, on disk when the evaluator has a disk tier.
 // The decoder version keys the stored outputs. A change to `normalize` bumps
 // it as well.
 #[crate::node(id = "bayer-raw", name = "Bayer RAW", tags = [tag::INPUT_TRANSFORM, tag::BAYER_RAW, tag::IO], foreign = disk, version = drip_raw::VERSION, references = [(

@@ -23,11 +23,11 @@ pub enum Illuminant {
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct WhitePoint {
-    /// CIE 1931 x of the source illuminant; both whites are normalized to Y = 1.
+    /// CIE 1931 x of the scene's white.
     #[param(default = color::D65[0], range = 0.0..=1.0)]
     #[label("x")]
     pub x: f64,
-    /// CIE 1931 y of the source illuminant.
+    /// CIE 1931 y of the scene's white.
     #[param(default = color::D65[1], range = 0.0..=1.0)]
     #[label("y")]
     pub y: f64,
@@ -37,7 +37,7 @@ pub struct WhitePoint {
 #[serde(deny_unknown_fields)]
 #[validate(validate)]
 pub struct Settings {
-    /// Infer the scene white from CaptureMetadata, or supply its chromaticity.
+    /// Use the white balance the camera recorded, or set the scene's white.
     #[param]
     pub illuminant: Illuminant,
 }
@@ -104,14 +104,15 @@ fn contract(
     Ok((image.clone(),))
 }
 
-/// Adapt a scene illuminant to D65 using full CAT16 chromatic adaptation.
-/// Input and output are linear Rec.2020/D65 RGB. As shot maps the as-shot camera
-/// neutral through the capture's camera matrix to infer the source white.
-/// Custom white point supplies CIE 1931 xy without metadata.
-/// The RAW template cancels as-shot gains at camera conversion before this node.
-/// Place it before rendering. On already-balanced RGB, a custom source white is
-/// a creative reinterpretation. Signed/HDR samples are preserved without
-/// clipping.
+/// White-balance linear Rec.2020 RGB by adapting the scene's illuminant to D65
+/// with CAT16. As shot uses the white balance the camera recorded. Custom
+/// takes the scene white as CIE 1931 xy and needs no metadata. Place it after
+/// Camera RGB to color RGB and before tone mapping such as Sigmoid. On RGB
+/// that is already balanced, a custom white shifts colors creatively. Values
+/// are not clipped.
+// As shot maps the as-shot camera neutral through the capture's camera matrix.
+// That is the scene white because Camera RGB to color RGB cancels the as-shot
+// gains with D65 reference gains.
 #[crate::node(id="chromatic-adaptation", name="Chromatic adaptation", tags = [tag::INPUT_TRANSFORM, tag::COLOR], contract=contract,
     references=[("CAT16", "https://doi.org/10.1002/col.22131"),
         ("Colour full adaptation", "https://colour.readthedocs.io/en/v0.4.7/generated/colour.adaptation.matrix_chromatic_adaptation_VonKries.html")],

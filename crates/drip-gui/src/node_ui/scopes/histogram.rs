@@ -37,9 +37,10 @@ pub struct Settings {
 fn contract(_: &GlobalContext, _: &Settings, image: &RgbDesc) -> Result<(CountsDesc,)> {
     Ok((super::counts(SIZE, 3, image),))
 }
-/// Plot linear RGB channel counts by exposure, without a color conversion, so
-/// camera RGB shows native channels. Exposure is measured relative to sample
-/// value 1. The density scale controls counts, not the exposure axis.
+/// Count each channel's samples by exposure, in stops relative to a value of
+/// 1. Channels are counted as they arrive, so camera RGB shows the sensor's
+/// own channels. The density scale changes the bar heights, not the exposure
+/// axis.
 #[drip::node(id = "histogram", name = "Histogram", tags = [tag::VIEW, tag::SCOPE], contract = contract, bins = HISTOGRAM)]
 pub fn observe(
     p: &Settings,

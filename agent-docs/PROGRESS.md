@@ -5,6 +5,9 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
+- Node help and parameter hints rewritten for users across every node:
+  implementation detail moved to `//` comments, formulas out of hover
+  hints. The CPU gate passes (264 tests).
 - Neutral correction and All correct the lens after RCD demosaic. Through
   Neutral correction at scale 8, on the CPU runtime and on wgpu, the Sony
   fixture develops to finite RGB, and its 16 × 16 corner blocks sum 1.56

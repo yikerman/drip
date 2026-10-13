@@ -20,9 +20,10 @@ fn bin2x2_contract(global: &GlobalContext, _: &(), image: &BayerDesc) -> Result<
         coordinates: Coordinates::Camera(image.response.clone()),
     },))
 }
-/// Demosaic Bayer by averaging each 2×2 cell into camera RGB, including both green
-/// sites. Requires an explicit Bayer phase and drops incomplete edge cells.
-/// Requested preview detail first reduces each CFA phase plane.
+/// Demosaic Bayer data to camera RGB at half width and height by averaging
+/// each 2×2 cell, both greens included. It is fast and free of interpolation
+/// artifacts. An incomplete last row or column of cells is dropped.
+// At a preview scale the kernel first reduces each CFA phase plane.
 #[crate::node(id = "bayer-2x2-demosaic", name="Bayer 2×2 demosaic", tags = [tag::INPUT_TRANSFORM, tag::BAYER_RAW, tag::DEMOSAIC], contract = bin2x2_contract, scaled)]
 pub fn compute(
     ctx: &KernelContext<'_>,

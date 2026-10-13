@@ -35,7 +35,7 @@ pub enum Subsampling {
 #[serde(deny_unknown_fields)]
 #[validate(validate)]
 pub struct Export {
-    /// Destination JPEG file, written at full processing detail.
+    /// The JPEG file to write.
     #[label("Output file")]
     #[param(save = ["jpg", "jpeg"])]
     #[external]
@@ -46,7 +46,7 @@ pub struct Export {
     /// Higher values retain more detail and produce larger files. JPEG remains lossy at 100.
     #[param(default = 95, range = 1..=100)]
     pub quality: i64,
-    /// Chroma resolution. Reduced chroma uses area averaging before encoding.
+    /// Color resolution. 4:2:2 and 4:2:0 lower it to save space.
     #[label("Chroma subsampling")]
     #[param]
     pub subsampling: Subsampling,
@@ -66,13 +66,14 @@ impl Assets for Export {
     }
 }
 
-/// Write linear Rec.2020/D65 RGB to 8-bit JPEG through an embedded RGB ICC
-/// profile. Samples clip to the output range before lossy encoding. Chroma can
-/// retain full resolution or be averaged to half horizontal/vertical resolution.
-/// Connected capture metadata is copied without orientation; stored pixels already
-/// carry their final geometry. Export uses full processing detail independently of
-/// preview detail. A profile file is read at the first export; choose it again to
-/// pick up changes. JPEG dimensions must each be at most 65535 pixels.
+/// Write the image to an 8-bit JPEG with an embedded output profile, at full
+/// resolution whatever the preview shows. Values clip to the profile's range.
+/// Quality and chroma subsampling trade detail for file size. Capture metadata
+/// is copied when connected, without the orientation tag, since the pixels are
+/// already upright. Width and height can each be at most 65535 pixels. A
+/// profile file is read at the first export. Choose it again to pick up
+/// changes.
+// Reduced chroma is area-averaged before encoding.
 #[crate::node(
     id = "export-jpeg",
     name = "Export JPEG",

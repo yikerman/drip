@@ -14,11 +14,12 @@ fn bayer_contract(_: &GlobalContext, p: &Settings, input: &BayerDesc) -> Result<
     Ok((BayerDesc { extent: bayer_extent(&input.extent, p.factor as u32), ..input.clone() },))
 }
 
-/// Reduce Bayer by averaging each CFA phase plane separately. Output retains the
-/// input interpretation and phase. Complete blocks are retained, with at least
-/// one Bayer cell for small inputs. Factor 1 preserves incomplete edge cells too.
-/// The explicit factor is independent of requested preview detail. Apply sensor
-/// corrections before this spatial approximation when physical correspondence matters.
+/// Shrink Bayer data by averaging blocks of each color separately, keeping the
+/// mosaic pattern. Incomplete blocks at the right and bottom edges are
+/// dropped. Apply sensor corrections such as Hot pixel removal before it.
+// At least one Bayer cell is kept for small inputs, and factor 1 keeps
+// incomplete edge cells too. The factor is independent of the requested
+// preview detail.
 #[crate::node(id="reduce-bayer", name="Bayer box reduction", tags = [tag::GEOMETRY, tag::BAYER_RAW], contract=bayer_contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,

@@ -76,10 +76,12 @@ fn prepare_values(p: &Settings) -> [f32; 22] {
 fn apply_contract(_: &GlobalContext, _: &Settings, image: &RgbDesc) -> Result<(RgbDesc,)> {
     Ok((image.clone(),))
 }
-/// Apply a sigmoid contrast curve and hue correction to linear Rec.2020/D65 RGB
-/// with reference white at 1. Grey is fixed at 0.18, black stays zero and the
-/// curve approaches one. Outputs RGB in the same coordinates, without an
-/// output encoding. Negative channels use an achromatic projection.
+/// Map scene brightness to display range with an S-shaped contrast curve that
+/// keeps hues natural. Grey at 0.18 stays fixed, black stays black and
+/// highlights roll off smoothly toward white. It expects linear Rec.2020 RGB
+/// with white at 1.
+// The output stays in the same coordinates, without an output encoding.
+// Negative channels use an achromatic projection.
 #[crate::node(id="sigmoid",
 name="Sigmoid",
 tags = [tag::OUTPUT_TRANSFORM, tag::TONEMAP],

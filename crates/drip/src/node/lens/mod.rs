@@ -44,7 +44,8 @@ pub struct Embedded {
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Manual {
-    /// `r_d = r_u (a r_u³ + b r_u² + c r_u + 1 − a − b − c)`.
+    /// Lensfun `ptlens` distortion coefficient.
+    // r_d = r_u (a r_u³ + b r_u² + c r_u + 1 − a − b − c), in Hugin units.
     #[param(default = 0.0, range = -0.2..=0.2)]
     #[label("Distortion a")]
     pub a: f64,
@@ -54,14 +55,16 @@ pub struct Manual {
     #[param(default = 0.0, range = -0.2..=0.2)]
     #[label("Distortion c")]
     pub c: f64,
-    /// `r_d,R = k_R r_d`, after distortion.
+    /// Lensfun linear TCA: red's size relative to green.
+    // r_d,R = k_R r_d, after distortion.
     #[param(default = 1.0, range = 0.99..=1.01)]
     #[label("TCA red")]
     pub red: f64,
     #[param(default = 1.0, range = 0.99..=1.01)]
     #[label("TCA blue")]
     pub blue: f64,
-    /// `C_d = C_s / (1 + k₁ r² + k₂ r⁴ + k₃ r⁶)`.
+    /// Lensfun `pa` vignetting coefficient.
+    // C_d = C_s / (1 + k₁ r² + k₂ r⁴ + k₃ r⁶), r = 1 at the corner.
     #[param(default = 0.0, range = -1.0..=1.0)]
     #[label("Vignetting k1")]
     pub k1: f64,
@@ -86,12 +89,12 @@ pub enum Source {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, crate::Choice)]
 pub enum Fit {
-    /// The least zoom at which every output pixel reads inside the input.
+    /// Zoom just enough that no empty border shows.
     #[default]
     #[choice("fill")]
     #[label("Fill")]
     Fill,
-    /// No zoom: the centre keeps its magnification.
+    /// Keep the scale. Exposed edges are black.
     #[choice("keep")]
     #[label("Keep")]
     Keep,
@@ -100,7 +103,7 @@ pub enum Fit {
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
-    /// The camera's embedded correction, or a Lensfun calibration.
+    /// The correction the camera recorded, or a Lensfun calibration.
     #[param]
     pub source: Source,
     #[param(default = true)]
@@ -110,7 +113,7 @@ pub struct Settings {
     pub chromatic_aberration: bool,
     #[param(default = true)]
     pub vignetting: bool,
-    /// Zoom to hide the borders the correction exposes, or keep the scale.
+    /// Zoom to hide exposed borders, or keep the scale.
     #[param]
     pub fit: Fit,
 }
@@ -149,35 +152,28 @@ fn contract(
     Ok((image.clone(),))
 }
 
-/// Correct lens distortion, lateral chromatic aberration (TCA) and
-/// vignetting of RGB in one resampling. Each is a radial map about the
-/// optical centre: channel by channel, the output at radius ρ reads the input
-/// at radius `s_c(ρ)·ρ`, scaled by a vignetting gain of that source radius.
-/// Place it after demosaic, while channels are the sensor's, since TCA
-/// moves red and blue against green.
+/// Correct lens distortion, color fringes toward the edges (lateral chromatic
+/// aberration) and dark corners (vignetting). Place it right after demosaic,
+/// before Orientation and before any crop or perspective change.
 ///
-/// Embedded reads the correction the camera recorded in `metadata`: Sony,
-/// Fujifilm, DNG, Olympus and Panasonic RAW files, converted as darktable's
-/// embedded-metadata lens correction converts them. Fine-tune factors scale
-/// each correction: 0 removes it, 2 doubles it. Without metadata, or when
-/// the file carries no correction, the image passes unchanged. Manual takes
-/// a Lensfun calibration in Lensfun's units: `ptlens` distortion `a`, `b`,
-/// `c` and linear TCA about half the shorter side, `pa` vignetting about the
-/// half diagonal. It ignores the profile's crop factor, real focal length
-/// and centre offsets, so it fits only uncropped images of the calibrated
-/// format. The switches turn each correction off.
+/// Embedded uses the correction the camera recorded in Sony, Fujifilm, DNG,
+/// Olympus, OM System and Panasonic RAW files, interpreted as darktable does.
+/// Fine-tune scales each part: 0 removes it and 2 doubles it. Files without a
+/// recorded correction pass through unchanged. Manual takes a Lensfun
+/// calibration: ptlens distortion a, b and c, linear TCA red and blue, and pa
+/// vignetting k1, k2 and k3. Use a profile for the same focal length and
+/// camera format, on an uncropped image.
 ///
-/// The centre is the frame's, except where a DNG states its own, which is
-/// in the sensor's orientation, so keep the node before Orientation. A crop
-/// or perspective transform before the node moves the centre.
-///
-/// Fill zooms about the centre to the least scale at which every output
-/// pixel of every channel reads inside the input. It zooms out, showing more
-/// of the frame, where the correction pulls the whole border inward. Keep
-/// holds the centre's magnification, and edges the correction exposes are
-/// black. The output keeps the input's description. The image is
-/// resampled with Lanczos-3, together with the warps next to it, and a
-/// Resample after it chooses another filter.
+/// The switches turn each correction off. Fill zooms in just enough that no
+/// empty border shows, or zooms out to keep more of the frame when it can.
+/// Keep leaves the scale alone, so edges the correction exposes are black.
+/// Samples are reconstructed with Lanczos-3. To choose another filter, put a
+/// Resample directly after it.
+// Each correction is a radial map about the optical center: channel by
+// channel, the output at radius ρ reads the input at s_c(ρ)·ρ, times a
+// vignetting gain of that source radius. The center is the frame's, or a DNG's
+// own in sensor orientation. Manual mode ignores Lensfun's crop factor, real
+// focal length and center offsets. The output keeps the input's description.
 #[crate::node(id = "lens-correction", name = "Lens correction", tags = [tag::GEOMETRY, tag::RECOVERY], contract = contract, warp, references = [
     ("darktable developers, lens.cc, 2026", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/lens.cc"),
     ("F. Witherden, Embedded lens correction, darktable PR 7092", "https://github.com/darktable-org/darktable/pull/7092"),

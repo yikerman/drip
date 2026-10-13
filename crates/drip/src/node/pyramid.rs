@@ -19,10 +19,11 @@ pub use expand::{Definition, Ports, add, definition};
 #[serde(deny_unknown_fields)]
 #[validate(validate)]
 pub struct Settings {
-    /// Halvings of the image, each followed by a blur.
+    /// How many times the image is halved. Each level doubles the blur's
+    /// reach.
     #[param(default = 3, range = 1..=8)]
     pub levels: i64,
-    /// Standard deviation of the blur at each level, in that level's pixels.
+    /// Blur radius at each level, in that level's pixels.
     #[param(default = 1.0, range = 0.25..=4.0)]
     pub radius: f32,
 }
@@ -35,13 +36,12 @@ fn validate(p: &Settings) -> Result<()> {
     Ok(())
 }
 
-/// Blur RGB through a Gaussian pyramid. The image is halved `levels` times
-/// with a box filter, each level is blurred with a Gaussian of `radius`
-/// pixels of that level (Sharpen at amount −1), and the coarsest level is
-/// resampled back to the input's full-detail size with Mitchell–Netravali.
-/// Each level doubles the blur's reach in the input's pixels at a quarter of
-/// the cost, so a wide blur stays cheap. A flat image passes unchanged.
-/// Coordinates are kept.
+/// Blur RGB strongly at low cost. The image is halved Levels times, each level
+/// is blurred by Radius pixels of that level, and the result is scaled back
+/// up. Each extra level doubles the blur's reach.
+// Halving uses a box filter, the blur is Sharpen at amount −1, and the
+// coarsest level returns to the input's full-detail size with
+// Mitchell–Netravali. A flat image passes unchanged. Coordinates are kept.
 #[crate::node(id = "pyramid-blur", name = "Pyramid blur", tags = [tag::LOOK], meta)]
 pub fn expand(
     p: &Settings,

@@ -23,9 +23,9 @@ const RADIUS: f32 = 0.5;
 fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(CountsDesc,)> {
     Ok((super::counts(SIZE * SIZE, 1, image),))
 }
-/// Plot linear Rec.2020/D65 RGB chromaticity in CIE 1976 u′v′. Negative channels
-/// are clipped for visualization; black has no chromaticity and is omitted.
-/// Density uses logarithmic counts.
+/// Plot the chromaticity of Rec.2020 RGB in CIE 1976 u′v′, with density on a
+/// logarithmic scale. Black has no chromaticity and is left out, and negative
+/// channels are clipped for display.
 #[drip::node(id = "vectorscope", name = "Vectorscope", tags = [tag::VIEW, tag::SCOPE], contract = contract, bins = VECTORSCOPE)]
 pub fn observe(
     _: &(),

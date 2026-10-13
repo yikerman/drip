@@ -574,6 +574,11 @@ decisions from the compute-model migration and later.
   text is measured as shipped.
 - **Decided:** Inspector help joins Rustdoc source wraps and keeps
   paragraphs. Reflow belongs to presentation.
+- **Decided (2026-10-13):** Node help and parameter hints tell a user only
+  what they need: what the node does, where to place it, what its controls
+  change, visible side effects and when it refuses. How it works (store
+  keys, fusion, footprints, formulas, preview internals) goes in `//`
+  comments beside the attribute or field, where maintainers read it.
 - **Decided (2026-10-13):** Built-in templates are built in Rust.
   `drip::templates` wires each processing chain, so a batch frontend runs the
   same pipelines and a renamed parameter or port fails to compile. The GUI

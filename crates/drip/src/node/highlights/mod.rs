@@ -16,7 +16,8 @@ mod tests;
 #[serde(deny_unknown_fields)]
 #[validate(validate)]
 pub struct Settings {
-    /// Fraction of each site's clipping level at which reconstruction begins.
+    /// How close to clipping a sample must be before it is rebuilt, as a
+    /// fraction of its clipping level.
     #[param(default = 0.98, range = 0.5..=1.0)]
     pub threshold: f32,
 }
@@ -39,10 +40,12 @@ fn contract(
     }
     Ok((image.clone(),))
 }
-/// Reconstruct clipped Bayer samples with inpaint opposed, assuming balanced
-/// camera channels. BayerLevels supplies clipping levels in matching
-/// coordinates, and approximate levels are allowed. The Bayer output keeps the
-/// input's interpretation. Adapted from darktable's inpaint opposed algorithm.
+/// Rebuild clipped highlights in Bayer data from the channels that did not
+/// clip, with darktable's inpaint opposed method. It expects white-balanced
+/// data and BayerLevels from Bayer site gains. Threshold sets how close to
+/// clipping a sample must be before it is rebuilt.
+// Approximate levels are allowed. The Bayer output keeps the input's
+// interpretation.
 #[crate::node(id="highlights-opposed", name="Opposed highlights", tags = [tag::INPUT_TRANSFORM, tag::BAYER_RAW, tag::RECOVERY], contract=contract, references=[("darktable inpaint opposed", "https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/hlreconstruct/opposed.c")])]
 pub fn reconstruct(
     ctx: &KernelContext<'_>,

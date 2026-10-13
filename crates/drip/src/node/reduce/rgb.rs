@@ -13,8 +13,9 @@ fn contract(_: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(RgbDesc
         |e: &Extent| Extent { width: e.width.div_ceil(factor), height: e.height.div_ceil(factor) };
     Ok((RgbDesc { extent: reduce(&image.extent), full: reduce(&image.full), ..image.clone() },))
 }
-/// Reduce RGB by box averaging without changing its coordinates. The factor
-/// applies to both dimensions, and partial edge blocks use available samples.
+/// Shrink RGB by averaging blocks of pixels. Blocks at the right and bottom
+/// edges average the pixels they have.
+// Coordinates are kept.
 #[crate::node(id="reduce-rgb", name="RGB box reduction", tags = [tag::GEOMETRY], contract=contract)]
 pub fn compute(
     ctx: &KernelContext<'_>,
