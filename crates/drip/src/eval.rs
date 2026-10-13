@@ -473,7 +473,7 @@ impl<'a, 't> Run<'a, 't> {
         while let Some((index, scale)) = stack.pop() {
             if requested.insert((index, scale)) {
                 let entry = run.entry(index);
-                let read = if run.is_foreign(entry) { 1 } else { scale };
+                let read = if entry.node.kind().shape.reads_full_detail() { 1 } else { scale };
                 stack.extend(entry.inputs.iter().flatten().map(|from| (from.node.index, read)));
             }
         }
@@ -497,10 +497,6 @@ impl<'a, 't> Run<'a, 't> {
         self.dag.entries[index].as_ref().expect("needed nodes exist")
     }
 
-    fn is_foreign(&self, entry: &Entry) -> bool {
-        matches!(entry.node.kind().shape, Shape::Foreign(_))
-    }
-
     fn reduces(&self, index: usize) -> bool {
         self.entry(index).node.kind().shape.reduces()
     }
@@ -519,7 +515,7 @@ impl<'a, 't> Run<'a, 't> {
     fn depends(&self, entry: &Entry) -> bool {
         let shape = entry.node.kind().shape;
         self.scale > 1
-            && !self.is_foreign(entry)
+            && !shape.reads_full_detail()
             && (shape.scaled()
                 || entry
                     .inputs
@@ -565,11 +561,11 @@ impl<'a, 't> Run<'a, 't> {
     /// scaled shape, which reaches the scale itself. A target's region cuts
     /// the images on a plane it reads.
     fn edge(&self, consumer: Option<&Entry>, scale: u32, port: PortId) -> Slot {
-        let read = if consumer.is_some_and(|entry| self.is_foreign(entry)) { 1 } else { scale };
+        let full_detail = consumer.is_some_and(|entry| entry.node.kind().shape.reads_full_detail());
+        let read = if full_detail { 1 } else { scale };
         let at = self.scale_of(port.node.index, read);
         let planar = self.planar(port);
-        let claimed =
-            matches!(self.entry(port.node.index).node.kind().shape, Shape::Kernel { scaled: true });
+        let claimed = self.entry(port.node.index).node.kind().shape.produces_at_scale();
         let scaled = consumer.is_some_and(|entry| entry.node.kind().shape.scaled());
         // A warp's output can be finer than the scale: Orientation keeps the
         // sampling of a full-detail input.
@@ -609,12 +605,8 @@ impl<'a, 't> Run<'a, 't> {
     /// How the disk tier stores `slot`, when it is an output of a `foreign =
     /// disk` node.
     fn codec(&self, slot: Slot) -> Option<&'static Codec> {
-        match self.entry(slot.port.node.index).node.kind().shape {
-            Shape::Foreign(Cache::Disk(codecs)) if slot.parent().is_none() => {
-                codecs.get(slot.port.index)
-            }
-            _ => None,
-        }
+        let codecs = self.entry(slot.port.node.index).node.kind().shape.codecs();
+        codecs.get(slot.port.index).filter(|_| slot.parent().is_none())
     }
 
     /// Count one more consumer of `slot`. The first one takes the value from

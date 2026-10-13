@@ -68,10 +68,34 @@ impl Shape {
         matches!(self, Self::Kernel { scaled: true } | Self::Warp | Self::Resample)
     }
 
+    /// Whether the kind produces its outputs at the requested scale itself,
+    /// a `scaled` kernel, so evaluation never reduces them. A warp's output
+    /// can still be finer than the scale, as Orientation keeps the sampling
+    /// of a full-detail input.
+    pub fn produces_at_scale(self) -> bool {
+        matches!(self, Self::Kernel { scaled: true })
+    }
+
+    /// Whether the kind reads its inputs at full detail whatever the
+    /// requested scale: a foreign node, whose outputs the store keeps once
+    /// for every scale.
+    pub fn reads_full_detail(self) -> bool {
+        matches!(self, Self::Foreign(_))
+    }
+
     /// Whether the kind reduces its input to a host value, `Reduce` or
     /// `Bins`. A frontend consumes such a node's outputs.
     pub fn reduces(self) -> bool {
         matches!(self, Self::Reduce(_) | Self::Bins(_))
+    }
+
+    /// How the disk tier stores each output, in port order. Empty unless
+    /// the kind is `foreign = disk`.
+    pub fn codecs(self) -> &'static [Codec] {
+        match self {
+            Self::Foreign(Cache::Disk(codecs)) => codecs,
+            _ => &[],
+        }
     }
 }
 
