@@ -510,7 +510,6 @@ impl<'a, 't> Run<'a, 't> {
                 }
             }
         }
-        let specs = e.node.kind().outputs;
         let result = match shape {
             // A foreign node describes its outputs when it publishes them.
             Shape::Foreign(cache) => {
@@ -520,9 +519,6 @@ impl<'a, 't> Run<'a, 't> {
             Shape::Meta => self.expand(e, scale, &slots, &inputs)?,
             _ => self.run(e.node.as_ref(), scale, &inputs)?,
         };
-        if result.len() != specs.len() {
-            return Err(Error::Runtime("node result arity mismatch".into()));
-        }
         self.nodes += 1;
         for (port, image) in result.into_iter().enumerate() {
             let slot = Slot::output(output_id(e.id, port), scale);
@@ -541,15 +537,8 @@ impl<'a, 't> Run<'a, 't> {
         // Only a scaled shape reads the scale, which keys it.
         let global = GlobalContext { scale: if shape.scaled() { scale } else { 1 } };
         let outputs = node.contract(&global, &descriptions(inputs))?;
-        if outputs.len() != node.kind().outputs.len() {
-            return Err(Error::Runtime("node contract output arity mismatch".into()));
-        }
         let ctx = KernelContext::counted(&global, self.runtime, self.tally);
-        let images = node.run(&ctx, inputs, &outputs)?;
-        if images.len() != outputs.len() {
-            return Err(Error::Runtime("node result arity mismatch".into()));
-        }
-        Ok(images)
+        node.run(&ctx, inputs, &outputs)
     }
 
     /// Materialize `inputs` here, then take the outputs of the store's job

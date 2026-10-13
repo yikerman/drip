@@ -439,24 +439,8 @@ impl Port {
                 ));
             }
         };
-        if let Some(placement) = placement(&payload) {
-            let message = format!(
-                "ports name payloads; the {placement} placement left node signatures. \
-                 Read the value with `data.host()` or `data.device(ctx)`"
-            );
-            return Err(syn::Error::new(payload.span(), message));
-        }
         Ok(Self { name, payload, requirement, direction, view, optional, index: 0 })
     }
-}
-
-/// The wrapper's name when `ty` wraps a payload in a former `Cpu` or `Device` placement.
-fn placement(ty: &syn::Type) -> Option<String> {
-    let syn::Type::Path(ty) = ty else { return None };
-    let segment = ty.path.segments.last()?;
-    let wrapped = matches!(segment.arguments, syn::PathArguments::AngleBracketed(_));
-    (wrapped && (segment.ident == "Cpu" || segment.ident == "Device"))
-        .then(|| segment.ident.to_string())
 }
 
 fn wrapper_type(ty: &syn::Type, span: Span) -> syn::Result<(&syn::PathSegment, Vec<&syn::Type>)> {

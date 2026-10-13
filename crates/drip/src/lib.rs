@@ -113,16 +113,6 @@ mod error {
         #[error("being computed")]
         Pending,
     }
-    impl From<String> for Error {
-        fn from(s: String) -> Self {
-            Self::Runtime(s)
-        }
-    }
-    impl From<&str> for Error {
-        fn from(s: &str) -> Self {
-            Self::Runtime(s.into())
-        }
-    }
     pub type Result<T> = std::result::Result<T, Error>;
 }
 

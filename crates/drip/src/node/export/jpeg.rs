@@ -117,7 +117,8 @@ pub fn encode(
     if pixels.len() != desc.extent.pixels() {
         return Err(Error::Contract("JPEG export pixels do not match the image extent".into()));
     }
-    let pixels: Vec<[u8; 3]> = output.convert(PixelFormat::RGB_8, pixels)?;
+    let pixels: Vec<[u8; 3]> =
+        output.convert(PixelFormat::RGB_8, pixels).map_err(Error::Runtime)?;
     let mut bytes = Vec::new();
     let mut encoder = Encoder::new(&mut bytes, p.quality as u8);
     encoder.set_sampling_factor(match p.subsampling {

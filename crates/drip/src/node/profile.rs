@@ -138,7 +138,7 @@ pub fn convert_in_place<T: Send>(pixels: &mut [T], convert: impl Fn(&mut [T]) + 
 impl ProfileSource {
     /// ICC bytes of a built-in profile, or of the chosen file once checked.
     fn icc(&self) -> Result<Vec<u8>, Error> {
-        let built_in = |profile: Profile| profile.icc().map_err(|e| e.to_string().into());
+        let built_in = |profile: Profile| profile.icc().map_err(|e| Error::Runtime(e.to_string()));
         match self {
             Self::Srgb => built_in(rgb("sRGB", REC709, srgb_curve())),
             Self::DisplayP3 => built_in(rgb("Display P3", P3, srgb_curve())),

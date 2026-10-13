@@ -28,8 +28,12 @@ pub fn prepare(
     let output = || output.expect("proof modes load their output");
     let pixels = match p.mode {
         Mode::None => None,
-        Mode::Softproof(_) => Some(softproof(output(), &image.pixels)?),
-        Mode::Gamutcheck(_) => Some(gamutcheck(output(), &image.pixels)?),
+        Mode::Softproof(_) => {
+            Some(softproof(output(), &image.pixels).map_err(KernelError::Runtime)?)
+        }
+        Mode::Gamutcheck(_) => {
+            Some(gamutcheck(output(), &image.pixels).map_err(KernelError::Runtime)?)
+        }
     };
     let mut view = match pixels {
         None => PreviewImage::new(image),

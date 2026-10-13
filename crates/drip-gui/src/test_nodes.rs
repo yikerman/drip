@@ -118,7 +118,11 @@ impl GuiNode for probe::Definition {
     type Presentation = ();
     const PREPARE: Option<Prepare<Self>> = Some(Prepare::Inputs(|node, _, _| {
         PROBE_CALLS.fetch_add(1, Ordering::Relaxed);
-        if node.parameters.fail { Err("preparation failed".into()) } else { Ok(()) }
+        if node.parameters.fail {
+            Err(drip::Error::Runtime("preparation failed".into()))
+        } else {
+            Ok(())
+        }
     }));
 }
 

@@ -285,18 +285,6 @@ fn rejects_unsupported_signatures() {
 }
 
 #[test]
-fn rejects_placements_in_port_types() {
-    for placement in ["Cpu", "Device"] {
-        let wrapper = quote::format_ident!("{placement}");
-        let function = syn::parse_quote! {
-            fn x(c: &C, p: &P, image: Option<Read<'_, ports::#wrapper<Rgb>, Rec2020>>) {}
-        };
-        let error = expand(quote!(id = "x", contract = c), function).unwrap_err().to_string();
-        assert!(error.contains(&format!("the {placement} placement left")), "{error}");
-    }
-}
-
-#[test]
 fn accepts_qualified_ports_and_indexes_each_direction_independently() {
     let function: syn::ItemFn = syn::parse_quote! {
         fn mix(

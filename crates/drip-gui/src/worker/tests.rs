@@ -126,7 +126,7 @@ mod preview_logs_only_changed_root_failures_at_their_severity_fixture {
     ) -> drip::Result<()> {
         match p.state {
             State::Incomplete => Err(KernelError::Contract("choose a file".into())),
-            State::Failed => Err("decode failed".into()),
+            State::Failed => Err(KernelError::Runtime("decode failed".into())),
             State::Ok => {
                 image.host()[0] = [1., 1., 0.];
                 Ok(())
@@ -374,7 +374,8 @@ mod exports_read_current_files_at_full_detail_fixture {
     #[drip::node(id="test-file", name="file", contract=image_contract)]
     fn file(_: &KernelContext<'_>, p: &FileKernel, mut image: Write<'_, Rgb>) -> drip::Result<()> {
         let path = p.path.as_ref().ok_or_else(|| KernelError::Contract("choose a file".into()))?;
-        let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        let text =
+            std::fs::read_to_string(path).map_err(|e| KernelError::Runtime(e.to_string()))?;
         image.host()[0] = [text.parse().unwrap(), 1.0, 0.0];
         Ok(())
     }

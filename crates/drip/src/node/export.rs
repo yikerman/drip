@@ -204,7 +204,7 @@ fn converted<'a, T: lcms2::Pod + Default + Send>(
 ) -> Result<Vec<[T; 3]>> {
     let mut pixels = Vec::with_capacity(count);
     for band in rows {
-        pixels.extend(output.convert(format, &band?)?);
+        pixels.extend(output.convert(format, &band?).map_err(Error::Runtime)?);
     }
     if pixels.len() != count {
         return Err(Error::Contract("TIFF export pixels do not match the image extent".into()));

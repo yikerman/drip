@@ -49,26 +49,10 @@ pub type Expand = fn(
 #[derive(Clone, Copy)]
 pub struct MapBody {
     /// Unique within the binary: the declaring module and the body's path.
-    /// Kernel identity compares bodies by name and constant count.
+    /// Kernel identity compares bodies by name.
     pub name: &'static str,
     pub constants: usize,
     pub expand: Expand,
-}
-impl PartialEq for MapBody {
-    fn eq(&self, other: &Self) -> bool {
-        (self.name, self.constants) == (other.name, other.constants)
-    }
-}
-impl Eq for MapBody {}
-impl std::hash::Hash for MapBody {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        (self.name, self.constants).hash(state);
-    }
-}
-impl std::fmt::Debug for MapBody {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}[{}]", self.name, self.constants)
-    }
 }
 
 /// The constants a map's host function returns: `[f32; N]`, read by the body
@@ -412,4 +396,4 @@ macro_rules! by_name {
         }
     )*};
 }
-by_name!(FilterBody, ReduceBody, BinsBody, StencilBody);
+by_name!(MapBody, FilterBody, ReduceBody, BinsBody, StencilBody);
