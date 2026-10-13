@@ -18,5 +18,4 @@ pub mod reduce;
 mod shared_kernel;
 pub mod sigmoid;
 pub mod source;
-pub mod templates;
 pub use source::source;

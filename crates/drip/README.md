@@ -6,7 +6,7 @@
   containing its parameters, contracts, computation and private helpers/kernels.
   RCD kernels belong in `node/rcd/`; sigmoid math belongs in `node/sigmoid.rs`.
 - Shared image-processing code also lives under `node/`: payload implementations,
-  color management, export encoding and pipeline templates. `shared_kernel.rs`
+  color management and export encoding. `shared_kernel.rs`
   contains reusable operations such as matrix multiplication and Bayer reduction,
   never a collection of unrelated node kernels.
 - Outside `node/`, keep shared DAG/evaluation infrastructure: definitions and

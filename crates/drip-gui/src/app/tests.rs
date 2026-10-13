@@ -50,7 +50,7 @@ fn detail_dropdown_scroll_updates_the_project_and_stops_at_ends() {
 /// The built-in template applied to the fixture raw, saved to a temp file.
 fn fixture_project(name: &str) -> PathBuf {
     let raw = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/raw/sony-ilce-7rm3.arw");
-    let mut p = templates::raw_to_tiff();
+    let mut p = templates::default_project();
     let read = p.graph.find("Bayer RAW").unwrap();
     p.graph.set_param(read, "path", json!(raw)).unwrap();
     let file = std::env::temp_dir().join(format!("drip-gui-{name}-{}.drip", std::process::id()));
@@ -312,7 +312,7 @@ fn invalid_detail_does_not_replace_the_open_project() {
     let mut app = App::new(None, true, || {});
     let original = app.project.clone();
     for value in [json!(-1), json!(9), json!(256), json!(2.5), json!("2"), json!(null)] {
-        let mut project = templates::raw_to_tiff();
+        let mut project = templates::default_project();
         project.ui = json!({"preview_level": value});
         assert!(app.set_project(project, None).is_err());
         assert_eq!(app.project.to_json().unwrap(), original.to_json().unwrap());
@@ -418,6 +418,25 @@ fn replacing_a_modified_project_asks_to_save_first() {
     h.key_press_modifiers(Modifiers::COMMAND, Key::N);
     h.run();
     assert!(h.query_by_label("Discard").is_none(), "unmodified projects are replaced");
+    std::fs::remove_file(file).unwrap();
+}
+
+#[test]
+fn built_in_templates_replace_the_project_after_the_unsaved_prompt() {
+    let file = std::env::temp_dir().join(format!("drip-built-in-{}.drip", std::process::id()));
+    std::fs::write(&file, Project::default().to_json().unwrap()).unwrap();
+    let mut h = harness(App::new(Some(file.clone()), true, || {}));
+    h.run();
+    h.state_mut().edit(Edit::Add(&drip::node::exposure::compute::KIND, Vec2::ZERO));
+    h.get_by_label("New from template").click();
+    h.run();
+    h.get_by_label(templates::TEMPLATES[0].name).click();
+    h.run();
+    assert_eq!(h.state().file.as_ref(), Some(&file), "the prompt holds the template");
+    h.get_by_label("Discard").click();
+    h.run();
+    assert!(h.state().file.is_none() && !h.state().modified);
+    assert!(h.state().project.graph.find("Bayer RAW").is_some());
     std::fs::remove_file(file).unwrap();
 }
 
@@ -663,7 +682,7 @@ fn nodes_with_parameters_and_views_pop_them_out() {
     assert!(h.query_by_label("Shown in its window").is_none());
 
     // Node ids are reused, so a new project closes every window.
-    h.state_mut().set_project(templates::raw_to_tiff(), None).unwrap();
+    h.state_mut().set_project(templates::default_project(), None).unwrap();
     assert!(h.state().windows().is_empty());
 }
 

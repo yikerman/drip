@@ -8,10 +8,13 @@ use crate::editor::Editor;
 use crate::history::History;
 use crate::model::{Graph, Project};
 use crate::node_ui::Popped;
-use crate::node_ui::templates;
+use crate::templates::{self, Template};
 use crate::ui_state;
 use crate::worker::Worker;
 use egui::{Key, KeyboardShortcut, Modifiers};
+
+/// Work that replaces the project, deferred while unsaved edits are resolved.
+pub(super) type Replace = Box<dyn FnOnce(&mut App)>;
 
 /// A project command, offered in the menu and by its shortcut.
 pub(super) struct Command {
@@ -107,18 +110,29 @@ impl App {
 
     /// Runs `command`, after asking about unsaved edits if it replaces the project.
     pub(super) fn invoke(&mut self, command: &Command) {
-        if command.replaces && self.modified {
-            self.replacing = Some(command.run);
-            self.redraw = true;
+        if command.replaces {
+            self.replace(Box::new(command.run));
         } else {
             (command.run)(self);
+        }
+    }
+
+    /// Runs `replace`, which replaces the project, after asking about unsaved edits.
+    pub(super) fn replace(&mut self, replace: Replace) {
+        if self.modified {
+            self.replacing = Some(replace);
+            self.redraw = true;
+        } else {
+            replace(self);
         }
     }
 
     /// Asks whether to save unsaved edits before a waiting command replaces
     /// the project. Every window shows it; the first answer applies.
     pub(super) fn unsaved_prompt(&mut self, ctx: &egui::Context) {
-        let Some(replace) = self.replacing else { return };
+        if self.replacing.is_none() {
+            return;
+        }
         let response = egui::Modal::new(egui::Id::new("unsaved edits")).show(ctx, |ui| {
             ui.label(format!("{} has unsaved changes.", self.name()));
             ui.horizontal(|ui| {
@@ -133,7 +147,7 @@ impl App {
             self.save_project();
         }
         if save || discard || cancel || response.should_close() {
-            self.replacing = None;
+            let replace = self.replacing.take().expect("checked above");
             self.redraw = true;
             // A failed or canceled save keeps the project.
             if discard || (save && !self.modified) {
@@ -192,7 +206,14 @@ impl App {
     }
 
     pub(super) fn new_project(&mut self) {
-        if let Err(error) = self.set_project(templates::raw_to_tiff(), None) {
+        self.new_from(&templates::TEMPLATES[0]);
+    }
+
+    /// Replaces the project with an untitled one from a built-in template.
+    pub(super) fn new_from(&mut self, template: &Template) {
+        let result =
+            template.project().map_err(|e| e.to_string()).and_then(|p| self.set_project(p, None));
+        if let Err(error) = result {
             self.report(Err(error));
         }
     }

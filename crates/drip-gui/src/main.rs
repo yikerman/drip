@@ -26,6 +26,7 @@ mod node_ui;
 mod parent;
 mod registry;
 mod render;
+mod templates;
 #[cfg(test)]
 mod test_nodes;
 mod theme;

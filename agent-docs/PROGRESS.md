@@ -4,6 +4,16 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-12
 
+- Built-in templates are now `templates/*.drip-template` files embedded in the
+  GUI. The RAW pipeline moved to `templates/neutral-restore.drip-template`,
+  generated from the previous Rust builder, so layout and template inputs are
+  unchanged; the core keeps its RAW chain only as a test fixture. New creates
+  Neutral restore; New from template lists built-ins. Tests check each file
+  equals its re-serialization and that a template choice waits for the
+  unsaved-edits prompt. All 180 workspace tests and three doctests pass with
+  `DRIP_BACKEND=cpu` and `drip/cpu`; strict Clippy and formatting pass. No
+  desktop session exercised. The continuous-geometry template waits for its
+  nodes.
 - Added Mitchell–Netravali and Lanczos-3 as shared `#[cube]` filter kernels
   (`node/filter.rs`), not yet used by a node. The outer Mitchell piece is
   factored around its double root to avoid f32 cancellation; Lanczos uses a

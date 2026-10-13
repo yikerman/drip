@@ -129,8 +129,10 @@ On Windows, run `dist\drip-gui.exe`. The distribution build selects Vulkan on
 Linux, native Metal on macOS, and D3D12 on Windows. See
 [compute backends](crates/drip/README.md#compute-backends) for alternatives.
 
-Choose the RAW file under **Template parameters** to begin. You can also pass
-an existing `.drip` project or `.drip-template` to `drip-gui` when launching it.
+Choose the RAW file under **Template parameters** to begin. **New from
+template** lists the built-in templates; **Open…** also opens your own
+`.drip-template` files, and you can pass a `.drip` project or `.drip-template`
+to `drip-gui` when launching it.
 
 ## Canvas gestures
 

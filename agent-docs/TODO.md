@@ -26,13 +26,14 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Worker startup failures | Open | Report thread-creation failures in `Worker::new` without losing the worker. |
 | Sensor calibration | Open | Expose sample conventions and sensor coordinates before dark/flat correction; see [DESIGN](DESIGN.md). |
 | Everyday image nodes | Proposed | Implement in the order below under [Next image nodes](#next-image-nodes). This is a proposed follow-up, not an expansion of the packaged proof-of-concept gate. |
+| Continuous-geometry template | Blocked | Add `templates/` file demonstrating Interpolate → Lens correction/Perspective Transform → Sample, with previews after Sample, once those nodes exist ([FIELD](FIELD.md)). |
 | Field extensions | Open | Border/auto-crop and default filter, decided before Sample ships. Later: `MonoField` with masks, a `Chain` payload shared by an image and its mask, Sample onto another image's grid for registration, EWA footprints, deferred nonlinear value operations, and a citable derivation of repeated-resampling loss. See [FIELD](FIELD.md#open-questions). |
 | Later processing extensions | Deferred | Pixel math, general filtering, gain fields, registration and multi-frame denoise/HDR/super-resolution/stitching. Add payloads with consumers. |
 | Chart calibration | Deferred | Fit reusable transforms from separate chart images; see [DESIGN](DESIGN.md). |
 | Camera color / other CFAs | Deferred | Calibration beyond matrix/as-shot WB; X-Trans and other non-Bayer inputs. |
 | Windows RAW paths | Open | Use LibRaw's wide-path API. |
 | Drop the wgpu fork | Deferred | Upgrade when a compatible release supports passthrough; see [THIRD_PARTY](../THIRD_PARTY.md). |
-| CLI | Deferred | Template parameters, overwrite/collision policy and partial failures. |
+| CLI | Deferred | Loading GUI-saved templates that contain view kinds; template parameters, overwrite/collision policy and partial failures. |
 | Project-relative paths | Open | Resolve against the project location alongside CLI work. |
 | Save/close protection | Deferred | Failure-safe saves/exports, confirmation when closing the app with unsaved edits (New and Open ask) and in-flight export handling. |
 | File changes | Idea | Detect changed RAW and ICC files; nodes assume them unchanged until chosen again. |

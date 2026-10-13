@@ -1,54 +1,46 @@
-//! The core starting pipeline, laid out with the editor's universal views.
-use super::{preview, scopes};
-use crate::model::{Graph, Project};
-use serde_json::json;
+//! Built-in templates: `.drip-template` files from the repository's
+//! `templates/`, embedded in the binary and listed by hand. They load through
+//! the same path as template files a user opens.
+use crate::model::Project;
 
-pub fn raw_to_tiff() -> Project {
-    let (mut dag, pipeline) =
-        drip::node::templates::raw_to_tiff().expect("valid built-in pipeline");
-    let views = [
-        preview::observe::add(&mut dag, Default::default()).map(|v| v.image),
-        scopes::histogram::observe::add(&mut dag, Default::default()).map(|v| v.image),
-        scopes::waveform::observe::add(&mut dag, Default::default()).map(|v| v.image),
-        scopes::vectorscope::observe::add(&mut dag, ()).map(|v| v.image),
-    ];
-    let views = views.map(|view| view.expect("registered view"));
-    for view in views {
-        dag.connect(pipeline.sigmoid.output, view).expect("views accept rendered RGB");
+pub struct Template {
+    pub name: &'static str,
+    text: &'static str,
+}
+
+/// Every built-in template, in menu order. The first is what New creates.
+pub static TEMPLATES: &[Template] = &[Template {
+    name: "Neutral restore",
+    text: include_str!("../../../templates/neutral-restore.drip-template"),
+}];
+
+impl Template {
+    pub fn project(&self) -> drip::Result<Project> {
+        Project::from_json(self.text)
     }
-    let mut graph = Graph::from_dag(dag).expect("registered built-in nodes");
-    // Align views on the top edge, stack histogram/waveform in one column,
-    // and stagger processing through Orientation to separate metadata branches.
-    // Exposure/Sigmoid align with Orientation; RAW and TIFF sit below the chain.
-    let layout = [
-        (pipeline.raw.node, json!({"pos": [0.0, 800.0]})),
-        (pipeline.gains.node, json!({"pos": [240.0, 550.0]})),
-        (pipeline.highlights.node, json!({"pos": [480.0, 565.0]})),
-        (pipeline.demosaic.node, json!({"pos": [720.0, 600.0]})),
-        (pipeline.color.node, json!({"pos": [960.0, 635.0]})),
-        (pipeline.adaptation.node, json!({"pos": [1200.0, 670.0]})),
-        (pipeline.orientation.node, json!({"pos": [1440.0, 720.0]})),
-        (pipeline.exposure.node, json!({"pos": [1680.0, 720.0]})),
-        (pipeline.sigmoid.node, json!({"pos": [1920.0, 720.0]})),
-        (pipeline.export.node, json!({"pos": [1920.0, 900.0], "size": null})),
-        (views[0].node(), json!({"pos": [240.0, 0.0], "size": [672, 440]})),
-        (views[1].node(), json!({"pos": [1200.0, 0.0], "size": [320, 240]})),
-        (views[2].node(), json!({"pos": [1200.0, 320.0], "size": [320, 240]})),
-        (views[3].node(), json!({"pos": [1680.0, 0.0], "size": [320, 320]})),
-    ];
-    for (id, ui) in layout {
-        graph.set_ui(id, ui).unwrap();
-    }
-    Project { graph, ui: json!(null) }
+}
+
+/// The project New creates.
+pub fn default_project() -> Project {
+    TEMPLATES[0].project().expect("built-in templates load")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn built_in_templates_load_as_saved() {
+        for template in TEMPLATES {
+            let project = template.project().unwrap();
+            assert_eq!(project.to_json().unwrap(), template.text, "{} is stale", template.name);
+        }
+    }
 
     #[test]
     fn raw_adjustments_are_shared_by_views_and_export_and_survive_reopening() {
-        let mut project = raw_to_tiff();
+        let mut project = default_project();
         let raw = project.graph.find("Bayer RAW").unwrap();
         let orientation = project.graph.find("Orientation").unwrap();
         let color = project.graph.find("Camera RGB to color RGB").unwrap();

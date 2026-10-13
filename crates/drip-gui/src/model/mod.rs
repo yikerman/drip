@@ -42,17 +42,6 @@ impl Node {
     }
 }
 impl Graph {
-    pub fn from_dag(dag: Dag) -> Result<Self> {
-        let mut graph = Self { dag, ..Self::default() };
-        let ids: Vec<_> = graph.dag.nodes().map(|(id, _)| id).collect();
-        for id in ids {
-            let kind = crate::registry::REGISTRY
-                .kind(graph.dag.node(id)?.kind().id)
-                .ok_or_else(|| GraphError::Graph("unregistered editor node".into()))?;
-            graph.initialize_state(id, kind);
-        }
-        Ok(graph)
-    }
     pub fn kind(&self, id: NodeId) -> Option<&'static Kind> {
         self.dag.node(id).ok().map(|node| node.kind())
     }

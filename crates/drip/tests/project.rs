@@ -7,6 +7,49 @@ use serde_json::json;
 fn registry() -> Registry {
     Registry::new(&[NODES])
 }
+
+/// Handles a test edits in the RAW pipeline of the built-in Neutral restore template.
+struct RawPipeline {
+    raw: node::raw::Ports,
+    demosaic: node::rcd::Ports,
+    orientation: node::orientation::Ports,
+}
+
+/// The processing chain of `templates/neutral-restore.drip-template`, without
+/// its GUI views, for core tests that need a complete RAW pipeline.
+fn raw_pipeline() -> drip::Result<(drip::graph::Dag, RawPipeline)> {
+    let mut dag = drip::graph::Dag::new();
+    let raw = node::raw::add(&mut dag, Default::default())?;
+    let (mosaic, metadata) = (raw.mosaic, raw.metadata);
+    let gains = node::bayer_gains::add(&mut dag, ())?;
+    let highlights = node::highlights::reconstruct::add(&mut dag, Default::default())?;
+    let demosaic = node::rcd::add(&mut dag, ())?;
+    let color = node::camera_to_rgb::add(&mut dag, ())?;
+    let adaptation = node::chromatic_adaptation::add(&mut dag, Default::default())?;
+    let orientation = node::orientation::add(&mut dag, Default::default())?;
+    let exposure = node::exposure::add(&mut dag, Default::default())?;
+    let sigmoid = node::sigmoid::apply::add(&mut dag, Default::default())?;
+    let export = node::export::tiff::add(&mut dag, Default::default())?;
+    dag.edit(|edit| {
+        edit.connect(mosaic, gains.image)?;
+        edit.connect(metadata, gains.metadata)?;
+        edit.connect(gains.levels, highlights.levels)?;
+        edit.connect(gains.output, highlights.image)?;
+        edit.connect(highlights.output, demosaic.image)?;
+        edit.connect(demosaic.output, color.image)?;
+        edit.connect(metadata, color.metadata)?;
+        edit.connect(color.output, adaptation.image)?;
+        edit.connect(metadata, adaptation.metadata)?;
+        edit.connect(adaptation.output, orientation.image)?;
+        edit.connect(metadata, orientation.metadata)?;
+        edit.connect(orientation.output, exposure.image)?;
+        edit.connect(exposure.output, sigmoid.image)?;
+        edit.connect(sigmoid.output, export.image)?;
+        edit.connect(metadata, export.metadata)?;
+        Ok(())
+    })?;
+    Ok((dag, RawPipeline { raw, demosaic, orientation }))
+}
 #[test]
 fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     let mut p = Project::default();
@@ -94,7 +137,7 @@ fn tiff_profile_extent_and_pixels_survive_encoding() {
 fn missing_raw_preserves_editable_parameters_and_reports_load_error() {
     let path = std::path::Path::new("/tmp/drip-deliberately-missing-raw-source.nef");
     assert!(!path.exists());
-    let (mut dag, _) = drip::node::templates::raw_to_tiff().unwrap();
+    let (mut dag, _) = raw_pipeline().unwrap();
     let raw = dag.nodes().find(|(_, n)| n.kind().id == "bayer-raw").unwrap().0;
     dag.set_parameters(raw, json!({ "path": path })).unwrap();
     let text = Project { dag, ..Default::default() }.to_json().unwrap();
@@ -154,7 +197,7 @@ fn edits_and_project_open_do_not_depend_on_loaded_sources() {
         .join("../../fixtures/raw/pixls/nikon-d70s.nef");
     let raw = json!({"path":fixture});
     for load_first in [false, true] {
-        let (mut dag, t) = node::templates::raw_to_tiff().unwrap();
+        let (mut dag, t) = raw_pipeline().unwrap();
         if load_first {
             dag.set_parameters(t.raw.node, raw.clone()).unwrap();
         }

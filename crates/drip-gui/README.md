@@ -18,6 +18,8 @@ The non-trivial files outside `node_ui/`:
 - `model/`: `Graph`, the DAG plus names, template inputs and layout, and its
   project persistence.
 - `registry.rs`: the hand-maintained `VIEWS`, `REGISTRY` and `BINDINGS`.
+- `templates.rs`: built-in templates, the repository's `templates/*.drip-template`
+  files embedded in the binary and listed by hand.
 - `worker.rs`: the background queue for previews and node actions.
 - `parent.rs`: pop-outs as child windows of the main window.
 - `render/`: worker-prepared node drawing, linear Rec.2020 images and

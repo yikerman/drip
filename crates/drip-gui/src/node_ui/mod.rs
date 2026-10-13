@@ -148,4 +148,3 @@ pub fn fitted(ctx: &egui::Context) -> Option<Vec2> {
 }
 
 pub mod data;
-pub mod templates;

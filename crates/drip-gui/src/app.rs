@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::history::History;
 use crate::model::NodeId;
 use crate::model::Project;
-use crate::node_ui::templates;
+use crate::templates;
 use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
 
 use crate::editing::{Edit, Frame, NodeCx, Report};
@@ -45,7 +45,7 @@ pub struct App {
     redraw: bool,
     /// A command that replaces the project, waiting until unsaved edits are
     /// saved or discarded.
-    replacing: Option<fn(&mut App)>,
+    replacing: Option<commands::Replace>,
     history: History,
     /// The window whose pointer gesture made edits not yet in the history;
     /// `Some(None)` is the main window.
@@ -75,7 +75,7 @@ impl App {
         wake: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
-        let project = templates::raw_to_tiff();
+        let project = templates::default_project();
         let mut app = App {
             history: History::new(project.graph.clone()),
             project,
@@ -305,6 +305,18 @@ impl App {
                     self.invoke(command);
                 }
             }
+            ui.add_enabled_ui(self.idle(), |ui| {
+                ui.menu_button("New from template", |ui| {
+                    for template in templates::TEMPLATES {
+                        if ui.button(template.name).clicked() {
+                            self.replace(Box::new(|app: &mut App| app.new_from(template)));
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .tip("Built-in templates. Open… also opens .drip-template files.");
+            });
             ui.separator();
             if ui.button("Add node…").tip("Space over the canvas").clicked() {
                 self.editor.add_node();

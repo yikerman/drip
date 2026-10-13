@@ -353,9 +353,19 @@ Settled with the user on 2026-10-11 after a review against
   Every test harness installs the fonts, so text is measured as shipped.
 - **Decided:** Inspector help joins Rustdoc source wraps and keeps paragraphs;
   reflow belongs to presentation.
-- **Decided:** The default RAW template uses a landscape layout: views share a
-  top edge, processing staggers down through Orientation, RAW and TIFF sit at
-  the bottom corners.
+- **Decided (2026-10-12):** Built-in templates are ordinary `.drip-template`
+  files in the repository's `templates/`, embedded in the GUI with
+  `include_str!` and listed by hand in `templates.rs`; they load through the
+  same path as a template a user opens. New creates the first (Neutral
+  restore); **New from template** lists all; **Open…** opens template files.
+  A test requires each file to equal its own re-serialization, so a schema or
+  format change regenerates them; the files carry the crate's major version
+  and are not migrated. They contain GUI view kinds, so a headless frontend
+  cannot load them as they are. Templates are not built in Rust: the core
+  keeps only a test fixture of the RAW chain.
+- **Decided:** Neutral restore uses a landscape layout: views share a top edge,
+  processing staggers down through Orientation, RAW and TIFF sit at the bottom
+  corners.
 - **Tentative:** Rounded orthogonal wires could help backward links; routing
   around nodes needs obstacle-aware paths. No router chosen.
 
