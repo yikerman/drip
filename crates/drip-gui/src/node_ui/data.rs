@@ -22,9 +22,6 @@ impl HostImage {
     /// on the device; `requested_scale` is the preview request.
     pub fn new<R>(image: &Read<'_, Rgb, R>, requested_scale: u32) -> Result<Self> {
         let lattice = Rgb::lattice(image.desc);
-        let step: [f32; 2] =
-            std::array::from_fn(|a| lattice.full[a] as f32 / lattice.extent[a] as f32);
-        let corner = |samples: [u32; 2]| std::array::from_fn(|a| samples[a] as f32 * step[a]);
         Ok(Self {
             width: image.desc.extent.width as usize,
             height: image.desc.extent.height as usize,
@@ -33,7 +30,7 @@ impl HostImage {
             pixels: image.data.host()?.clone(),
             plane: Placement {
                 full: lattice.full.map(|v| v as f32),
-                covers: [corner(lattice.window.origin), corner(lattice.window.end())],
+                covers: lattice.covered(lattice.window).map(|corner| corner.map(|v| v as f32)),
             },
         })
     }

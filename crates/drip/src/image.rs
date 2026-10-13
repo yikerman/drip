@@ -411,11 +411,11 @@ fn bytes<P: MapPayload>(desc: &Description) -> usize {
 
 fn reduce<P: MapPayload>(image: &Image, scale: u32) -> Result<Image> {
     let lattice = lattice::<P>(&image.desc);
-    let reduced = lattice.full.map(|side| side.div_ceil(scale));
-    if (0..2).all(|axis| lattice.extent[axis] <= reduced[axis]) {
+    let reduced = Lattice::reduced(lattice.full, scale);
+    if (0..2).all(|axis| lattice.extent[axis] <= reduced.extent[axis]) {
         return Ok(image.clone());
     }
-    let desc = P::on(downcast(&image.desc), Lattice::whole(reduced, lattice.full));
+    let desc = P::on(downcast(&image.desc), reduced);
     image.resample::<P>(&body::BOX, Arc::new(desc))
 }
 

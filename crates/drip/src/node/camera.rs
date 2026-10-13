@@ -8,10 +8,8 @@
 //! through the same matrix for its source white ([`as_shot_white`]).
 use crate::{
     Error, Result,
-    node::{
-        color::{self, Mat3},
-        data::BayerPhase,
-    },
+    body::matrix::{Mat3, apply, to_f64},
+    node::{color, data::BayerPhase},
 };
 use drip_raw::{Calibration, Metadata};
 
@@ -90,9 +88,9 @@ pub fn site_levels(m: &Metadata) -> Result<[f32; 4]> {
 /// under the reference white maps to RGB white. Unbalanced responses use unit
 /// balance.
 pub fn matrix(m: &Metadata, balance: Option<[f32; 4]>) -> Result<Mat3> {
-    let xyz_to_cam = color::to_f64(&std::array::from_fn(|i| m.calibration.xyz_to_cam[i]));
+    let xyz_to_cam = to_f64(&std::array::from_fn(|i| m.calibration.xyz_to_cam[i]));
     let rgb_to_xyz = color::rgb_to_xyz(color::REC2020, color::D65);
-    let reference = color::apply(&xyz_to_cam, color::apply(&rgb_to_xyz, [1.; 3]));
+    let reference = apply(&xyz_to_cam, apply(&rgb_to_xyz, [1.; 3]));
     let balance = balance.unwrap_or([1.; 4]);
     let unusable = || Error::Contract("capture has no usable camera color matrix".into());
     if reference.iter().any(|v| !v.is_finite() || *v <= 0.0) {
@@ -114,7 +112,7 @@ pub fn matrix(m: &Metadata, balance: Option<[f32; 4]>) -> Result<Mat3> {
 pub fn as_shot_white(m: &Metadata) -> Result<[f64; 2]> {
     let matrix = matrix(m, Some(as_shot_balance(m)?))?;
     let rgb_to_xyz = color::rgb_to_xyz(color::REC2020, color::D65);
-    let white = color::apply(&rgb_to_xyz, color::apply(&matrix, [1.; 3]));
+    let white = apply(&rgb_to_xyz, apply(&matrix, [1.; 3]));
     let sum: f64 = white.iter().sum();
     if !white[1].is_finite() || white[1] <= 0.0 || !sum.is_finite() || sum <= 0.0 {
         return Err(Error::Contract("camera matrix has no usable as-shot white".into()));
@@ -137,7 +135,7 @@ mod tests {
         for balance in [[1., 1., 1., 1.], [2., 1., 4., 1.], [2., 1., 1.5, 1.]] {
             let balanced: [f64; 3] = std::array::from_fn(|c| native[c] * f64::from(balance[c]));
             let matrix = matrix(&m, Some(balance)).unwrap();
-            let recovered = color::apply(&rgb_to_xyz, color::apply(&matrix, balanced));
+            let recovered = apply(&rgb_to_xyz, apply(&matrix, balanced));
             for (actual, expected) in recovered.into_iter().zip(native) {
                 assert!((actual - expected).abs() < 1e-12);
             }

@@ -4,12 +4,11 @@
 //! the corners. Design: `agent-docs/FIELD.md`, "Perspective Transform".
 use crate::{
     Error, Result,
-    body::Warp,
-    node::{
-        color::{self, Mat3},
-        data::*,
-        filter::Filter,
+    body::{
+        Warp,
+        matrix::{self, Mat3},
     },
+    node::{data::*, filter::Filter},
     ports::*,
     registry::tag,
     runtime::GlobalContext,
@@ -163,7 +162,7 @@ pub fn frame(p: &Settings, input: [f64; 2]) -> Result<Frame> {
     let square = square_to_quad(q)
         .ok_or_else(|| Error::Contract("three corners on one line define no transform".into()))?;
     let unit = [[1.0 / width, 0.0, 0.0], [0.0, 1.0 / height, 0.0], [0.0, 0.0, 1.0]];
-    Ok(Frame { map: color::mul(&square, &unit), size: [width, height] })
+    Ok(Frame { map: matrix::mul(&square, &unit), size: [width, height] })
 }
 
 /// The full-detail output extent: the frame rounded to whole pixels.
@@ -199,7 +198,7 @@ pub fn transform(p: &Settings, image: Point<'_, Rgb>, output: Point<'_, Rgb>) ->
     // The output plane spans the rounded extent, so scale it onto the frame.
     let full = &output.desc.full;
     let [sx, sy] = [frame.size[0] / f64::from(full.width), frame.size[1] / f64::from(full.height)];
-    let map = color::mul(&frame.map, &[[sx, 0.0, 0.0], [0.0, sy, 0.0], [0.0, 0.0, 1.0]]);
+    let map = matrix::mul(&frame.map, &[[sx, 0.0, 0.0], [0.0, sy, 0.0], [0.0, 0.0, 1.0]]);
     Ok(Warp::filtered([map; 3], Filter::Lanczos3.body()))
 }
 
@@ -218,12 +217,12 @@ pub enum Fit {
 /// since corners of the new frame no longer average to it.
 pub fn fit(p: &Settings, input: [f64; 2], mode: Fit) -> Option<Settings> {
     let Frame { map, size } = frame(p, input).ok()?;
-    let inverse = color::inverse(&map);
+    let inverse = matrix::inverse(&map);
     let [w, h] = input;
     let corners = [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]];
     let mut region = [[0.0; 2]; 4];
     for (corner, point) in corners.iter().zip(&mut region) {
-        let [x, y, z] = color::apply(&inverse, [corner[0], corner[1], 1.0]);
+        let [x, y, z] = matrix::apply(&inverse, [corner[0], corner[1], 1.0]);
         // NaN too: a point on or beyond the vanishing line has no image.
         if z.is_nan() || z <= 0.0 {
             return None;
@@ -238,7 +237,7 @@ pub fn fit(p: &Settings, input: [f64; 2], mode: Fit) -> Option<Settings> {
     let rect = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]
         .map(|[dx, dy]| [cx + dx * s * aspect / 2.0, cy + dy * s / 2.0]);
     let quad = rect.map(|[x, y]| {
-        let [x, y, z] = color::apply(&map, [x, y, 1.0]);
+        let [x, y, z] = matrix::apply(&map, [x, y, 1.0]);
         [x / z / w, y / z / h]
     });
     Some(p.with_quad(quad, Aspect::Ratio(Ratio { ratio: aspect })))
@@ -277,11 +276,11 @@ fn inscribed(region: &[[f64; 2]; 4], aspect: f64) -> Option<[f64; 3]> {
         for j in i + 1..constraints.len() {
             for l in j + 1..constraints.len() {
                 let rows = [constraints[i].0, constraints[j].0, constraints[l].0];
-                if color::determinant(&rows).abs() < 1e-12 * scale * scale {
+                if matrix::determinant(&rows).abs() < 1e-12 * scale * scale {
                     continue;
                 }
-                let x = color::apply(
-                    &color::inverse(&rows),
+                let x = matrix::apply(
+                    &matrix::inverse(&rows),
                     [constraints[i].1, constraints[j].1, constraints[l].1],
                 );
                 if feasible(x) && best.is_none_or(|b| x[2] > b[2]) {
@@ -343,9 +342,8 @@ mod tests {
         [400.0, 300.0]
     }
 
-    fn project(m: &Mat3, [x, y]: [f64; 2]) -> [f64; 2] {
-        let [x, y, z] = color::apply(m, [x, y, 1.0]);
-        [x / z, y / z]
+    fn project(m: &Mat3, p: [f64; 2]) -> [f64; 2] {
+        matrix::project(m, p).expect("the point lies before the horizon")
     }
 
     fn close(a: [f64; 2], b: [f64; 2]) -> bool {

@@ -176,10 +176,18 @@ impl RuntimeContext {
     }
 }
 
+/// Workgroups of 256 lanes, one lane per element.
 pub(crate) fn dispatch_dims(elements: usize) -> (CubeCount, CubeDim) {
-    let groups = elements.div_ceil(256);
+    let dim = CubeDim::new_1d(256);
+    (grid(elements, dim), dim)
+}
+
+/// Workgroups of `dim` that cover `len` lanes, split over two axes, since
+/// one axis takes at most 65 535 workgroups.
+pub(crate) fn grid(len: usize, dim: CubeDim) -> CubeCount {
+    let groups = len.div_ceil(dim.num_elems() as usize);
     let x = groups.min(65535);
-    (CubeCount::Static(x as u32, groups.div_ceil(x) as u32, 1), CubeDim::new_1d(256))
+    CubeCount::Static(x as u32, groups.div_ceil(x) as u32, 1)
 }
 
 /// Dispatch and device allocation supplied by evaluation. Nodes use the client

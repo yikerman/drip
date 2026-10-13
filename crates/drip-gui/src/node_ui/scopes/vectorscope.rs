@@ -9,7 +9,13 @@ use super::{SIZE, Scope, ScopeAxes, scope};
 use crate::node_ui::{GuiNode, Prepare};
 use drip::node::color::{self, D65, REC2020};
 use drip::registry::tag;
-use drip::{Result, body::BinsBody, node::data::*, ports::*, runtime::GlobalContext};
+use drip::{
+    Result,
+    body::{BinsBody, matrix},
+    node::data::*,
+    ports::*,
+    runtime::GlobalContext,
+};
 #[cfg(test)]
 use rayon::prelude::*;
 use std::sync::Arc;
@@ -98,7 +104,7 @@ impl GuiNode for observe::Definition {
 
 pub fn vectorscope(counts: &Read<'_, Counts>) -> Result<Arc<Scope>> {
     let matrix = color::rgb_to_xyz(REC2020, D65);
-    let primaries = color::transpose(matrix).map(|primary| position(uv(primary)));
+    let primaries = matrix::transpose(matrix).map(|primary| position(uv(primary)));
     Ok(scope(
         super::per_bin(counts)?,
         ScopeAxes::Vectorscope { primaries },
@@ -131,14 +137,14 @@ pub fn vectorscope_xyz([x, y]: [f32; 2]) -> [f64; 3] {
 }
 
 #[cfg(test)]
-fn vector_counts(pixels: &[[f32; 3]], matrix: &color::Mat3) -> Vec<[u32; 3]> {
+fn vector_counts(pixels: &[[f32; 3]], matrix: &matrix::Mat3) -> Vec<[u32; 3]> {
     pixels
         .par_iter()
         .with_min_len(16384)
         .fold(
             || vec![[0u32; 3]; SIZE * SIZE],
             |mut counts, pixel| {
-                let xyz = color::apply(matrix, pixel.map(|v| f64::from(v.max(0.0))));
+                let xyz = matrix::apply(matrix, pixel.map(|v| f64::from(v.max(0.0))));
                 // Black has no chromaticity, so it must not create a neutral spike.
                 if xyz[1] > 0.0 {
                     let [x, y] = position(uv(xyz)).map(|v| (v * SIZE as f32) as usize);
@@ -248,13 +254,13 @@ mod tests {
     #[test]
     fn chromaticity_matches_cie_coordinates_and_is_exposure_independent() {
         let matrix = color::rgb_to_xyz(REC2020, D65);
-        let white = uv(color::apply(&matrix, [1.0; 3]));
+        let white = uv(matrix::apply(&matrix, [1.0; 3]));
         assert!((white[0] - 0.197830).abs() < 1e-6);
         assert!((white[1] - 0.468320).abs() < 1e-6);
         assert_eq!(position(white), [0.5; 2]);
-        let red = uv(color::apply(&matrix, [1.0, 0.0, 0.0]));
+        let red = uv(matrix::apply(&matrix, [1.0, 0.0, 0.0]));
         assert!((red[0] - 0.556604).abs() < 1e-6);
         assert!((red[1] - 0.516509).abs() < 1e-6);
-        assert_eq!(red, uv(color::apply(&matrix, [4.0, 0.0, 0.0])));
+        assert_eq!(red, uv(matrix::apply(&matrix, [4.0, 0.0, 0.0])));
     }
 }

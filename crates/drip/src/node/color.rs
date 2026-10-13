@@ -1,6 +1,5 @@
 //! Colorimetry shared by nodes and export.
-
-pub type Mat3 = [[f64; 3]; 3];
+use crate::body::matrix::{Mat3, apply, determinant, inverse, mul, transpose};
 
 /// CIE 1931 xy chromaticity of D65 \[1\].
 pub const D65: [f64; 2] = [0.3127, 0.3290];
@@ -50,39 +49,4 @@ pub fn camera_to_rgb(xyz_to_cam: &Mat3, rgb_to_xyz: &Mat3) -> Option<Mat3> {
     let usable =
         determinant(&rgb_to_cam).abs() > 1e-6 && rgb_to_cam.iter().flatten().all(|v| v.is_finite());
     usable.then(|| inverse(&rgb_to_cam))
-}
-
-pub fn mul(a: &Mat3, b: &Mat3) -> Mat3 {
-    std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
-}
-
-pub fn apply(m: &Mat3, v: [f64; 3]) -> [f64; 3] {
-    m.map(|row| row[0] * v[0] + row[1] * v[1] + row[2] * v[2])
-}
-
-pub fn transpose(m: Mat3) -> Mat3 {
-    std::array::from_fn(|i| std::array::from_fn(|j| m[j][i]))
-}
-
-fn cofactor(m: &Mat3, i: usize, j: usize) -> f64 {
-    let (r0, r1, c0, c1) = ((i + 1) % 3, (i + 2) % 3, (j + 1) % 3, (j + 2) % 3);
-    m[r0][c0] * m[r1][c1] - m[r0][c1] * m[r1][c0]
-}
-
-pub fn determinant(m: &Mat3) -> f64 {
-    (0..3).map(|j| m[0][j] * cofactor(m, 0, j)).sum()
-}
-
-/// Inverse by the adjugate; callers only invert well-conditioned color matrices.
-pub fn inverse(m: &Mat3) -> Mat3 {
-    let det = determinant(m);
-    std::array::from_fn(|i| std::array::from_fn(|j| cofactor(m, j, i) / det))
-}
-
-pub fn to_f32(m: &Mat3) -> [[f32; 3]; 3] {
-    m.map(|row| row.map(|v| v as f32))
-}
-
-pub fn to_f64(m: &[[f32; 3]; 3]) -> Mat3 {
-    m.map(|row| row.map(f64::from))
 }

@@ -1,6 +1,7 @@
 use crate::{
     Error, Result,
-    node::{camera, color, data::*},
+    body::matrix,
+    node::{camera, data::*},
     ports::*,
     registry::tag,
     runtime::GlobalContext,
@@ -32,6 +33,6 @@ pub fn compute(
     metadata: Read<'_, CaptureMetadata>,
     _output: Point<'_, Rgb, Rec2020>,
 ) -> Result<[f32; 9]> {
-    let matrix = camera::matrix(metadata.data.host()?, image.desc.response()?.balance)?;
-    Ok(bytemuck::cast(color::to_f32(&matrix)))
+    let to_rgb = camera::matrix(metadata.data.host()?, image.desc.response()?.balance)?;
+    Ok(bytemuck::cast(matrix::to_f32(&to_rgb)))
 }

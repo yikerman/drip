@@ -1,5 +1,6 @@
 use drip::{
     Error, Result,
+    body::matrix,
     eval::{Evaluator, InputValues, Policy},
     graph::Dag,
     image::Description,
@@ -18,7 +19,7 @@ fn metadata(model: &str) -> Arc<drip_raw::Metadata> {
     let mut m =
         drip_raw::Metadata { make: "Fixture".into(), model: model.into(), ..Default::default() };
     let cam_from_xyz =
-        color::to_f32(&color::inverse(&color::rgb_to_xyz(color::REC2020, color::D65)));
+        matrix::to_f32(&matrix::inverse(&color::rgb_to_xyz(color::REC2020, color::D65)));
     m.calibration.xyz_to_cam[..3].copy_from_slice(&cam_from_xyz);
     Arc::new(m)
 }

@@ -1,12 +1,14 @@
 //! Resample and warps against an independent f64 resampler.
 use drip::{
-    body::Warp,
+    body::{
+        Warp,
+        matrix::{self, Mat3},
+    },
     eval::Evaluator,
     graph::Dag,
     image::{Description, Image, Raster},
     node::{
         self,
-        color::{self, Mat3},
         data::*,
         filter::Filter,
         perspective,
@@ -82,7 +84,7 @@ fn resample_warped(
     let source = Raster::<Rgb>::from_host(warped.source.clone(), pixels.into()).unwrap();
     let [x, y] = warped.origin;
     let shift = [[1.0, 0.0, x], [0.0, 1.0, y], [0.0, 0.0, 1.0]];
-    let warp = Warp::filtered(warped.maps.map(|m| color::mul(&m, &shift)), p.filter.body());
+    let warp = Warp::filtered(warped.maps.map(|m| matrix::mul(&m, &shift)), p.filter.body());
     let extent = |scale: f64| {
         let [w, h] = warped.size.map(|v| (v * scale).round() as u32);
         let desc: Description = Arc::new(RgbDesc::new(

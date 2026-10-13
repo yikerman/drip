@@ -129,7 +129,7 @@ mod tests {
     #[cfg(feature = "cpu")]
     #[test]
     fn raw_neutral_survives_as_shot_to_reference_and_cat16() {
-        use crate::{eval::Evaluator, node, node::color, runtime::RuntimeContext};
+        use crate::{body::matrix, eval::Evaluator, node, node::color, runtime::RuntimeContext};
         let mut r = raw();
         r.metadata.sensor.width = 64;
         r.metadata.sensor.height = 64;
@@ -148,9 +148,9 @@ mod tests {
         let (desc, mosaic) = normalize(&r).unwrap();
         let facts = Arc::new(r.metadata);
         let balanced = camera::matrix(&facts, camera::as_shot_balance(&facts).ok());
-        let mapped = color::apply(&balanced.unwrap(), [0.5; 3]);
+        let mapped = matrix::apply(&balanced.unwrap(), [0.5; 3]);
         assert!((mapped[0] - mapped[1]).abs() > 0.01); // WB is deferred to CAT16.
-        let expected_y = color::apply(&color::rgb_to_xyz(color::REC2020, color::D65), mapped)[1];
+        let expected_y = matrix::apply(&color::rgb_to_xyz(color::REC2020, color::D65), mapped)[1];
         let mut dag = crate::graph::Dag::new();
         let mosaic = node::source::<Bayer>(&mut dag, desc, mosaic).unwrap();
         let metadata = node::source::<CaptureMetadata>(&mut dag, facts.clone(), facts).unwrap();

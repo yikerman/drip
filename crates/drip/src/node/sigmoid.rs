@@ -13,7 +13,8 @@
 
 use crate::node::color::{D65, REC2020};
 use crate::{
-    Error, Result, node::color, node::data::*, ports::*, registry::tag, runtime::GlobalContext,
+    Error, Result, body::matrix, node::color, node::data::*, ports::*, registry::tag,
+    runtime::GlobalContext,
 };
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
@@ -61,14 +62,14 @@ fn prepare_values(p: &Settings) -> [f32; 22] {
     let film = f64::from(p.contrast) * (1.0 - grey) / (paper * (1.0 - grey_root));
     let log_exposure = film * grey.ln() + (1.0 / grey_root - 1.0).ln();
     let base = color::rgb_to_xyz(REC2020, D65);
-    let to_base = color::inverse(&base);
-    let inset = color::mul(&to_base, &color::rgb_to_xyz(primaries([0.9, 0.9, 0.85]), D65));
+    let to_base = matrix::inverse(&base);
+    let inset = matrix::mul(&to_base, &color::rgb_to_xyz(primaries([0.9, 0.9, 0.85]), D65));
     let outset =
-        color::inverse(&color::mul(&to_base, &color::rgb_to_xyz(primaries([1.0; 3]), D65)));
+        matrix::inverse(&matrix::mul(&to_base, &color::rgb_to_xyz(primaries([1.0; 3]), D65)));
     let mut result = [0.; 22];
     result[..4].copy_from_slice(&[film as f32, paper as f32, log_exposure as f32, p.preserve_hue]);
-    result[4..13].copy_from_slice(color::to_f32(&inset).as_flattened());
-    result[13..].copy_from_slice(color::to_f32(&outset).as_flattened());
+    result[4..13].copy_from_slice(matrix::to_f32(&inset).as_flattened());
+    result[13..].copy_from_slice(matrix::to_f32(&outset).as_flattened());
     result
 }
 

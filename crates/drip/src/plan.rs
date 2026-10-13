@@ -66,10 +66,11 @@ use crate::{
     body::{
         Bin, BinsBody, FilterBody, MapBody, MapPayload, Pixel, Position, Projective, ReduceBody,
         StencilBody, Warp, Window,
+        matrix::{IDENTITY, mul},
     },
     image::Raster,
     lattice::{Lattice, Rect},
-    runtime::{KernelContext, dispatch_dims},
+    runtime::{KernelContext, dispatch_dims, grid},
 };
 use cubecl::prelude::*;
 use std::sync::Arc;
@@ -78,8 +79,6 @@ use std::sync::Arc;
 /// clamped, bounding taps per output sample. Stronger reductions alias. A
 /// prefiltered pyramid or EWA would lift the bound.
 pub const MAX_FOOTPRINT: f32 = 16.0;
-
-const IDENTITY: Projective = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 /// Values one lane of a fold or combine pass reads, so a pass takes the
 /// count down by this factor.
@@ -464,11 +463,10 @@ struct Reach {
 }
 impl Reach {
     fn of(radius: f32, lattice: Lattice) -> Self {
-        let rate = |a: usize| f64::from(lattice.extent[a]) / f64::from(lattice.full[a]);
-        let span = |a: usize| f64::from(radius) * rate(a);
+        let span = |a: usize| f64::from(radius) * lattice.rate(a);
         Self {
             samples: [0, 1].map(|a| (span(a).ceil() as u32).max(1)),
-            rate: [0, 1].map(|a| rate(a) as f32),
+            rate: [0, 1].map(|a| lattice.rate(a) as f32),
             approximates: (0..2).any(|a| lattice.extent[a] < lattice.full[a] && span(a) < 1.0),
         }
     }
@@ -499,11 +497,9 @@ pub(crate) fn reindexes(warp: &Warp, from: Lattice, to: Lattice) -> Result<bool>
 /// conversions into the map keeps the kernel to one projective map per
 /// channel and keeps exact maps exact in f64.
 fn index(plane: &Projective, from: Lattice, to: Lattice) -> Projective {
-    let step = |axis: usize| f64::from(to.full[axis]) / f64::from(to.extent[axis]);
-    let (sx, sy) = (step(0), step(1));
+    let (sx, sy) = (to.step(0), to.step(1));
     let to_plane = [[sx, 0.0, 0.5 * sx], [0.0, sy, 0.5 * sy], [0.0, 0.0, 1.0]];
-    let rate = |axis: usize| f64::from(from.extent[axis]) / f64::from(from.full[axis]);
-    let to_index = [[rate(0), 0.0, -0.5], [0.0, rate(1), -0.5], [0.0, 0.0, 1.0]];
+    let to_index = [[from.rate(0), 0.0, -0.5], [0.0, from.rate(1), -0.5], [0.0, 0.0, 1.0]];
     mul(&to_index, &mul(plane, &to_plane))
 }
 
@@ -571,19 +567,8 @@ fn lanes(client: &Client) -> CubeDim {
     CubeDim::new_1d(client.properties().hardware.max_units_per_cube.min(256))
 }
 
-/// Workgroups of `dim` that cover `len` lanes.
-fn grid(len: usize, dim: CubeDim) -> CubeCount {
-    let groups = len.div_ceil(dim.num_elems() as usize);
-    let x = groups.min(65535);
-    CubeCount::Static(x as u32, groups.div_ceil(x) as u32, 1)
-}
-
 fn compose(a: &[Projective; 3], b: &[Projective; 3]) -> [Projective; 3] {
     std::array::from_fn(|c| mul(&a[c], &b[c]))
-}
-
-fn mul(a: &Projective, b: &Projective) -> Projective {
-    std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
 }
 
 /// How the fused kernel reads its input, part of its CubeCL kernel identity.

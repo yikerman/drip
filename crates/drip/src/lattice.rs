@@ -21,6 +21,12 @@ impl Lattice {
         Self { extent, full, window: Rect { origin: [0; 2], extent } }
     }
 
+    /// The whole lattice of an image of `full` pixels at `scale`: one sample
+    /// per started `scale × scale` block.
+    pub fn reduced(full: [u32; 2], scale: u32) -> Self {
+        Self::whole(full.map(|side| side.div_ceil(scale)), full)
+    }
+
     /// This lattice holding `window`, which must lie inside it.
     pub fn with(self, window: Rect) -> Self {
         Self { window, ..self }
@@ -30,11 +36,21 @@ impl Lattice {
         self.window == Rect { origin: [0; 2], extent: self.extent }
     }
 
+    /// Full-detail pixels per sample along `axis`, `full / extent`.
+    pub fn step(&self, axis: usize) -> f64 {
+        f64::from(self.full[axis]) / f64::from(self.extent[axis])
+    }
+
+    /// Samples per full-detail pixel along `axis`, `extent / full`.
+    pub fn rate(&self, axis: usize) -> f64 {
+        f64::from(self.extent[axis]) / f64::from(self.full[axis])
+    }
+
     /// The samples whose cells meet `region`, a rectangle of the plane in
     /// full-detail pixels. `None` when they are none.
     pub fn cover(&self, region: Rect) -> Option<Rect> {
         let axis = |a: usize| {
-            let step = f64::from(self.full[a]) / f64::from(self.extent[a]);
+            let step = self.step(a);
             let start = (f64::from(region.origin[a]) / step).floor();
             let end = (f64::from(region.origin[a]) + f64::from(region.extent[a])) / step;
             let clamp = |v: f64| v.clamp(0.0, f64::from(self.extent[a])) as u32;
@@ -42,6 +58,14 @@ impl Lattice {
         };
         let ((x0, x1), (y0, y1)) = (axis(0), axis(1));
         (x1 > x0 && y1 > y0).then_some(Rect { origin: [x0, y0], extent: [x1 - x0, y1 - y0] })
+    }
+
+    /// The part of the plane the cells of `window` cover, from its minimum
+    /// to its maximum corner in full-detail pixels. [`cover`](Self::cover)
+    /// of it returns `window`.
+    pub fn covered(&self, window: Rect) -> [[f64; 2]; 2] {
+        let corner = |at: [u32; 2]| [0, 1].map(|a| f64::from(at[a]) * self.step(a));
+        [corner(window.origin), corner(window.end())]
     }
 }
 

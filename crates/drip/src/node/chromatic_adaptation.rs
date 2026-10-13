@@ -1,10 +1,7 @@
 use crate::{
     Error, Result,
-    node::{
-        camera,
-        color::{self, Mat3},
-        data::*,
-    },
+    body::matrix::{self, Mat3},
+    node::{camera, color, data::*},
     ports::*,
     registry::tag,
     runtime::GlobalContext,
@@ -61,15 +58,15 @@ fn xyz([x, y]: [f64; 2]) -> [f64; 3] {
 /// Full CAT16 adaptation between equal-luminance CIE 1931 xy whites.
 /// White responses must be finite and positive; image samples remain unrestricted.
 fn adaptation(source: [f64; 2], target: [f64; 2]) -> Result<Mat3> {
-    let source = color::apply(&CAT16, xyz(source));
-    let target = color::apply(&CAT16, xyz(target));
+    let source = matrix::apply(&CAT16, xyz(source));
+    let target = matrix::apply(&CAT16, xyz(target));
     if source.iter().chain(&target).any(|v| !v.is_finite() || *v <= 0.0) {
         return Err(Error::Contract(
             "CAT16 white must have finite, positive cone responses".into(),
         ));
     }
     let scaled = std::array::from_fn(|r| CAT16[r].map(|v| v * target[r] / source[r]));
-    Ok(color::mul(&color::inverse(&CAT16), &scaled))
+    Ok(matrix::mul(&matrix::inverse(&CAT16), &scaled))
 }
 
 /// Working-RGB adaptation from the source white to D65.
@@ -81,9 +78,9 @@ fn matrix(p: &Settings, metadata: Option<&drip_raw::Metadata>) -> Result<[[f32; 
         })?)?,
     };
     let rgb_to_xyz = color::rgb_to_xyz(color::REC2020, color::D65);
-    let matrix = color::to_f32(&color::mul(
-        &color::inverse(&rgb_to_xyz),
-        &color::mul(&adaptation(source, color::D65)?, &rgb_to_xyz),
+    let matrix = matrix::to_f32(&matrix::mul(
+        &matrix::inverse(&rgb_to_xyz),
+        &matrix::mul(&adaptation(source, color::D65)?, &rgb_to_xyz),
     ));
     if matrix.iter().flatten().any(|v| !v.is_finite()) {
         return Err(Error::Contract("CAT16 matrix exceeds finite f32 coefficients".into()));
@@ -156,11 +153,11 @@ mod tests {
             let forward = adaptation(source, color::D65).unwrap();
             let reverse = adaptation(color::D65, source).unwrap();
             for (actual, expected) in
-                color::apply(&forward, xyz(source)).into_iter().zip(xyz(color::D65))
+                matrix::apply(&forward, xyz(source)).into_iter().zip(xyz(color::D65))
             {
                 assert!((actual - expected).abs() < 1e-12);
             }
-            let roundtrip = color::mul(&reverse, &forward);
+            let roundtrip = matrix::mul(&reverse, &forward);
             for (r, row) in roundtrip.iter().enumerate() {
                 for (c, value) in row.iter().enumerate() {
                     assert!((value - if r == c { 1.0 } else { 0.0 }).abs() < 1e-12);

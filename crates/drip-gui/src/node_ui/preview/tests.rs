@@ -1,5 +1,6 @@
 use super::*;
 use crate::node_ui::data::Placement;
+use drip::body::matrix;
 use drip::node::color::{self, D65, REC709, REC2020};
 type Rec2020Mat = Arc<HostImage>;
 
@@ -65,14 +66,14 @@ fn softproof_bounds_the_target_gamut_and_keeps_image_geometry() {
         (shown.width, shown.height, shown.requested_scale),
         (rgb.width, rgb.height, rgb.requested_scale)
     );
-    let rec_to_srgb = color::mul(
-        &color::inverse(&color::rgb_to_xyz(REC709, D65)),
+    let rec_to_srgb = matrix::mul(
+        &matrix::inverse(&color::rgb_to_xyz(REC709, D65)),
         &color::rgb_to_xyz(REC2020, D65),
     );
-    let srgb_to_rec = color::inverse(&rec_to_srgb);
+    let srgb_to_rec = matrix::inverse(&rec_to_srgb);
     for (&input, &got) in rgb.pixels.iter().zip(shown.pixels.iter()) {
-        let bounded = color::apply(&rec_to_srgb, input.map(f64::from)).map(|v| v.clamp(0.0, 1.0));
-        close(got, color::apply(&srgb_to_rec, bounded).map(|v| v as f32));
+        let bounded = matrix::apply(&rec_to_srgb, input.map(f64::from)).map(|v| v.clamp(0.0, 1.0));
+        close(got, matrix::apply(&srgb_to_rec, bounded).map(|v| v as f32));
     }
     assert_eq!(rgb.pixels[3], [0.0, 1.0, 0.0], "source stays unchanged");
 }

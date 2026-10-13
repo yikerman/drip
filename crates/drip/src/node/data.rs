@@ -32,7 +32,8 @@ impl Extent {
     /// The samples stored of a full-detail extent at `GlobalContext::scale`:
     /// one per started `scale × scale` block.
     pub fn reduced(&self, scale: u32) -> Self {
-        Self { width: self.width.div_ceil(scale), height: self.height.div_ceil(scale) }
+        let [width, height] = Lattice::reduced([self.width, self.height], scale).extent;
+        Self { width, height }
     }
     pub fn validate(&self) -> Result<()> {
         // Kernels use 32-bit indices, including the packed RGB layout.

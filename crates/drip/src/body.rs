@@ -1,6 +1,7 @@
 //! What the deferred shapes hand the segment compiler: the `#[cube]` bodies
 //! of maps, reductions and stencils, resampling filters and warps, and the
-//! [`Pixel`] they read.
+//! [`Pixel`] they read. [`matrix`] holds the 3×3 math that warps and colour
+//! transforms share.
 //!
 //! A map, reduce, bins or stencil kind registers a `static` body, and its
 //! host function returns the body's constants. The compiler (`plan.rs`)
@@ -74,7 +75,56 @@ impl<const N: usize> Constants for [f32; N] {
 }
 
 /// A projective map of the plane on homogeneous `[x, y, 1]` columns.
-pub type Projective = [[f64; 3]; 3];
+pub type Projective = matrix::Mat3;
+
+/// 3×3 matrices in f64, row-major, for warps and colour transforms alike.
+pub mod matrix {
+    pub type Mat3 = [[f64; 3]; 3];
+
+    pub const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+    pub fn mul(a: &Mat3, b: &Mat3) -> Mat3 {
+        std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum()))
+    }
+
+    pub fn apply(m: &Mat3, v: [f64; 3]) -> [f64; 3] {
+        m.map(|row| row[0] * v[0] + row[1] * v[1] + row[2] * v[2])
+    }
+
+    /// The point `m` takes `[x, y]` to, `None` where its homogeneous `w` is
+    /// not positive, beyond the map's horizon.
+    pub fn project(m: &Mat3, [x, y]: [f64; 2]) -> Option<[f64; 2]> {
+        let [x, y, w] = apply(m, [x, y, 1.0]);
+        (w > 0.0).then(|| [x / w, y / w])
+    }
+
+    pub fn transpose(m: Mat3) -> Mat3 {
+        std::array::from_fn(|i| std::array::from_fn(|j| m[j][i]))
+    }
+
+    fn cofactor(m: &Mat3, i: usize, j: usize) -> f64 {
+        let (r0, r1, c0, c1) = ((i + 1) % 3, (i + 2) % 3, (j + 1) % 3, (j + 2) % 3);
+        m[r0][c0] * m[r1][c1] - m[r0][c1] * m[r1][c0]
+    }
+
+    pub fn determinant(m: &Mat3) -> f64 {
+        (0..3).map(|j| m[0][j] * cofactor(m, 0, j)).sum()
+    }
+
+    /// Inverse by the adjugate. Callers invert only well-conditioned matrices.
+    pub fn inverse(m: &Mat3) -> Mat3 {
+        let det = determinant(m);
+        std::array::from_fn(|i| std::array::from_fn(|j| cofactor(m, j, i) / det))
+    }
+
+    pub fn to_f32(m: &Mat3) -> [[f32; 3]; 3] {
+        m.map(|row| row.map(|v| v as f32))
+    }
+
+    pub fn to_f64(m: &[[f32; 3]; 3]) -> Mat3 {
+        m.map(|row| row.map(f64::from))
+    }
+}
 
 /// What a warp's host function returns. `maps` take the output plane to the
 /// input plane, per channel, in each description's full-detail pixels

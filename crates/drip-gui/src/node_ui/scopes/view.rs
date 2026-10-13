@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use drip::body::matrix;
 use drip::node::color::{self, D65, REC709};
 use egui::{Align2, FontId, Painter, Rect, Stroke};
 
@@ -107,7 +108,7 @@ fn histogram(painter: &Painter, rect: Rect, h: &Histogram, font: &FontId) {
 // result, so image size never determines UI-thread counting work.
 fn scope_mesh(scope: &Scope) -> egui::Mesh {
     let density = normalized_counts(&scope.counts, scope.log);
-    let xyz_to_srgb = color::inverse(&color::rgb_to_xyz(REC709, D65));
+    let xyz_to_srgb = matrix::inverse(&color::rgb_to_xyz(REC709, D65));
     let mut mesh = egui::Mesh::default();
     let size = SIZE as f32;
     for (i, count) in scope.counts.iter().enumerate() {
@@ -130,8 +131,12 @@ fn scope_mesh(scope: &Scope) -> egui::Mesh {
 // Scope colors are sRGB UI annotations: clip out-of-gamut components and
 // normalize the peak before encoding. Density scales the visible color, while
 // neutral chromaticities stay white and the plot's geometry stays unchanged.
-fn vectorscope_color(position: [f32; 2], density: f32, xyz_to_srgb: &color::Mat3) -> egui::Color32 {
-    let rgb = color::apply(xyz_to_srgb, vectorscope_xyz(position)).map(|v| v.max(0.0));
+fn vectorscope_color(
+    position: [f32; 2],
+    density: f32,
+    xyz_to_srgb: &matrix::Mat3,
+) -> egui::Color32 {
+    let rgb = matrix::apply(xyz_to_srgb, vectorscope_xyz(position)).map(|v| v.max(0.0));
     let peak = rgb.into_iter().fold(0.0, f64::max);
     let encoded = rgb.map(|v| {
         let srgb = egui::ecolor::gamma_from_linear((v / peak) as f32);
@@ -190,7 +195,7 @@ mod tests {
 
     #[test]
     fn vectorscope_colors_preserve_neutrals_primaries_and_density() {
-        let matrix = color::inverse(&color::rgb_to_xyz(REC709, D65));
+        let matrix = matrix::inverse(&color::rgb_to_xyz(REC709, D65));
         assert_eq!(vectorscope_color([0.5; 2], 1.0, &matrix), egui::Color32::WHITE);
         assert_eq!(vectorscope_color([0.5; 2], 0.25, &matrix), egui::Color32::from_gray(64));
         for (channel, [x, y]) in REC709.into_iter().enumerate() {

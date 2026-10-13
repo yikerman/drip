@@ -13,9 +13,11 @@ use crate::render::{
 };
 use crate::theme::{self, Tip};
 use drip::{
-    body::Warp,
+    body::{
+        Warp,
+        matrix::{self, IDENTITY, Mat3, project},
+    },
     node::{
-        color::{self, Mat3},
         data::{Extent, Rgb, RgbDesc},
         filter::Filter,
         perspective::{self, Aspect, Fit, Frame, Ratio, Settings},
@@ -29,7 +31,6 @@ use std::sync::Arc;
 const MAX_SIDE: u32 = 4096;
 /// Pointer distance, in points, within which a handle is grabbed.
 const GRAB: f32 = 10.0;
-const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 impl GuiNode for perspective::Definition {
     type Presentation = Prepared;
@@ -69,7 +70,7 @@ fn prepare(p: &Settings, image: &Read<'_, Rgb>, ctx: &PrepareContext) -> drip::R
         // The warp's output plane spans `full`, so place it over `plane` first.
         let [sx, sy] = [plane.size[0] / f64::from(w), plane.size[1] / f64::from(h)];
         let place = [[sx, 0.0, plane.origin[0]], [0.0, sy, plane.origin[1]], [0.0, 0.0, 1.0]];
-        let warp = Warp::filtered([color::mul(map, &place); 3], Filter::Lanczos3.body());
+        let warp = Warp::filtered([matrix::mul(map, &place); 3], Filter::Lanczos3.body());
         let warped = input.warp::<Rgb>(&warp, Arc::new(desc))?.raster::<Rgb>(&kernels)?;
         Ok(HostImage {
             width: extent.width as usize,
@@ -101,7 +102,7 @@ fn view_bounds(map: &Mat3, output: &Plane, input: &Plane) -> Plane {
     let [ox, oy] = output.origin;
     let [w, h] = output.size;
     let limit = [[ox - w, oy - h], [ox + 2.0 * w, oy + 2.0 * h]];
-    let inverse = color::inverse(map);
+    let inverse = matrix::inverse(map);
     let mut lo = [ox, oy];
     let mut hi = [ox + w, oy + h];
     for corner in corners(input) {
@@ -296,7 +297,7 @@ impl TransformView {
     /// The current corners as a rectangle in the prepared output plane, or
     /// `None` while the shown image predates a perspective edit.
     fn frame_of(&self, p: &Settings) -> Option<Box> {
-        let inverse = color::inverse(&self.map);
+        let inverse = matrix::inverse(&self.map);
         let quad = perspective::plane_quad(p, self.input.size);
         let mut points = [[0.0; 2]; 4];
         for (q, point) in quad.iter().zip(&mut points) {
@@ -318,7 +319,7 @@ impl TransformView {
 
     /// A point of the shown plane in the plane of `map`, through the input.
     fn rebase(&self, map: &Mat3, p: [f64; 2]) -> Option<[f64; 2]> {
-        project(&color::inverse(map), project(&self.map, p)?)
+        project(&matrix::inverse(map), project(&self.map, p)?)
     }
 
     fn frame_tool(
@@ -366,7 +367,7 @@ impl TransformView {
         let drag = state.drag?;
         let at = self.rebase(&drag.map, placement.to_plane(pointer?))?;
         if let Grip::Level = drag.grip {
-            let shown = |p| project(&color::inverse(&self.map), p);
+            let shown = |p| project(&matrix::inverse(&self.map), p);
             let line = [drag.start, at]
                 .map(|p| project(&drag.map, p).and_then(shown).map(|p| placement.to_screen(p)));
             if let [Some(a), Some(b)] = line {
@@ -562,11 +563,6 @@ fn corners(r: &Plane) -> [[f64; 2]; 4] {
     let [x, y] = r.origin;
     let [w, h] = r.size;
     [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
-}
-
-fn project(m: &Mat3, [x, y]: [f64; 2]) -> Option<[f64; 2]> {
-    let [x, y, z] = color::apply(m, [x, y, 1.0]);
-    (z > 0.0).then(|| [x / z, y / z])
 }
 
 /// A rotated rectangle in the output plane: the frame being edited.

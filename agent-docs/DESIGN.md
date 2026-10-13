@@ -71,6 +71,9 @@ decisions from the compute-model migration and later.
 - **Decided:** One `Rgb` payload, with its interpretation in a typed
   description. Float identity is exact, so an ICC profile near Rec.2020 is a
   different space.
+- **Decided (2026-10-13):** `RgbDesc` keeps `extent`, `full` and
+  `window` instead of embedding a `Lattice`, so stored descriptions and the
+  disk format stay as they are. `Rgb::lattice` and `Rgb::on` convert.
 - **Decided:** `Payload { NAME, Desc, Host, validate, check, allocate }`,
   with `DeviceLayout` for payloads a kernel reads. Structured data stays on
   the CPU, and nodes flatten the numbers a kernel needs into

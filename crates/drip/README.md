@@ -25,7 +25,7 @@ them a node file may name.
 |---|---|
 | `definition.rs` | `Kind`, `Tag`, the `Node` and `Typed` traits, actions, assets, and the `Identity` and `Durability` the store keys and evicts by |
 | `shape.rs` | `Shape`: how evaluation runs a kind, and the disk `Codec`s |
-| `body.rs` | the bodies, filters and warps the segment compiler fuses, and `Pixel` |
+| `body.rs` | the bodies, filters and warps the segment compiler fuses, `Pixel`, and 3×3 `matrix` math |
 | `lattice.rs` | `Lattice` and `Rect`: where samples sit on the full-detail plane |
 | `plan.rs` | the segment compiler: composition rules, input windows, the fused kernel, reduction passes |
 | `eval.rs` | `Evaluator`: scale, keys, scheduling, regions, `Policy` and `InputValues` |

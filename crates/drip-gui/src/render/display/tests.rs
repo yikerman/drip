@@ -3,6 +3,7 @@ use crate::{
     node_ui::data::{HostImage, Placement},
     render::{image, pipeline},
 };
+use drip::body::matrix;
 use std::sync::Arc;
 use wgpu::{SurfaceCapabilities, SurfaceColorSpace as Space, SurfaceColorSpaces as Spaces};
 
@@ -137,8 +138,8 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
     let mut reference = vec![[0u16; 3]; rgb.len()];
     let bounded = rgb.map(|pixel| pixel.map(|v| v.clamp(0.0, 1.0)));
     convert.transform_pixels(&bounded, &mut reference);
-    let matrix = color::mul(
-        &color::inverse(&color::rgb_to_xyz(color::REC709, color::D65)),
+    let matrix = matrix::mul(
+        &matrix::inverse(&color::rgb_to_xyz(color::REC709, color::D65)),
         &color::rgb_to_xyz(color::REC2020, color::D65),
     );
     for output in [
@@ -162,7 +163,7 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
                     .map(|b| half::f16::from_ne_bytes([b[0], b[1]]).to_f64())
                     .collect();
                 let pixel = bounded[i].map(f64::from);
-                let expected = color::apply(&matrix, pixel);
+                let expected = matrix::apply(&matrix, pixel);
                 for channel in 0..3 {
                     assert!(
                         (actual[channel] - expected[channel]).abs() < 0.004,
@@ -196,9 +197,9 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
     };
     // Half-transparent black over Rec.2020 green leaves the Rec.2020 cube
     // after gamma-space blending, despite both inputs being in gamut.
-    let blended = color::apply(&matrix, [0.0, 1.0, 0.0]).map(|v| (encode(v) * 0.5) as f32);
-    let to_rec2020 = color::inverse(&matrix);
-    assert!(color::apply(&to_rec2020, blended.map(decode)).iter().any(|v| *v < -0.001));
+    let blended = matrix::apply(&matrix, [0.0, 1.0, 0.0]).map(|v| (encode(v) * 0.5) as f32);
+    let to_rec2020 = matrix::inverse(&matrix);
+    assert!(matrix::apply(&to_rec2020, blended.map(decode)).iter().any(|v| *v < -0.001));
     gui.push(blended);
     gui.push([1.5; 3]);
     let canvas = texture(&device, gui.len() as u32, CANVAS);
@@ -227,8 +228,8 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
     draw(&device, &queue, &pipeline, &group, &target, 3);
     let bytes = read(&device, &queue, &target);
     for (i, pixel) in gui.iter().enumerate() {
-        let rec2020 = color::apply(&to_rec2020, pixel.map(decode)).map(|v| v.clamp(0.0, 1.0));
-        let expected = color::apply(&matrix, rec2020);
+        let rec2020 = matrix::apply(&to_rec2020, pixel.map(decode)).map(|v| v.clamp(0.0, 1.0));
+        let expected = matrix::apply(&matrix, rec2020);
         for (channel, expected) in expected.into_iter().enumerate() {
             let offset = i * 8 + channel * 2;
             let actual = half::f16::from_ne_bytes([bytes[offset], bytes[offset + 1]]).to_f64();
