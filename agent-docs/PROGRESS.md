@@ -5,6 +5,23 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
+- Explicit compute model, benchmark of the migration: the GUI worker
+  protocol on the baseline (21fd470) and after each of the eight steps,
+  with a Sigmoid edit, a 100 % crop and a project reopen added, three rounds
+  of five samples per version, `DRIP_BACKEND=wgpu` on the RTX 3080 and
+  `RAYON_NUM_THREADS=12`. Medians in ms, baseline to final (df6565f): a new
+  Exposure at level 1 69.5 to 36.3, a new Sigmoid contrast 70.2 to 37.4, an
+  unchanged request 68.7 to 33.1, scale changes 45.8, 69.2 and 170.3 to
+  12.7, 32.9 and 76.7 at levels 2, 1 and 0, and a reopen 472.6 to 168.2. The
+  first load rose from 525.9 to 589.5 with the disk-tier write. A
+  1600 × 1000 crop takes 7.3. Peak RSS stays at 2.1 GiB after 4.8 GiB at
+  steps 4 and 5. Step 6 made recomputation faster (50.3 to 33.8 for a new
+  EV) and store hits slower (25.2 to 33.9 at level 1), since Preview's
+  preparation costs 27.7 ms on a hit instead of 18.0, and step 8 is 1 to 3
+  ms slower than step 7 at level 1. Neither cause was isolated. Every saved
+  preview is bit identical to the baseline's. Report, driver, per-version
+  patches and data are in
+  `../drip-benchmark-results/2026-10-13-migration/report.md`.
 - Explicit compute model, step 8: the meta shape and Pyramid blur. All
   eight steps have landed. `tests/meta.rs` checks on the CPU runtime and
   wgpu (RTX 3080) that Pyramid blur with three levels expands to Resample
