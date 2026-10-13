@@ -458,6 +458,10 @@ decisions from the compute-model migration and later.
 - **Tentative (2026-10-13):** The ±0.1 EV alternation hits the store from
   its third sample, so measurements add five level-1 requests with a new EV
   each.
+- **Decided (2026-10-13):** The store and the GUI's preview packing stay as
+  they are until measured. A library test first checks that a repeated
+  demand downloads nothing after the frontend read its input. It found
+  previews rerunning their tail instead ([TODO](TODO.md)).
 
 ## GUI
 

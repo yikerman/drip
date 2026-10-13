@@ -368,3 +368,6 @@ impl Counts {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

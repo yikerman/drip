@@ -17,6 +17,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Tiled export | Follow-up | Whole kernels upstream still allocate the whole image on the device, and the TIFF encoder takes one host buffer because tiff 0.11.3's `write_strip` ignores compression. Stream strips when the encoder allows it, and band JPEG export too. |
 | Foreign job cancellation | Open | A job no demand needs runs to its end. Add a cooperative check when a foreign node can stop early, such as a denoiser. |
 | Disk tier reads | Follow-up | A disk hit reads on the evaluating thread, 89 ms for the Sony mosaic from the page cache. Measure a cold read before moving reads to the job thread. |
+| Preview hits | Follow-up | At a preview scale a view reads a reduction of its input that is the same image, and the run releases the unreduced value before the view materializes it, so neither is stored and every preview reruns the tail and downloads again. Store the value under the parent's key once it materializes, and measure previews ([PROGRESS](PROGRESS.md)). |
 | Store accounting | Follow-up | Entries sharing storage are charged twice, and budgets bound neither a running evaluation's values nor untaken job outputs. Measure device memory over a long session first. |
 | Benchmark protocol | Open | Confirm with the user whether the protocol adopts the five new-EV requests the store measurements added. |
 | Step 3 measurement | Follow-up | Time the template tail with Orientation, and without geometry, against 17142d6 in `../drip-benchmark-results/2026-10-13-fusion/`. |

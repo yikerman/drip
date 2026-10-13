@@ -11,6 +11,16 @@ stated, and report medians (ranges) in ms. Drivers and data are in
 `../drip-benchmark-results/2026-10-13-*/`. Each step passed the full
 workspace gate.
 
+- A demand repeated after the frontend read its view's input, Source →
+  Exposure → view on 64 × 48 samples, CPU runtime
+  (`eval::tests::cpu_repeated_demand`). At full detail the second call
+  runs only the view, the store serves Exposure's output with the host
+  samples read after the first call, and nothing downloads. At scale 4 the
+  second call also downloads nothing, but it reruns Exposure (two nodes,
+  one fused launch of 192 samples), and the frontend's read downloads
+  again. The view reads a reduction of Exposure's output that is the same
+  image, and the run releases the unreduced value before the view
+  materializes it, so neither key keeps the raster.
 - Documentation cut to one job per level: crate indexes with a diagram and
   an example, module docs with their rules, and an overview ARCHITECTURE.
   The drip README's examples now compile as doc tests, and `cargo doc
