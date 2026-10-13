@@ -12,6 +12,7 @@ use crate::{
 use cubecl::bytes::Bytes;
 
 pub mod interpolate;
+pub mod perspective;
 pub mod sample;
 
 /// An axis-aligned rectangle in plane units (full-detail pixels).
@@ -25,6 +26,8 @@ pub struct Rect {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stage {
     /// Homogeneous `[x, y, 1]` columns; points with `w ≤ 0` have no source.
+    /// Sample tests `w` of the composed chain, which matches testing every
+    /// stage unless two stages both put their horizon inside the frame.
     Projective(Mat3),
 }
 

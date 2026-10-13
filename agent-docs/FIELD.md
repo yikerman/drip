@@ -393,7 +393,11 @@ Each step is one self-contained commit series.
    resampler with per-channel projective maps on CPU, WGPU and Vulkan.
 5. Projective stage and Perspective Transform: quad and aspect, the DLT
    solve, validation, borders, and Fit as a host function. Then the editing
-   view as a separate GUI commit series.
+   view as a separate GUI commit series. Node done
+   (`node/field/perspective.rs`): Heckbert's closed-form square-to-quad map,
+   aspect from corners (mean opposite sides) or a ratio, Fit by enumerating
+   the LP's vertices, `inside` for Keep inside. An integer crop through
+   Sample reproduces its pixels exactly.
 6. Radial stages and Lens correction with per-channel TCA, after deciding how a
    field locates the optical centre (capture geometry versus `full`, and
    Orientation).

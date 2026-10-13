@@ -26,6 +26,7 @@ pub fn check(evaluator: &Evaluator) {
     per_channel_maps_match_the_reference(evaluator);
     minification_antialiases(evaluator);
     preview_keeps_framing(evaluator);
+    perspective_crops_exactly_and_matches_the_reference(evaluator);
 }
 
 fn settings(filter: Filter, factor: f64) -> Settings {
@@ -216,6 +217,51 @@ fn preview_keeps_framing(evaluator: &Evaluator) {
         (out.extent, out.full),
         (Extent { width: 7, height: 5 }, Extent { width: 14, height: 10 })
     );
+}
+
+fn perspective_crops_exactly_and_matches_the_reference(evaluator: &Evaluator) {
+    use node::field::perspective::{self, Aspect};
+    let (width, height) = (8, 6);
+    let pixels = pattern(width, height);
+    let desc = RgbDesc::new(Extent { width, height }, Coordinates::Space(REC2020_D65));
+    let run = |quad, global: &GlobalContext| {
+        let mut dag = Dag::new();
+        let source = node::source::<Rgb>(&mut dag, desc.clone(), pixels.clone()).unwrap();
+        let field = node::field::interpolate::add(&mut dag, ()).unwrap();
+        let p = perspective::Settings::default().with_quad(quad, Aspect::Corners);
+        let transform = perspective::add(&mut dag, p).unwrap();
+        let sample = node::field::sample::add(&mut dag, settings(Filter::Lanczos3, 1.0)).unwrap();
+        dag.connect(source, field.image).unwrap();
+        dag.connect(field.output, transform.field).unwrap();
+        dag.connect(transform.output, sample.field).unwrap();
+        let field = evaluator.evaluate::<Cpu<RgbField>>(&dag, global, transform.output).unwrap();
+        let result = evaluator.evaluate::<Cpu<Rgb>>(&dag, global, sample.output).unwrap();
+        (field.desc.clone(), result.desc.clone(), result.data.to_vec())
+    };
+    // Columns 2..6, rows 0..3.
+    let crop = [[0.25, 0.0], [0.75, 0.0], [0.75, 0.5], [0.25, 0.5]];
+    let (_, out, data) = run(crop, &Default::default());
+    assert_eq!(out.extent, Extent { width: 4, height: 3 });
+    let expected: Vec<_> =
+        (0..3).flat_map(|y| (2..6).map(move |x| (x, y))).map(|(x, y)| pixels[y * 8 + x]).collect();
+    assert_eq!(data, expected);
+    let (_, out, _) = run(crop, &GlobalContext { scale: 2 });
+    assert_eq!(
+        (out.extent, out.full),
+        (Extent { width: 2, height: 2 }, Extent { width: 4, height: 3 })
+    );
+
+    let keystone = [[0.1, 0.0], [0.9, 0.05], [1.0, 1.0], [0.0, 0.9]];
+    let (field, out, data) = run(keystone, &Default::default());
+    let expected = reference(&field, &pixels, &out.extent, Filter::Lanczos3);
+    for (actual, expected) in data.iter().zip(&expected) {
+        for c in 0..3 {
+            assert!(
+                (f64::from(actual[c]) - expected[c]).abs() < 1e-3,
+                "{actual:?} vs {expected:?}"
+            );
+        }
+    }
 }
 
 fn rotation(angle: f64, [cx, cy]: [f64; 2]) -> [[f64; 3]; 3] {

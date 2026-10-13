@@ -56,6 +56,7 @@ pub static NODES: &[&Kind] = &[
     &chromatic_adaptation::compute::KIND,
     &orientation::compute::KIND,
     &field::interpolate::lift::KIND,
+    &field::perspective::transform::KIND,
     &field::sample::realize::KIND,
     &reduce::rgb::compute::KIND,
     &exposure::compute::KIND,
