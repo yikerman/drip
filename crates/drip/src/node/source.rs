@@ -1,7 +1,7 @@
 //! Immutable, already loaded source values.
 use crate::{
     Result,
-    definition::{Kind, Node},
+    definition::{Identity, Kind, Node},
     graph::Dag,
     image::{Description, Image, Raster},
     payload::Payload,
@@ -18,15 +18,18 @@ pub fn source<P: Payload>(
 ) -> Result<Output<P>> {
     P::validate(&desc)?;
     let raster = Raster::<P>::from_host(desc, data.into())?;
-    let id = dag.add(Arc::new(Source { raster }))?;
+    let id = dag.add(Arc::new(Source { raster, identity: Identity::bound() }))?;
     Ok(Output::new(id, 0))
 }
 struct Source<P: Payload> {
     raster: Raster<P>,
+    /// Bound data has no persistent definition to key it by.
+    identity: Identity,
 }
 impl<P: Payload> Source<P> {
     const KIND: Kind = Kind {
         id: "bound-source",
+        version: 1,
         name: "Bound source",
         tags: &[],
         help: "Immutable, validated source value.",
@@ -46,6 +49,9 @@ impl<P: Payload> Node for Source<P> {
     }
     fn parameters(&self) -> Result<serde_json::Value> {
         Err(crate::Error::Graph("this bound value has no persistent source definition".into()))
+    }
+    fn identity(&self) -> Result<Identity> {
+        Ok(self.identity.clone())
     }
     fn contract(&self, _: &GlobalContext, _: &[Option<Description>]) -> Result<Vec<Description>> {
         Ok(vec![self.raster.description()])

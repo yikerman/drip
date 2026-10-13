@@ -5,8 +5,49 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
-## 2026-10-13
+- Explicit compute model, step 4: the evaluator's store keeps materialized
+  values across demands under content keys, durability and per-side byte
+  budgets. `tests/store.rs` checks on the CPU runtime and wgpu (RTX 3080)
+  that a Sigmoid-only edit of a Bayer source, 2×2 demosaic, camera matrix,
+  CAT16, Orientation, Exposure and Sigmoid graph runs five nodes and one
+  launch with two hits and no upload, and that the unchanged demand runs no
+  node, launches nothing and transfers nothing. On the host runtime, a
+  budget holding the source and one scaled copy evicts the older copy and
+  keeps the source. The same graph built in two `Dag`s shares every value,
+  other parameters or a bumped `version` do not, and bound data is never
+  shared. A device budget below one raster drops the source's upload and
+  keeps its host samples, which upload again on the next edit. A source's
+  identity changes when its file is rewritten. Tests that count the work of
+  one evaluation now use a new evaluator, and four tests changed on purpose:
+  a node's two outputs are hits on the second evaluation, the GUI worker no
+  longer reruns a source for a new target set, a file-reading test kernel
+  picks up a new file through a new path, and auto exposure checks the
+  running state on its first click only, since the store serves the second.
+  Measured with the GUI worker protocol in
+  `../drip-benchmark-results/2026-10-13-store/`: before is a worktree of
+  f1e0697, after the same commit with this change, `DRIP_BACKEND=wgpu`,
+  `RAYON_NUM_THREADS=12`, three alternating runs of five samples. Medians
+  (ranges) in ms:
 
+  | Scenario | Level | Before | After |
+  |---|---|---|---|
+  | Scale change | 2 | 45.0 (44.5–48.3) | 9.9 (9.4–12.2) |
+  | Scale change | 1 | 67.9 (67.0–70.1) | 24.3 (23.7–27.8) |
+  | Scale change | 0 | 160.8 (157.6–177.3) | 82.5 (79.8–91.6) |
+  | Exposure ±0.1 EV | 1 | 67.7 (66.6–69.3) | 25.5 (23.4–53.9) |
+  | Exposure, new EV each | 1 | 68.7 (67.4–74.8) | 55.3 (47.8–72.4) |
+  | Unchanged | 1 | 73.0 (67.7–76.4) | 24.9 (23.6–26.5) |
+
+  Preview texels are identical before and after. After warm-up every level
+  is stored, so scale changes and unchanged demands cost the view
+  preparation alone. The alternating edit returns to stored values from its
+  third sample. With a new EV the five tail nodes take microseconds on the
+  host, and Preview's preparation grows from 17 ms to 38 ms as it waits for
+  the fused launch and downloads the new 127 MB sigmoid output. Build each
+  variant with `CC=/usr/bin/cc CXX=/usr/bin/c++
+  CARGO_TARGET_DIR=$PWD/../<v>-target cargo build --release --offline -p
+  drip-gui` in its worktree and run `./run.sh`. The full workspace gate
+  passes.
 - Explicit compute model, step 3: warps, Resample and the resampling stage
   replace `RgbField`, Interpolate and Sample. Orientation's permutations
   pass bit for bit through the graph on the CPU runtime and wgpu (RTX 3080),

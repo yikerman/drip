@@ -225,14 +225,17 @@ fn gain(dag: &mut Dag, input: Output<Rgb>, ev: f32) -> Output<Rgb> {
 }
 
 fn deferred_images_materialize_once_per_consumer_that_needs_samples(runtime: RuntimeContext) {
-    let evaluator = Evaluator::new(runtime);
+    // A new evaluator per check, so no launch is saved by the store.
+    let evaluate = |dag: &Dag, output| {
+        Evaluator::new(runtime.clone()).evaluate::<Rgb>(dag, &Default::default(), output).unwrap()
+    };
     let mut dag = Dag::new();
     let source = rec2020(&mut dag, vec![[0.25, -1.0, 3.0]; 3]);
     let first = gain(&mut dag, source, 1.0);
     let twice = gain(&mut dag, first, 2.0);
 
     // `evaluate` materializes a map output, and two maps launch one kernel.
-    let result = evaluator.evaluate::<Rgb>(&dag, &Default::default(), twice).unwrap();
+    let result = evaluate(&dag, twice);
     assert_eq!(result.statistics.fused, 1);
     assert_eq!(result.statistics.nodes, 3);
     assert_eq!(**result.data.host().unwrap(), [[2.0, -8.0, 24.0]; 3]);
@@ -240,7 +243,7 @@ fn deferred_images_materialize_once_per_consumer_that_needs_samples(runtime: Run
     // A kernel consumer after two maps reads their samples.
     let copy = host_copy::add(&mut dag, ()).unwrap();
     dag.connect(twice, copy.image).unwrap();
-    let result = evaluator.evaluate::<Rgb>(&dag, &Default::default(), copy.output).unwrap();
+    let result = evaluate(&dag, copy.output);
     assert_eq!(result.statistics.fused, 1);
     assert_eq!(**result.data.host().unwrap(), [[2.0, -8.0, 24.0]; 3]);
 
@@ -248,7 +251,7 @@ fn deferred_images_materialize_once_per_consumer_that_needs_samples(runtime: Run
     let pair = sum::add(&mut dag, ()).unwrap();
     dag.connect(twice, pair.a).unwrap();
     dag.connect(twice, pair.b).unwrap();
-    let result = evaluator.evaluate::<Rgb>(&dag, &Default::default(), pair.output).unwrap();
+    let result = evaluate(&dag, pair.output);
     assert_eq!(result.statistics.fused, 1);
     assert_eq!(**result.data.host().unwrap(), [[4.0, -16.0, 48.0]; 3]);
 
@@ -259,14 +262,14 @@ fn deferred_images_materialize_once_per_consumer_that_needs_samples(runtime: Run
     let pair = sum::add(&mut dag, ()).unwrap();
     dag.connect(left, pair.a).unwrap();
     dag.connect(right, pair.b).unwrap();
-    let result = evaluator.evaluate::<Rgb>(&dag, &Default::default(), pair.output).unwrap();
+    let result = evaluate(&dag, pair.output);
     assert_eq!(result.statistics.fused, 2);
     assert_eq!(**result.data.host().unwrap(), [[1.25, -5.0, 15.0]; 3]);
 
     // A plan may read no constants.
     let negated = negate::add(&mut dag, ()).unwrap();
     dag.connect(source, negated.image).unwrap();
-    let result = evaluator.evaluate::<Rgb>(&dag, &Default::default(), negated.output).unwrap();
+    let result = evaluate(&dag, negated.output);
     assert_eq!(result.statistics.fused, 1);
     assert_eq!(**result.data.host().unwrap(), [[-0.25, 1.0, -3.0]; 3]);
 }
@@ -293,6 +296,8 @@ fn template_tail_launches_once(runtime: RuntimeContext) {
     let to_orientation =
         evaluator.evaluate::<Rgb>(d, &Default::default(), orientation.output).unwrap();
     assert_eq!(to_orientation.statistics.fused, 1);
+    // A new evaluator, so the tail does not start from the stored orientation.
+    let evaluator = Evaluator::new(evaluator.runtime().clone());
     let to_sigmoid = evaluator.evaluate::<Rgb>(d, &Default::default(), sigmoid.output).unwrap();
     assert_eq!(to_sigmoid.statistics.fused, 1);
     assert_eq!(to_sigmoid.statistics.uploads, 1);
@@ -340,8 +345,8 @@ fn launches(evaluator: &Evaluator, dag: &Dag, output: Output<Rgb>) -> (usize, Ve
 /// the map it fuses. A reindex joins the stage wherever it sits, and steps
 /// that move nothing launch nothing.
 fn segments_cut_only_where_composing_changes_the_result(runtime: RuntimeContext) {
-    let evaluator = Evaluator::new(runtime);
-    let launches = |dag: &Dag, output| launches(&evaluator, dag, output);
+    // A new evaluator per evaluation, so every count starts from the source.
+    let launches = |dag: &Dag, output| launches(&Evaluator::new(runtime.clone()), dag, output);
     let mut dag = Dag::new();
     let d = &mut dag;
     let pixels: Vec<_> =

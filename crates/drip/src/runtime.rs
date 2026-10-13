@@ -1,6 +1,7 @@
 //! One explicit compute device per evaluator. Host nodes remain ordinary Rust.
 //! The runtime counts image transfers and fused launches, which
-//! `eval::Statistics` reports.
+//! `eval::Statistics` reports, and states the byte budgets of the evaluator's
+//! store.
 use crate::{
     Error, Result,
     payload::{DeviceBuffer, DeviceLayout},
@@ -41,6 +42,21 @@ impl GlobalContext {
 pub struct RuntimeContext {
     client: Option<Client>,
     counts: Arc<Counts>,
+    budget: Budget,
+}
+
+/// Bytes an evaluator's store keeps resident on each side before it evicts.
+/// Values a running evaluation holds are not bounded by it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Budget {
+    pub device: u64,
+    pub host: u64,
+}
+impl Default for Budget {
+    /// 4 GiB on the device and 8 GiB on the host.
+    fn default() -> Self {
+        Self { device: 4 << 30, host: 8 << 30 }
+    }
 }
 #[derive(Default)]
 struct Counts {
@@ -63,13 +79,26 @@ impl RuntimeContext {
     }
 
     pub fn host() -> Self {
-        Self { client: None, counts: Default::default() }
+        Self { client: None, counts: Default::default(), budget: Budget::default() }
     }
 
     /// Adopt an explicitly initialized compute client. Device identity belongs
-    /// to this context and its clones.
+    /// to this context and its clones. The device budget is half the memory
+    /// the runtime reports, or the default where it reports none.
     pub fn from_client(client: Client) -> Self {
-        Self { client: Some(client), counts: Default::default() }
+        let reported = client.properties().memory.max_memory();
+        let device = reported.map_or(Budget::default().device, |bytes| bytes / 2);
+        let budget = Budget { device, ..Budget::default() };
+        Self { client: Some(client), counts: Default::default(), budget }
+    }
+
+    /// This context with the store budgets of evaluators built on it.
+    pub fn with_budget(self, budget: Budget) -> Self {
+        Self { budget, ..self }
+    }
+
+    pub fn budget(&self) -> Budget {
+        self.budget
     }
 
     pub fn client(&self) -> Result<&Client> {

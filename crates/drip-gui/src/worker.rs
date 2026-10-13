@@ -1,7 +1,7 @@
 //! One sequential queue per project: previews and node actions run in order
-//! with one evaluator, which also reads a node's files when first forced. The
-//! app replaces the worker with its project, discarding queued work and late
-//! replies.
+//! with one evaluator, which also reads a node's files when first forced and
+//! keeps materialized values for later demands. The app replaces the worker
+//! with its project, discarding queued work, late replies and those values.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,8 +22,8 @@ pub type ViewResult = Result<Option<Arc<dyn Drawable>>, NodeError>;
 type Snapshot = BTreeMap<NodeId, ViewResult>;
 
 /// Forces part of one graph snapshot under one context. Shared ancestors run
-/// once and each output lives until its last consumer is done; the effect then
-/// consumes the inputs of its nodes.
+/// once, and values the evaluator stored for an earlier demand are reused.
+/// The effect then consumes the inputs of its nodes.
 struct Demand {
     graph: Graph,
     global: GlobalContext,

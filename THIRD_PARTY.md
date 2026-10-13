@@ -47,6 +47,7 @@ no darktable source code is copied.
 | [Smithay contributors](https://github.com/Smithay/wayland-rs) (`wayland-client`, `wayland-protocols`) | Wayland pop-out parenting and surface color descriptions | MIT |
 | [PolyMeilex and rfd contributors](https://github.com/PolyMeilex/rfd) | Native file dialogs | MIT |
 | [Serde contributors](https://github.com/serde-rs/serde) (`serde`, `serde_json`) | Project serialization | MIT OR Apache-2.0 |
+| [RustCrypto contributors](https://github.com/RustCrypto/hashes) (`sha2` 0.10) | SHA-256 content keys of the evaluator's store | MIT OR Apache-2.0; [MIT](https://github.com/RustCrypto/hashes/blob/master/sha2/LICENSE-MIT), [Apache-2.0](https://github.com/RustCrypto/hashes/blob/master/sha2/LICENSE-APACHE) |
 | [David Tolnay and thiserror contributors](https://github.com/dtolnay/thiserror) | Error definitions | MIT OR Apache-2.0 |
 | [Rust log contributors](https://github.com/rust-lang/log), [env_logger contributors](https://github.com/rust-cli/env_logger) | Logging | MIT OR Apache-2.0 |
 | [half-rs contributors](https://github.com/VoidStarKat/half-rs) (`half`) | Half-float texture preparation | MIT OR Apache-2.0 |

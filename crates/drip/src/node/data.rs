@@ -136,11 +136,11 @@ impl Payload for Rgb {
     fn allocate(d: &RgbDesc) -> Self::Host {
         vec![[0.0; 3]; d.extent.pixels()].into()
     }
-}
-impl DeviceLayout for Rgb {
     fn byte_len(d: &RgbDesc) -> usize {
         d.extent.pixels() * size_of::<[f32; 3]>()
     }
+}
+impl DeviceLayout for Rgb {
     fn encode(_: &RgbDesc, host: &Self::Host) -> Result<Bytes> {
         Ok(host.shared_bytes())
     }
@@ -206,11 +206,11 @@ impl Payload for Bayer {
     fn allocate(d: &BayerDesc) -> Self::Host {
         vec![0.0; d.extent.pixels()].into()
     }
-}
-impl DeviceLayout for Bayer {
     fn byte_len(d: &BayerDesc) -> usize {
         d.extent.pixels() * size_of::<f32>()
     }
+}
+impl DeviceLayout for Bayer {
     fn encode(_: &BayerDesc, host: &Self::Host) -> Result<Bytes> {
         Ok(host.shared_bytes())
     }
@@ -239,11 +239,11 @@ impl Payload for BayerLevels {
     fn allocate(_: &BayerLevelsDesc) -> [f32; 4] {
         [0.0; 4]
     }
-}
-impl DeviceLayout for BayerLevels {
     fn byte_len(_: &BayerLevelsDesc) -> usize {
         size_of::<[f32; 4]>()
     }
+}
+impl DeviceLayout for BayerLevels {
     fn encode(_: &BayerLevelsDesc, host: &[f32; 4]) -> Result<Bytes> {
         Ok(Bytes::from_elems(host.to_vec()))
     }
@@ -275,6 +275,9 @@ impl Payload for CaptureMetadata {
     }
     fn allocate(d: &Self::Desc) -> Self::Host {
         d.clone()
+    }
+    fn byte_len(_: &Self::Desc) -> usize {
+        size_of::<drip_raw::Metadata>()
     }
 }
 

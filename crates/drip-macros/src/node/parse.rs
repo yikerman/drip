@@ -3,6 +3,8 @@ use syn::{parse::Parser, spanned::Spanned};
 
 pub(super) struct Options {
     pub id: syn::Expr,
+    /// `Kind::version`, 1 unless declared.
+    pub version: syn::Expr,
     pub name: syn::Expr,
     /// Paths to registered `Tag` statics, e.g. `[tag::LOOK]`.
     pub tags: Vec<syn::Expr>,
@@ -45,6 +47,7 @@ impl Options {
         let entries = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
             .parse2(tokens)?;
         let mut id = None;
+        let mut version = None;
         let mut display_name = None;
         let mut tags = None;
         let mut contract = None;
@@ -69,6 +72,7 @@ impl Options {
             }
             let option = match name.to_string().as_str() {
                 "id" => &mut id,
+                "version" => &mut version,
                 "name" => &mut display_name,
                 "tags" => &mut tags,
                 "contract" => &mut contract,
@@ -114,6 +118,7 @@ impl Options {
             name: display_name.unwrap_or_else(|| id.clone()),
             tags,
             id,
+            version: version.unwrap_or_else(|| syn::parse_quote!(1)),
             contract,
             references: references.unwrap_or_else(|| syn::parse_quote!([])),
             action,

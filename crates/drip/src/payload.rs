@@ -20,12 +20,16 @@ pub trait Payload: Send + Sync + Sized + 'static {
     fn check(desc: &Self::Desc, host: &Self::Host) -> Result<()>;
     /// Fresh host output storage for a valid description.
     fn allocate(desc: &Self::Desc) -> Self::Host;
+    /// Bytes one value under `desc` occupies, as the store charges its
+    /// budgets. A [`DeviceLayout`] payload states its layout's exact length,
+    /// a host-only payload an estimate.
+    fn byte_len(desc: &Self::Desc) -> usize;
 }
 
 /// A payload kernels read on the device. Numeric buffers keep their host element
 /// layout; structured payloads stay on the host and do not implement this.
+/// `encode` produces, and `decode` reads, [`Payload::byte_len`] bytes.
 pub trait DeviceLayout: Payload {
-    fn byte_len(desc: &Self::Desc) -> usize;
     fn encode(desc: &Self::Desc, host: &Self::Host) -> Result<Bytes>;
     fn decode(desc: &Self::Desc, bytes: Bytes) -> Result<Self::Host>;
 }

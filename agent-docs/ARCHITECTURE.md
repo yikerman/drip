@@ -20,9 +20,10 @@ records why, [TODO](TODO.md) lists unfinished work and
 
 A node computes context × parameters × inputs → outputs. Each port names a
 payload, a type implementing `Payload` (`payload.rs`) with a host value type
-`Host` and a description type `Desc`. A description holds what a contract
-reads without touching samples: extent, CFA phase, colour coordinates. Payloads that kernels read also implement `DeviceLayout`,
-which fixes their byte layout on the device.
+`Host`, a description type `Desc` and `byte_len`, the bytes one value
+occupies. A description holds what a contract reads without touching
+samples: extent, CFA phase, colour coordinates. Payloads that kernels read
+also implement `DeviceLayout`, which fixes their byte layout on the device.
 
 The value on an edge is an `Image` (`image.rs`): a type-erased description
 and either a raster or a deferred computation. Clones share one value.
@@ -49,11 +50,23 @@ plan and its input, so a segment never stores its intermediate images.
 Later calls and clones share the result. `Image::raster` materializes and
 returns the samples, for frontends.
 
-The `Store` (`store.rs`) holds the outputs of one evaluation, keyed by
-output port, with the number of consumers still to run. An output is dropped
-after its last consumer, so peak memory follows the live edges. An
-evaluation leaves behind only the result its caller holds and the files that
-sources and assets keep.
+The `Store` (`store.rs`) is the evaluator's memo of materialized values. A
+value's key is a SHA-256 over its producer's kind ID and `Kind::version`,
+the node's `Identity` (`definition.rs`) and the keys of its inputs in port
+order. A computed node's identity is its parameter JSON and the global
+scale. A source's identity is its parameters and the stamps (path, length,
+modification time) of the files it read. Bound in-memory data has a
+per-instance random identity. Equal keys mean equal samples, so equal nodes
+in two graphs share an entry. Entries are rasters, never replaced, each with
+its producer's `Durability`: High for sources, otherwise the most durable of
+the kind's tags (`registry::TAGS` states one per tag), Low without tags. The
+`RuntimeContext` sets a `Budget` per side, by default half the device memory
+the runtime reports or 4 GiB, and 8 GiB on the host. Over a budget the store
+drops representations from the least durable entry, the least recently used
+first among equals. Dropping a device representation keeps the host one, and
+an entry with neither leaves. A deferred image enters once a consumer has
+materialized it, so the store never holds a plan's input. Dropping the
+`Evaluator` drops its store.
 
 ## Shapes
 
@@ -64,8 +77,8 @@ and any other function is a kernel.
 
 | Shape | Function | Inputs | Outputs | Evaluation |
 |---|---|---|---|---|
-| `Kernel` | `fn(&KernelContext, &Params, ports...) -> Result<()>`, with a contract when it has outputs | `Read<'_, P, R>`, or `Option<Read<..>>` when optional | `Write<'_, P, R>`, written on host or device, or `Forward<'_, P, R>`, set from a raster the node holds | the contract, then the function on materialized inputs, on every evaluation that forces it |
-| `Source` | `fn(&Params, Load<'_, P>...) -> Result<()>`, without context or contract | none | `Load<'_, P>`, set with a description and host samples | loads when first forced and keeps the outputs or the error. Each evaluation receives fresh rasters sharing the host samples |
+| `Kernel` | `fn(&KernelContext, &Params, ports...) -> Result<()>`, with a contract when it has outputs | `Read<'_, P, R>`, or `Option<Read<..>>` when optional | `Write<'_, P, R>`, written on host or device, or `Forward<'_, P, R>`, set from a raster the node holds | the contract, then the function on materialized inputs, whenever a demanded output is not stored |
+| `Source` | `fn(&Params, Load<'_, P>...) -> Result<()>`, without context or contract | none | `Load<'_, P>`, set with a description and host samples | stamps its input files, then loads when first forced and keeps the outputs or the error. Each run receives fresh rasters sharing the host samples |
 | `Map(&MapBody)` | `#[node(map = body)] fn(&Params, Point<In>, Read..., Point<Out>) -> Result<[f32; N]>`, with a contract | the first `Point` is the mapped input, a description only. Other inputs are `Read`, materialized | the second `Point`, a description only. The output is a deferred image | the function returns the constants of `body`, a `#[cube] fn(px: Pixel, k: &[f32]) -> Pixel`. The first consumer that needs samples runs the segment in one kernel |
 | `Warp` | `#[node(warp)] fn(&Params, Point<In>, Read..., Point<Out>) -> Result<Warp>`, with a contract | as for a map | as for a map | the function returns per-channel projective maps from the output plane to the input plane, in full-detail pixels, and a reconstruction filter, or none for a reindex. The maps compose into the segment's resampling stage |
 | `Resample` | `#[node(resample)] fn(&Params, Point<In>, Point<Out>) -> Result<&'static FilterBody>`, with a contract | as for a map | as for a map | the function returns the filter. The contract's description sets the output lattice, and the stage resamples onto it |
@@ -118,31 +131,43 @@ at `MAX_FOOTPRINT` source samples, repeats edge samples for taps and makes
 points outside the input, or beyond the map's horizon, black
 ([FIELD](FIELD.md)).
 
-A source keeps its loaded outputs, or its failure, in a `OnceLock` in the
-admitted node. Files are assumed not to change. Editing parameters admits a
-new node, which reads again. A fresh raster per evaluation keeps a device
-upload of loaded samples with that evaluation. Tests bind data already in
-memory with `node::source`, which is a source too. Files that a kernel's
-parameters name, such as output ICC profiles, are assets:
+A source keeps its loaded outputs and their identity, or its failure, in a
+`OnceLock` in the admitted node. Before reading, it stamps the input files
+its `Path` parameters name (`param::input_files`). Files are assumed not to
+change. Editing parameters admits a new node, which reads and stamps again.
+Each run receives a fresh raster of the loaded samples, so a device upload
+belongs to the store entry that keeps it, under the budget. Tests bind data
+already in memory with `node::source`, which is a source too. Files that a
+kernel's parameters name, such as output ICC profiles, are assets:
 `#[node(assets)]` with `impl Assets for Params`, read when an action or a
 preparation first asks and kept the same way.
 
 `eval.rs` does not read the shape. The macro builds the difference into
-`Node::contract` and `Node::run`, and `Image` carries the deferral.
+`Node::identity`, `Node::contract` and `Node::run`, and `Image` carries the
+deferral.
 
 ## Evaluation
 
 Nothing runs until a caller forces it. `Evaluator::evaluate::<P>(dag,
 global, output)` forces one output. It returns the raster where its node
 produced it, a deferred target materialized on the device, and `Statistics`:
-nodes run, and uploads, downloads and fused launches on the runtime during
+nodes run, uploads, downloads and fused launches on the runtime, values the
+store served (`hits`) and representations it dropped (`evictions`) during
 the call. `evaluate_inputs` forces several target nodes in one run and
 returns each target's materialized `InputValues`, which a frontend binds to
 the node's typed `Inputs` with `bind::<N>()`. `evaluate_batch` does the same
-and records host timings per node.
+and records host timings per node that runs.
 
-Evaluation runs the targets and their ancestors once each, in `Dag::order`,
-the topological order recomputed on every graph edit.
+A call first keys every node the targets depend on, in `Dag::order`, the
+topological order recomputed on every graph edit. Keying a source loads it.
+It then walks back from the demanded values. A stored value is a hit, and a
+missing one schedules its node and the values that node reads. Target nodes
+of `evaluate_inputs` always run, so their contracts check what they receive.
+The scheduled nodes run once each in graph order. The run counts the
+consumers of each value and drops its reference after the last. The store
+then keeps the value if it has a key and samples. A Sigmoid-only edit
+therefore runs the five nodes of the tail segment and one fused launch from
+the stored demosaic output, and an unchanged demand runs no node.
 `GlobalContext::scale` requests preview detail and is validated at
 evaluation (1 to 256). RCD and Bayer 2×2 demosaic reduce each CFA phase
 plane by it before demosaicing, Perspective Transform and Resample store
@@ -177,7 +202,9 @@ and runs demands in order on one thread. A preview demand forces the nodes
 whose binding prepares a view, at scale `2^level` with level 0 to 8, then
 prepares each view from its inputs. A newer preview request replaces a
 pending one and makes a running one's result stale. An action demand forces
-one node at full detail and runs its action. Demands are not merged.
+one node at full detail and runs its action. Demands are not merged, but a
+later demand reuses what the store kept from earlier ones. A new project
+replaces the worker, its evaluator and the store.
 
 ## Data model
 
@@ -234,6 +261,12 @@ parameters and descriptions into constants, and a `#[cube]` body over one
 `exposure.rs` is the smallest real map, and `camera_to_rgb.rs` also reads a
 `Read` input on the host to build its matrix.
 
+Outputs are stored under keys that include `Kind::version`. When a change
+alters what a kind computes for the same parameters and inputs, bump it with
+`#[node(version = N)]` (1 by default). Kernels must be pure: a kernel that
+reads a file outside a source's `Load` ports keeps returning the stored
+value until its parameters change.
+
 A geometric operation is a warp: its host function returns a `Warp` with a
 map per channel from the output plane to the input plane, both in
 full-detail pixels (`[0, full]`), and its contract describes the output's
@@ -253,9 +286,11 @@ profile. Views that only the GUI shows are declared in drip-gui.
 Unit tests sit in the node's file. Graph tests in `crates/drip/tests/` build
 a `Dag`, bind inputs with `node::source` and evaluate. Device kernels belong
 in `tests/algorithms.rs`, with the resampling reference in
-`tests/algorithms/resample.rs`, and segments in `tests/fusion.rs`. Each file runs
-its checks on the CPU runtime with `--features drip/cpu` and on the
-`DRIP_BACKEND` runtime with `cargo test -p drip -- --ignored selected_backend`.
+`tests/algorithms/resample.rs`, segments in `tests/fusion.rs` and the store
+in `tests/store.rs`. A test that counts the work of one evaluation uses a
+new `Evaluator`, whose store is empty. Each file runs its checks on the CPU
+runtime with `--features drip/cpu` and on the `DRIP_BACKEND` runtime with
+`cargo test -p drip -- --ignored selected_backend`.
 
 Help is the Rustdoc on the node function: operation, assumptions, inputs
 and outputs by payload name, creative reinterpretations. Papers and sources
@@ -286,10 +321,11 @@ through an example.
 
 Drip is adopting the compute model of
 [COMPUTE_MODEL](COMPUTE_MODEL.md#proposal-for-drip) in eight steps. Steps 1
-to 3 landed on 2026-10-13. Step 1 made ports name payloads, values `Image`
+to 4 landed on 2026-10-13. Step 1 made ports name payloads, values `Image`
 and `Raster`, gave kinds a `Shape` and moved a run's values into a `Store`.
 Step 2 added the map shape and fused kernels and made Exposure, Camera RGB
 to color RGB, Chromatic adaptation and Sigmoid maps. Step 3 added warps,
 Resample and the resampling stage, replacing `RgbField`, Interpolate and
-Sample, and made Perspective Transform and Orientation warps. Step 4 is
-next: content keys, durability and the device budget.
+Sample, and made Perspective Transform and Orientation warps. Step 4 made
+the store a memo with content keys, durability and per-side budgets. Step 5
+is next: `foreign` nodes and the disk tier.

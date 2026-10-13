@@ -242,10 +242,12 @@ fn perspective_crops_exactly_and_matches_the_reference(evaluator: &Evaluator) {
         let resample = node::resample::add(&mut dag, settings(Filter::Lanczos3, 1.0)).unwrap();
         dag.connect(source, transform.image).unwrap();
         dag.connect(transform.output, resample.image).unwrap();
-        let alone = evaluator.evaluate::<Rgb>(&dag, global, transform.output).unwrap();
-        let result = evaluator.evaluate::<Rgb>(&dag, global, resample.output).unwrap();
         // The warp and the Resample run as one launch, with the same filter.
+        // Evaluating the warp's output first would store it, and the
+        // Resample would then start from that raster.
+        let result = evaluator.evaluate::<Rgb>(&dag, global, resample.output).unwrap();
         assert_eq!(result.statistics.fused, 1);
+        let alone = evaluator.evaluate::<Rgb>(&dag, global, transform.output).unwrap();
         let data = result.data.host().unwrap().to_vec();
         assert_eq!(alone.desc, result.desc);
         assert_eq!(bits(alone.data.host().unwrap()), bits(&data));

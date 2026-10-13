@@ -36,7 +36,8 @@ storage uniform.
 The non-trivial files outside `node/`:
 
 - `definition.rs`: what `#[node]` generates against: `Kind`, `Tag`, the
-  `Node`/`Typed` traits, `Action`, `Assets`.
+  `Node`/`Typed` traits, `Action`, `Assets`, and the `Identity` and
+  `Durability` the store keys and evicts by.
 - `shape.rs`: how evaluation runs a kind (`Shape`: kernel, source, map, warp
   or resample) and what the segment compiler composes: `MapBody` and the
   `Pixel` it maps, `Warp`, `FilterBody`, and the `Lattice` of a
@@ -44,14 +45,17 @@ The non-trivial files outside `node/`:
 - `registry.rs`: the hand-maintained `NODES`, `TAGS` and `Registry`.
 - `graph.rs`: `Dag` and transactional edits, checked on ports only.
 - `eval.rs`: `Evaluator`, demand-driven evaluation of the requested subgraph;
-  contracts run here, and results are materialized for their consumers.
+  contracts run here, nodes whose outputs the store holds are skipped, and
+  results are materialized for their consumers.
 - `image.rs`: `Image`, the value on an edge, a raster or the deferred output of
   a map, warp or resample, materialized on first need, and `Raster`, samples
   with lazy host and device residency and counted transfers.
 - `plan.rs`: the segment compiler: a `Plan` of one resampling stage and map
   bodies, the rules for composing steps into it, and the fused kernel that
   runs it.
-- `store.rs`: the values of one evaluation, kept until their last consumer.
+- `store.rs`: the evaluator's memo of materialized values across demands:
+  content keys, and eviction by durability and recency within per-side byte
+  budgets.
 - `ports.rs`: port views (`Read`, `Write`, `Forward`, `Load`, and `Point` for
   maps, warps and resamples) and interpretation requirements.
 - `payload.rs`: payload families, their host types and device byte layouts.
@@ -67,7 +71,7 @@ a new node is one more line.
 
 - `drip::registry::NODES`: processing node kinds, in pipeline order.
 - `drip::registry::TAGS`: every tag a node may carry, with a one-sentence
-  description. Frontends add none. A node takes at most one stage tag, after
+  description and the durability of its nodes' outputs in the store. Frontends add none. A node takes at most one stage tag, after
   ACES: `input-transform`, `look` or `output-transform`. File readers and
   writers carry `io`.
 - `drip::registry::Registry`: composes lists, rejects duplicate IDs and
@@ -179,7 +183,10 @@ and reads `image.data.host()?`. The raster transfers what the next node asks
 for. An output declared `Forward<'_, P>` instead of `Write` is set from samples
 the node already holds, `output.set(image.data)`, so a node that only changes
 the description copies nothing.
-The ID is the persistence key, so keep it once projects use it. Tags say what
+The ID is the persistence key, so keep it once projects use it. The
+evaluator stores outputs under keys that include `version`, 1 by default:
+add `version = 2` to `#[node]` when a change alters what the node computes
+from the same parameters and inputs. Tags say what
 the node is for: at most one stage tag, then any others that help finding it.
 Parameters are a struct deriving `Parameters` in place of `()`, as in
 `exposure.rs`. Credit adapted algorithms beside the code and in

@@ -53,15 +53,18 @@ Settled with the user on 2026-10-11 and revised by the compute model
   forced and keeps the result, failure included. Files are assumed not to
   change, so the cache does not change the node's outputs. It holds file
   contents, not intermediate results. To pick up a changed file, choose it
-  again. Each evaluation receives loaded host samples in a fresh raster
-  (2026-10-13), so a device upload of them is not retained with the node.
+  again. A source stamps the input files its parameters name (path, length,
+  modification time) before reading them, and the stamps key its outputs
+  (2026-10-13). Each run receives loaded host samples in a fresh raster, so
+  a device upload of them belongs to the store entry, under its budget,
+  rather than to the node.
 - **Decided:** One sequential queue with one evaluator runs previews, export
   and auto exposure. Edits read no files, and project open reads only the
   project JSON. A preview or an action is a demand: a graph snapshot forced
   under one `GlobalContext` in one batch, whose effect then consumes the
-  inputs. Actions use full detail. Demands are not merged, since reuse would
-  need the excluded cache. A GUI action may return node parameters, applied
-  as an ordinary edit.
+  inputs. Actions use full detail. Demands are not merged. A later demand
+  reuses what the evaluator's store kept from earlier ones (2026-10-13). A
+  GUI action may return node parameters, applied as an ordinary edit.
 - **Decided:** A worker serves one project. New and Open replace it: the old
   thread finishes its current command and skips its queue, and its replies
   have no receiver, so reused node IDs cannot pick up old results. New and
@@ -255,11 +258,11 @@ Settled with the user on 2026-10-11 and revised by the compute model
   as proposed in [COMPUTE_MODEL](COMPUTE_MODEL.md#proposal-for-drip): nodes
   declare a shape, evaluation fuses segments between materialization points,
   derives regions and preview scale from shapes, and memoizes in one store.
-  It is executed in eight steps. Steps 4 and 5 revisit the no-cache
-  requirement under Performance, which holds until then.
+  It is executed in eight steps. Step 4 replaced the no-cache requirement
+  under Performance with the store, and step 5 adds its disk tier.
 - **Decided (2026-10-13):** Step 1. `Kind::shape` declares how evaluation runs
   a kind, `Kernel` or `Source`, and later shapes are added beside them. A
-  run's values live in a `Store`, which step 4 grows into the memo.
+  run's values lived in a `Store`, which step 4 grew into the memo.
 - **Decided (2026-10-13):** Step 2. A map node returns the constants of a
   `#[cube]` body over one pixel, and its contract still describes the output.
   Its output is a deferred image that the next map extends and the first
@@ -305,6 +308,43 @@ Settled with the user on 2026-10-11 and revised by the compute model
   kernels they replaced, so results are bit-identical. Fusion takes the colour
   tail from 6.6 ms to 1.8 ms at full detail on the Sony fixture
   ([PROGRESS](PROGRESS.md#2026-10-13)).
+- **Decided (2026-10-13):** Step 4. The evaluator owns a `Store` that keeps
+  materialized values across demands, keyed by content. An output's key is a
+  SHA-256 over the producer's kind ID and `version`, its identity and the
+  keys of its inputs in port order. A computed node's identity is its
+  canonical parameter JSON (object keys sorted) and the global scale. A
+  source's is its parameters and the stamps of the input files they name,
+  without the scale. Bound in-memory data hashes a per-instance random
+  identity. The kind ID determines a map's body, so input keys cover a
+  plan's body sequence and constants without hashing them. `version` is
+  bumped by hand when a kernel's numerics change. Equal nodes share one
+  entry, and a new evaluator, as each GUI project has, starts empty.
+- **Decided (2026-10-13):** Durability orders eviction: Low first, then
+  Medium, then High, least recently used first within a class. A kind's
+  durability is High for a source, otherwise the most durable of its tags,
+  Low without tags. Tags state theirs: `io` High; `input-transform`,
+  `bayer-raw`, `demosaic`, `recovery`, `geometry` and `color` Medium;
+  `look`, `output-transform`, `tonemap`, `view` and `scope` Low. No node
+  declares its own.
+- **Decided (2026-10-13):** The store keeps rasters only, with each
+  representation charged at the payload's `byte_len`, against a device
+  budget (half the memory the runtime reports, 4 GiB where it reports none)
+  and a host budget (8 GiB), both `RuntimeContext` settings. Over a budget it
+  drops representations in eviction order. Dropping a device one keeps the
+  host one, and an entry with neither leaves. Rasters sharing storage are
+  charged once per entry. A deferred image enters the store once a consumer
+  materializes it. One no consumer materialized is rebuilt by its nodes'
+  host functions, so the store never holds a plan's input outside the
+  budget.
+- **Decided (2026-10-13):** Evaluation keys every needed node first, which
+  loads sources, then walks back from the demanded values. A stored value
+  is a hit, and a missing one schedules its node and the node's inputs.
+  Target nodes of `evaluate_inputs` always run, so their contracts check
+  what they receive. A run keeps its own live values with use counts, so a
+  value the budget evicts mid-run stays available to its consumers.
+  `Statistics` reports hits and evictions. A Sigmoid-only edit runs the five
+  nodes of the tail segment and one launch, and an unchanged demand runs
+  none.
 - **Decided:** CubeCL computation with one kernel source per algorithm across
   runtimes. wgpu presentation and color management stay frontend-owned.
   `DRIP_BACKEND` selects explicitly and never falls back (crate README).
@@ -345,9 +385,12 @@ Settled with the user on 2026-10-11 and revised by the compute model
   which prevents concurrent first Vulkan calls that crash the NVIDIA ICD while
   allowing parallel tests. The display test therefore also requires the
   selected `DRIP_BACKEND` to be available.
-- **Requirement:** No persistent intermediate cache. Do not optimize
-  prematurely. Tracing adds no synchronization. Benchmark artifacts stay
-  outside Git.
+- **Requirement:** Do not optimize prematurely. Tracing adds no
+  synchronization. Benchmark artifacts stay outside Git.
+- **Decided (2026-10-13):** Materialized values persist across demands in
+  the evaluator's store under byte budgets ([Compute](#compute), step 4).
+  This replaces the requirement of no persistent intermediate cache. The
+  user approved the compute model's plan that replaces it.
 - **Decided:** Sub-300 ms latency is acceptable without further optimization.
 - **Decided:** Benchmark protocol: Sony fixture (7968×5320), release builds,
   WGPU on the RTX 3080, `RAYON_NUM_THREADS=12`, serial runs. Drive the real GUI
@@ -356,6 +399,9 @@ Settled with the user on 2026-10-11 and revised by the compute model
   at level 1, and issue five identical level-1 requests. Report medians and
   ranges. Exclude drawing, texture upload and file export. Harness and results
   live in `../drip-benchmark-results/`.
+- **Tentative (2026-10-13):** The benchmark protocol's ±0.1 EV alternation
+  returns to stored values from its third sample. The step 4 measurement
+  adds five level-1 requests with a new EV each to time a recomputed tail.
 
 ## GUI
 

@@ -310,11 +310,12 @@ mod latest_targets_win_and_a_replaced_worker_skips_queued_work_fixture {
         assert_eq!(pixel(&worker, preview), [3.0, 1.0, 0.0, 1.0]);
         assert!(worker.result(histogram).is_some());
 
-        // A new target set computes one fresh run and replaces the presentation.
+        // A new target set replaces the presentation. The evaluator's store
+        // still holds the source's output, so the source does not run again.
         worker.request(&graph, 1, vec![histogram]).unwrap();
         wait(&mut worker);
         assert!(worker.result(preview).is_none());
-        assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0, 3.0]);
+        assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0]);
 
         // A dropped worker finishes its current command, then skips its
         // queue: here an export that would evaluate the source again.
@@ -341,7 +342,7 @@ mod latest_targets_win_and_a_replaced_worker_skips_queued_work_fixture {
         for _ in 0..2 {
             woke.recv_timeout(COMPUTE_TIMEOUT).unwrap();
         }
-        assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0, 3.0, 3.0]);
+        assert_eq!(*CALLS.lock().unwrap(), [1.0, 3.0, 3.0]);
         worker.request(&graph, 2, vec![preview]).unwrap();
         wait(&mut worker);
         assert_eq!(pixel(&worker, preview), [4.0, 1.0, 0.0, 1.0]);
@@ -361,7 +362,9 @@ mod exports_read_current_files_at_full_detail_fixture {
         #[param(open = [])]
         path: Option<std::path::PathBuf>,
     }
-    // Reads on every run, unlike nodes that keep their files, to exercise worker ordering.
+    // Reads its file whenever it runs, unlike a source, which stamps and keeps
+    // its files. The store keys the output by path and scale only, so a new
+    // scale or a new path reads the file again.
     #[drip::node(id="test-file", name="file", contract=image_contract)]
     fn file(_: &KernelContext<'_>, p: &FileKernel, mut image: Write<'_, Rgb>) -> drip::Result<()> {
         let path = p.path.as_ref().ok_or_else(|| KernelError::Contract("choose a file".into()))?;
@@ -392,10 +395,9 @@ mod exports_read_current_files_at_full_detail_fixture {
         perform(&mut worker, &graph, export);
         assert_eq!(std::fs::read_to_string(&output).unwrap(), "[2.0, 1.0, 0.0]");
         assert_eq!(pixel(&worker, preview), before, "export leaves preview intact");
-        worker.request(&graph, 3, vec![preview]).unwrap();
-        wait(&mut worker);
-        assert_eq!(pixel(&worker, preview), [2.0, 1.0, 0.0, 1.0]);
-        std::fs::write(&input, "3").unwrap();
+        let chosen = input.with_extension("chosen");
+        std::fs::write(&chosen, "3").unwrap();
+        graph.set_param(source, "path", json!(chosen)).unwrap();
         worker.request(&graph, 3, vec![preview]).unwrap();
         wait(&mut worker);
         assert_eq!(pixel(&worker, preview), [3.0, 1.0, 0.0, 1.0]);
@@ -413,6 +415,7 @@ mod exports_read_current_files_at_full_detail_fixture {
         );
         assert!(worker.result(preview).unwrap().is_err());
         std::fs::remove_file(input).unwrap();
+        std::fs::remove_file(chosen).unwrap();
         std::fs::remove_file(output).unwrap();
     }
 }

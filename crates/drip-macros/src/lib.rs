@@ -21,7 +21,9 @@ use documentation::documentation;
 /// exactly when the node has outputs. Evaluation calls it before running the node.
 /// Rustdoc and `references = [(label, url), ...]` become node help.
 /// Optional `name` defaults to the ID; optional `tags = [tag::BAYER_RAW, ...]` names
-/// registered `Tag` statics (see `drip::registry`).
+/// registered `Tag` statics (see `drip::registry`). `version = N`, 1 by default,
+/// is bumped by hand when the node's numerics change, so outputs the evaluator
+/// stored under the previous version no longer match.
 /// The parameter type supplies its schema through `Parameters` (usually derived).
 /// Use `&()` for nodes without parameters.
 /// `Option<Read<Payload>>` declares an optional input; output ports remain required.

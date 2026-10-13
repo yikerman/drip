@@ -31,21 +31,28 @@ pub(super) fn node(
         }
         (None, false) => (contract(options, signature), run(name, signature)),
     };
-    // Files are read when first forced and kept with the node, error included.
-    // They are assumed not to change, so the cache keeps the node pure; any
-    // parameter edit admits a new node, which reads them again.
+    let identity = if signature.source {
+        quote!(Ok(self.loaded()?.1.clone()))
+    } else {
+        quote!(Ok(::drip::definition::Identity::Computed(self.parameters()?)))
+    };
+    // Files are read when first forced and kept with the node, error included,
+    // with the identity that keys the outputs in the store. They are assumed
+    // not to change, so the cache keeps the node pure. A parameter edit
+    // admits a new node, which reads and stamps them again.
     let (definition, admission) = if signature.source {
         let load = load(name, signature);
         (
             quote! {
                 #vis struct Definition {
                     #vis parameters: #parameters,
-                    loaded: ::std::sync::OnceLock<::drip::Result<Vec<::drip::image::Image>>>,
+                    loaded: ::std::sync::OnceLock<::drip::Result<Loaded>>,
                 }
+                type Loaded = (Vec<::drip::image::Image>, ::drip::definition::Identity);
                 impl Definition {
-                    fn loaded(&self) -> ::drip::Result<&[::drip::image::Image]> {
+                    fn loaded(&self) -> ::drip::Result<&Loaded> {
                         let loaded = self.loaded.get_or_init(|| load(&self.parameters));
-                        loaded.as_deref().map_err(Clone::clone)
+                        loaded.as_ref().map_err(Clone::clone)
                     }
                 }
                 #load
@@ -115,6 +122,10 @@ pub(super) fn node(
                     ::drip::param::encode(&self.parameters)
                 }
 
+                fn identity(&self) -> ::drip::Result<::drip::definition::Identity> {
+                    #identity
+                }
+
                 #contract
                 #run
             }
@@ -130,6 +141,7 @@ fn kind(
     vis: &TokenStream,
 ) -> TokenStream {
     let id = &options.id;
+    let version = &options.version;
     let name = &options.name;
     let tags = &options.tags;
     let help = crate::documentation(&function.attrs);
@@ -162,6 +174,7 @@ fn kind(
     quote! {
         #vis static KIND: ::drip::definition::Kind = ::drip::definition::Kind {
             id: #id,
+            version: #version,
             name: #name,
             tags: &[#(&#tags),*],
             help: #help,
@@ -423,8 +436,9 @@ fn body(body: &syn::Path, constants: &syn::Type, vis: &TokenStream) -> TokenStre
     }
 }
 
-/// Run a source when it is first forced. A failure is cached like a value, so
-/// the node stays editable and persistable and evaluation reports it.
+/// Run a source when it is first forced, after stamping the files its
+/// parameters name. A failure is cached like a value, so the node stays
+/// editable and persistable and evaluation reports it.
 fn load(name: &syn::Ident, signature: &Signature) -> TokenStream {
     let slots: Vec<_> =
         signature.outputs().map(|port| format_ident!("slot_{}", port.index)).collect();
@@ -436,17 +450,20 @@ fn load(name: &syn::Ident, signature: &Signature) -> TokenStream {
     let count = slots.len();
     let parameters = &signature.parameters;
     quote! {
-        fn load(parameters: &#parameters) -> ::drip::Result<Vec<::drip::image::Image>> {
+        fn load(parameters: &#parameters) -> ::drip::Result<Loaded> {
+            let identity =
+                ::drip::definition::Identity::loaded(&KIND, ::drip::param::encode(parameters)?)?;
             let mut slots: [Option<::drip::image::Image>; #count] = ::std::array::from_fn(|_| None);
             let [#(#slots),*] = &mut slots;
             super::#name(parameters, #(#loads),*)?;
-            slots
+            let images = slots
                 .into_iter()
                 .zip([#(#names),*])
                 .map(|(slot, port)| slot.ok_or_else(|| ::drip::Error::Contract(
                     format!("source did not load {port}"),
                 )))
-                .collect()
+                .collect::<::drip::Result<_>>()?;
+            Ok((images, identity))
         }
     }
 }
@@ -458,20 +475,20 @@ fn loaded_contract() -> TokenStream {
             _: &::drip::runtime::GlobalContext,
             _: &[Option<::drip::image::Description>],
         ) -> ::drip::Result<Vec<::drip::image::Description>> {
-            Ok(self.loaded()?.iter().map(|image| image.desc().clone()).collect())
+            Ok(self.loaded()?.0.iter().map(|image| image.desc().clone()).collect())
         }
     }
 }
 
-/// Each evaluation receives the loaded host samples in a fresh raster, so a
-/// device copy is the evaluation's, like any computed output.
+/// Each run receives the loaded host samples in a fresh raster, so a device
+/// copy belongs to the store entry that keeps it, like any computed output.
 fn loaded_run(signature: &Signature) -> TokenStream {
     let images = signature.outputs().map(|port| {
         let index = port.index;
         let payload = &port.payload;
         quote! {
             ::drip::image::Image::from(
-                loaded[#index].downcast::<#payload>().expect("loaded payload").share_host()?,
+                loaded.0[#index].downcast::<#payload>().expect("loaded payload").share_host()?,
             )
         }
     });

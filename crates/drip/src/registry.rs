@@ -13,32 +13,35 @@ use std::sync::Arc;
 
 /// Tags nodes may carry, stages first. A node takes at most one of the ACES
 /// stages [1] (input transform, look, output transform); geometry, views and
-/// file writers take none. Frontends declare no tags of their own.
+/// file writers take none. Frontends declare no tags of their own. Each tag
+/// states how durable its nodes' outputs are in the store, and a kind takes
+/// the most durable of its tags.
 ///
 /// [1] Academy Color Encoding System, "ACES overview."
 /// https://docs.acescentral.com/background/overview
 pub mod tag {
-    use crate::definition::Tag;
+    use crate::definition::{Durability::*, Tag};
     macro_rules! tags {
-        ($($name:ident $id:literal $description:literal;)*) => {
-            $(pub static $name: Tag = Tag { id: $id, description: $description };)*
+        ($($name:ident $id:literal $durability:ident $description:literal;)*) => {
+            $(pub static $name: Tag =
+                Tag { id: $id, description: $description, durability: $durability };)*
             /// Every tag, in display order.
             pub static TAGS: &[&Tag] = &[$(&$name),*];
         };
     }
     tags! {
-        INPUT_TRANSFORM "input-transform" "Camera-native data to scene-linear color RGB, as an ACES Input Transform.";
-        LOOK "look" "Technical or creative adjustment of scene-referred RGB, as an ACES Look Transform.";
-        OUTPUT_TRANSFORM "output-transform" "Scene-referred to display-referred rendering, as an ACES Output Transform.";
-        IO "io" "Reads or writes image files.";
-        BAYER_RAW "bayer-raw" "Works on Bayer sensor data before demosaicing.";
-        DEMOSAIC "demosaic" "Reconstructs full RGB from a color filter array.";
-        RECOVERY "recovery" "Restores what the capture lost or distorted, such as clipped highlights.";
-        GEOMETRY "geometry" "Changes pixel positions or sampling.";
-        COLOR "color" "Converts color spaces or white points.";
-        TONEMAP "tonemap" "Compresses scene range into display range.";
-        VIEW "view" "Shows an image in the GUI.";
-        SCOPE "scope" "Measures an image for display.";
+        INPUT_TRANSFORM "input-transform" Medium "Camera-native data to scene-linear color RGB, as an ACES Input Transform.";
+        LOOK "look" Low "Technical or creative adjustment of scene-referred RGB, as an ACES Look Transform.";
+        OUTPUT_TRANSFORM "output-transform" Low "Scene-referred to display-referred rendering, as an ACES Output Transform.";
+        IO "io" High "Reads or writes image files.";
+        BAYER_RAW "bayer-raw" Medium "Works on Bayer sensor data before demosaicing.";
+        DEMOSAIC "demosaic" Medium "Reconstructs full RGB from a color filter array.";
+        RECOVERY "recovery" Medium "Restores what the capture lost or distorted, such as clipped highlights.";
+        GEOMETRY "geometry" Medium "Changes pixel positions or sampling.";
+        COLOR "color" Medium "Converts color spaces or white points.";
+        TONEMAP "tonemap" Low "Compresses scene range into display range.";
+        VIEW "view" Low "Shows an image in the GUI.";
+        SCOPE "scope" Low "Measures an image for display.";
     }
 }
 pub use tag::TAGS;

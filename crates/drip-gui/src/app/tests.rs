@@ -96,15 +96,19 @@ fn auto_exposure_is_queued_and_applies_its_ev_as_an_edit() {
     let exposure = h.state().project.graph.find("Exposure").unwrap();
     h.state_mut().selected = Some(exposure);
     let mut metered = Vec::new();
-    for _ in 0..2 {
+    for click in 0..2 {
         h.run();
         h.get_by_label("Auto exposure").click();
         h.run();
-        assert!(h.state().action.as_ref().unwrap().running.contains("Auto exposure"));
-        assert!(h.get_by_label("Auto exposure").accesskit_node().is_disabled());
-        // Replacing the project would drop the running action's result.
-        for project in ["New", "Open…"] {
-            assert!(h.get_by_label(project).accesskit_node().is_disabled());
+        // The store serves the second click's input, so that action can
+        // finish within the frame. The first one shows the running state.
+        if click == 0 {
+            assert!(h.state().action.as_ref().unwrap().running.contains("Auto exposure"));
+            assert!(h.get_by_label("Auto exposure").accesskit_node().is_disabled());
+            // Replacing the project would drop the running action's result.
+            for project in ["New", "Open…"] {
+                assert!(h.get_by_label(project).accesskit_node().is_disabled());
+            }
         }
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
         while h.state().action.is_some() {

@@ -329,8 +329,10 @@ fn consume(
     output.host().copy_from_slice(image.data.host()?);
     Ok(())
 }
+/// Both outputs of one node come from one run of it, and the store keeps
+/// them for later evaluations.
 #[test]
-fn independent_outputs_share_one_producer_per_evaluation_without_persistent_cache() {
+fn independent_outputs_share_one_producer_and_stay_in_the_store() {
     PRODUCED.store(0, Ordering::Relaxed);
     let mut d = Dag::new();
     let source = image(&mut d);
@@ -340,13 +342,15 @@ fn independent_outputs_share_one_producer_per_evaluation_without_persistent_cach
     d.connect(split.copy, consumer.image).unwrap();
     d.connect(split.levels, consumer.levels).unwrap();
     let eval = Evaluator::new(RuntimeContext::host());
-    for expected in 1..=2 {
-        let result = eval.evaluate::<Rgb>(&d, &Default::default(), consumer.output).unwrap();
-        assert_eq!(result.statistics.nodes, 3);
-        assert_eq!(PRODUCED.load(Ordering::Relaxed), expected);
-    }
+    let result = eval.evaluate::<Rgb>(&d, &Default::default(), consumer.output).unwrap();
+    assert_eq!((result.statistics.nodes, result.statistics.hits), (3, 0));
+    assert_eq!(PRODUCED.load(Ordering::Relaxed), 1);
+    let result = eval.evaluate::<Rgb>(&d, &Default::default(), consumer.output).unwrap();
+    assert_eq!((result.statistics.nodes, result.statistics.hits), (0, 1));
     let levels = eval.evaluate::<BayerLevels>(&d, &Default::default(), split.levels).unwrap();
-    assert_eq!(*levels.data.host().unwrap(), LEVELS); // image output may be unused
+    assert_eq!((levels.statistics.nodes, levels.statistics.hits), (0, 1));
+    assert_eq!(*levels.data.host().unwrap(), LEVELS);
+    assert_eq!(PRODUCED.load(Ordering::Relaxed), 1);
 }
 
 #[node(id="test-value-check",contract=copy_contract)]
@@ -411,18 +415,27 @@ fn device_chain(runtime: RuntimeContext) {
     assert_eq!(result.statistics.nodes, 7);
     assert_eq!(result.statistics.uploads, 2);
     assert_eq!(result.statistics.downloads, 1); // The island's input; the result stays.
-    let resident = eval.evaluate::<Rgb>(&d, &Default::default(), exposure.output).unwrap();
+    // A new evaluator, so the exposure output is computed again rather than
+    // served from the store.
+    let resident = Evaluator::new(eval.runtime().clone())
+        .evaluate::<Rgb>(&d, &Default::default(), exposure.output)
+        .unwrap();
     assert_eq!(resident.statistics.downloads, 0);
     assert_eq!(resident.statistics.uploads, 1);
 
     let observer = sink::add(&mut d, ()).unwrap();
     d.connect(after.output, observer.image).unwrap();
-    let mut timings = Vec::new();
-    let values = eval.evaluate_batch(&d, &Default::default(), &[observer.node], Some(&mut timings));
-    let inputs = values[&observer.node].as_ref().unwrap().bind::<sink::Definition>().unwrap();
-    assert_eq!(inputs.image.data.host().unwrap(), result.data.host().unwrap());
-    assert_eq!(timings.len(), 8);
-    assert!(timings.iter().all(|timing| timing.success));
+    // Timings cover the nodes that run: all eight on a new evaluator, and
+    // only the sink where the store holds its input.
+    for (eval, expected) in [(Evaluator::new(eval.runtime().clone()), 8), (eval, 1)] {
+        let mut timings = Vec::new();
+        let values =
+            eval.evaluate_batch(&d, &Default::default(), &[observer.node], Some(&mut timings));
+        let inputs = values[&observer.node].as_ref().unwrap().bind::<sink::Definition>().unwrap();
+        assert_eq!(inputs.image.data.host().unwrap(), result.data.host().unwrap());
+        assert_eq!(timings.len(), expected);
+        assert!(timings.iter().all(|timing| timing.success));
+    }
 }
 #[cfg(feature = "wgpu")]
 #[test]

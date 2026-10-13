@@ -3,17 +3,30 @@ use crate::{
     Error, Result,
     eval::InputValues,
     image::{Description, Image},
-    param::{ParamSpec, Parameters},
+    param::{self, ParamSpec, Parameters},
     ports::PortSpec,
     runtime::KernelContext,
     shape::Shape,
 };
-use std::{any::Any, sync::Arc};
+use std::{
+    any::Any,
+    hash::{BuildHasher, RandomState},
+    path::PathBuf,
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::SystemTime,
+};
 
 /// Everything about a node kind that does not depend on its parameters. One
 /// static per kind; graph checks, help and editors read the same declaration.
 pub struct Kind {
     pub id: &'static str,
+    /// Bumped by hand when the kind's numerics change, so outputs the store
+    /// keeps from the previous version no longer match. `#[node(version = N)]`
+    /// sets it, 1 by default.
+    pub version: u32,
     pub name: &'static str,
     /// What the node is for, from `registry::TAGS`; structure such as ports
     /// and payloads stays in the declaration.
@@ -36,6 +49,16 @@ pub struct Kind {
 pub struct Tag {
     pub id: &'static str,
     pub description: &'static str,
+    /// The durability of the outputs of nodes with this purpose.
+    pub durability: Durability,
+}
+/// How likely an edit is to replace a stored output, in the order the store
+/// evicts, `Low` first. Each tag in `registry::TAGS` states one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Durability {
+    Low,
+    Medium,
+    High,
 }
 #[derive(Clone, Copy)]
 pub struct Action {
@@ -54,6 +77,69 @@ impl Kind {
     pub fn param(&self, name: &str) -> Option<&'static ParamSpec> {
         self.parameters.iter().find(|p| p.name == name)
     }
+
+    /// `High` for a source, otherwise the most durable of the kind's tags,
+    /// `Low` without tags.
+    pub fn durability(&self) -> Durability {
+        if self.shape == Shape::Source {
+            return Durability::High;
+        }
+        self.tags.iter().map(|tag| tag.durability).max().unwrap_or(Durability::Low)
+    }
+}
+
+/// What a node's outputs depend on beside its kind and its inputs.
+/// Evaluation hashes it into their store keys.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Identity {
+    /// Outputs computed from these parameters, persisted JSON, under the
+    /// evaluation's global context.
+    Computed(serde_json::Value),
+    /// Outputs a source loaded with these parameters from these files. They
+    /// are the same under every global context.
+    Loaded(serde_json::Value, Vec<FileStamp>),
+    /// Outputs bound in memory, which no other node instance shares.
+    Bound(u128),
+}
+impl Identity {
+    /// A source's identity: its parameters and the input files they name
+    /// under `kind`'s schema, stamped now. Call it before reading the files:
+    /// a file written during the read then stamps differently when chosen
+    /// again.
+    pub fn loaded(kind: &Kind, parameters: serde_json::Value) -> Result<Self> {
+        let files = param::input_files(kind.parameters, &parameters)
+            .into_iter()
+            .map(FileStamp::read)
+            .collect::<Result<_>>()?;
+        Ok(Self::Loaded(parameters, files))
+    }
+
+    /// An identity no other call returns in this process. A random
+    /// per-process seed makes a repeat in another process unlikely.
+    pub fn bound() -> Self {
+        static SEED: OnceLock<u64> = OnceLock::new();
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let seed = *SEED.get_or_init(|| RandomState::new().hash_one(0u8));
+        Self::Bound(u128::from(seed) << 64 | u128::from(NEXT.fetch_add(1, Ordering::Relaxed)))
+    }
+}
+
+/// A file as a source found it before reading: its path, byte length and
+/// modification time. Equal stamps are taken to mean equal contents.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileStamp {
+    pub path: PathBuf,
+    pub len: u64,
+    /// `None` where the platform reports no modification time.
+    pub modified: Option<SystemTime>,
+}
+impl FileStamp {
+    /// Fails, naming the path, when the file cannot be inspected.
+    pub fn read(path: PathBuf) -> Result<Self> {
+        let metadata = std::fs::metadata(&path)
+            .map_err(|e| Error::Runtime(format!("{}: {e}", path.display())))?;
+        Ok(Self { len: metadata.len(), modified: metadata.modified().ok(), path })
+    }
 }
 
 /// Mechanical adapter interface. Use #[node] for computational nodes.
@@ -61,6 +147,9 @@ impl Kind {
 pub trait Node: Any + Send + Sync {
     fn kind(&self) -> &'static Kind;
     fn parameters(&self) -> Result<serde_json::Value>;
+    /// What the outputs depend on beside the kind and the inputs. A source
+    /// loads its files here, so a failure is the source's load error.
+    fn identity(&self) -> Result<Identity>;
     /// Pure output description/check using the same global configuration as run.
     /// Inputs are the evaluated descriptions; `None` is an unconnected optional input.
     fn contract(

@@ -7,7 +7,8 @@
 //! that evaluation and the store pass between nodes: a raster, or a deferred
 //! image that a map, warp or resample published. `plan` decides how each step
 //! composes, and materializes a deferred image into a raster when a consumer
-//! first needs samples.
+//! first needs samples. A materialized image reports its bytes per side to
+//! the store, which may keep it without one side.
 use crate::{
     Error, Result,
     payload::{DeviceBuffer, DeviceLayout, Payload},
@@ -34,7 +35,7 @@ pub struct Image {
 }
 struct Value {
     /// A `Raster<P>`, set when the image is created or materialized.
-    raster: OnceLock<Box<dyn Any + Send + Sync>>,
+    raster: OnceLock<Box<dyn Stored>>,
     /// The computation of a deferred image until it is materialized, which
     /// releases its input.
     pending: Mutex<Option<Deferred>>,
@@ -47,8 +48,36 @@ struct Deferred {
     plan: Plan,
     materialize: Materialize,
 }
-type Materialize =
-    fn(&Deferred, &Description, &KernelContext<'_>) -> Result<Box<dyn Any + Send + Sync>>;
+type Materialize = fn(&Deferred, &Description, &KernelContext<'_>) -> Result<Box<dyn Stored>>;
+
+/// A raster without its payload type, as the store accounts for it.
+trait Stored: Any + Send + Sync {
+    fn footprint(&self) -> Footprint;
+    /// The same samples without the representation on `side`, or `None`
+    /// when it is the only one.
+    fn without(&self, side: Side) -> Option<Box<dyn Stored>>;
+}
+
+/// Bytes a raster holds on each side, zero where it has no representation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Footprint {
+    pub host: u64,
+    pub device: u64,
+}
+impl Footprint {
+    pub fn on(self, side: Side) -> u64 {
+        match side {
+            Side::Host => self.host,
+            Side::Device => self.device,
+        }
+    }
+}
+/// Where a representation lives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Side {
+    Host,
+    Device,
+}
 
 impl Image {
     pub fn desc(&self) -> &Description {
@@ -58,7 +87,21 @@ impl Image {
     /// The samples as payload `P`. `None` when the image holds another
     /// payload or is deferred and not yet materialized.
     pub fn downcast<P: Payload>(&self) -> Option<&Raster<P>> {
-        self.value.raster.get()?.downcast_ref()
+        let raster: &dyn Any = self.value.raster.get()?.as_ref();
+        raster.downcast_ref()
+    }
+
+    /// The samples' bytes on each side, `None` while the image is deferred.
+    pub(crate) fn footprint(&self) -> Option<Footprint> {
+        self.value.raster.get().map(|raster| raster.footprint())
+    }
+
+    /// The samples without the representation on `side`, sharing the other
+    /// one. `None` while deferred or when `side` holds the only one.
+    pub(crate) fn without(&self, side: Side) -> Option<Image> {
+        let raster = self.value.raster.get()?.without(side)?;
+        let value = Value { raster: OnceLock::from(raster), pending: Mutex::new(None) };
+        Some(Image { desc: self.desc.clone(), value: Arc::new(value) })
     }
 
     /// Run a deferred image's plan into a raster on `ctx`'s runtime, its
@@ -150,7 +193,7 @@ impl Image {
 impl<P: Payload> From<Raster<P>> for Image {
     fn from(raster: Raster<P>) -> Self {
         let desc = raster.description();
-        let raster: Box<dyn Any + Send + Sync> = Box::new(raster);
+        let raster: Box<dyn Stored> = Box::new(raster);
         let value = Value { raster: OnceLock::from(raster), pending: Mutex::new(None) };
         Self { desc, value: Arc::new(value) }
     }
@@ -160,7 +203,7 @@ impl Deferred {
         &self,
         desc: &Description,
         ctx: &KernelContext<'_>,
-    ) -> Result<Box<dyn Any + Send + Sync>> {
+    ) -> Result<Box<dyn Stored>> {
         let input = self.input.raster::<P>(ctx)?;
         Ok(Box::new(self.plan.run(&input, typed(desc), ctx)?))
     }
@@ -191,6 +234,12 @@ struct Resident<P: Payload> {
     buffer: DeviceBuffer<P>,
     runtime: RuntimeContext,
     decode: fn(&P::Desc, Bytes) -> Result<P::Host>,
+}
+
+impl<P: Payload> Clone for Resident<P> {
+    fn clone(&self) -> Self {
+        Self { buffer: self.buffer.clone(), runtime: self.runtime.clone(), decode: self.decode }
+    }
 }
 
 impl<P: Payload> Clone for Raster<P> {
@@ -237,11 +286,31 @@ impl<P: Payload> Raster<P> {
     }
 
     /// A new raster sharing these host samples, downloaded first if needed,
-    /// without the device copy. Sources hand one to each evaluation, so an
-    /// upload of loaded data lives only as long as that evaluation.
+    /// without the device copy. Sources hand one to each run, so an upload of
+    /// loaded data lives with the store entry that holds it, under its budget.
     pub fn share_host(&self) -> Result<Self> {
         self.host()?;
         Ok(Self::new(self.0.desc.clone(), self.0.host.get().cloned(), None))
+    }
+}
+
+impl<P: Payload> Stored for Raster<P> {
+    fn footprint(&self) -> Footprint {
+        let bytes = P::byte_len(&self.0.desc) as u64;
+        let held = |present: bool| if present { bytes } else { 0 };
+        Footprint {
+            host: held(self.0.host.get().is_some()),
+            device: held(self.0.device.get().is_some()),
+        }
+    }
+
+    fn without(&self, side: Side) -> Option<Box<dyn Stored>> {
+        let (host, device) = (self.0.host.get(), self.0.device.get());
+        let (host, device) = match side {
+            Side::Host => (None, Some(device?.clone())),
+            Side::Device => (Some(host?.clone()), None),
+        };
+        Some(Box::new(Self::new(self.0.desc.clone(), host, device)))
     }
 }
 

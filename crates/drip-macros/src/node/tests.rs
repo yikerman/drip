@@ -328,7 +328,7 @@ fn preserves_public_bindings_and_metadata() {
     }
     assert!(items.iter().any(|item| matches!(item, syn::Item::Static(item)
         if item.ident == "KIND" && matches!(item.vis, syn::Visibility::Public(_)))));
-    for method in ["kind", "parameters", "contract", "run", "bind"] {
+    for method in ["kind", "parameters", "identity", "contract", "run", "bind"] {
         generated_method(&module, method);
     }
     assert_eq!(literal(&module, "help"), "First line.\nSecond line.");
@@ -370,6 +370,34 @@ fn supplies_default_and_explicit_display_metadata() {
         }
         let tags = kind_field(&module, "tags");
         assert_eq!(quote!(#tags).to_string(), expected_tags.to_string());
+    }
+}
+
+#[test]
+fn versions_default_to_one_and_are_declared_by_hand() {
+    for (options, expected) in [(quote!(id = "x"), "1"), (quote!(id = "x", version = 3), "3")] {
+        let function = syn::parse_quote!(
+            fn x(context: &Context, parameters: &Params) {}
+        );
+        let module = generated_module(expand(options, function).unwrap());
+        let version = kind_field(&module, "version");
+        assert_eq!(quote!(#version).to_string(), expected);
+    }
+}
+
+#[test]
+fn sources_identify_by_what_they_loaded_and_others_by_parameters() {
+    let source = syn::parse_quote! {
+        fn read(p: &Settings, raw: Load<'_, Bayer>) -> Result<()> { Ok(()) }
+    };
+    let kernel = syn::parse_quote! { fn x(c: &Context, p: &P) -> Result<()> { Ok(()) } };
+    for (function, expected) in [
+        (source, "Ok (self . loaded () ? . 1 . clone ())"),
+        (kernel, "Ok (:: drip :: definition :: Identity :: Computed (self . parameters () ?))"),
+    ] {
+        let module = generated_module(expand(quote!(id = "x"), function).unwrap());
+        let body = &generated_method(&module, "identity").block;
+        assert!(quote!(#body).to_string().contains(expected), "{}", quote!(#body));
     }
 }
 

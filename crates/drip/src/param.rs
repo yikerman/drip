@@ -87,6 +87,31 @@ impl ParamKind {
     }
 }
 
+/// The files persisted parameters `value` name for reading under `specs`:
+/// each set `Path` that is not an output, including those of selected choice
+/// variants, in schema order.
+pub fn input_files(specs: &[ParamSpec], value: &Json) -> Vec<std::path::PathBuf> {
+    specs
+        .iter()
+        .flat_map(|spec| {
+            let field = &value[spec.name];
+            match spec.kind {
+                ParamKind::Path { output: false, .. } => {
+                    field.as_str().map(Into::into).into_iter().collect()
+                }
+                ParamKind::Choice { options, .. } => options
+                    .iter()
+                    .filter(|option| option.selected(field))
+                    .flat_map(|option| {
+                        input_files(option.parameters.unwrap_or(&[]), &field[option.name])
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            }
+        })
+        .collect()
+}
+
 /// Typed parameters from their persisted JSON; the type is the schema check.
 pub fn decode<P: serde::de::DeserializeOwned>(json: Json) -> crate::Result<P> {
     serde_json::from_value(json)
