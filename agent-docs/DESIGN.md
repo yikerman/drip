@@ -282,7 +282,8 @@ Settled with the user on 2026-10-11 and revised by the compute model
   derives regions and preview scale from shapes, and memoizes in one store.
   It is executed in eight steps. Step 4 replaced the no-cache requirement
   under Performance with the store, step 5 added its disk tier, step 6
-  regions and the scale rule, and step 7 reductions.
+  regions and the scale rule, and step 7 reductions, which removed the GUI's
+  kernels.
 - **Decided (2026-10-13):** Step 1. `Kind::shape` declares how evaluation runs
   a kind, `Kernel` or `Source`, and later shapes are added beside them. A
   run's values lived in a `Store`, which step 4 grew into the memo.
@@ -517,14 +518,18 @@ Settled with the user on 2026-10-11 and revised by the compute model
   atomics, at most 32 and 2²⁰ counts in all, each lane adding a run of its
   pixels in one bin at once. In 32 copies a level-1 waveform's 196 608
   counts spread atomics over 25 MB and took 6.1 ms on the RTX 3080, and in
-  five copies, within its L2 cache, 2.0 ms. Kernels with barriers cap
-  their lanes at the runtime's limit, since the CPU runtime needs a host
-  worker per lane.
+  five copies, within its L2 cache, 2.0 ms. The vectorscope, at 32 copies
+  before, gets 16. Kernels with barriers cap their lanes at the runtime's
+  limit, since the CPU runtime needs a host worker per lane. Bodies compare
+  uploaded f32 bin edges for exact exposure boundaries, and the vectorscope
+  normalizes RGB before XYZ for HDR headroom.
 - **Decided (2026-10-13):** A reduction reads a deferred input in place
   when it is the input's only consumer in the run, and otherwise
   materializes it first, once for every consumer, and the store keeps it.
-  Results are bit-identical either way. Maps after a fan-out still
-  recompute, since materializing would cut their segment.
+  Results are bit-identical either way. Three scopes at level 1 on the Sony
+  fixture took 5.03 ms, each computing the tail, and 4.19 ms reading it
+  materialized once ([PROGRESS](PROGRESS.md#2026-10-13)). Maps after a
+  fan-out still recompute, since materializing would cut their segment.
 - **Decided (2026-10-13):** A frontend consumes a reduce or bins target's
   outputs instead of its inputs. Evaluation demands the outputs like any
   value, so stored counts run nothing, and `InputValues::bind_outputs`
@@ -534,19 +539,22 @@ Settled with the user on 2026-10-11 and revised by the compute model
   lattice. It runs at the requested scale when it reads an image on a
   plane, and its key carries the scale through its input's
   (`Key::reduced`).
+- **Decided (2026-10-13):** Histogram, Waveform and Vectorscope stay GUI
+  kinds tagged `view` and `scope` and are bins nodes whose `#[cube]` bin
+  bodies are drip-gui's only device code. Their `Counts` output (`node::data`,
+  with the coordinates of the counted samples for the plot's label) is a
+  port on the canvas that nothing consumes yet, and `Prepare::Outputs`
+  plots it. The worker and the user's graph are unchanged. A view that
+  received inputs and ran the reduction through `Image::count` would keep
+  the binding as it was, but would recount an unchanged image on every
+  preview, where the store now serves the counts.
 - **Decided (2026-10-13):** Auto exposure is `node::exposure::meter`, a
   library function over an `Image` that folds `MEAN_LUMINANCE` with
   `Image::fold` and returns `Exposure` parameters, so a headless frontend
-  can meter. It keeps the exact Y = 0.18 target and the darktable
-  reference.
-- **Decided:** Reductions use fixed-order partial sums without float atomics.
-  Exposure reductions cap lanes at the runtime limit, since CPU barrier kernels
-  need a host worker per lane. Scopes compare uploaded f32 thresholds to keep
-  exact bin edges. The vectorscope normalizes RGB before XYZ for HDR headroom.
-- **Decided:** GUI scopes and auto exposure consume device RGB with GUI-owned
-  kernels and read back counts or one f32 until step 7 adds `reduce`.
-  Softproof, gamut check and preview packing stay on the CPU. Packing uses
-  Rayon over disjoint RGBA f16 slices.
+  can meter, and the GUI action is one call. It keeps the exact Y = 0.18
+  target and the darktable reference.
+- **Decided:** Softproof, gamut check and preview packing stay on the CPU.
+  Packing uses Rayon over disjoint RGBA f16 slices.
 
 - **Decided (2026-10-13):** Export TIFF writes an image larger than the
   device budget in bands. A target's input on a plane over the budget stays

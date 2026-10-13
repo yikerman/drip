@@ -44,10 +44,11 @@ pub fn prepare(
 
 impl super::GuiNode for observe::Definition {
     type Presentation = PreviewImage;
-    const PREPARE: Option<super::Prepare<Self>> = Some(|node, inputs, ctx| {
-        let image = Arc::new(HostImage::new(&inputs.image, ctx.global.scale)?);
-        prepare(&node.parameters, node.assets()?.as_ref(), &image)
-    });
+    const PREPARE: Option<super::Prepare<Self>> =
+        Some(super::Prepare::Inputs(|node, inputs, ctx| {
+            let image = Arc::new(HostImage::new(&inputs.image, ctx.global.scale)?);
+            prepare(&node.parameters, node.assets()?.as_ref(), &image)
+        }));
 }
 
 use drip::{

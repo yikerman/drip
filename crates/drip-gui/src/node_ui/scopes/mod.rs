@@ -1,8 +1,15 @@
-//! Shared exposure settings, reductions and plotting for scope nodes.
-use drip::{Error, Result};
+//! Scope nodes: Histogram, Waveform and Vectorscope are bins nodes whose
+//! counts the store keeps, and whose views plot the counts. Each declares a
+//! `#[cube]` bin body, its only device code. The exposure axis, its bin
+//! edges and plotting are shared here and in `view`.
+use cubecl::prelude::*;
+use drip::{
+    Error, Result,
+    node::data::{Counts, CountsDesc, RgbDesc},
+    ports::Read,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-pub(super) mod device;
 pub(crate) mod histogram;
 pub(crate) mod vectorscope;
 mod view;
@@ -62,6 +69,43 @@ pub enum ScopeAxes {
 }
 
 pub(super) const SIZE: usize = 256;
+
+/// The lower edge of each of the `SIZE` bins of `range`, `2^ev` for equal
+/// steps of `ev`. Bodies compare samples with these f32 values, so a sample
+/// on an edge falls in the same bin on every runtime and on the host.
+fn edges(range: &ExposureRange) -> [f32; SIZE] {
+    let (min, max) = (range.min_ev as f32, range.max_ev as f32);
+    std::array::from_fn(|i| 2f32.powf(min + i as f32 * (max - min) / SIZE as f32))
+}
+
+/// The bin of `value` among the `SIZE` ascending `edges`: the last edge at
+/// or below it. Values below the first edge, and NaN, fall in bin 0.
+#[cube]
+fn stop(value: f32, edges: &[f32]) -> u32 {
+    let mut lo = 0usize;
+    let mut hi = 256usize;
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if value >= edges[mid] {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    u32::cast_from(usize::max(lo, 1) - 1)
+}
+
+/// What a scope with `bins` bins of `channels` channels counts of `image`.
+fn counts(bins: usize, channels: usize, image: &RgbDesc) -> CountsDesc {
+    CountsDesc { bins, channels, coordinates: image.coordinates.clone() }
+}
+
+/// Counts with three channels per bin, the missing ones zero.
+fn per_bin(counts: &Read<'_, Counts>) -> Result<Vec<[u32; 3]>> {
+    let host = counts.data.host()?;
+    let bin = |c: &[u32]| std::array::from_fn(|i| c.get(i).copied().unwrap_or(0));
+    Ok(host.chunks(counts.desc.channels).map(bin).collect())
+}
 pub(super) fn scope(
     counts: Vec<[u32; 3]>,
     axes: ScopeAxes,

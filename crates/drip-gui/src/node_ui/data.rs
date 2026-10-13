@@ -1,7 +1,7 @@
 //! Images prepared for GUI views. Processing payloads remain in `drip`.
 use drip::{
     Result,
-    node::data::{DeviceBuffer, HostBuffer, Rgb, RgbDesc},
+    node::data::{HostBuffer, Rgb},
     ports::Read,
     runtime::{GlobalContext, KernelContext, RuntimeContext},
     shape::MapPayload,
@@ -67,31 +67,9 @@ impl Default for PrepareContext {
         Self { runtime: RuntimeContext::host(), global: Default::default() }
     }
 }
-/// Device RGB retained for GUI-owned scope kernels.
-pub struct DeviceRgb {
-    pub desc: RgbDesc,
-    pub pixels: DeviceBuffer<Rgb>,
-}
-impl DeviceRgb {
-    /// Shares the evaluated device pixels, uploading them first if they are on the host.
-    pub fn new<R>(image: &Read<'_, Rgb, R>, ctx: &PrepareContext) -> Result<Self> {
-        Ok(Self { desc: image.desc.clone(), pixels: image.data.device(&ctx.kernels())?.clone() })
-    }
-}
-
 impl PrepareContext {
-    pub fn client(&self) -> Result<&cubecl::prelude::Client> {
-        self.runtime.client()
-    }
     /// For running drip kernels and reading device samples on the runtime.
     pub fn kernels(&self) -> KernelContext<'_> {
         KernelContext::new(&self.global, &self.runtime)
     }
-}
-
-/// A GUI kernel's scratch buffer as an argument. Every such buffer holds
-/// 4-byte scalars (f32 or u32), matching the kernels' slices.
-pub(crate) fn argument(handle: &cubecl::server::Handle) -> cubecl::prelude::BufferArg {
-    // SAFETY: the buffer's element size is one scalar, as documented above.
-    unsafe { cubecl::prelude::BufferArg::from_raw_parts(handle.clone(), 1) }
 }

@@ -521,8 +521,8 @@ changes add shapes without changing what a value is.
 | 4 | Keys, durability and the device budget. A Sigmoid-only edit recomputes only the tail. | Landed 2026-10-13 |
 | 5 | `foreign` with the disk tier. RAW decode moves to it, and one stacking or model placeholder proves the path. | Landed 2026-10-13, with Hot pixel removal as the second node |
 | 6 | Regions: a 100 % crop view and tiled export. | Landed 2026-10-13, with kernels whole and no halos |
-| 7 | `reduce`. Scopes and auto exposure leave GUI-owned kernels. | Next |
-| 8 | `stencil` and `meta` with the first sharpen and pyramid nodes. | Planned |
+| 7 | `reduce`. Scopes and auto exposure leave GUI-owned kernels. | Landed 2026-10-13, with a `bins` shape beside `reduce` |
+| 8 | `stencil` and `meta` with the first sharpen and pyramid nodes. | Next |
 
 ## References
 

@@ -240,7 +240,9 @@ set of rules:
   workgroup in shared memory, one workgroup per 4096 pixels and at most 256
   workgroups, and a merge pass sums the workgroups' copies. Larger counts go
   to copies in global memory, at most 32 and together at most 2²⁰ counts,
-  each lane adding a run of its pixels in one bin at once.
+  each lane adding a run of its pixels in one bin at once. The
+  waveform's 196 608 counts get five copies and the vectorscope's 65 536
+  get 16.
 - Kernels with barriers take at most the runtime's lanes per workgroup,
   since the CPU runtime runs a host worker per lane.
 
@@ -352,20 +354,20 @@ error there fails every result.
 The GUI worker (`drip-gui/src/worker.rs`) owns one `Evaluator` per project
 and runs demands in order on one thread. A preview demand forces the nodes
 whose binding prepares a view, at scale `2^level` with level 0 to 8, then
-prepares each view from its inputs. A newer preview request replaces a
-pending one and makes a running one's result stale. A detail demand
-prepares one view from its input over a region at scale 1. The image view
-navigates in full-detail pixels, and at 100 % or more over a coarser
-preview its window asks for the visible region. The worker sends the latest
-region per view after any waiting preview and draws the crop over the
-magnified preview once both belong to the same graph, so an edit shows the
-new preview alone until its crop arrives. Scopes keep the preview's
-samples. An action demand forces one node at full detail and runs its
-action. Demands are not merged, but a later demand reuses what the store
-kept from earlier ones. A new project
-replaces the worker, its evaluator and the memory store. Every worker's
-evaluator has the disk tier of `Disk::platform()`, so a RAW decoded in one
-session is read from disk in the next.
+prepares each view from its inputs, or a scope from its counts. A newer
+preview request replaces a pending one and makes a running one's result
+stale. A detail demand prepares one view from its input over a region at
+scale 1. The image view navigates in full-detail pixels, and at 100 % or
+more over a coarser preview its window asks for the visible region. The
+worker sends the latest region per view after any waiting preview and draws
+the crop over the magnified preview once both belong to the same graph, so
+an edit shows the new preview alone until its crop arrives. Scopes keep the
+preview's samples. An action demand forces one node at full detail and runs
+its action. Demands are not merged, but a later demand reuses what the store
+kept from earlier ones. A new project replaces the worker, its evaluator and
+the memory store. Every worker's evaluator has the disk tier of
+`Disk::platform()`, so a RAW decoded in one session is read from disk in the
+next.
 
 Previews evaluate under `Policy::Defer` and actions under `Policy::Wait`. A
 target waiting for a foreign job keeps its previous view, the worker stays
@@ -455,12 +457,14 @@ alters what a kind computes for the same parameters and inputs, bump it with
 must be pure: a kernel that reads a file keeps returning the stored value
 until its parameters change, since only foreign nodes stamp their files.
 
-A measurement over every pixel is a reduction. Declare a `static ReduceBody`
-or `BinsBody` with a name unique among its kind and its `#[cube]` bodies
-beside the node, and a node `#[node(reduce = BODY)]` or `bins = BODY` whose
-host function returns the body's constants. Its contract describes the
-output. A frontend can also call `Image::fold` or `Image::count` directly,
-as `exposure::meter` does for auto exposure with its `MEAN_LUMINANCE` body.
+A measurement over every pixel is a reduction. Declare a `static
+ReduceBody` or `BinsBody` with a name unique among its kind and its
+`#[cube]` bodies beside the node, and a node `#[node(reduce = BODY)]` or
+`bins = BODY` whose host function returns the body's constants. Its
+contract describes the output. The scopes in `drip-gui/src/node_ui/scopes/`
+are bins nodes. A frontend can also call `Image::fold` or `Image::count`
+directly, as `exposure::meter` does for auto exposure with its
+`MEAN_LUMINANCE` body.
 
 A geometric operation is a warp: its host function returns a `Warp` with a
 map per channel from the output plane to the input plane, both in
@@ -512,17 +516,23 @@ Every listed kind appears in the editor with ports, help and schema controls
 from its `Kind`. Node-specific presentation is an `impl GuiNode` on the
 node's generated `Definition`, listed in `BINDINGS` in
 `drip-gui/src/registry.rs`. `controls` replaces the schema controls,
-`PREPARE` turns the node's typed inputs into a drawable view, and `ACTION`
-adds a frontend action whose result may become new parameters. `PREPARE`
-also prepares a detail, the view of a region of the inputs at full detail,
-whose inputs state their window. Both receive
-a `PrepareContext` with the demand's `GlobalContext` and the evaluator's
-runtime, so they read device samples and run drip kernels where the inputs
-live. Perspective Transform's view resamples its input through
-`Image::warp` and `Image::raster` rather than a kernel of its own.
+`PREPARE` turns what a preview hands the node into a drawable view, and
+`ACTION` adds a frontend action whose result may become new parameters.
+`Prepare::Inputs` prepares from the node's typed inputs and
+`Prepare::Outputs` from a reduction's typed outputs. `PREPARE` also
+prepares a detail, the view of a region of the inputs at full detail, whose
+inputs state their window. Both receive a `PrepareContext` with the
+demand's `GlobalContext` and the evaluator's runtime, so they read device
+samples and run drip kernels where the inputs live. Perspective Transform's
+view resamples its input through `Image::warp` and `Image::raster` rather
+than a kernel of its own, and auto exposure calls `exposure::meter`.
+drip-gui launches no kernel of its own.
 
-Views that only present their inputs, Preview and the scopes, are declared
-in drip-gui with `#[drip::node]`, listed in `VIEWS` and tagged `view`. A view
+Preview, Histogram, Waveform and Vectorscope are declared in drip-gui with
+`#[drip::node]`, listed in `VIEWS` and tagged `view`, the scopes also
+`scope`. Preview is a view of its input. The scopes are bins nodes whose
+only device code is their bin body: their `Counts` output, shown as a port,
+is stored like any value, and their views plot it. A view
 whose window edits its node implements `Drawable::interact` and sets
 parameters through `ControlCx::set`, as Perspective Transform's view does.
 The [drip-gui README](../crates/drip-gui/README.md#presenting-a-node) walks
@@ -532,7 +542,7 @@ through an example.
 
 Drip is adopting the compute model of
 [COMPUTE_MODEL](COMPUTE_MODEL.md#proposal-for-drip) in eight steps. Steps 1
-to 6 landed on 2026-10-13. Step 1 made ports name
+to 7 landed on 2026-10-13. Step 1 made ports name
 payloads, values `Image` and `Raster`, gave kinds a `Shape` and moved a
 run's values into a `Store`. Step 2 added the map shape and fused kernels
 and made Exposure, Camera RGB to color RGB, Chromatic adaptation and Sigmoid
@@ -545,4 +555,6 @@ form, and added Hot pixel removal. Step 6 added regions and windows to the
 fused segments, derived each node's scale from shapes with the `scaled`
 claim and evaluation's box reduction, made Export TIFF write in bands over
 the device budget and gave the GUI's image view full-detail crops at 100 %.
-Kernels stay whole, without halos. Step 7 is next: `reduce`.
+Kernels stay whole, without halos. Step 7 added the reduce and bins shapes,
+made the scopes bins nodes and auto exposure a library reduction, and
+removed drip-gui's kernels. Step 8 is next: `stencil` and `meta`.

@@ -19,9 +19,17 @@ use std::sync::Arc;
 
 type Parameters<G> = <G as Typed>::Parameters;
 type Inputs<'a, G> = <G as Typed>::Inputs<'a>;
-/// Runs on the admitted node, which holds its parameters and any assets.
-pub type Prepare<G> =
-    for<'a> fn(&G, Inputs<'a, G>, &PrepareContext) -> Result<<G as GuiNode>::Presentation>;
+type Outputs<'a, G> = <G as Typed>::Outputs<'a>;
+type Presentation<G> = <G as GuiNode>::Presentation;
+/// Turns what a preview hands a node into its view. Runs on the admitted
+/// node, which holds its parameters and any assets.
+pub enum Prepare<G: GuiNode> {
+    /// From the node's typed inputs: a view, or any node but a reduction.
+    Inputs(for<'a> fn(&G, Inputs<'a, G>, &PrepareContext) -> Result<Presentation<G>>),
+    /// From the typed outputs of a reduce or bins node, which evaluation
+    /// hands in place of its inputs.
+    Outputs(for<'a> fn(&G, Outputs<'a, G>, &PrepareContext) -> Result<Presentation<G>>),
+}
 type Run<G> = for<'a> fn(&G, Inputs<'a, G>, &PrepareContext) -> Result<Option<Parameters<G>>>;
 /// A named frontend action. It may return new parameters for its node, which
 /// the app applies as an ordinary edit once the action finishes.
@@ -57,9 +65,15 @@ impl Binding {
             // Erased extras are function pointers, which cannot capture: each
             // reads its declaration again.
             prepare: match G::PREPARE {
-                Some(_) => Some(|node, inputs, ctx, images| {
-                    let prepare = G::PREPARE.expect("declared preparation");
-                    Ok(prepare(G::of(node)?, inputs.bind::<G>()?, ctx)?.into_drawable(images))
+                Some(_) => Some(|node, values, ctx, images| {
+                    let node = G::of(node)?;
+                    let presentation = match G::PREPARE.expect("declared preparation") {
+                        Prepare::Inputs(prepare) => prepare(node, values.bind::<G>()?, ctx),
+                        Prepare::Outputs(prepare) => {
+                            prepare(node, values.bind_outputs::<G>()?, ctx)
+                        }
+                    };
+                    Ok(presentation?.into_drawable(images))
                 }),
                 None => None,
             },

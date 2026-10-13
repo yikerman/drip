@@ -1,107 +1,17 @@
-//! Auto exposure: meter the node's input at full detail, then set its EV.
-use super::{
-    Action, GuiNode,
-    data::{DeviceRgb, argument},
-};
-use cubecl::prelude::*;
-use drip::{
-    Error, Result,
-    node::{color, data::Rec2020, exposure},
-    ports::Requirement,
-};
+//! Auto exposure: meter the node's input at full detail with the library's
+//! [`exposure::meter`], then set its EV.
+use super::{Action, GuiNode};
+use drip::{image::Image, node::exposure};
 
 impl GuiNode for exposure::Definition {
     type Presentation = ();
-    // Meter before sigmoid; bright or dark subjects may need a manual adjustment.
     const ACTION: Option<Action<Self>> = Some(Action {
         name: "Auto exposure",
-        run: |_, inputs, ctx| Ok(Some(meter(&DeviceRgb::new(&inputs.image, ctx)?, ctx.client()?)?)),
+        run: |_, inputs, ctx| {
+            let image = Image::from(inputs.image.data.clone());
+            Ok(Some(exposure::meter(&image, &ctx.kernels())?))
+        },
     });
-}
-
-/// Exposure that brings the whole-image mean luminance of `image` to 18% grey.
-fn meter(image: &DeviceRgb, client: &Client) -> Result<exposure::Exposure> {
-    Rec2020::check(&image.desc)
-        .map_err(|e| Error::Contract(format!("auto exposure requires {}: {e}", Rec2020::LABEL)))?;
-    // Like darktable's area exposure mapping [1], compare linear luminance
-    // against a target. Here the area is the whole image and the target is
-    // exactly Y=0.18, rather than its default L*=50 (Y≈0.1842).
-    // [1] darktable contributors, “exposure,” development user manual.
-    // https://docs.darktable.org/usermanual/development/en/module-reference/processing-modules/exposure/
-    let mean = mean_luminance(client, image.pixels.argument(), image.desc.extent.pixels())?;
-    if !mean.is_finite() || mean <= 0.0 {
-        return Err(Error::Contract(
-            "auto exposure needs a finite, positive mean luminance".into(),
-        ));
-    }
-    let params = exposure::Exposure { ev: (0.18 / mean).log2() as f32 };
-    drip::param::Parameters::validate(&params)
-        .map_err(|_| Error::Contract("auto exposure gain is not representable".into()))?;
-    Ok(params)
-}
-
-fn mean_luminance(client: &Client, mut input: BufferArg, pixels: usize) -> Result<f64> {
-    // Normalize before summing to keep HDR headroom. Each invocation sums at
-    // most 256 values; successive passes reduce those contributions to one f32.
-    let weights =
-        color::rgb_to_xyz(color::REC2020, color::D65)[1].map(|v| (v / pixels as f64) as f32);
-    let dim = CubeDim::new_1d(client.properties().hardware.max_units_per_cube.min(256));
-    let mut len = pixels;
-    let mut rgb = true;
-    loop {
-        let count = len.div_ceil(256);
-        let output = client.empty(count * 4);
-        kernel::reduce::launch(
-            client,
-            CubeCount::Static(count.div_ceil(dim.num_elems() as usize) as u32, 1, 1),
-            dim,
-            input,
-            argument(&output),
-            weights[0],
-            weights[1],
-            weights[2],
-            rgb,
-        );
-        if count == 1 {
-            let bytes = client.read_one(output).map_err(|e| Error::Runtime(e.to_string()))?;
-            return Ok(f64::from(f32::from_ne_bytes(bytes[..4].try_into().unwrap())));
-        }
-        input = argument(&output);
-        len = count;
-        rgb = false;
-    }
-}
-
-mod kernel {
-    use cubecl::prelude::*;
-
-    #[cube(launch)]
-    pub fn reduce(
-        input: &[f32],
-        output: &mut [f32],
-        r: f32,
-        g: f32,
-        b: f32,
-        #[comptime] rgb: bool,
-    ) {
-        let i = ABSOLUTE_POS;
-        if i < output.len() {
-            let mut sum = 0.0f32;
-            let mut pixel = i;
-            let count = if rgb { input.len() / 3 } else { input.len() };
-            // Striding by the output length keeps adjacent lanes' reads coalesced.
-            while pixel < count {
-                if rgb {
-                    sum +=
-                        input[pixel * 3] * r + input[pixel * 3 + 1] * g + input[pixel * 3 + 2] * b;
-                } else {
-                    sum += input[pixel];
-                }
-                pixel += output.len();
-            }
-            output[i] = sum;
-        }
-    }
 }
 
 #[cfg(test)]
@@ -109,11 +19,11 @@ pub(crate) mod tests {
     use super::*;
     use crate::node_ui::data::PrepareContext;
     use drip::{
+        Result,
         definition::Typed,
         eval::Evaluator,
         graph::Dag,
-        node,
-        node::data::*,
+        node::{self, color, data::*},
         ports::NodeId,
         runtime::{KernelContext, RuntimeContext},
     };
@@ -199,8 +109,7 @@ pub(crate) mod tests {
             assert_eq!(image.statistics.downloads, 0);
             let global = Default::default();
             let kernels = KernelContext::new(&global, evaluator.runtime());
-            let input = image.data.device(&kernels).unwrap().argument();
-            let actual = mean_luminance(kernels.client().unwrap(), input, count).unwrap();
+            let actual = exposure::mean_luminance(&Image::from(image.data), &kernels).unwrap();
             assert!(
                 (actual - expected).abs() <= expected.abs() * 2e-6,
                 "{count}: {actual} vs {expected}"

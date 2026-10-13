@@ -55,7 +55,7 @@ pub fn slow(_: &KernelContext<'_>, _: &SlowKernel) -> drip::Result<()> {
 }
 impl GuiNode for slow::Definition {
     type Presentation = PreviewImage;
-    const PREPARE: Option<Prepare<Self>> = Some(|node, _, _| {
+    const PREPARE: Option<Prepare<Self>> = Some(Prepare::Inputs(|node, _, _| {
         if node.parameters.block {
             let gate = SLOW_GATE.lock().unwrap();
             let (started, release) = gate.as_ref().unwrap();
@@ -70,7 +70,7 @@ impl GuiNode for slow::Definition {
             color_space: "Rec.2020 / D65".into(),
             pixels: vec![[0.5; 3]].into(),
         })))
-    });
+    }));
 }
 
 #[drip::node(id="test-declared_view", name="Declared view", contract=empty_contract)]
@@ -80,7 +80,7 @@ pub fn declared_view(_: &KernelContext<'_>, _: &()) -> drip::Result<()> {
 impl GuiNode for declared_view::Definition {
     type Presentation = PreviewImage;
     const PREPARE: Option<Prepare<Self>> =
-        Some(|_, _, _| Err(drip::Error::Contract("no view yet".into())));
+        Some(Prepare::Inputs(|_, _, _| Err(drip::Error::Contract("no view yet".into()))));
 }
 
 #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
@@ -95,7 +95,7 @@ pub fn custom_controls_view(_: &KernelContext<'_>, _: &CustomSettings) -> drip::
 impl GuiNode for custom_controls_view::Definition {
     type Presentation = PreviewImage;
     const PREPARE: Option<Prepare<Self>> =
-        Some(|_, _, _| Err(drip::Error::Contract("no view yet".into())));
+        Some(Prepare::Inputs(|_, _, _| Err(drip::Error::Contract("no view yet".into()))));
     fn controls(ui: &mut egui::Ui, cx: &mut ControlCx<'_, '_, '_, '_, Self::Parameters>) {
         cx.schema(ui);
         ui.label("Custom view controls");
@@ -116,10 +116,10 @@ pub fn probe(_: &KernelContext<'_>, _: &ProbeSettings) -> drip::Result<()> {
 }
 impl GuiNode for probe::Definition {
     type Presentation = ();
-    const PREPARE: Option<Prepare<Self>> = Some(|node, _, _| {
+    const PREPARE: Option<Prepare<Self>> = Some(Prepare::Inputs(|node, _, _| {
         PROBE_CALLS.fetch_add(1, Ordering::Relaxed);
         if node.parameters.fail { Err("preparation failed".into()) } else { Ok(()) }
-    });
+    }));
 }
 
 #[derive(Clone, Serialize, Deserialize, drip::Parameters)]

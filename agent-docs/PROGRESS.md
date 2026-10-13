@@ -17,8 +17,32 @@ in [TODO](TODO.md).
   counts. Two bins nodes on the tail materialize it once, as do a bins node
   and a view. A reduce node folds the deferred tail to the same bits as its
   samples, at scale 4 the counts equal those of the box-reduced tail, and a
-  region on a bins target is refused. The macro tests cover both forms.
-  The full workspace gate passes.
+  region on a bins target is refused. drip-gui launches no kernel of its own
+  (`grep -rn "cube(launch)" crates/drip-gui/src` finds nothing). The scope
+  and auto exposure tests pass with unchanged expected values on wgpu and
+  on the CPU runtime. The scope device tests are ignored by default and ran
+  with `--ignored`. They now evaluate scope nodes and compare the counts
+  with the same host references. The macro tests cover both forms. Timed
+  with release drivers kept in
+  `../drip-benchmark-results/2026-10-13-reduce/` on the Sony fixture at
+  level 1 with `DRIP_BACKEND=wgpu` and `RAYON_NUM_THREADS=12`, a new
+  Exposure per sample, five samples after two warm-ups, evaluation until the
+  counts are on the host, plot meshes excluded. Step 6 ran in a worktree at
+  `fe3a83f`. Medians (ranges) in ms:
+
+  | Targets | Step 6 | Step 7 |
+  |---|---|---|
+  | Histogram | 1.65 (1.61–1.70) | 1.56 (1.50–1.64) |
+  | Waveform | 1.60 (1.57–1.76) | 2.26 (2.18–2.34) |
+  | Vectorscope | 1.88 (1.86–2.11) | 1.44 (1.21–1.58) |
+  | Three scopes | 3.92 (3.79–3.92) | 4.19 (4.18–4.33) |
+  | Preview and three scopes | 3.91 (3.86–4.01) | 4.19 (4.06–4.31) |
+
+  A scope alone writes no image. With several consumers the tail is
+  materialized once, as before, since recomputing it in three passes took
+  5.03 ms. The generic waveform pass is 0.6 ms slower than the per-column
+  kernel it replaced, after limiting its global copies to five took it from
+  6.1 ms. The full workspace gate passes.
 - Explicit compute model, step 6: regions, windows and the scale rule.
   `tests/regions.rs` checks on the CPU runtime and wgpu (RTX 3080) that a
   13 × 9 crop of six chains over a 61 × 47 source (maps, a reindex, a

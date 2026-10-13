@@ -26,7 +26,9 @@ fn prepared(p: Settings, scale: u32) -> (Prepared, Vec<[f32; 3]>) {
     let id = transform.node;
     let inputs = evaluator.evaluate_inputs(&dag, &global, &[id]).remove(&id).unwrap().unwrap();
     let ctx = PrepareContext { runtime: evaluator.runtime().clone(), global };
-    let prepare = <perspective::Definition as GuiNode>::PREPARE.unwrap();
+    let Some(Prepare::Inputs(prepare)) = <perspective::Definition as GuiNode>::PREPARE else {
+        panic!("Perspective Transform prepares from its inputs")
+    };
     let node = perspective::Definition::of(dag.node(id).unwrap()).unwrap();
     (
         prepare(node, inputs.bind::<perspective::Definition>().unwrap(), &ctx).unwrap(),

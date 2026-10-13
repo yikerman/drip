@@ -3,7 +3,7 @@
 //! its contracts.
 
 use crate::model::Kind;
-use drip::node::data::{Bayer, BayerLevels, CaptureMetadata, Rgb};
+use drip::node::data::{Bayer, BayerLevels, CaptureMetadata, Counts, Rgb};
 use drip::ports::PortSpec;
 use egui::Color32;
 
@@ -62,6 +62,7 @@ pub fn color(spec: &PortSpec) -> Option<Color32> {
         (spec.is::<Bayer>(), Color32::from_rgb(150, 164, 150)),
         (spec.is::<BayerLevels>(), Color32::from_rgb(148, 156, 170)),
         (spec.is::<CaptureMetadata>(), Color32::from_rgb(164, 150, 166)),
+        (spec.is::<Counts>(), Color32::from_rgb(170, 154, 146)),
     ]
     .into_iter()
     .find_map(|(is, color)| is.then_some(color))

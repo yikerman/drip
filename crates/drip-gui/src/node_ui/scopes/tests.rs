@@ -1,30 +1,51 @@
-use super::{histogram::histogram, vectorscope::vectorscope, waveform::waveform};
+use super::{histogram, vectorscope, waveform};
 use std::sync::Arc;
 
 use super::{SIZE, ScopeAxes};
 use crate::model::Graph;
 use crate::node_ui::data::{HostImage, Placement, PrepareContext};
 use crate::node_ui::scopes::{ExposureRange, Scale, histogram::Settings};
-use drip::{eval::Evaluator, graph::Dag, node::data::*, runtime::RuntimeContext};
+use crate::node_ui::{GuiNode, Prepare};
+use drip::{eval::Evaluator, graph::Dag, node::data::*, ports::NodeId, runtime::RuntimeContext};
 use serde_json::json;
+
+/// What scope node `G`, added to `dag` as `node`, prepares from its counts,
+/// evaluated at full detail on `ctx`'s runtime.
+fn prepared<G: GuiNode>(dag: &Dag, node: NodeId, ctx: &PrepareContext) -> G::Presentation {
+    let evaluator = Evaluator::new(ctx.runtime.clone());
+    let mut values = evaluator.evaluate_inputs(dag, &ctx.global, &[node]);
+    let values = values.remove(&node).unwrap().unwrap();
+    let Some(Prepare::Outputs(prepare)) = G::PREPARE else { panic!("scopes prepare counts") };
+    prepare(G::of(dag.node(node).unwrap()).unwrap(), values.bind_outputs::<G>().unwrap(), ctx)
+        .unwrap()
+}
+
+/// Scope node `G` with `parameters` over `image`'s samples as Rec.2020/D65.
+fn scope<G: GuiNode>(
+    parameters: &G::Parameters,
+    image: &HostImage,
+    ctx: &PrepareContext,
+) -> G::Presentation {
+    let mut dag = Dag::new();
+    let extent = Extent { width: image.width as u32, height: image.height as u32 };
+    let desc = RgbDesc::new(extent, Coordinates::Space(REC2020_D65));
+    let source = drip::node::source::<Rgb>(&mut dag, desc, image.pixels.to_vec()).unwrap();
+    let node = (G::KIND.build)(serde_json::to_value(parameters).unwrap()).unwrap();
+    let node = dag.add(node).unwrap();
+    dag.connect_ids(source.id(), dag.input_port(node, "image").unwrap()).unwrap();
+    prepared::<G>(&dag, node, ctx)
+}
 
 #[test]
 #[ignore = "requires the DRIP_BACKEND compute device; run explicitly"]
 fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
-    let pixels = Arc::new(HostImage {
-        width: 2,
-        height: 2,
-        plane: Placement::whole([2.0, 2.0]),
-        requested_scale: 1,
-        color_space: "Rec.2020 / D65".into(),
-        pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36], [1.0, 0.5, 2.0], [0.25; 3]].into(),
-    });
+    let pixels = vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36], [1.0, 0.5, 2.0], [0.25; 3]];
     let mut dag = Dag::new();
     let extent = Extent { width: 2, height: 2 };
     let working = drip::node::source::<Rgb>(
         &mut dag,
         RgbDesc::new(extent.clone(), Coordinates::Space(REC2020_D65)),
-        pixels.pixels.to_vec(),
+        pixels.clone(),
     )
     .unwrap();
     let response = Response {
@@ -34,41 +55,32 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
     let camera = drip::node::source::<Rgb>(
         &mut dag,
         RgbDesc::new(extent, Coordinates::Camera(response)),
-        pixels.pixels.to_vec(),
+        pixels,
     )
     .unwrap();
     // One histogram kind plots either coordinate system without conversion.
-    let histogram = super::histogram::observe::add(&mut dag, Settings::default()).unwrap();
-    let camera_histogram = super::histogram::observe::add(&mut dag, Settings::default()).unwrap();
-    dag.connect(working, histogram.image).unwrap();
-    dag.connect(camera, camera_histogram.image).unwrap();
-    let targets = [histogram.image.node(), camera_histogram.image.node()];
-    let values = Evaluator::new(RuntimeContext::from_env().unwrap()).evaluate_inputs(
-        &dag,
-        &Default::default(),
-        &targets,
-    );
-    let ctx = context();
-    let device = |id| {
-        let inputs = values[id].as_ref().unwrap();
-        let inputs = inputs.bind::<super::histogram::observe::Definition>().unwrap();
-        crate::node_ui::data::DeviceRgb::new(&inputs.image, &ctx).unwrap()
-    };
-    let (a, b) = (device(&targets[0]), device(&targets[1]));
-    fn prepare(
-        image: &crate::node_ui::data::DeviceRgb,
-        ctx: &PrepareContext,
-    ) -> (Arc<super::Histogram>, Arc<super::Scope>) {
-        let range = ExposureRange { min_ev: -12, max_ev: 4 };
-        (
-            super::histogram::histogram(&range, Scale::Log, image, ctx).unwrap(),
-            waveform(&range, Scale::Log, image, ctx).unwrap(),
-        )
+    let range = ExposureRange { min_ev: -12, max_ev: 4 };
+    let settings = Settings { range: range.clone(), scale: Scale::Log };
+    let waveform_settings = waveform::Settings { range, scale: Scale::Log };
+    let mut scopes = Vec::new();
+    for input in [working, camera] {
+        let histogram = histogram::observe::add(&mut dag, settings.clone()).unwrap();
+        let waveform = waveform::observe::add(&mut dag, waveform_settings.clone()).unwrap();
+        dag.connect(input, histogram.image).unwrap();
+        dag.connect(input, waveform.image).unwrap();
+        scopes.push((histogram.node, waveform.node));
     }
-    let (histogram, waveform) = prepare(&a, &ctx);
+    let ctx = context();
+    let prepare = |(histogram, waveform)| {
+        (
+            prepared::<histogram::observe::Definition>(&dag, histogram, &ctx),
+            prepared::<waveform::observe::Definition>(&dag, waveform, &ctx),
+        )
+    };
+    let (histogram, waveform) = prepare(scopes[0]);
     assert_eq!(histogram.counts.iter().flatten().sum::<u32>(), 12);
     assert_eq!(waveform.counts.iter().flatten().sum::<u32>(), 12);
-    let (camera_histogram, camera_waveform) = prepare(&b, &ctx);
+    let (camera_histogram, camera_waveform) = prepare(scopes[1]);
     assert_eq!(histogram.counts, camera_histogram.counts);
     assert_eq!(waveform.counts, camera_waveform.counts);
     assert_eq!(histogram.color_space, "Rec.2020 / D65");
@@ -87,11 +99,11 @@ fn histogram_bins_by_stops() {
         pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]].into(),
     };
     let mut graph = Graph::default();
-    let id = graph.add_node(&crate::node_ui::scopes::histogram::observe::KIND).unwrap();
+    let id = graph.add_node(&histogram::observe::KIND).unwrap();
     let context = context();
     let prepare = |graph: &Graph| {
         let p: Settings = serde_json::from_value(graph.node(id).unwrap().params).unwrap();
-        histogram(&p.range, p.scale, &device(&image, &context), &context).unwrap()
+        scope::<histogram::observe::Definition>(&p, &image, &context)
     };
     let h = prepare(&graph);
     let bin = |v: f32| ((v.log2() - h.min_stop) / (h.max_stop - h.min_stop) * 256.0) as usize;
@@ -123,7 +135,7 @@ fn vectorscope_uses_working_rec2020_coordinates() {
         pixels: vec![[1.0, 0.0, 0.0]].into(),
     };
     let context = context();
-    let scope = vectorscope(&device(&image, &context), &context).unwrap();
+    let scope = scope::<vectorscope::observe::Definition>(&(), &image, &context);
     let ScopeAxes::Vectorscope { primaries } = scope.axes else { panic!("chromaticity") };
     assert_eq!(scope.color_space, "Rec.2020 / D65");
     // Independently derive CIE u'v' for Rec.2020 red (x=.708, y=.292), relative to D65.
@@ -144,14 +156,9 @@ pub(crate) fn context() -> PrepareContext {
     PrepareContext { runtime: evaluator.runtime().clone(), ..Default::default() }
 }
 
-pub(crate) fn device(image: &HostImage, ctx: &PrepareContext) -> crate::node_ui::data::DeviceRgb {
-    let desc = RgbDesc::new(
-        Extent { width: image.width as u32, height: image.height as u32 },
-        Coordinates::Space(REC2020_D65),
-    );
-    let raster = Raster::<Rgb>::from_host(desc.clone(), image.pixels.clone()).unwrap();
-    let pixels = raster.device(&ctx.kernels()).unwrap().clone();
-    crate::node_ui::data::DeviceRgb { desc, pixels }
+/// What Vectorscope prepares from `image`'s samples, for its tests.
+pub(crate) fn vectorscope_of(image: &HostImage, ctx: &PrepareContext) -> Arc<super::Scope> {
+    scope::<vectorscope::observe::Definition>(&(), image, ctx)
 }
 
 #[test]
@@ -182,13 +189,14 @@ fn device_reductions_match_reference() {
             color_space: "Rec.2020 / D65".into(),
             pixels: input.into(),
         };
-        let gpu = device(&image, &ctx);
         assert_eq!(
-            histogram(&settings.range, settings.scale, &gpu, &ctx).unwrap().counts,
+            scope::<histogram::observe::Definition>(&settings, &image, &ctx).counts,
             super::histogram::count(&image.pixels, &edges)
         );
+        let waveform_settings =
+            waveform::Settings { range: settings.range.clone(), ..Default::default() };
         assert_eq!(
-            waveform(&settings.range, settings.scale, &gpu, &ctx).unwrap().counts,
+            scope::<waveform::observe::Definition>(&waveform_settings, &image, &ctx).counts,
             super::waveform::waveform_counts(&image, -12.0, 4.0)
         );
     }

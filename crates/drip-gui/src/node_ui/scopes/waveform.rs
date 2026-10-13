@@ -1,13 +1,10 @@
-//! Waveform reduction shared by color and camera scopes.
-#[cfg(test)]
-use super::SIZE;
-use super::{ExposureRange, Scale, Scope, ScopeAxes, scope};
+//! Waveform: per-channel exposure against horizontal image position.
+use super::{ExposureRange, SIZE, Scale, Scope, ScopeAxes, scope};
 #[cfg(test)]
 use crate::node_ui::data::HostImage;
-use crate::node_ui::data::{DeviceRgb, PrepareContext};
-use drip::Error as KernelError;
+use crate::node_ui::{GuiNode, Prepare};
 use drip::registry::tag;
-use drip::{node::data::*, ports::*, runtime::KernelContext};
+use drip::{Result, node::data::*, ports::*, runtime::GlobalContext, shape::BinsBody};
 #[cfg(test)]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -24,34 +21,62 @@ pub struct Settings {
     #[label("Density scale")]
     pub scale: Scale,
 }
+fn contract(_: &GlobalContext, _: &Settings, image: &RgbDesc) -> Result<(CountsDesc,)> {
+    Ok((super::counts(SIZE * SIZE, 3, image),))
+}
 /// Plot linear RGB channel exposure against horizontal image position, without a
 /// color conversion; camera RGB shows native channels. Exposure is measured
 /// relative to sample value 1; the density scale controls bin brightness.
-#[drip::node(id = "waveform", name = "Waveform", tags = [tag::VIEW, tag::SCOPE])]
-pub fn observe(_: &KernelContext<'_>, _: &Settings, _image: Read<'_, Rgb>) -> drip::Result<()> {
-    Ok(())
-}
-impl crate::node_ui::GuiNode for observe::Definition {
-    type Presentation = Arc<Scope>;
-    const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|node, inputs, ctx| {
-        let p = &node.parameters;
-        waveform(&p.range, p.scale, &DeviceRgb::new(&inputs.image, ctx)?, ctx)
-    });
+#[drip::node(id = "waveform", name = "Waveform", tags = [tag::VIEW, tag::SCOPE], contract = contract, bins = WAVEFORM)]
+pub fn observe(
+    p: &Settings,
+    _image: Point<'_, Rgb>,
+    _counts: Point<'_, Counts>,
+) -> Result<[f32; SIZE]> {
+    Ok(super::edges(&p.range))
 }
 
-pub fn waveform(
-    range: &ExposureRange,
-    scale: Scale,
-    image: &DeviceRgb,
-    ctx: &PrepareContext,
-) -> Result<Arc<Scope>, KernelError> {
-    let (min, max) = (range.min_ev as f32, range.max_ev as f32);
-    let counts = super::device::exposure(image, ctx, min, max, true)?;
+/// Row-major `SIZE × SIZE` bins, exposure rows from the top and position
+/// columns, with the exposure bin edges as constants.
+static WAVEFORM: BinsBody = BinsBody {
+    name: "drip-gui::waveform",
+    constants: SIZE,
+    bins: SIZE * SIZE,
+    channels: 3,
+    bin: kernel::waveform::expand,
+};
+
+mod kernel {
+    use crate::node_ui::scopes::stop;
+    use cubecl::prelude::*;
+    use drip::shape::{Bin, Pixel, Position};
+
+    /// Image column `x` falls in scope column `⌊256 · x / width⌋`, so the
+    /// scope columns split the image columns as evenly as integers allow.
+    #[cube]
+    pub fn waveform(px: Pixel, at: Position, k: &[f32]) -> Bin {
+        let column = at.x * 256u32 / at.width;
+        Bin {
+            c0: (255u32 - stop(px.r, k)) * 256u32 + column,
+            c1: (255u32 - stop(px.g, k)) * 256u32 + column,
+            c2: (255u32 - stop(px.b, k)) * 256u32 + column,
+        }
+    }
+}
+
+impl GuiNode for observe::Definition {
+    type Presentation = Arc<Scope>;
+    const PREPARE: Option<Prepare<Self>> =
+        Some(Prepare::Outputs(|node, outputs, _| waveform(&node.parameters, &outputs.counts)));
+}
+
+pub fn waveform(settings: &Settings, counts: &Read<'_, Counts>) -> Result<Arc<Scope>> {
+    let (min_stop, max_stop) = (settings.range.min_ev as f32, settings.range.max_ev as f32);
     Ok(scope(
-        counts,
-        ScopeAxes::Waveform { min_stop: min, max_stop: max },
-        super::logarithmic(scale),
-        image.desc.coordinates.to_string(),
+        super::per_bin(counts)?,
+        ScopeAxes::Waveform { min_stop, max_stop },
+        super::logarithmic(settings.scale),
+        counts.desc.coordinates.to_string(),
     ))
 }
 

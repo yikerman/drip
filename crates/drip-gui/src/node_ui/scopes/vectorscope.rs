@@ -5,34 +5,105 @@
 //! The vectorscope uses u′v′ directly, not darktable's lightness-scaled u*v*.
 //! Negative RGB components are clipped only for chromaticity visualization.
 
-#[cfg(test)]
-use super::SIZE;
-use super::{Scope, ScopeAxes, scope};
-use crate::node_ui::data::{DeviceRgb, PrepareContext};
-use drip::Error as KernelError;
+use super::{SIZE, Scope, ScopeAxes, scope};
+use crate::node_ui::{GuiNode, Prepare};
 use drip::node::color::{self, D65, REC2020};
 use drip::registry::tag;
-use drip::{node::data::*, ports::*, runtime::KernelContext};
+use drip::{Result, node::data::*, ports::*, runtime::GlobalContext, shape::BinsBody};
 #[cfg(test)]
 use rayon::prelude::*;
 use std::sync::Arc;
 const RADIUS: f32 = 0.5;
+fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(CountsDesc,)> {
+    Ok((super::counts(SIZE * SIZE, 1, image),))
+}
 /// Plot linear Rec.2020/D65 RGB chromaticity in CIE 1976 u′v′. Negative channels
 /// are clipped for visualization; black has no chromaticity and is omitted.
 /// Density uses logarithmic counts.
-#[drip::node(id = "vectorscope", name = "Vectorscope", tags = [tag::VIEW, tag::SCOPE])]
-pub fn observe(_: &KernelContext<'_>, _: &(), _image: Read<'_, Rgb, Rec2020>) -> drip::Result<()> {
-    Ok(())
+#[drip::node(id = "vectorscope", name = "Vectorscope", tags = [tag::VIEW, tag::SCOPE], contract = contract, bins = VECTORSCOPE)]
+pub fn observe(
+    _: &(),
+    _image: Point<'_, Rgb, Rec2020>,
+    _counts: Point<'_, Counts>,
+) -> Result<[f32; 11]> {
+    let matrix = color::rgb_to_xyz(REC2020, D65).map(|row| row.map(|v| v as f32));
+    let mut constants = [0.0; 11];
+    constants[..9].copy_from_slice(matrix.as_flattened());
+    constants[9..].copy_from_slice(&white_uv());
+    Ok(constants)
 }
-pub fn vectorscope(image: &DeviceRgb, ctx: &PrepareContext) -> Result<Arc<Scope>, KernelError> {
-    let matrix = &color::rgb_to_xyz(REC2020, D65);
-    let counts = super::device::vectorscope(image, ctx, matrix, white_uv())?;
-    let primaries = color::transpose(*matrix).map(|primary| position(uv(primary)));
+
+/// Row-major `SIZE × SIZE` u′v′ bins centred on D65, with the RGB to XYZ
+/// matrix and D65's u′v′ as constants.
+static VECTORSCOPE: BinsBody = BinsBody {
+    name: "drip-gui::vectorscope",
+    constants: 11,
+    bins: SIZE * SIZE,
+    channels: 1,
+    bin: kernel::chromaticity::expand,
+};
+
+mod kernel {
+    use cubecl::prelude::*;
+    use drip::shape::{Bin, Pixel, Position};
+
+    #[cube]
+    fn positive(v: f32) -> f32 {
+        if v > 0.0f32 { v } else { 0.0f32 }
+    }
+
+    /// The u′v′ bin of a pixel, or `SIZE · SIZE`, which counts nothing, for
+    /// a pixel without chromaticity.
+    #[cube]
+    pub fn chromaticity(px: Pixel, _at: Position, k: &[f32]) -> Bin {
+        let r = positive(px.r);
+        let g = positive(px.g);
+        let b = positive(px.b);
+        // Normalize first: chromaticity is exposure independent and finite
+        // HDR samples must not overflow XYZ or its denominator.
+        let peak = f32::max(r, f32::max(g, b));
+        let mut bin = 65536u32;
+        if peak > 0.0 {
+            let r = r / peak;
+            let g = g / peak;
+            let b = b / peak;
+            let x = k[0] * r + k[1] * g + k[2] * b;
+            let y = k[3] * r + k[4] * g + k[5] * b;
+            let z = k[6] * r + k[7] * g + k[8] * b;
+            let denominator = x + 15.0 * y + 3.0 * z;
+            let u = 4.0 * x / denominator;
+            let v = 9.0 * y / denominator;
+            let bx = u32::cast_from(f32::clamp((0.5 + u - k[9]) * 256.0, 0.0, 255.0));
+            let by = u32::cast_from(f32::clamp((0.5 - v + k[10]) * 256.0, 0.0, 255.0));
+            bin = by * 256 + bx;
+            // Exact neutrals belong at D65, including values at f32 extremes.
+            if r == g && g == b {
+                bin = 128u32 * 256 + 128;
+            }
+            // As in the host reference, undefined infinite chromaticities
+            // enter the top-left bin. NaN and negative channels clip to zero.
+            if peak > f32::MAX {
+                bin = 0u32;
+            }
+        }
+        Bin { c0: bin, c1: 0u32, c2: 0u32 }
+    }
+}
+
+impl GuiNode for observe::Definition {
+    type Presentation = Arc<Scope>;
+    const PREPARE: Option<Prepare<Self>> =
+        Some(Prepare::Outputs(|_, outputs, _| vectorscope(&outputs.counts)));
+}
+
+pub fn vectorscope(counts: &Read<'_, Counts>) -> Result<Arc<Scope>> {
+    let matrix = color::rgb_to_xyz(REC2020, D65);
+    let primaries = color::transpose(matrix).map(|primary| position(uv(primary)));
     Ok(scope(
-        counts,
+        super::per_bin(counts)?,
         ScopeAxes::Vectorscope { primaries },
         true,
-        image.desc.coordinates.to_string(),
+        counts.desc.coordinates.to_string(),
     ))
 }
 
@@ -87,12 +158,6 @@ fn vector_counts(pixels: &[[f32; 3]], matrix: &color::Mat3) -> Vec<[u32; 3]> {
         )
 }
 
-impl crate::node_ui::GuiNode for observe::Definition {
-    type Presentation = Arc<Scope>;
-    const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-        Some(|_, inputs, ctx| vectorscope(&DeviceRgb::new(&inputs.image, ctx)?, ctx));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,7 +166,7 @@ mod tests {
     #[ignore = "requires the DRIP_BACKEND compute device; run explicitly"]
     fn device_vectorscope_preserves_neutrals_primaries_and_hdr() {
         use crate::node_ui::data::{HostImage, Placement};
-        use crate::node_ui::scopes::tests::{context, device};
+        use crate::node_ui::scopes::tests::{context, vectorscope_of};
         let ctx = context();
         let mut pixels = vec![[0.18; 3]; 40000];
         pixels.extend([
@@ -120,7 +185,7 @@ mod tests {
             color_space: "Rec.2020 / D65".into(),
             pixels: pixels.into(),
         };
-        let counts = vectorscope(&device(&image, &ctx), &ctx).unwrap().counts.clone();
+        let counts = vectorscope_of(&image, &ctx).counts.clone();
         let expected = vector_counts(&image.pixels, &color::rgb_to_xyz(REC2020, D65));
         assert_eq!(counts, expected);
     }
@@ -128,7 +193,7 @@ mod tests {
     #[ignore = "requires the DRIP_BACKEND compute device; run explicitly"]
     fn device_vectorscope_rounding_stays_near_reference() {
         use crate::node_ui::data::{HostImage, Placement};
-        use crate::node_ui::scopes::tests::{context, device};
+        use crate::node_ui::scopes::tests::{context, vectorscope_of};
         let ctx = context();
         let mut state = 42u32;
         let pixels: Vec<[f32; 3]> = (0..262144)
@@ -147,7 +212,7 @@ mod tests {
             color_space: "Rec.2020 / D65".into(),
             pixels: pixels.into(),
         };
-        let counts = vectorscope(&device(&image, &ctx), &ctx).unwrap().counts.clone();
+        let counts = vectorscope_of(&image, &ctx).counts.clone();
         let expected = vector_counts(&image.pixels, &color::rgb_to_xyz(REC2020, D65));
         assert_eq!(
             counts.iter().map(|v| u64::from(v[0])).sum::<u64>(),

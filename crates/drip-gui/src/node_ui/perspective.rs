@@ -34,7 +34,7 @@ const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 impl GuiNode for perspective::Definition {
     type Presentation = Prepared;
     const PREPARE: Option<Prepare<Self>> =
-        Some(|node, inputs, ctx| prepare(&node.parameters, &inputs.image, ctx));
+        Some(Prepare::Inputs(|node, inputs, ctx| prepare(&node.parameters, &inputs.image, ctx)));
 }
 
 /// An axis-aligned rectangle in a plane, in full-detail pixels.

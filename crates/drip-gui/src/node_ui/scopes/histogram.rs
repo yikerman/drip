@@ -1,11 +1,9 @@
-//! Histogram evaluation and its integer reduction.
+//! Histogram: per-channel counts over the exposure axis.
 
-use super::{ExposureRange, Scale};
-use crate::node_ui::data::DeviceRgb;
-use crate::node_ui::data::PrepareContext;
-use drip::Error as KernelError;
+use super::{ExposureRange, SIZE, Scale};
+use crate::node_ui::{GuiNode, Prepare};
 use drip::registry::tag;
-use drip::{node::data::*, ports::*, runtime::KernelContext};
+use drip::{Result, node::data::*, ports::*, runtime::GlobalContext, shape::BinsBody};
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -25,9 +23,6 @@ pub struct Histogram {
     pub color_space: String,
 }
 
-#[cfg(test)]
-const BINS: usize = 256;
-
 #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
 /// The exposure axis and how bin counts are scaled.
 pub struct Settings {
@@ -39,48 +34,65 @@ pub struct Settings {
     #[label("Density scale")]
     pub scale: Scale,
 }
+fn contract(_: &GlobalContext, _: &Settings, image: &RgbDesc) -> Result<(CountsDesc,)> {
+    Ok((super::counts(SIZE, 3, image),))
+}
 /// Plot linear RGB channel counts by exposure, without a color conversion; camera
 /// RGB shows native channels. Exposure is measured relative to sample value 1;
 /// the density scale controls counts, not the exposure axis.
-#[drip::node(id = "histogram", name = "Histogram", tags = [tag::VIEW, tag::SCOPE])]
-pub fn observe(_: &KernelContext<'_>, _: &Settings, _image: Read<'_, Rgb>) -> drip::Result<()> {
-    Ok(())
-}
-impl crate::node_ui::GuiNode for observe::Definition {
-    type Presentation = Arc<Histogram>;
-    const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|node, inputs, ctx| {
-        let p = &node.parameters;
-        histogram(&p.range, p.scale, &DeviceRgb::new(&inputs.image, ctx)?, ctx)
-    });
+#[drip::node(id = "histogram", name = "Histogram", tags = [tag::VIEW, tag::SCOPE], contract = contract, bins = HISTOGRAM)]
+pub fn observe(
+    p: &Settings,
+    _image: Point<'_, Rgb>,
+    _counts: Point<'_, Counts>,
+) -> Result<[f32; SIZE]> {
+    Ok(super::edges(&p.range))
 }
 
-pub fn histogram(
-    range: &ExposureRange,
-    scale: Scale,
-    image: &DeviceRgb,
-    ctx: &PrepareContext,
-) -> Result<Arc<Histogram>, KernelError> {
-    let (min, max) = (range.min_ev as f32, range.max_ev as f32);
-    let counts = super::device::exposure(image, ctx, min, max, false)?;
-    let log = super::logarithmic(scale);
-    let histogram = Histogram {
-        min_stop: min,
-        max_stop: max,
-        counts,
-        log,
-        color_space: image.desc.coordinates.to_string(),
-    };
-    Ok(Arc::new(histogram))
+/// Each channel's exposure bin, with the bin edges as constants.
+static HISTOGRAM: BinsBody = BinsBody {
+    name: "drip-gui::histogram",
+    constants: SIZE,
+    bins: SIZE,
+    channels: 3,
+    bin: kernel::histogram::expand,
+};
+
+mod kernel {
+    use crate::node_ui::scopes::stop;
+    use cubecl::prelude::*;
+    use drip::shape::{Bin, Pixel, Position};
+
+    #[cube]
+    pub fn histogram(px: Pixel, _at: Position, k: &[f32]) -> Bin {
+        Bin { c0: stop(px.r, k), c1: stop(px.g, k), c2: stop(px.b, k) }
+    }
+}
+
+impl GuiNode for observe::Definition {
+    type Presentation = Arc<Histogram>;
+    const PREPARE: Option<Prepare<Self>> =
+        Some(Prepare::Outputs(|node, outputs, _| histogram(&node.parameters, &outputs.counts)));
+}
+
+pub fn histogram(settings: &Settings, counts: &Read<'_, Counts>) -> Result<Arc<Histogram>> {
+    Ok(Arc::new(Histogram {
+        min_stop: settings.range.min_ev as f32,
+        max_stop: settings.range.max_ev as f32,
+        counts: super::per_bin(counts)?,
+        log: super::logarithmic(settings.scale),
+        color_space: counts.desc.coordinates.to_string(),
+    }))
 }
 
 #[cfg(test)]
-pub(super) fn count(input: &[[f32; 3]], thresholds: &[f32; BINS]) -> Vec<[u32; 3]> {
+pub(super) fn count(input: &[[f32; 3]], thresholds: &[f32; SIZE]) -> Vec<[u32; 3]> {
     input
         .par_chunks(4096)
         .map(|pixels| {
             // Accumulate in place: passing this 3 KiB array through a fold per
             // pixel can copy it repeatedly. One partial per chunk amortizes it.
-            let mut counts = [[0u32; 3]; BINS];
+            let mut counts = [[0u32; 3]; SIZE];
             for pixel in pixels {
                 for (c, &value) in pixel.iter().enumerate() {
                     // Comparing edges keeps exact boundaries independent of log rounding.
@@ -91,7 +103,7 @@ pub(super) fn count(input: &[[f32; 3]], thresholds: &[f32; BINS]) -> Vec<[u32; 3
             counts
         })
         .reduce(
-            || [[0; 3]; BINS],
+            || [[0; 3]; SIZE],
             |mut counts, partial| {
                 // Private histograms avoid atomic contention; integer sums are exact.
                 for (count, value) in counts.iter_mut().zip(partial) {
@@ -133,6 +145,6 @@ mod tests {
     }
     #[test]
     fn empty_image() {
-        assert_eq!(count(&[], &[0.0; BINS]), vec![[0; 3]; BINS]);
+        assert_eq!(count(&[], &[0.0; SIZE]), vec![[0; 3]; SIZE]);
     }
 }

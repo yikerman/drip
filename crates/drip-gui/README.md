@@ -34,7 +34,8 @@ The non-trivial files outside `node_ui/`:
 `src/registry.rs` lists, by hand, everything the GUI discovers:
 
 - `VIEWS`: node kinds declared in the GUI because what they prepare is GUI-only
-  (preview and scopes). They use the library's `view` and `scope` tags.
+  (Preview, and the scopes, which are bins nodes). They use the library's
+  `view` and `scope` tags.
 - `REGISTRY`: the kinds the editor offers and projects may contain,
   `drip::registry::NODES` followed by `VIEWS`.
 - `BINDINGS`: node-specific presentation, an `impl GuiNode` on a node's
@@ -74,15 +75,23 @@ impl GuiNode for double::compute::Definition {
 
 Other overrides use the same impl and entry:
 
-- `PREPARE` with a `Presentation` draws a view in the node and its pop-out,
-  from the node's typed inputs, as in `scopes/histogram.rs`.
+- `PREPARE` with a `Presentation` draws a view in the node and its pop-out:
+  `Prepare::Inputs` from the node's typed inputs, as in `preview/mod.rs`, or
+  `Prepare::Outputs` from a reduce or bins node's typed outputs, as in
+  `scopes/histogram.rs`.
 - `ACTION` adds a frontend action whose result may become new parameters, as
-  in `exposure.rs` (auto exposure). A kind has a frontend action or one declared
-  on the node, not both.
+  in `exposure.rs` (auto exposure, one call to the library's
+  `exposure::meter`). A kind has a frontend action or one declared on the
+  node, not both.
 - A view whose window edits the node implements `Drawable::interact` and sets
   parameters through `ControlCx::set`, as in `perspective.rs` (Perspective
   Transform's handles).
 
-A node that only presents its inputs and prepares GUI-only data, such as a
-scope, is declared here with `#[drip::node]` instead of in the library, listed
-in `registry::VIEWS` as well as `BINDINGS`, and tagged `view`.
+A node that only presents its inputs and prepares GUI-only data, such as
+Preview, is declared here with `#[drip::node]` instead of in the library,
+listed in `registry::VIEWS` as well as `BINDINGS`, and tagged `view`. The
+scopes are declared the same way and tagged `scope` too, as bins nodes: each
+counts its input with a `#[cube]` bin body, the only device code in
+drip-gui, and its view plots the `Counts` the store keeps. The GUI launches
+no kernel itself. It reaches the device through drip's `Image` and node
+shapes.
