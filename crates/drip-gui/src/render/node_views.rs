@@ -2,6 +2,7 @@
 
 use std::{any::Any, sync::Arc};
 
+use crate::editing::NodeCx;
 use crate::node_ui::data::HostImage;
 use egui::{FontId, Painter, Rect, Ui};
 
@@ -19,6 +20,11 @@ pub trait Drawable: Send + Sync + Any {
             ui.id().with("view"),
             &FontId::proportional(theme::BODY_SIZE),
         );
+    }
+
+    /// The pop-out window of a view whose handles edit its node's parameters.
+    fn interact(&self, ui: &mut Ui, _node: &mut NodeCx) {
+        self.window(ui);
     }
 }
 

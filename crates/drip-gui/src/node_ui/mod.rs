@@ -10,6 +10,7 @@ pub use binding::{Action, Binding, GuiNode, Prepare};
 pub use controls::ControlCx;
 mod image_view;
 pub mod parameters;
+mod perspective;
 pub mod ports;
 mod sigmoid;
 mod viewer;

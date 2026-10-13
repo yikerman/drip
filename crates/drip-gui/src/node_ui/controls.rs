@@ -21,6 +21,16 @@ impl<'n, 'g, 'f, 'a, N: DeserializeOwned> ControlCx<'n, 'g, 'f, 'a, N> {
         drip::param::decode(self.node.node().params).expect("validated node parameters")
     }
 
+    pub fn set(&mut self, parameters: &N)
+    where
+        N: serde::Serialize,
+    {
+        let value = drip::param::encode(parameters).expect("parameters serialize");
+        if value != self.node.node().params {
+            self.node.set_parameters(value);
+        }
+    }
+
     pub fn schema(&mut self, ui: &mut Ui) {
         super::parameters::schema(ui, self.node);
     }

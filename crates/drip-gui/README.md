@@ -75,6 +75,9 @@ Other overrides use the same impl and entry:
 - `ACTION` adds a frontend action whose result may become new parameters; see
   `exposure.rs` (auto exposure). A kind has a frontend action or one declared
   on the node, not both.
+- A view whose window edits the node implements `Drawable::interact` and sets
+  parameters through `ControlCx::set`; see `perspective.rs` (Perspective
+  Transform's handles).
 
 A node that only presents its inputs and prepares GUI-only data, such as a
 scope, is declared here with `#[drip::node]` instead of in the library, listed

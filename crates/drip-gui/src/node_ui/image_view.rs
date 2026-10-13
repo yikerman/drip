@@ -53,7 +53,23 @@ impl ViewState {
     }
 }
 
-pub(super) fn show(ui: &mut Ui, image: &Arc<Image>, interpolation: bool) {
+/// Where `show` drew the image, for overlays.
+pub(super) struct Shown {
+    /// The navigation area.
+    pub area: Rect,
+    /// The whole image on screen, possibly beyond `area`.
+    pub image: Rect,
+    pub response: egui::Response,
+}
+
+/// Navigable image. With `editing`, the primary button is left to the
+/// caller's handles and the secondary or middle button pans.
+pub(super) fn show(
+    ui: &mut Ui,
+    image: &Arc<Image>,
+    interpolation: bool,
+    editing: bool,
+) -> Option<Shown> {
     let id = ui.id().with("image view");
     let mut state = ui.data_mut(|data| data.get_temp::<ViewState>(id).unwrap_or_default());
     ui.horizontal_wrapped(|ui| {
@@ -83,10 +99,11 @@ pub(super) fn show(ui: &mut Ui, image: &Arc<Image>, interpolation: bool) {
         ui.weak(format!("{} × {} · {detail}", image.width, image.height));
     });
 
-    let (area, response) = ui.allocate_exact_size(ui.available_size(), Sense::drag());
+    let sense = if editing { Sense::click_and_drag() } else { Sense::drag() };
+    let (area, response) = ui.allocate_exact_size(ui.available_size(), sense);
     if !area.is_positive() {
         ui.data_mut(|data| data.insert_temp(id, state));
-        return;
+        return None;
     }
     let pixels = vec2(image.width as f32, image.height as f32);
     let ppp = ui.ctx().pixels_per_point();
@@ -103,20 +120,27 @@ pub(super) fn show(ui: &mut Ui, image: &Arc<Image>, interpolation: bool) {
         }
     }
     let size = pixels * state.scale(area, pixels, ppp);
-    if response.dragged_by(PointerButton::Primary) {
+    let panning = if editing {
+        response.dragged_by(PointerButton::Secondary) || response.dragged_by(PointerButton::Middle)
+    } else {
+        response.dragged_by(PointerButton::Primary)
+    };
+    if panning {
         state.pan(area, size, response.drag_delta());
     }
-    let cursor = if response.dragged_by(PointerButton::Primary) {
-        egui::CursorIcon::Grabbing
+    let response = if panning {
+        response.on_hover_and_drag_cursor(egui::CursorIcon::Grabbing)
+    } else if editing {
+        response
     } else {
-        egui::CursorIcon::Grab
+        response.on_hover_and_drag_cursor(egui::CursorIcon::Grab)
     };
-    response.on_hover_and_drag_cursor(cursor);
     let rect = state.rect(area, size);
     // Align the origin to the render target so integer zooms align pixel grids.
     let rect = Rect::from_min_size((rect.min.to_vec2() * ppp).round().to_pos2() / ppp, size);
     image::draw(&ui.painter().with_clip_rect(area), rect, id, image.clone(), interpolation);
     ui.data_mut(|data| data.insert_temp(id, state));
+    Some(Shown { area, image: rect, response })
 }
 
 /// Retain enough precision to distinguish a wheel zoom from nearby presets.

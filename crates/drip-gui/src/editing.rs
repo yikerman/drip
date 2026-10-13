@@ -136,6 +136,11 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
         self.frame.edit(self.graph, Edit::Param(self.id, name, value));
     }
 
+    /// Replaces all parameters, as a view's handles edit them.
+    pub fn set_parameters(&mut self, parameters: Json) {
+        self.frame.edit(self.graph, Edit::Parameters(self.id, parameters));
+    }
+
     pub fn set_name(&mut self, name: &str) {
         self.frame.edit(self.graph, Edit::Name(self.id, name));
     }

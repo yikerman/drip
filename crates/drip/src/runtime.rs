@@ -78,7 +78,12 @@ pub struct KernelContext<'a> {
     pub global: &'a GlobalContext,
     pub(crate) runtime: &'a RuntimeContext,
 }
-impl KernelContext<'_> {
+impl<'a> KernelContext<'a> {
+    /// For frontends that run node kernels outside evaluation, such as a view
+    /// sampling a field.
+    pub fn new(global: &'a GlobalContext, runtime: &'a RuntimeContext) -> Self {
+        Self { global, runtime }
+    }
     #[doc(hidden)]
     pub fn allocate<P: crate::ports::Port>(
         &self,

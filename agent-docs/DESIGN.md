@@ -179,9 +179,9 @@ Settled with the user on 2026-10-11 after a review against
   Fit action, not a stored mode. Sample defaults to Lanczos-3, accepting signed
   halos around HDR highlights. See [FIELD](FIELD.md#borders-and-auto-crop).
 - **Decided (2026-10-12):** Perspective Transform has its own editing view,
-  separate from Preview (no proofing), with Frame and Perspective tools
-  editing the same quad. Handle details are tentative; see
-  [FIELD](FIELD.md#editing-view).
+  separate from Preview (no proofing), with Frame, Level and Perspective
+  tools editing the same quad, Keep inside and Fit. A view's window may edit
+  its node through `Drawable::interact`; see [FIELD](FIELD.md#editing-view).
 - **Open:** Lens-correction coordinates and `MonoField`; see
   [FIELD](FIELD.md#open-questions).
 - **Tentative:** The proposed next-node order in [TODO](TODO.md#next-image-nodes)

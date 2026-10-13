@@ -308,7 +308,8 @@ deferred until masks exist.
 
 ## Editing view
 
-**Tentative (2026-10-12), GUI-owned.** Perspective Transform has its own view,
+**Implemented (2026-10-12), GUI-owned** (`drip-gui/src/node_ui/perspective.rs`).
+Perspective Transform has its own view,
 like Preview, so editing needs no extra Sample and Preview nodes; a downstream
 Sample and Preview still show the final image. The binding's preparation
 samples the node's input field with the drip Sample kernel at the preview
@@ -342,15 +343,25 @@ on the displayed pixels while a newer evaluation is pending.
 A drag moves its overlay immediately, edits parameters continuously and ends
 its undo step on release.
 
-GUI changes this needs:
+How it is built:
 
-- Views that edit their node's parameters. Today a view's window only pans
-  and zooms (`image_view.rs`); a binding needs an editing hook with typed
-  parameters and its presentation, as controls have.
-- `image_view` exposes its image↔screen transform so overlays follow zoom and
-  pan.
-- drip exposes Sample's realization as a function for the preparation, not
-  only as a node.
+- `Drawable::interact` gives a view's window the node, so handles edit
+  parameters through `ControlCx::set`, as controls do.
+- `image_view::show` reports where it drew the image; in editing mode the
+  primary button belongs to the handles and the secondary or middle button
+  pans.
+- Preparation calls `sample::render` through `KernelContext::new`, twice: the
+  input over its domain (Perspective tool) and the input through the current
+  map over the output plane's view bounds, at most one output size beyond the
+  output on each side (Frame and Level tools).
+- A gesture keeps the map of the image shown when it began and converts the
+  pointer through the input plane, so a preparation arriving mid-drag does
+  not move its handles. Frame edits set the aspect as a ratio, keeping the
+  map exactly; Keep inside bisects a move or resize at the input's edge and
+  shrinks a rotation about the frame's centre. Frame handles are hidden
+  ("Updating…") while the shown image predates a perspective edit.
+- Not yet exercised in a desktop session; tests cover preparation on the
+  compute runtime and the frame geometry.
 
 ## Maintainability
 

@@ -38,6 +38,6 @@ pub(super) fn body(ui: &mut Ui, node: &mut NodeCx) {
 
 pub(super) fn window(ui: &mut Ui, node: &mut NodeCx) {
     if let Some(view) = node.view() {
-        view.window(ui);
+        view.interact(ui, node);
     }
 }

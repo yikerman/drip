@@ -47,6 +47,6 @@ impl Drawable for ImageView {
     }
 
     fn window(&self, ui: &mut Ui) {
-        super::super::image_view::show(ui, &self.image, self.interpolation);
+        super::super::image_view::show(ui, &self.image, self.interpolation, false);
     }
 }

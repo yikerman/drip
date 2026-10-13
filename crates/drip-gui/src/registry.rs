@@ -28,6 +28,7 @@ pub(crate) static BINDINGS: &[&[Binding]] = &[
     &[
         Binding::new::<drip::node::exposure::Definition>(),
         Binding::new::<drip::node::sigmoid::apply::Definition>(),
+        Binding::new::<drip::node::field::perspective::Definition>(),
         Binding::new::<preview::observe::Definition>(),
         Binding::new::<scopes::histogram::observe::Definition>(),
         Binding::new::<scopes::waveform::observe::Definition>(),
