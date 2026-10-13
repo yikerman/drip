@@ -25,7 +25,10 @@ use drip::{
     ports::Read,
 };
 use egui::{Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, Ui, pos2, vec2};
+use geometry::{Box, Grip, largest, level_angle};
 use std::sync::Arc;
+
+mod geometry;
 
 /// Longest side of a prepared image, in samples.
 const MAX_SIDE: u32 = 4096;
@@ -156,16 +159,6 @@ enum Tool {
     Perspective,
 }
 
-#[derive(Clone, Copy)]
-enum Grip {
-    Corner(usize),
-    Edge(usize),
-    Move,
-    Rotate,
-    Level,
-    QuadCorner(usize),
-}
-
 /// A gesture in progress. Frame gestures work in the output plane of the
 /// image shown when they started, through `map`: a preparation arriving
 /// mid-drag has its own plane.
@@ -190,6 +183,27 @@ impl Default for State {
     fn default() -> Self {
         Self { tool: Tool::Frame, keep_inside: true, drag: None, unbounded: false }
     }
+}
+impl State {
+    /// How Keep inside limits a frame that `grip` moves.
+    fn limit(&self, grip: Grip) -> Limit {
+        match (self.keep_inside, grip) {
+            (false, _) => Limit::Free,
+            (true, Grip::Rotate | Grip::Level) => Limit::Shrink,
+            (true, _) => Limit::Stop,
+        }
+    }
+}
+
+/// How an edited frame is brought back inside the input.
+#[derive(Clone, Copy)]
+enum Limit {
+    /// Keep inside is off.
+    Free,
+    /// Stop a move or resize at the input's edge.
+    Stop,
+    /// Shrink a rotated frame about its centre until it fits.
+    Shrink,
 }
 
 /// Plane ↔ screen for an image spanning `plane` drawn at `screen`.
@@ -378,37 +392,29 @@ impl TransformView {
                 return None;
             }
             let target = drag.frame.rotated(level_angle(drag.start, at)?);
-            return Some(self.settings(current, &drag, target, state.keep_inside, true));
+            return Some(self.settings(current, &drag, target, state.limit(drag.grip)));
         }
         if !response.dragged_by(egui::PointerButton::Primary) {
             return None;
         }
         let target = drag.frame.dragged(drag.grip, drag.start, at);
-        let shrink = matches!(drag.grip, Grip::Rotate);
-        Some(self.settings(current, &drag, target, state.keep_inside, shrink))
+        Some(self.settings(current, &drag, target, state.limit(drag.grip)))
     }
 
-    /// Settings for `target`, reached from `start`. Keep inside stops a move
-    /// or resize at the input's edge, and shrinks a rotated frame about its
-    /// centre until it fits.
-    fn settings(
-        &self,
-        current: &Settings,
-        drag: &Drag,
-        target: Box,
-        keep_inside: bool,
-        shrink: bool,
-    ) -> Settings {
+    /// Settings for `target`, reached from the drag's frame and brought
+    /// inside the input as `limit` says.
+    fn settings(&self, current: &Settings, drag: &Drag, target: Box, limit: Limit) -> Settings {
         let start = drag.frame;
         let with = |frame: Box| {
             let ratio = frame.half[0] / frame.half[1];
             current.with_quad(self.quad_of(&drag.map, &frame), Aspect::Ratio(Ratio { ratio }))
         };
-        if !keep_inside || !perspective::inside(&with(start)) {
+        if matches!(limit, Limit::Free) || !perspective::inside(&with(start)) {
             return with(target);
         }
-        let candidate = |t: f64| {
-            if shrink { target.scaled(t) } else { start.towards(&target, t) }
+        let candidate = |t: f64| match limit {
+            Limit::Shrink => target.scaled(t),
+            _ => start.towards(&target, t),
         };
         let t = largest(|t| perspective::inside(&with(candidate(t))));
         // Nothing fits when even a vanishing frame would leave the input.
@@ -535,140 +541,10 @@ fn inside_polygon(p: &[Pos2; 4], at: Pos2) -> bool {
     (0..4).all(|i| side(i) >= 0.0) || (0..4).all(|i| side(i) <= 0.0)
 }
 
-/// The rotation that makes the line from `a` to `b` horizontal, or vertical
-/// when it is steeper than 45°.
-fn level_angle(a: [f64; 2], b: [f64; 2]) -> Option<f64> {
-    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-    if dx.hypot(dy) == 0.0 {
-        return None;
-    }
-    let angle = dy.atan2(dx);
-    let quarter = std::f64::consts::FRAC_PI_2;
-    Some(angle - (angle / quarter).round() * quarter)
-}
-
-/// The largest `t` in `[0, 1]` that `fits`, assuming `fits(0)`.
-fn largest(fits: impl Fn(f64) -> bool) -> f64 {
-    if fits(1.0) {
-        return 1.0;
-    }
-    let (mut lo, mut hi) = (0.0, 1.0);
-    for _ in 0..40 {
-        let mid = (lo + hi) / 2.0;
-        if fits(mid) { lo = mid } else { hi = mid }
-    }
-    lo
-}
-
 fn corners(r: &Plane) -> [[f64; 2]; 4] {
     let [x, y] = r.origin;
     let [w, h] = r.size;
     [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]
-}
-
-/// A rotated rectangle in the output plane: the frame being edited.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct Box {
-    center: [f64; 2],
-    angle: f64,
-    half: [f64; 2],
-}
-
-impl Box {
-    /// The rectangle with corners `p` (top-left, top-right, bottom-right,
-    /// bottom-left), if they form one.
-    fn of(p: [[f64; 2]; 4]) -> Option<Self> {
-        let sub = |a: [f64; 2], b: [f64; 2]| [a[0] - b[0], a[1] - b[1]];
-        let (u, v) = (sub(p[1], p[0]), sub(p[3], p[0]));
-        let (w, h) = (u[0].hypot(u[1]), v[0].hypot(v[1]));
-        let scale = w.max(h);
-        let opposite = sub(sub(p[2], p[1]), v);
-        let square = (u[0] * v[0] + u[1] * v[1]).abs() <= 1e-6 * scale * scale;
-        let closed = opposite[0].hypot(opposite[1]) <= 1e-6 * scale;
-        // Mirrored frames would turn handles inside out.
-        let upright = u[0] * v[1] - u[1] * v[0] > 0.0;
-        (w > 0.0 && h > 0.0 && square && closed && upright).then(|| Self {
-            center: [(p[0][0] + p[2][0]) / 2.0, (p[0][1] + p[2][1]) / 2.0],
-            angle: u[1].atan2(u[0]),
-            half: [w / 2.0, h / 2.0],
-        })
-    }
-
-    fn corners(&self) -> [[f64; 2]; 4] {
-        let (s, c) = self.angle.sin_cos();
-        let [a, b] = self.half;
-        [[-a, -b], [a, -b], [a, b], [-a, b]]
-            .map(|[x, y]| [self.center[0] + c * x - s * y, self.center[1] + s * x + c * y])
-    }
-
-    /// `p` in this frame's axes, relative to its centre.
-    fn local(&self, p: [f64; 2]) -> [f64; 2] {
-        let (s, c) = self.angle.sin_cos();
-        let (x, y) = (p[0] - self.center[0], p[1] - self.center[1]);
-        [c * x + s * y, -s * x + c * y]
-    }
-
-    fn world(&self, [x, y]: [f64; 2]) -> [f64; 2] {
-        let (s, c) = self.angle.sin_cos();
-        [self.center[0] + c * x - s * y, self.center[1] + s * x + c * y]
-    }
-
-    fn rotated(&self, by: f64) -> Self {
-        Self { angle: self.angle + by, ..*self }
-    }
-
-    fn scaled(&self, s: f64) -> Self {
-        Self { half: self.half.map(|v| v * s), ..*self }
-    }
-
-    fn towards(&self, target: &Self, t: f64) -> Self {
-        let lerp = |a: f64, b: f64| a + (b - a) * t;
-        Self {
-            center: [
-                lerp(self.center[0], target.center[0]),
-                lerp(self.center[1], target.center[1]),
-            ],
-            angle: lerp(self.angle, target.angle),
-            half: [lerp(self.half[0], target.half[0]), lerp(self.half[1], target.half[1])],
-        }
-    }
-
-    /// The frame after dragging `grip` from `start` to `at`.
-    fn dragged(&self, grip: Grip, start: [f64; 2], at: [f64; 2]) -> Self {
-        const MIN: f64 = 1.0;
-        let (from, to) = (self.local(start), self.local(at));
-        let delta = [to[0] - from[0], to[1] - from[1]];
-        // Signs of the corners and of each edge's axis, in output order.
-        const CORNER: [[f64; 2]; 4] = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
-        const EDGE: [[f64; 2]; 4] = [[0.0, -1.0], [1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]];
-        let resize = |signs: [f64; 2]| {
-            // The opposite side stays put; the dragged side follows the pointer.
-            let mut lo = [-self.half[0], -self.half[1]];
-            let mut hi = self.half;
-            for axis in 0..2 {
-                if signs[axis] > 0.0 {
-                    hi[axis] = (hi[axis] + delta[axis]).max(lo[axis] + MIN);
-                } else if signs[axis] < 0.0 {
-                    lo[axis] = (lo[axis] + delta[axis]).min(hi[axis] - MIN);
-                }
-            }
-            let center = self.world([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0]);
-            Self { center, half: [(hi[0] - lo[0]) / 2.0, (hi[1] - lo[1]) / 2.0], ..*self }
-        };
-        match grip {
-            Grip::Corner(i) => resize(CORNER[i]),
-            Grip::Edge(i) => resize(EDGE[i]),
-            Grip::Move => Self {
-                center: [self.center[0] + at[0] - start[0], self.center[1] + at[1] - start[1]],
-                ..*self
-            },
-            Grip::Rotate => {
-                let angle = |p: [f64; 2]| (p[1] - self.center[1]).atan2(p[0] - self.center[0]);
-                self.rotated(angle(at) - angle(start))
-            }
-            Grip::Level | Grip::QuadCorner(_) => *self,
-        }
-    }
 }
 
 #[cfg(test)]

@@ -147,15 +147,15 @@ fn keep_inside_stops_moves_at_the_edge_and_shrinks_rotations() {
     let current = crop();
     let moving = drag(&view, Grip::Move, &current);
     let target = moving.frame.dragged(Grip::Move, moving.start, [moving.start[0] + 300.0, 150.0]);
-    let kept = view.settings(&current, &moving, target, true, false);
+    let kept = view.settings(&current, &moving, target, Limit::Stop);
     let xs = kept.quad().map(|[x, _]| x);
     assert!((xs[1] - 1.0).abs() < 1e-9 && (xs[0] - 0.5).abs() < 1e-9, "{xs:?}");
-    let free = view.settings(&current, &moving, target, false, false);
+    let free = view.settings(&current, &moving, target, Limit::Free);
     assert!(!perspective::inside(&free));
 
     let full = Settings::default();
     let turning = drag(&view, Grip::Rotate, &full);
-    let kept = view.settings(&full, &turning, turning.frame.rotated(0.1), true, true);
+    let kept = view.settings(&full, &turning, turning.frame.rotated(0.1), Limit::Shrink);
     assert!(perspective::inside(&kept));
     let size = perspective::frame(&kept, INPUT.size).unwrap().size;
     assert!(size[0] < 400.0 && (size[0] / size[1] - 4.0 / 3.0).abs() < 1e-9);
