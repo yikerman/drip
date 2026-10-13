@@ -1,15 +1,20 @@
 //! Pop-out image navigation, independent of graph edits and processing.
+//!
+//! Navigation works in the image's full-detail plane, so 100 % shows one
+//! full-detail pixel per display pixel whatever the preview level. A preview
+//! coarser than that is magnified, and the view reports the visible region
+//! for a full-detail crop, which it draws over the preview once it arrives.
 
 use std::sync::Arc;
 
-use egui::{PointerButton, Pos2, Rect, Sense, Ui, Vec2, pos2, vec2};
+use egui::{PointerButton, Pos2, Rect, Sense, Ui, Vec2, pos2};
 
 use crate::render::image::{self, Image};
 use crate::theme::Tip;
 
 #[derive(Clone, Copy)]
 struct ViewState {
-    /// Render-target pixels per rendered image pixel; None follows the window.
+    /// Render-target pixels per full-detail pixel; None follows the window.
     zoom: Option<f32>,
     /// Normalized image position at the viewport center, retained across updates.
     center: Pos2,
@@ -60,13 +65,18 @@ pub(super) struct Shown {
     /// The whole image on screen, possibly beyond `area`.
     pub image: Rect,
     pub response: egui::Response,
+    /// The visible region of the plane in full-detail pixels, when the view
+    /// magnifies a preview coarser than full detail to 100 % or more.
+    pub detail: Option<drip::shape::Rect>,
 }
 
-/// Navigable image. With `editing`, the primary button is left to the
-/// caller's handles and the secondary or middle button pans.
+/// Navigable image, with `detail`, a full-detail crop of it, drawn over it.
+/// With `editing`, the primary button is left to the caller's handles and the
+/// secondary or middle button pans.
 pub(super) fn show(
     ui: &mut Ui,
     image: &Arc<Image>,
+    detail: Option<&Arc<Image>>,
     interpolation: bool,
     editing: bool,
 ) -> Option<Shown> {
@@ -87,16 +97,17 @@ pub(super) fn show(
             &options,
             |zoom| zoom_label(zoom, &options),
         )
-        .tip("100%: one rendered image pixel per display pixel");
+        .tip("100%: one full-detail pixel per display pixel");
         if state.zoom.is_none() {
             state.center = pos2(0.5, 0.5);
         }
-        let detail = if image.requested_scale == 1 {
+        let requested = if image.requested_scale == 1 {
             "Full detail requested".into()
         } else {
             format!("1/{} detail requested", image.requested_scale)
         };
-        ui.weak(format!("{} × {} · {detail}", image.width, image.height));
+        let shown = if detail.is_some() { " · full detail in view" } else { "" };
+        ui.weak(format!("{} × {} · {requested}{shown}", image.width, image.height));
     });
 
     let sense = if editing { Sense::click_and_drag() } else { Sense::drag() };
@@ -105,7 +116,7 @@ pub(super) fn show(
         ui.data_mut(|data| data.insert_temp(id, state));
         return None;
     }
-    let pixels = vec2(image.width as f32, image.height as f32);
+    let pixels = Vec2::from(image.plane.full);
     let ppp = ui.ctx().pixels_per_point();
     state.constrain(area, pixels * state.scale(area, pixels, ppp));
     if let Some(pointer) = response.hover_pos() {
@@ -138,9 +149,35 @@ pub(super) fn show(
     let rect = state.rect(area, size);
     // Align the origin to the render target so integer zooms align pixel grids.
     let rect = Rect::from_min_size((rect.min.to_vec2() * ppp).round().to_pos2() / ppp, size);
-    image::draw(&ui.painter().with_clip_rect(area), rect, id, image.clone(), interpolation);
+    let painter = ui.painter().with_clip_rect(area);
+    let scale = size / pixels;
+    for (image, id) in std::iter::once((image, id)).chain(detail.map(|d| (d, id.with("detail")))) {
+        let [min, max] = image.plane.covers.map(|corner| rect.min + Vec2::from(corner) * scale);
+        image::draw(&painter, Rect::from_min_max(min, max), id, image.clone(), interpolation);
+    }
     ui.data_mut(|data| data.insert_temp(id, state));
-    Some(Shown { area, image: rect, response })
+    // `scale · ppp` counts display pixels per full-detail pixel.
+    let magnified = image.requested_scale > 1 && scale.x * ppp >= 1.0 - 1e-3;
+    let detail = magnified.then(|| visible(area, rect, pixels)).flatten();
+    Some(Shown { area, image: rect, response, detail })
+}
+
+/// The cells of a plane of `plane` full-detail pixels, drawn over `rect`,
+/// that meet `area`.
+fn visible(area: Rect, rect: Rect, plane: Vec2) -> Option<drip::shape::Rect> {
+    let shown = area.intersect(rect);
+    if !shown.is_positive() {
+        return None;
+    }
+    let to_plane = |p: Pos2| (p - rect.min) / rect.size() * plane;
+    let (min, max) = (to_plane(shown.min), to_plane(shown.max));
+    let axis = |min: f32, max: f32, side: f32| {
+        let start = min.floor().clamp(0.0, side - 1.0);
+        let end = max.ceil().clamp(start + 1.0, side);
+        (start as u32, (end - start) as u32)
+    };
+    let ((x, width), (y, height)) = (axis(min.x, max.x, plane.x), axis(min.y, max.y, plane.y));
+    Some(drip::shape::Rect { origin: [x, y], extent: [width, height] })
 }
 
 /// Retain enough precision to distinguish a wheel zoom from nearby presets.

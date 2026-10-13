@@ -14,7 +14,7 @@ use egui::{CentralPanel, Panel, RichText, Ui, Vec2};
 
 use crate::editing::{Edit, Frame, NodeCx, Report};
 use crate::editor::Editor;
-use crate::node_ui::{self, Popped};
+use crate::node_ui::{self, Part, Popped};
 use crate::theme::Tip;
 use crate::ui_state::{self, DEFAULT_LEVEL, MAX_LEVEL};
 use crate::worker::{Notice, Worker};
@@ -128,7 +128,8 @@ impl App {
         Panel::top("menu").show_separator_line(false).show(ui, |ui| self.menu(ui));
         Panel::bottom("status").show_separator_line(false).show(ui, |ui| self.status_line(ui));
         let results = |id| self.worker.result(id);
-        let mut frame = Frame::new(&results, &self.popped, self.actions_disabled());
+        let details = |id| self.worker.detail_view(id);
+        let mut frame = Frame::new(&results, &details, &self.popped, self.actions_disabled());
         let graph = &mut self.project.graph;
         Panel::right("inspector").resizable(true).default_size(320.0).show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -152,7 +153,8 @@ impl App {
     pub fn window(&mut self, ui: &mut Ui, popped: Popped) {
         self.shortcuts(ui.ctx());
         let results = |id| self.worker.result(id);
-        let mut frame = Frame::new(&results, &self.popped, self.actions_disabled());
+        let details = |id| self.worker.detail_view(id);
+        let mut frame = Frame::new(&results, &details, &self.popped, self.actions_disabled());
         let graph = &mut self.project.graph;
         CentralPanel::default().show(ui, |ui| {
             if graph.kind(popped.node).is_some() {
@@ -160,10 +162,20 @@ impl App {
             }
         });
         let report = frame.report;
-        let changed = report.changed;
+        let (changed, detail) = (report.changed, report.detail);
         self.apply(report);
+        if popped.part == Part::View {
+            self.detail(popped.node, detail);
+        }
         self.record(ui.ctx(), Some(popped), changed);
         self.unsaved_prompt(ui.ctx());
+    }
+
+    /// Asks the worker for the full-detail crop a view's window wants.
+    fn detail(&mut self, node: NodeId, region: Option<drip::shape::Rect>) {
+        if let Err(error) = self.worker.detail(&self.project.graph, node, region) {
+            self.report(Err(error));
+        }
     }
 
     pub fn windows(&self) -> Vec<Window> {
@@ -204,6 +216,9 @@ impl App {
 
     pub fn close_window(&mut self, popped: Popped) {
         self.popped.remove(&popped);
+        if popped.part == Part::View {
+            self.detail(popped.node, None);
+        }
         self.redraw = true;
     }
 
@@ -250,7 +265,8 @@ impl App {
     /// Applies one edit outside a GUI frame.
     fn edit(&mut self, edit: Edit<'_>) {
         let results = |id| self.worker.result(id);
-        let mut frame = Frame::new(&results, &self.popped, self.actions_disabled());
+        let details = |id| self.worker.detail_view(id);
+        let mut frame = Frame::new(&results, &details, &self.popped, self.actions_disabled());
         frame.edit(&mut self.project.graph, edit);
         let report = frame.report;
         let changed = report.changed;
@@ -281,6 +297,8 @@ impl App {
                     }
                     action_reported = true;
                 }
+                // Redrawn like every notice.
+                Notice::Detailed => {}
                 Notice::Failed => {
                     self.action = None;
                     self.report(Err("the worker stopped".into()));

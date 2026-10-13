@@ -622,6 +622,17 @@ Settled with the user on 2026-10-11 and revised by the compute model
   the crate's major version and are not migrated. They contain GUI view kinds,
   so a headless frontend cannot load them as they are. The core keeps only a
   test fixture of the RAW chain.
+- **Decided (2026-10-13):** The image view navigates in the full-detail
+  plane: 100 % shows one full-detail pixel per display pixel at every
+  preview level, and a coarser preview is magnified. At 100 % or more over a
+  preview coarser than full detail, the window reports its visible region,
+  and the worker evaluates the view node's input over it at scale 1, a
+  detail demand, after any waiting preview, once per region and preview
+  generation. The crop is drawn over the magnified preview while both
+  belong to the same graph, so an edit shows the new preview alone until the
+  new crop arrives, and a crop of an older region stays until the newer one
+  arrives. Scopes keep the preview's samples. Fit, smaller zooms and
+  full-detail previews ask for nothing.
 - **Decided:** Neutral restore uses a landscape layout: views share a top edge,
   processing staggers down through Orientation, and RAW and TIFF sit at the
   bottom corners.

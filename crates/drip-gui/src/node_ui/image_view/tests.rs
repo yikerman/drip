@@ -1,5 +1,6 @@
 use super::*;
-use egui::{Event, Modifiers, MouseWheelUnit, TouchPhase};
+use crate::node_ui::data::Placement;
+use egui::{Event, Modifiers, MouseWheelUnit, TouchPhase, vec2};
 use egui_kittest::{Harness, kittest::Queryable};
 
 #[test]
@@ -60,7 +61,13 @@ fn zoom_keeps_pointer_anchor_and_pan_stops_at_image_edges() {
 
 #[test]
 fn popup_controls_wheel_and_primary_drag_share_navigation_state() {
-    let image = Arc::new(Image { width: 1000, height: 800, requested_scale: 2, texels: vec![] });
+    let image = Arc::new(Image {
+        width: 1000,
+        height: 800,
+        requested_scale: 2,
+        plane: Placement::whole([1000.0, 800.0]),
+        texels: vec![],
+    });
     let mut h = Harness::builder()
         .with_size(vec2(500.0, 400.0))
         .with_step_dt(1.0 / 60.0)
@@ -68,7 +75,7 @@ fn popup_controls_wheel_and_primary_drag_share_navigation_state() {
         .build_ui_state(
             move |ui, state: &mut ViewState| {
                 crate::theme::fonts(ui.ctx());
-                show(ui, &image, false, false);
+                show(ui, &image, None, false, false);
                 *state = ui.data(|data| data.get_temp(ui.id().with("image view")).unwrap());
             },
             ViewState::default(),
@@ -140,15 +147,20 @@ fn popup_controls_wheel_and_primary_drag_share_navigation_state() {
 #[test]
 fn pointer_leave_stops_image_scroll_zoom() {
     for same_frame in [false, true] {
-        let image =
-            Arc::new(Image { width: 1000, height: 800, requested_scale: 1, texels: vec![] });
+        let image = Arc::new(Image {
+            width: 1000,
+            height: 800,
+            requested_scale: 1,
+            plane: Placement::whole([1000.0, 800.0]),
+            texels: vec![],
+        });
         let mut h = Harness::builder()
             .with_size(vec2(500.0, 400.0))
             .with_step_dt(1.0 / 60.0)
             .build_ui_state(
                 move |ui, state: &mut ViewState| {
                     crate::theme::fonts(ui.ctx());
-                    show(ui, &image, false, false);
+                    show(ui, &image, None, false, false);
                     *state = ui.data(|data| data.get_temp(ui.id().with("image view")).unwrap());
                 },
                 ViewState::default(),
@@ -170,5 +182,44 @@ fn pointer_leave_stops_image_scroll_zoom() {
         h.step();
         assert_eq!(h.state().zoom, before.zoom);
         assert_eq!(h.state().center, before.center);
+    }
+}
+
+/// At 100 % or more over a preview coarser than full detail, the view
+/// reports the visible region of the plane around its centre. Fit, smaller
+/// zooms and full-detail previews ask for nothing.
+#[test]
+fn a_magnified_preview_reports_its_visible_region() {
+    let plane = Placement::whole([2000.0, 1600.0]);
+    for (requested_scale, zoom, asks) in [
+        (4, Some(1.0), true),
+        (4, Some(2.0), true),
+        (4, Some(0.5), false),
+        (4, None, false),
+        (1, Some(2.0), false),
+    ] {
+        let image =
+            Arc::new(Image { width: 500, height: 400, requested_scale, plane, texels: vec![] });
+        let mut h = Harness::builder().with_size(vec2(500.0, 400.0)).build_ui_state(
+            move |ui, detail: &mut Option<drip::shape::Rect>| {
+                crate::theme::fonts(ui.ctx());
+                let state = ViewState { zoom, center: pos2(0.5, 0.5) };
+                ui.data_mut(|data| data.insert_temp(ui.id().with("image view"), state));
+                *detail = show(ui, &image, None, false, false).and_then(|shown| shown.detail);
+            },
+            None,
+        );
+        h.run();
+        let Some(region) = *h.state() else {
+            assert!(!asks, "{requested_scale} at {zoom:?}");
+            continue;
+        };
+        assert!(asks, "{requested_scale} at {zoom:?}");
+        let zoom = zoom.unwrap();
+        for (axis, centre, side) in [(0, 1000.0, 500.0), (1, 800.0, 400.0)] {
+            let middle = region.origin[axis] as f32 + region.extent[axis] as f32 / 2.0;
+            assert!((middle - centre).abs() <= 1.0, "{region:?}");
+            assert!(region.extent[axis] as f32 <= side / zoom + 2.0, "{region:?}");
+        }
     }
 }

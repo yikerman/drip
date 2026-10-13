@@ -1,7 +1,9 @@
 //! Test-only node kinds and presentation that the registry and bindings must
 //! find, e.g. for project loading or prepared views.
 use crate::node_ui::{
-    Action, Binding, ControlCx, GuiNode, Prepare, data::HostImage, preview::PreviewImage,
+    Action, Binding, ControlCx, GuiNode, Prepare,
+    data::{HostImage, Placement},
+    preview::PreviewImage,
 };
 use drip::{
     node::data::{Coordinates, Extent, REC2020_D65, Rgb, RgbDesc},
@@ -63,6 +65,7 @@ impl GuiNode for slow::Definition {
         Ok(PreviewImage::new(&Arc::new(HostImage {
             width: 1,
             height: 1,
+            plane: Placement::whole([1.0, 1.0]),
             requested_scale: 1,
             color_space: "Rec.2020 / D65".into(),
             pixels: vec![[0.5; 3]].into(),

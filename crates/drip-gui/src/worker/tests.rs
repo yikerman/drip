@@ -554,3 +554,85 @@ mod panic_wakes_the_ui_and_ends_the_busy_state_fixture {
         assert!(!worker.busy());
     }
 }
+
+mod a_magnified_view_shows_a_full_detail_crop_over_its_preview_fixture {
+    use super::*;
+    use crate::node_ui::preview::ImageView;
+    use drip::shape::Rect;
+
+    #[derive(Clone, Serialize, Deserialize, drip::Parameters)]
+    struct Ramp {
+        #[param(default = 1.0, range = 0.0..=10.0)]
+        gain: f32,
+    }
+    const WIDTH: u32 = 16;
+    fn ramp_contract(_: &drip::runtime::GlobalContext, _: &Ramp) -> drip::Result<(RgbDesc,)> {
+        let extent = Extent { width: WIDTH, height: 12 };
+        Ok((RgbDesc::new(extent, Coordinates::Space(REC2020_D65)),))
+    }
+    /// Sample `i` holds `gain · i / 256` in red, exact in f16.
+    #[drip::node(id = "test-ramp", name = "ramp", contract = ramp_contract)]
+    fn ramp(_: &KernelContext<'_>, p: &Ramp, mut image: Write<'_, Rgb>) -> drip::Result<()> {
+        for (i, px) in image.host().iter_mut().enumerate() {
+            *px = [p.gain * i as f32 / 256.0, 0.0, 0.0];
+        }
+        Ok(())
+    }
+
+    /// Red of each packed texel of `image`.
+    fn reds(image: &crate::render::image::Image) -> Vec<f32> {
+        let texel = |i: usize| u16::from_ne_bytes([image.texels[i * 8], image.texels[i * 8 + 1]]);
+        (0..image.width * image.height).map(|i| half::f16::from_bits(texel(i)).to_f32()).collect()
+    }
+
+    fn detail(worker: &Worker, id: NodeId) -> Option<&ImageView> {
+        worker.detail_view(id).map(|view| view.downcast_ref::<ImageView>().unwrap())
+    }
+
+    /// The view asks for its visible region. The crop of the region at full
+    /// detail arrives after the preview and shows over it while both belong
+    /// to the same graph. An edit hides it once the new preview shows, until
+    /// the region's new crop arrives. Scopes keep the preview's samples.
+    #[test]
+    fn a_magnified_view_shows_a_full_detail_crop_over_its_preview() {
+        let (mut graph, source, preview, histogram) = graph(&ramp::KIND);
+        let mut worker = Worker::new(Arc::new(|| {}), None);
+        worker.request(&graph, 2, vec![preview, histogram]).unwrap();
+        wait(&mut worker);
+        let shown = &view::<ImageView>(&worker, preview).image;
+        assert_eq!((shown.width, shown.height, shown.plane.full), (4, 3, [16.0, 12.0]));
+        let scope = worker.result(histogram).unwrap().as_ref().unwrap().clone().unwrap();
+
+        let region = Rect { origin: [4, 2], extent: [6, 5] };
+        worker.detail(&graph, preview, Some(region)).unwrap();
+        wait(&mut worker);
+        let crop = &detail(&worker, preview).unwrap().image;
+        assert_eq!((crop.width, crop.height), (6, 5));
+        assert_eq!(crop.plane.covers, [[4.0, 2.0], [10.0, 7.0]]);
+        let expected: Vec<f32> =
+            (2..7).flat_map(|y| (4..10).map(move |x| (y * WIDTH + x) as f32 / 256.0)).collect();
+        assert_eq!(reds(crop), expected);
+        let unchanged = worker.result(histogram).unwrap().as_ref().unwrap().as_ref().unwrap();
+        assert!(Arc::ptr_eq(unchanged, &scope), "scopes keep the preview's view");
+        // The same region again asks for nothing.
+        worker.detail(&graph, preview, Some(region)).unwrap();
+        assert!(!worker.busy());
+
+        graph.set_param(source, "gain", json!(2.0)).unwrap();
+        worker.request(&graph, 2, vec![preview, histogram]).unwrap();
+        worker.detail(&graph, preview, Some(region)).unwrap();
+        // The preview runs first, and with it the previous crop leaves.
+        while worker.showing_previous() {
+            assert!(detail(&worker, preview).is_some(), "the crop shows with its preview");
+            worker.poll();
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(detail(&worker, preview).is_none());
+        wait(&mut worker);
+        let crop = &detail(&worker, preview).unwrap().image;
+        assert_eq!(reds(crop), expected.iter().map(|v| v * 2.0).collect::<Vec<_>>());
+
+        worker.detail(&graph, preview, None).unwrap();
+        assert!(detail(&worker, preview).is_none());
+    }
+}

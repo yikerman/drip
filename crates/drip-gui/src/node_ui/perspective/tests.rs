@@ -77,7 +77,13 @@ fn view_bounds_stop_at_an_unbounded_input() {
 
 fn view(map: Mat3) -> TransformView {
     let image = |w, h| {
-        Arc::new(Image { width: w, height: h, requested_scale: 1, texels: vec![0; w * h * 8] })
+        Arc::new(Image {
+            width: w,
+            height: h,
+            requested_scale: 1,
+            plane: crate::node_ui::data::Placement::whole([w as f32, h as f32]),
+            texels: vec![0; w * h * 8],
+        })
     };
     TransformView {
         source: image(4, 3),

@@ -100,7 +100,7 @@ mod tests {
     #[test]
     #[ignore = "requires the DRIP_BACKEND compute device; run explicitly"]
     fn device_vectorscope_preserves_neutrals_primaries_and_hdr() {
-        use crate::node_ui::data::HostImage;
+        use crate::node_ui::data::{HostImage, Placement};
         use crate::node_ui::scopes::tests::{context, device};
         let ctx = context();
         let mut pixels = vec![[0.18; 3]; 40000];
@@ -115,6 +115,7 @@ mod tests {
         let image = HostImage {
             width: pixels.len(),
             height: 1,
+            plane: Placement::whole([pixels.len() as f32, 1.0]),
             requested_scale: 1,
             color_space: "Rec.2020 / D65".into(),
             pixels: pixels.into(),
@@ -126,7 +127,7 @@ mod tests {
     #[test]
     #[ignore = "requires the DRIP_BACKEND compute device; run explicitly"]
     fn device_vectorscope_rounding_stays_near_reference() {
-        use crate::node_ui::data::HostImage;
+        use crate::node_ui::data::{HostImage, Placement};
         use crate::node_ui::scopes::tests::{context, device};
         let ctx = context();
         let mut state = 42u32;
@@ -141,6 +142,7 @@ mod tests {
         let image = HostImage {
             width: 512,
             height: 512,
+            plane: Placement::whole([512.0, 512.0]),
             requested_scale: 1,
             color_space: "Rec.2020 / D65".into(),
             pixels: pixels.into(),

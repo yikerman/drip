@@ -24,12 +24,16 @@ in [TODO](TODO.md).
   same launch, matching the 2 × 2 block means, and after Orientation too. A
   Bayer negation before a 2×2 demosaic and a foreign copy after it run once
   across scales 1 and 4: the copy reads full detail and its consumer
-  receives it reduced. Three tests
-  changed on purpose: the explicit RGB reduction is checked at full detail,
-  since a preview scale now reduces its source first; the scale test's
-  source claims `scaled` and describes a plane that no scale reduces; and a
-  file-reading test kernel keeps its first read for the export, since its
-  key no longer holds the scale. Timed with a release driver kept in
+  receives it reduced. In the GUI, the image view reports its visible region
+  only at 100 % or more over a coarser preview, and the worker shows a
+  full-detail crop over the preview it belongs to, hides it after an edit
+  until the new crop arrives, and leaves scopes on the preview
+  (`a_magnified_view_shows_a_full_detail_crop_over_its_preview`). Three
+  tests changed on purpose. The explicit RGB reduction is checked at full
+  detail, since a preview scale now reduces its source first. The scale
+  test's source claims `scaled` and describes a plane that no scale
+  reduces. A file-reading test kernel keeps its first read for the export,
+  since its key no longer holds the scale. Timed with a release driver kept in
   `../drip-benchmark-results/2026-10-13-regions/` on the Sony fixture with
   `DRIP_BACKEND=wgpu` and `RAYON_NUM_THREADS=12`, a new Exposure per sample,
   so the tail runs as one launch from the stored RCD output, five samples

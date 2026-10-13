@@ -29,7 +29,7 @@ pub trait Drawable: Send + Sync + Any {
 }
 
 impl dyn Drawable {
-    #[cfg(test)]
+    /// The view as type `T`, as a window reads the detail of its own view.
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
         (self as &dyn Any).downcast_ref()
     }
@@ -70,13 +70,17 @@ impl IntoDrawable for () {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node_ui::preview::{ImageView, PreviewImage};
+    use crate::node_ui::{
+        data::Placement,
+        preview::{ImageView, PreviewImage},
+    };
 
     #[test]
     fn preparation_releases_source_and_keeps_packed_destruction_on_its_owner() {
         let source = Arc::new(HostImage {
             width: 1,
             height: 1,
+            plane: Placement::whole([1.0, 1.0]),
             requested_scale: 1,
             color_space: "Rec.2020 / D65".into(),
             pixels: vec![[-1.0, 0.5, 2.0]].into(),

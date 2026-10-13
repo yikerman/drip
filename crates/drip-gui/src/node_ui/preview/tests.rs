@@ -1,4 +1,5 @@
 use super::*;
+use crate::node_ui::data::Placement;
 use drip::node::color::{self, D65, REC709, REC2020};
 type Rec2020Mat = Arc<HostImage>;
 
@@ -27,6 +28,7 @@ fn image(pixels: Vec<[f32; 3]>) -> Arc<HostImage> {
     Arc::new(HostImage {
         width: pixels.len(),
         height: 1,
+        plane: Placement::whole([pixels.len() as f32, 1.0]),
         requested_scale: 4,
         color_space: "Rec.2020 / D65".into(),
         pixels: pixels.into(),

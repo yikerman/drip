@@ -74,7 +74,7 @@ fn harness(zoom: f32) -> Harness<'static, Scene> {
             |ui, s: &mut Scene| {
                 theme::apply(ui.ctx());
                 let popped = Default::default();
-                let mut frame = Frame::new(&|_| None, &popped, false);
+                let mut frame = Frame::new(&|_| None, &|_| None, &popped, false);
                 egui::Panel::right("inspector").default_size(250.0).show(ui, |ui| {
                     if let Some(id) = s.selected {
                         crate::inspector::selected_node(

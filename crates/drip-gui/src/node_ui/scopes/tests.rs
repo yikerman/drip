@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::{SIZE, ScopeAxes};
 use crate::model::Graph;
-use crate::node_ui::data::{HostImage, PrepareContext};
+use crate::node_ui::data::{HostImage, Placement, PrepareContext};
 use crate::node_ui::scopes::{ExposureRange, Scale, histogram::Settings};
 use drip::{eval::Evaluator, graph::Dag, node::data::*, runtime::RuntimeContext};
 use serde_json::json;
@@ -14,6 +14,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
     let pixels = Arc::new(HostImage {
         width: 2,
         height: 2,
+        plane: Placement::whole([2.0, 2.0]),
         requested_scale: 1,
         color_space: "Rec.2020 / D65".into(),
         pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36], [1.0, 0.5, 2.0], [0.25; 3]].into(),
@@ -80,6 +81,7 @@ fn histogram_bins_by_stops() {
     let image = HostImage {
         width: 2,
         height: 1,
+        plane: Placement::whole([2.0, 1.0]),
         requested_scale: 1,
         color_space: "Rec.2020 / D65".into(),
         pixels: vec![[0.18, 0.0, -1.0], [0.09, 1e6, 0.36]].into(),
@@ -115,6 +117,7 @@ fn vectorscope_uses_working_rec2020_coordinates() {
     let image = HostImage {
         width: 1,
         height: 1,
+        plane: Placement::whole([1.0, 1.0]),
         requested_scale: 1,
         color_space: "Rec.2020 / D65".into(),
         pixels: vec![[1.0, 0.0, 0.0]].into(),
@@ -174,6 +177,7 @@ fn device_reductions_match_reference() {
         let image = HostImage {
             width,
             height,
+            plane: Placement::whole([width as f32, height as f32]),
             requested_scale: 1,
             color_space: "Rec.2020 / D65".into(),
             pixels: input.into(),

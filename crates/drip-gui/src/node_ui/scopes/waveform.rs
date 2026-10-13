@@ -84,11 +84,13 @@ pub(super) fn waveform_counts(image: &HostImage, min: f32, max: f32) -> Vec<[u32
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node_ui::data::Placement;
     #[test]
     fn waveform_preserves_columns_channels_and_exposure() {
         let image = HostImage {
             width: 2,
             height: 2,
+            plane: Placement::whole([2.0, 2.0]),
             requested_scale: 1,
             color_space: "Rec.2020 / D65".into(),
             pixels: vec![[1.0, 0.0, 16.0], [0.5; 3], [1.0, -1.0, 32.0], [0.5; 3]].into(),

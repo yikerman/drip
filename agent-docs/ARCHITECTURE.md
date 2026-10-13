@@ -299,9 +299,16 @@ The GUI worker (`drip-gui/src/worker.rs`) owns one `Evaluator` per project
 and runs demands in order on one thread. A preview demand forces the nodes
 whose binding prepares a view, at scale `2^level` with level 0 to 8, then
 prepares each view from its inputs. A newer preview request replaces a
-pending one and makes a running one's result stale. An action demand forces
-one node at full detail and runs its action. Demands are not merged, but a
-later demand reuses what the store kept from earlier ones. A new project
+pending one and makes a running one's result stale. A detail demand
+prepares one view from its input over a region at scale 1. The image view
+navigates in full-detail pixels, and at 100 % or more over a coarser
+preview its window asks for the visible region. The worker sends the latest
+region per view after any waiting preview and draws the crop over the
+magnified preview once both belong to the same graph, so an edit shows the
+new preview alone until its crop arrives. Scopes keep the preview's
+samples. An action demand forces one node at full detail and runs its
+action. Demands are not merged, but a later demand reuses what the store
+kept from earlier ones. A new project
 replaces the worker, its evaluator and the memory store. Every worker's
 evaluator has the disk tier of `Disk::platform()`, so a RAW decoded in one
 session is read from disk in the next.
@@ -441,7 +448,9 @@ from its `Kind`. Node-specific presentation is an `impl GuiNode` on the
 node's generated `Definition`, listed in `BINDINGS` in
 `drip-gui/src/registry.rs`. `controls` replaces the schema controls,
 `PREPARE` turns the node's typed inputs into a drawable view, and `ACTION`
-adds a frontend action whose result may become new parameters. Both receive
+adds a frontend action whose result may become new parameters. `PREPARE`
+also prepares a detail, the view of a region of the inputs at full detail,
+whose inputs state their window. Both receive
 a `PrepareContext` with the demand's `GlobalContext` and the evaluator's
 runtime, so they read device samples and run drip kernels where the inputs
 live. Perspective Transform's view resamples its input through
@@ -458,7 +467,7 @@ through an example.
 
 Drip is adopting the compute model of
 [COMPUTE_MODEL](COMPUTE_MODEL.md#proposal-for-drip) in eight steps. Steps 1
-to 5 landed on 2026-10-13, and step 6 is under way. Step 1 made ports name
+to 6 landed on 2026-10-13. Step 1 made ports name
 payloads, values `Image` and `Raster`, gave kinds a `Shape` and moved a
 run's values into a `Store`. Step 2 added the map shape and fused kernels
 and made Exposure, Camera RGB to color RGB, Chromatic adaptation and Sigmoid
@@ -469,6 +478,6 @@ durability and per-side budgets. Step 5 added foreign nodes, the pending
 policy and the disk tier, made RAW decode a disk node in place of the source
 form, and added Hot pixel removal. Step 6 added regions and windows to the
 fused segments, derived each node's scale from shapes with the `scaled`
-claim and evaluation's box reduction, and made Export TIFF write in bands
-over the device budget. Kernels stay whole, without halos. The GUI's 100 %
-view of full-detail crops completes it.
+claim and evaluation's box reduction, made Export TIFF write in bands over
+the device budget and gave the GUI's image view full-detail crops at 100 %.
+Kernels stay whole, without halos. Step 7 is next: `reduce`.

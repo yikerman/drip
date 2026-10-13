@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use egui::{FontId, Painter, Rect, Ui};
 
+use crate::editing::NodeCx;
 use crate::node_ui::data::HostImage;
 use crate::render::image;
 use crate::render::node_views::{Drawable, Images, IntoDrawable};
@@ -47,6 +48,16 @@ impl Drawable for ImageView {
     }
 
     fn window(&self, ui: &mut Ui) {
-        super::super::image_view::show(ui, &self.image, self.interpolation, false);
+        super::super::image_view::show(ui, &self.image, None, self.interpolation, false);
+    }
+
+    /// Draws the full-detail crop the worker holds over the preview, and asks
+    /// for the visible region while the view magnifies the preview.
+    fn interact(&self, ui: &mut Ui, node: &mut NodeCx) {
+        let detail = node.detail().and_then(|view| view.downcast_ref::<ImageView>());
+        let detail = detail.map(|view| &view.image);
+        let shown =
+            super::super::image_view::show(ui, &self.image, detail, self.interpolation, false);
+        node.request_detail(shown.and_then(|shown| shown.detail));
     }
 }

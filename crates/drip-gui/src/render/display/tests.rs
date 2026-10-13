@@ -1,6 +1,6 @@
 use super::{CANVAS, compositor, presentation::Output};
 use crate::{
-    node_ui::data::HostImage,
+    node_ui::data::{HostImage, Placement},
     render::{image, pipeline},
 };
 use std::sync::Arc;
@@ -112,6 +112,7 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
     let source = Arc::new(image::Image::new(&HostImage {
         width: rgb.len(),
         height: 1,
+        plane: Placement::whole([rgb.len() as f32, 1.0]),
         requested_scale: 1,
         color_space: "Rec.2020 / D65".into(),
         pixels: rgb.to_vec().into(),
@@ -204,6 +205,7 @@ fn gpu_preview_and_output_match_colorimetric_reference() {
     let packed = image::Image::new(&HostImage {
         width: gui.len(),
         height: 1,
+        plane: Placement::whole([gui.len() as f32, 1.0]),
         requested_scale: 1,
         color_space: "sRGB".into(),
         pixels: gui.clone().into(),

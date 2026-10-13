@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crate::node_ui::data::HostImage;
+use crate::node_ui::data::{HostImage, Placement};
 use egui_wgpu::{CallbackResources, CallbackTrait, ScreenDescriptor};
 use rayon::prelude::*;
 
@@ -16,6 +16,7 @@ pub struct Image {
     pub height: usize,
     /// Requested processing detail; actual dimensions come from the evaluated image.
     pub requested_scale: u32,
+    pub plane: Placement,
     pub texels: Vec<u8>,
 }
 
@@ -29,7 +30,13 @@ impl Image {
                 }
             },
         );
-        Image { width: rgb.width, height: rgb.height, requested_scale: rgb.requested_scale, texels }
+        Image {
+            width: rgb.width,
+            height: rgb.height,
+            requested_scale: rgb.requested_scale,
+            plane: rgb.plane,
+            texels,
+        }
     }
 }
 

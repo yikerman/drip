@@ -3,8 +3,11 @@
 //! the outputs of disk-cached foreign nodes such as RAW decode across
 //! projects and sessions. A preview does not wait for a foreign job: views
 //! that need it keep what they showed, the status names the node, and the
-//! preview runs again when the job ends. The app replaces the worker with its
-//! project, discarding queued work, late replies and the memory store.
+//! preview runs again when the job ends. A view's window magnified beyond its
+//! preview asks for a detail: the visible region of its input at full
+//! detail, evaluated after the preview and shown over it once both belong to
+//! the same graph. The app replaces the worker with its project, discarding
+//! queued work, late replies and the memory store.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,6 +20,7 @@ use crate::node_ui::NodeAction;
 use drip::Error as NodeError;
 use drip::eval::{Evaluator, InputValues, NodeTiming, Policy, Target};
 use drip::runtime::{GlobalContext, RuntimeContext};
+use drip::shape::Rect;
 use drip::store::Disk;
 use serde_json::Value as Json;
 
@@ -39,6 +43,9 @@ struct Demand {
 enum Effect {
     /// Prepare the targets' views. A newer generation makes the result stale.
     Preview { generation: u64, targets: Vec<NodeId> },
+    /// Prepare `id`'s view from its input over `region` of its plane at full
+    /// detail, for preview `generation`.
+    Detail { generation: u64, id: NodeId, region: Rect },
     /// Run a node's action. Actions override the preview's context with full
     /// detail.
     Perform { id: NodeId, action: NodeAction },
@@ -62,6 +69,12 @@ enum Event {
         id: NodeId,
         result: Result<Option<Json>, String>,
     },
+    /// A detail's view, or `None` when it failed or waits for a foreign job.
+    Detailed {
+        generation: u64,
+        id: NodeId,
+        view: Option<Arc<dyn Drawable>>,
+    },
     /// A foreign job ended, so a preview waiting for it can run again.
     Ready,
     Stopped,
@@ -69,6 +82,8 @@ enum Event {
 
 pub enum Notice {
     Evaluated(Result<(), String>),
+    /// A view's full-detail crop arrived.
+    Detailed,
     /// An action finished; it may carry new parameters for its node.
     Performed {
         id: NodeId,
@@ -143,6 +158,14 @@ pub struct Worker {
     waiting: Option<String>,
     /// A foreign job ended since the last preview was sent.
     woken: bool,
+    /// Per view node, the detail demand waiting to be sent, sent after any
+    /// preview.
+    details: BTreeMap<NodeId, Demand>,
+    /// Per view node, the region and preview generation of the detail last
+    /// asked for, so an unchanged window asks once.
+    asked: BTreeMap<NodeId, (Rect, u64)>,
+    /// Per view node, the latest detail evaluated and its preview generation.
+    detailed: BTreeMap<NodeId, (u64, Arc<dyn Drawable>)>,
     collect: bool,
     failed: bool,
 }
@@ -186,6 +209,9 @@ impl Worker {
             latest: None,
             waiting: None,
             woken: false,
+            details: BTreeMap::new(),
+            asked: BTreeMap::new(),
+            detailed: BTreeMap::new(),
             collect: false,
             failed: false,
         }
@@ -200,10 +226,46 @@ impl Worker {
         self.views_generation.is_some_and(|generation| generation != self.generation)
     }
 
-    /// A preview or action is queued or running, or the shown preview waits
-    /// for a foreign job.
+    /// A preview, detail or action is queued or running, or the shown
+    /// preview waits for a foreign job.
     pub fn busy(&self) -> bool {
-        self.in_flight || self.pending.is_some() || self.waiting.is_some()
+        self.in_flight
+            || self.pending.is_some()
+            || !self.details.is_empty()
+            || self.waiting.is_some()
+    }
+
+    /// The full-detail view of the region `id`'s window last asked for, when
+    /// it was evaluated for the preview the worker shows. Until then the
+    /// window shows the preview alone.
+    pub fn detail_view(&self, id: NodeId) -> Option<&Arc<dyn Drawable>> {
+        let (generation, view) = self.detailed.get(&id)?;
+        (Some(*generation) == self.views_generation).then_some(view)
+    }
+
+    /// Asks for `id`'s view from its input over `region` of its plane, in
+    /// full-detail pixels, at full detail, or stops asking with `None`. The
+    /// latest region per node is evaluated after any preview, once per
+    /// region and preview generation.
+    pub fn detail(
+        &mut self,
+        graph: &Graph,
+        id: NodeId,
+        region: Option<Rect>,
+    ) -> Result<(), String> {
+        let Some(region) = region else {
+            self.details.remove(&id);
+            self.asked.remove(&id);
+            self.detailed.remove(&id);
+            return Ok(());
+        };
+        if self.asked.insert(id, (region, self.generation)) == Some((region, self.generation)) {
+            return Ok(());
+        }
+        let effect = Effect::Detail { generation: self.generation, id, region };
+        let demand = Demand { graph: graph.clone(), global: Default::default(), effect };
+        self.details.insert(id, demand);
+        self.start()
     }
 
     /// The name of the node whose foreign job the shown preview waits for.
@@ -223,6 +285,7 @@ impl Worker {
         self.generation += 1;
         self.views.retain(|id, _| graph.kind(*id).is_some());
         self.failures.retain(|id, _| graph.kind(*id).is_some());
+        self.detailed.retain(|id, _| graph.kind(*id).is_some());
         if self.pending.is_some() {
             log::trace!("coalesced pending preview into generation={}", self.generation);
         }
@@ -292,6 +355,18 @@ impl Worker {
                         notices.push(Notice::Performed { id, result });
                     }
                 }
+                Event::Detailed { generation, id, view } => {
+                    self.in_flight = false;
+                    self.collect = true;
+                    // A detail of an older graph never shows again; one of
+                    // an older region shows until the newer one arrives.
+                    if let Some(view) = view.filter(|_| generation == self.generation)
+                        && self.asked.contains_key(&id)
+                    {
+                        self.detailed.insert(id, (generation, view));
+                        notices.push(Notice::Detailed);
+                    }
+                }
                 Event::Ready => self.woken = true,
                 Event::Stopped => {
                     log::error!("worker stopped");
@@ -321,17 +396,25 @@ impl Worker {
         self.failed = true;
         self.in_flight = false;
         self.pending = None;
+        self.details.clear();
         self.waiting = None;
         Notice::Failed
     }
 
+    /// Sends the waiting preview, or else a waiting detail, unless a demand
+    /// is in flight.
     fn start(&mut self) -> Result<(), String> {
-        if !self.in_flight
-            && let Some(request) = self.pending.take()
-        {
-            self.send(&self.commands, Command::Force(request))?;
-            self.in_flight = true;
+        if self.in_flight {
+            return Ok(());
+        }
+        let preview = self.pending.take();
+        if preview.is_some() {
             self.woken = false;
+        }
+        let next = preview.or_else(|| self.details.pop_first().map(|(_, demand)| demand));
+        if let Some(demand) = next {
+            self.send(&self.commands, Command::Force(demand))?;
+            self.in_flight = true;
         }
         Ok(())
     }
@@ -385,9 +468,9 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
         runtime: evaluator.map_or_else(|_| RuntimeContext::host(), |e| e.runtime().clone()),
     };
     let targets = demand.targets();
-    // A preview shows what is ready, and an action needs every input.
+    // A view shows what is ready, and an action needs every input.
     let policy = match demand.effect {
-        Effect::Preview { .. } => Policy::Defer,
+        Effect::Preview { .. } | Effect::Detail { .. } => Policy::Defer,
         Effect::Perform { .. } => Policy::Wait,
     };
     let mut inputs = match evaluator {
@@ -457,6 +540,19 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
             );
             Event::Evaluated { generation, views, failures, pending }
         }
+        Effect::Detail { generation, id, region } => {
+            let node = demand.graph.dag.node(id);
+            let inputs = inputs.remove(&id).expect("demanded node");
+            let view = node
+                .map_err(|e| e.clone())
+                .and_then(|node| prepare_view(id, node, &inputs?, &ctx, images, None));
+            log::debug!(
+                "detail generation={generation} node={id:?} region={region:?} elapsed={:.1?} {}",
+                start.elapsed(),
+                view.as_ref().map_or_else(ToString::to_string, |_| "ok".into())
+            );
+            Event::Detailed { generation, id, view: view.ok().flatten() }
+        }
         Effect::Perform { id, action } => {
             let result = demand
                 .graph
@@ -480,6 +576,7 @@ impl Demand {
     fn targets(&self) -> Vec<Target> {
         match &self.effect {
             Effect::Preview { targets, .. } => targets.iter().map(|&id| id.into()).collect(),
+            Effect::Detail { id, region, .. } => vec![Target { node: *id, region: Some(*region) }],
             Effect::Perform { id, .. } => vec![(*id).into()],
         }
     }
@@ -487,6 +584,7 @@ impl Demand {
     fn log_timings(&self, phase: &str, timings: &[NodeTiming]) {
         let demand = match self.effect {
             Effect::Preview { generation, .. } => format!("preview generation={generation}"),
+            Effect::Detail { generation, .. } => format!("detail generation={generation}"),
             Effect::Perform { action, .. } => format!("action {}", action.name),
         };
         for timing in timings {

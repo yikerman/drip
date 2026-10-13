@@ -6,13 +6,18 @@ use crate::node_ui::{Part, Popped};
 use crate::render::node_views::Drawable;
 use crate::ui_state::LayoutField;
 use crate::worker::ViewResult;
+use drip::shape::Rect;
 use egui::Vec2;
 use serde_json::Value as Json;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 /// What one frame of node GUIs reads from the app, and what they did.
 pub struct Frame<'a> {
     pub results: &'a dyn Fn(NodeId) -> Option<&'a ViewResult>,
+    /// The full-detail crop of a node's view that belongs to its shown
+    /// result, if the worker holds one.
+    pub details: &'a dyn Fn(NodeId) -> Option<&'a Arc<dyn Drawable>>,
     /// The windows popped out.
     pub popped: &'a BTreeSet<Popped>,
     /// Disables actions while one runs.
@@ -33,6 +38,9 @@ pub struct Report {
     pub action: Option<NodeId>,
     /// A window the user opened or closed.
     pub toggled: Option<Popped>,
+    /// The region of its plane a view's window shows magnified beyond its
+    /// preview, in full-detail pixels, to see at full detail.
+    pub detail: Option<Rect>,
 }
 
 /// All frontend graph mutations pass through `Frame::edit`, which owns their
@@ -53,10 +61,11 @@ pub enum Edit<'a> {
 impl<'a> Frame<'a> {
     pub fn new(
         results: &'a dyn Fn(NodeId) -> Option<&'a ViewResult>,
+        details: &'a dyn Fn(NodeId) -> Option<&'a Arc<dyn Drawable>>,
         popped: &'a BTreeSet<Popped>,
         actions_disabled: bool,
     ) -> Self {
-        Frame { results, popped, actions_disabled, report: Report::default() }
+        Frame { results, details, popped, actions_disabled, report: Report::default() }
     }
 
     /// Applies an edit immediately; adding a node returns its id for selection.
@@ -130,6 +139,19 @@ impl<'g, 'f, 'a> NodeCx<'g, 'f, 'a> {
     /// The view of the node's latest result, if it has one.
     pub fn view(&self) -> Option<&'a dyn Drawable> {
         (self.frame.results)(self.id)?.as_ref().ok()?.as_deref()
+    }
+
+    /// The full-detail crop of the node's view, when one belongs to the
+    /// shown result.
+    pub fn detail(&self) -> Option<&'a dyn Drawable> {
+        (self.frame.details)(self.id).map(|view| &**view)
+    }
+
+    /// Asks to see `region` of the view's plane at full detail, in
+    /// full-detail pixels. A window that shows its view calls it every
+    /// frame, with `None` when it needs no detail.
+    pub fn request_detail(&mut self, region: Option<Rect>) {
+        self.frame.report.detail = region;
     }
 
     pub fn set_param(&mut self, name: &str, value: Json) {

@@ -64,6 +64,7 @@ fn prepare(p: &Settings, image: &Read<'_, Rgb>, ctx: &PrepareContext) -> drip::R
         let full = Extent { width: w, height: h };
         let extent = full.reduced(divisor);
         let coordinates = image.desc.coordinates.clone();
+        let placement = crate::node_ui::data::Placement::whole([w as f32, h as f32]);
         let desc = RgbDesc { extent: extent.clone(), full, window: None, coordinates };
         // The warp's output plane spans `full`, so place it over `plane` first.
         let [sx, sy] = [plane.size[0] / f64::from(w), plane.size[1] / f64::from(h)];
@@ -76,6 +77,7 @@ fn prepare(p: &Settings, image: &Read<'_, Rgb>, ctx: &PrepareContext) -> drip::R
             requested_scale: ctx.global.scale,
             color_space: image.desc.coordinates.to_string(),
             pixels: warped.host()?.clone(),
+            plane: placement,
         })
     };
     let input_plane = Plane { origin: [0.0, 0.0], size: perspective::plane(image.desc) };
@@ -226,7 +228,7 @@ impl Drawable for TransformView {
     }
 
     fn window(&self, ui: &mut Ui) {
-        image_view::show(ui, &self.framed, true, false);
+        image_view::show(ui, &self.framed, None, true, false);
     }
 
     fn interact(&self, ui: &mut Ui, node: &mut NodeCx) {
@@ -264,7 +266,7 @@ impl Drawable for TransformView {
             Tool::Perspective => (&self.source, &self.input),
             Tool::Frame | Tool::Level => (&self.framed, &self.view),
         };
-        let Some(shown) = image_view::show(ui, image, true, true) else {
+        let Some(shown) = image_view::show(ui, image, None, true, true) else {
             ui.data_mut(|d| d.insert_temp(id, state));
             return;
         };
