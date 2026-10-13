@@ -8,10 +8,15 @@
 //! inlines the bodies of a segment into one kernel, so kernel identity
 //! compares bodies by name and each sequence compiles once whatever the
 //! constants.
-use crate::{lattice::Lattice, payload::DeviceLayout};
+use crate::{
+    lattice::Lattice,
+    payload::{DeviceLayout, HostBuffer},
+};
 use cubecl::prelude::*;
 
-/// One sample of a [`MapPayload`] as a map body sees it, channels in storage order.
+/// One sample of a [`MapPayload`] as a body sees it. This is the layout
+/// every kernel of the segment compiler reads and writes: three f32
+/// channels per sample, packed, in storage order.
 #[derive(CubeType, Clone, Copy)]
 pub struct Pixel {
     pub r: f32,
@@ -19,12 +24,13 @@ pub struct Pixel {
     pub b: f32,
 }
 
-/// A payload the fused kernel reads and writes: packed `[f32; 3]` samples,
-/// one [`Pixel`] each, on the [`Lattice`] its description states. Its
-/// [`Payload::PLANE`](crate::payload::Payload::PLANE) is
+/// A payload the fused kernel reads and writes: one [`Pixel`] per sample,
+/// on the [`Lattice`] its description states. The host bound makes the
+/// layout part of the type, so a payload of another channel count cannot
+/// claim it. Its [`Payload::PLANE`](crate::payload::Payload::PLANE) is
 /// [`Plane::of`](crate::image::Plane::of), so evaluation can reduce and
 /// window its images without knowing the type.
-pub trait MapPayload: DeviceLayout {
+pub trait MapPayload: DeviceLayout<Host = HostBuffer<[f32; 3]>> {
     fn lattice(desc: &Self::Desc) -> Lattice;
     /// `desc` with its samples on `lattice`, holding `lattice.window`.
     fn on(desc: &Self::Desc, lattice: Lattice) -> Self::Desc;
