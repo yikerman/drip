@@ -215,7 +215,7 @@ fn a_deferred_demand_reports_pending_and_wakes_when_the_job_ends() {
     dag.connect(bound, independent.image).unwrap();
     let targets = [waiting.node.into(), independent.node.into()];
     let batch = || {
-        evaluator.evaluate_batch(&dag, &Default::default(), &targets, Policy::Defer, None).inputs
+        evaluator.evaluate_batch(&dag, &Default::default(), &targets, Policy::Defer, None).values
     };
     for _ in 0..2 {
         let values = batch();

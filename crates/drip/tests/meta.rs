@@ -127,7 +127,7 @@ fn view(
     let evaluator = Evaluator::new(runtime.clone());
     let mut batch =
         evaluator.evaluate_batch(dag, &GlobalContext::default(), &[target], Policy::Wait, None);
-    let values = batch.inputs.remove(&sink).unwrap().unwrap();
+    let values = batch.values.remove(&sink).unwrap().unwrap();
     let image = values.bind::<sink::Definition>().unwrap().image;
     let bits = image.data.host().unwrap().iter().flat_map(|px| px.map(f32::to_bits)).collect();
     (bits, batch.statistics)
@@ -181,8 +181,8 @@ fn sub_graph_nodes_report_their_timings_and_failures(runtime: RuntimeContext) {
     let count = |kind| timings.iter().filter(|timing| timing.kind == kind).count();
     assert_eq!((count("resample"), count("sharpen"), count("pyramid-blur")), (3, 2, 1));
     assert!(timings.iter().any(|timing| timing.kind == "test-refuse" && !timing.success));
-    assert!(batch.inputs.remove(&shown.node).unwrap().is_ok());
-    let error = batch.inputs.remove(&refused.node).unwrap().err().unwrap();
+    assert!(batch.values.remove(&shown.node).unwrap().is_ok());
+    let error = batch.values.remove(&refused.node).unwrap().err().unwrap();
     let Error::Node { kind: "test-refusing-meta", source, .. } = error else { panic!("{error}") };
     assert!(matches!(*source, Error::Node { kind: "test-refuse", .. }), "{source}");
 }
@@ -206,7 +206,7 @@ fn equal_meta_nodes_share_their_expansion(runtime: RuntimeContext) {
     let global = GlobalContext::default();
     let mut batch = evaluator.evaluate_batch(&dag, &global, &targets, Policy::Wait, None);
     let mut pixels = sinks.iter().map(|node| {
-        let values = batch.inputs.remove(node).unwrap().unwrap();
+        let values = batch.values.remove(node).unwrap().unwrap();
         let image = values.bind::<sink::Definition>().unwrap().image;
         image.data.host().unwrap().iter().flat_map(|px| px.map(f32::to_bits)).collect::<Vec<_>>()
     });

@@ -28,7 +28,7 @@ them a node file may name.
 | `body.rs` | the bodies, filters and warps the segment compiler fuses, `Pixel`, and 3×3 `matrix` math |
 | `lattice.rs` | `Lattice` and `Rect`: where samples sit on the full-detail plane |
 | `plan.rs` | the segment compiler: composition rules, input windows, the fused kernel, reduction passes |
-| `eval/` | `Evaluator` and its rules (`mod.rs`), one call's scheduling (`run.rs`), meta sub-graphs joining the run (`meta.rs`) and `InputValues` (`values.rs`) |
+| `eval/` | `Evaluator` and its rules (`mod.rs`), one call's scheduling (`run.rs`), meta sub-graphs joining the run (`meta.rs`) and `TargetValues` (`values.rs`) |
 | `store.rs` | content keys, eviction, foreign jobs, meta expansions and the `Disk` tier |
 | `expand.rs` | the `SubGraph` a meta node builds |
 | `image.rs` | `Image`, `Raster` and residency |
@@ -260,7 +260,7 @@ mod kernel {
 
 `reduce = BODY` names a `ReduceBody`, which folds pixels into an
 accumulator of f32. A frontend that targets the node binds its outputs with
-`InputValues::bind_outputs`. To measure without a node, call `Image::fold`
+`TargetValues::bind_outputs`. To measure without a node, call `Image::fold`
 or `Image::count`, as `exposure::meter` does for auto exposure.
 
 ### Stencil

@@ -24,7 +24,7 @@ fn prepared(p: Settings, scale: u32) -> (Prepared, Vec<[f32; 3]>) {
     let evaluator = Evaluator::new(RuntimeContext::from_env().unwrap());
     let global = drip::runtime::GlobalContext { scale };
     let id = transform.node;
-    let inputs = evaluator.evaluate_inputs(&dag, &global, &[id]).remove(&id).unwrap().unwrap();
+    let inputs = evaluator.evaluate_targets(&dag, &global, &[id]).remove(&id).unwrap().unwrap();
     let ctx = PrepareContext { runtime: evaluator.runtime().clone(), global };
     let Some(Prepare::Inputs(prepare)) = <perspective::Definition as GuiNode>::PREPARE else {
         panic!("Perspective Transform prepares from its inputs")

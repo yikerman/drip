@@ -333,7 +333,8 @@ fn bayer_host_island(evaluator: &Evaluator) {
     assert_eq!(result.statistics.downloads, 1); // The island's input; the result stays.
     assert!(result.data.host().unwrap().iter().enumerate().all(|(i, &v)| v == i as f32));
 
-    let inputs = evaluator.evaluate_inputs(&dag, &Default::default(), &[island.node, sibling.node]);
+    let inputs =
+        evaluator.evaluate_targets(&dag, &Default::default(), &[island.node, sibling.node]);
     // Clones share storage, so both consumers see the same host allocation.
     let image = |id| {
         let inputs = inputs[id].as_ref().unwrap();

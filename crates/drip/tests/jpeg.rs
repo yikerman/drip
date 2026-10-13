@@ -145,13 +145,13 @@ fn jpeg_action_survives_project_round_trip_and_writes_selected_profile() {
     restored.dag.connect(image, export.image).unwrap();
     restored.dag.connect(capture, export.metadata).unwrap();
     let evaluator = Evaluator::new(RuntimeContext::host());
-    let inputs = evaluator
-        .evaluate_inputs(&restored.dag, &Default::default(), &[export.node])
+    let target = evaluator
+        .evaluate_targets(&restored.dag, &Default::default(), &[export.node])
         .remove(&export.node)
         .unwrap()
         .unwrap();
     let node = restored.dag.node(export.node).unwrap();
-    (node.kind().action.unwrap().run)(node, &inputs).unwrap();
+    (node.kind().action.unwrap().run)(node, target.inputs().unwrap()).unwrap();
     let bytes = std::fs::read(&path).unwrap();
     std::fs::remove_file(path).unwrap();
     let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(bytes));

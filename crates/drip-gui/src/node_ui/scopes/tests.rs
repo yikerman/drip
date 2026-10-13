@@ -13,7 +13,7 @@ use serde_json::json;
 /// evaluated at full detail on `ctx`'s runtime.
 fn prepared<G: GuiNode>(dag: &Dag, node: NodeId, ctx: &PrepareContext) -> G::Presentation {
     let evaluator = Evaluator::new(ctx.runtime.clone());
-    let mut values = evaluator.evaluate_inputs(dag, &ctx.global, &[node]);
+    let mut values = evaluator.evaluate_targets(dag, &ctx.global, &[node]);
     let values = values.remove(&node).unwrap().unwrap();
     let Some(Prepare::Outputs(prepare)) = G::PREPARE else { panic!("scopes prepare counts") };
     prepare(G::of(dag.node(node).unwrap()).unwrap(), values.bind_outputs::<G>().unwrap(), ctx)

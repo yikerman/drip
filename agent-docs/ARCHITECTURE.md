@@ -147,8 +147,10 @@ live in `eval/mod.rs` (scale, keys, regions, policies, errors) and `store.rs`
 `Evaluator::evaluate` forces one output. `evaluate_batch` forces several
 targets, each with an optional region, under a `Policy`: `Wait` blocks on a
 running foreign job, and `Defer` reports the node pending so a preview can
-return. A frontend binds a target's inputs, or a reduction's outputs, to the
-node's typed views with `InputValues::bind` or `bind_outputs`.
+return. Each target hands its frontend `TargetValues`: a reduction's
+outputs, any other node's inputs. The frontend binds them to the node's
+typed views with `bind` or `bind_outputs`, and binding the other kind
+fails.
 
 ## Adding a node
 

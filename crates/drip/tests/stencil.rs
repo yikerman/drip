@@ -179,7 +179,7 @@ fn view(
     let target = Target { node: sink, region };
     let mut batch =
         evaluator.evaluate_batch(dag, &GlobalContext::default(), &[target], Policy::Wait, None);
-    let values = batch.inputs.remove(&sink).unwrap().unwrap();
+    let values = batch.values.remove(&sink).unwrap().unwrap();
     let image = values.bind::<sink::Definition>().unwrap().image;
     let bits = image.data.host().unwrap().iter().flat_map(|px| px.map(f32::to_bits)).collect();
     (image.desc.clone(), bits, batch.statistics)

@@ -77,13 +77,13 @@ fn export_depth_survives_reopening_and_encodes_expected_samples() {
             let export = reopened.graph.find("Export TIFF").unwrap();
             assert_eq!(reopened.graph.node(export).unwrap().params["depth"], depth);
             let values = evaluator
-                .evaluate_inputs(&reopened.graph.dag, &Default::default(), &[export])
+                .evaluate_targets(&reopened.graph.dag, &Default::default(), &[export])
                 .remove(&export)
                 .unwrap()
                 .unwrap();
             let node = reopened.graph.dag.node(export).unwrap();
             let export = crate::node_ui::action(node.kind()).unwrap();
-            export.run(node, &values, &Default::default()).unwrap();
+            export.run(node, values.inputs().unwrap(), &Default::default()).unwrap();
             let (data, icc, compression_tag) = read(&path);
             assert_eq!(icc, expected_profile.icc);
             assert_eq!(compression_tag, if compression == "none" { 1 } else { 8 });
@@ -142,7 +142,7 @@ fn softproof_matches_bounded_export_across_profiles_and_intents() {
                 });
                 set(&mut project, tiff, settings.clone());
                 set(&mut project, preview, json!({"mode": {"softproof": settings}}));
-                let mut inputs = evaluator.evaluate_inputs(
+                let mut inputs = evaluator.evaluate_targets(
                     &project.graph.dag,
                     &Default::default(),
                     &[preview, tiff],
@@ -159,7 +159,10 @@ fn softproof_matches_bounded_export_across_profiles_and_intents() {
                 let shown = super::prepare(&node.parameters, output.as_ref(), &image).unwrap();
                 let values = inputs.remove(&tiff).unwrap().unwrap();
                 let node = project.graph.dag.node(tiff).unwrap();
-                crate::node_ui::action(node.kind()).unwrap().run(node, &values, &ctx).unwrap();
+                crate::node_ui::action(node.kind())
+                    .unwrap()
+                    .run(node, values.inputs().unwrap(), &ctx)
+                    .unwrap();
                 let (data, icc, _) = read(&path);
                 let DecodingResult::U16(data) = data else { panic!("16-bit export") };
                 let encoded = data.as_chunks::<3>().0;

@@ -23,47 +23,89 @@ pub(super) fn cut(image: &Image, region: Rect, kernels: &KernelContext<'_>) -> R
     image.crop(window, kernels)
 }
 
-/// A target's evaluated inputs, in its input order, or a reduce or bins
-/// target's outputs in their place. An input on a plane larger than the
-/// device budget stays deferred until it is bound or cut, so an action can
-/// compute it in bands.
+/// What a target hands its frontend: a reduce or bins node's outputs, any
+/// other node's inputs.
+pub enum TargetValues {
+    Inputs(InputValues),
+    Outputs(OutputValues),
+}
+impl TargetValues {
+    /// The inputs. Fails for a reduce or bins target, which hands its
+    /// outputs.
+    pub fn inputs(&self) -> Result<&InputValues> {
+        match self {
+            Self::Inputs(inputs) => Ok(inputs),
+            Self::Outputs(outputs) => Err(Error::Contract(format!(
+                "{} hands its outputs, not its inputs",
+                outputs.kind.id
+            ))),
+        }
+    }
+
+    /// [`InputValues::bind`]. Fails for a reduce or bins target.
+    pub fn bind<N: Typed>(&self) -> Result<N::Inputs<'_>> {
+        self.inputs()?.bind::<N>()
+    }
+
+    /// [`OutputValues::bind`]. Fails for any target but a reduce or bins
+    /// node.
+    pub fn bind_outputs<N: Typed>(&self) -> Result<N::Outputs<'_>> {
+        match self {
+            Self::Outputs(outputs) => outputs.bind::<N>(),
+            Self::Inputs(inputs) => Err(Error::Contract(format!(
+                "{} hands its inputs, not its outputs",
+                inputs.kind.id
+            ))),
+        }
+    }
+}
+
+/// A target's evaluated inputs, in its input order. An input on a plane
+/// larger than the device budget stays deferred until it is bound or cut, so
+/// an action can compute it in bands.
+#[derive(Clone)]
 pub struct InputValues {
     pub(super) kind: &'static Kind,
-    /// `None` throughout for a reduction, whose inputs only its body reads.
     pub(super) values: Vec<Option<Image>>,
-    /// A reduction's outputs, otherwise empty.
-    pub(super) outputs: Vec<Image>,
     /// The runtime that materializes deferred inputs.
     pub(super) runtime: RuntimeContext,
 }
+
+/// A reduce or bins target's outputs, host values, in its output order.
+pub struct OutputValues {
+    pub(super) kind: &'static Kind,
+    pub(super) outputs: Vec<Image>,
+}
+impl OutputValues {
+    /// Typed views as declared by node type `N`, which must be the target's.
+    pub fn bind<N: Typed>(&self) -> Result<N::Outputs<'_>> {
+        check::<N>(self.kind)?;
+        N::bind_outputs(&self.outputs)
+    }
+}
+
+/// Fails unless `kind` is `N`'s.
+fn check<N: Typed>(kind: &'static Kind) -> Result<()> {
+    if !std::ptr::eq(kind, N::KIND) {
+        return Err(Error::Contract(format!(
+            "values of {} cannot bind as {}",
+            kind.id,
+            N::KIND.id
+        )));
+    }
+    Ok(())
+}
+
 impl InputValues {
-    /// Typed views as declared by node type `N`; these must be `N`'s inputs.
+    /// Typed views as declared by node type `N`, which must be the target's.
     /// Deferred inputs are materialized whole first.
     pub fn bind<N: Typed>(&self) -> Result<N::Inputs<'_>> {
-        self.check::<N>()?;
+        check::<N>(self.kind)?;
         let kernels = KernelContext::new(&FULL, &self.runtime);
         for image in self.values.iter().flatten() {
             image.materialize(&kernels)?;
         }
         N::bind(&self.values)
-    }
-
-    /// Typed views of a reduce or bins target's outputs as declared by node
-    /// type `N`. Fails for any other target.
-    pub fn bind_outputs<N: Typed>(&self) -> Result<N::Outputs<'_>> {
-        self.check::<N>()?;
-        N::bind_outputs(&self.outputs)
-    }
-
-    fn check<N: Typed>(&self) -> Result<()> {
-        if !std::ptr::eq(self.kind, N::KIND) {
-            return Err(Error::Contract(format!(
-                "values of {} cannot bind as {}",
-                self.kind.id,
-                N::KIND.id
-            )));
-        }
-        Ok(())
     }
 
     /// The device budget of the evaluator's store, which bounds what
@@ -109,15 +151,5 @@ impl InputValues {
             .step_by(rows as usize)
             .map(|y| Rect { origin: [0, y], extent: [width, rows.min(height - y)] })
             .collect()
-    }
-}
-impl Clone for InputValues {
-    fn clone(&self) -> Self {
-        Self {
-            kind: self.kind,
-            values: self.values.clone(),
-            outputs: self.outputs.clone(),
-            runtime: self.runtime.clone(),
-        }
     }
 }

@@ -80,7 +80,7 @@ mod meta;
 mod run;
 mod values;
 
-pub use values::InputValues;
+pub use values::{InputValues, OutputValues, TargetValues};
 
 /// Host wall time around one attempted node, including input transfers, contracts
 /// and allocation. Device dispatch is asynchronous; this is not GPU kernel time.
@@ -161,8 +161,8 @@ impl From<NodeId> for Target {
 
 /// What [`Evaluator::evaluate_batch`] returns.
 pub struct Batch {
-    /// Each target's inputs, or why they are missing.
-    pub inputs: BTreeMap<NodeId, Result<InputValues>>,
+    /// What each target hands its frontend, or why it is missing.
+    pub values: BTreeMap<NodeId, Result<TargetValues>>,
     pub statistics: Statistics,
 }
 
@@ -214,22 +214,22 @@ impl Evaluator {
         &self.runtime
     }
 
-    /// Prepare declared inputs for several external consumers in one run.
-    /// Shared ancestors execute once; an incomplete branch does not prevent
-    /// unrelated consumers from receiving their inputs. Each target node runs,
+    /// Prepare what several external consumers read in one run. Shared
+    /// ancestors execute once; an incomplete branch does not prevent
+    /// unrelated consumers from receiving their values. Each target node runs,
     /// so its contract checks the inputs it receives, except a reduce or bins
     /// node, whose outputs the store may hold.
-    pub fn evaluate_inputs(
+    pub fn evaluate_targets(
         &self,
         dag: &Dag,
         global: &GlobalContext,
         targets: &[NodeId],
-    ) -> BTreeMap<NodeId, Result<InputValues>> {
+    ) -> BTreeMap<NodeId, Result<TargetValues>> {
         let targets: Vec<Target> = targets.iter().map(|&node| node.into()).collect();
-        self.evaluate_batch(dag, global, &targets, Policy::Wait, None).inputs
+        self.evaluate_batch(dag, global, &targets, Policy::Wait, None).values
     }
 
-    /// `evaluate_inputs` for targets with regions, under `policy`, recording
+    /// `evaluate_targets` for targets with regions, under `policy`, recording
     /// host timings. Targets name distinct nodes. With [`Policy::Defer`], a
     /// target that depends on a running foreign job receives `Error::Pending`
     /// inside the `Error::Node` of that job's node.
@@ -250,11 +250,11 @@ impl Evaluator {
         timings: Option<&mut Vec<NodeTiming>>,
     ) -> Batch {
         let counts = Counts::of(&self.runtime);
-        let mut inputs = BTreeMap::new();
+        let mut values = BTreeMap::new();
         let mut valid = Vec::new();
         for target in targets {
             match target_error(dag, global, target) {
-                Some(error) => drop(inputs.insert(target.node, Err(error))),
+                Some(error) => drop(values.insert(target.node, Err(error))),
                 None => valid.push(*target),
             }
         }
@@ -275,15 +275,15 @@ impl Evaluator {
         }
         let failures = run.execute_all(run.order(dag));
         for target in &valid {
-            inputs.insert(target.node, run.collect(target.node, &failures));
+            values.insert(target.node, run.collect(target.node, &failures));
         }
         let statistics = counts.since(&self.runtime, run.finish());
         if let Err(error) = self.runtime.finish() {
-            for value in inputs.values_mut().filter(|v| v.is_ok()) {
+            for value in values.values_mut().filter(|v| v.is_ok()) {
                 *value = Err(error.clone());
             }
         }
-        Batch { inputs, statistics }
+        Batch { values, statistics }
     }
 
     /// Evaluate `target` and the nodes it depends on, waiting for foreign

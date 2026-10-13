@@ -7,7 +7,7 @@
 //! wherever it sits.
 use drip::{
     Result,
-    eval::{Evaluator, InputValues, Policy, Statistics, Target},
+    eval::{Evaluator, Policy, Statistics, Target, TargetValues},
     graph::Dag,
     lattice::Rect,
     node::{
@@ -124,14 +124,14 @@ fn view(
     sink: NodeId,
     scale: u32,
     region: Option<Rect>,
-) -> (InputValues, Statistics) {
+) -> (TargetValues, Statistics) {
     let target = Target { node: sink, region };
     let mut batch =
         evaluator.evaluate_batch(dag, &GlobalContext { scale }, &[target], Policy::Wait, None);
-    (batch.inputs.remove(&sink).unwrap().unwrap(), batch.statistics)
+    (batch.values.remove(&sink).unwrap().unwrap(), batch.statistics)
 }
 
-fn image(values: &InputValues) -> (RgbDesc, Vec<[u32; 3]>) {
+fn image(values: &TargetValues) -> (RgbDesc, Vec<[u32; 3]>) {
     let image = values.bind::<sink::Definition>().unwrap().image;
     let bits = image.data.host().unwrap().iter().map(|px| px.map(f32::to_bits)).collect();
     (image.desc.clone(), bits)
@@ -204,7 +204,7 @@ fn regions_count_full_detail_pixels(runtime: RuntimeContext) {
     let beyond = Target { node: sink.node, region: Some(Rect { origin: [70, 0], extent: [4, 4] }) };
     let mut batch =
         evaluator.evaluate_batch(&dag, &Default::default(), &[beyond], Policy::Wait, None);
-    let error = batch.inputs.remove(&sink.node).unwrap().err().unwrap();
+    let error = batch.values.remove(&sink.node).unwrap().err().unwrap();
     assert!(error.to_string().contains("the region lies outside the image"), "{error}");
 }
 
@@ -311,11 +311,12 @@ fn a_tiled_export_matches_the_export_in_one_piece(runtime: RuntimeContext) {
     let write = |device: u64| {
         let budget = Budget { device, ..Budget::default() };
         let evaluator = Evaluator::new(runtime.clone().with_budget(budget));
-        let mut inputs = evaluator.evaluate_inputs(&dag, &Default::default(), &[export.node]);
-        let inputs = inputs.remove(&export.node).unwrap().unwrap();
+        let mut inputs = evaluator.evaluate_targets(&dag, &Default::default(), &[export.node]);
+        let target = inputs.remove(&export.node).unwrap().unwrap();
+        let inputs = target.inputs().unwrap();
         let bands = inputs.bands(inputs.budget()).len();
         let node = dag.node(export.node).unwrap();
-        (node.kind().action.unwrap().run)(node, &inputs).unwrap();
+        (node.kind().action.unwrap().run)(node, inputs).unwrap();
         (bands, std::fs::read(&file).unwrap())
     };
     let (one, whole) = write(Budget::default().device);

@@ -50,7 +50,7 @@ pub(crate) mod tests {
     /// Runs the action as the worker does: on the node's inputs at full detail.
     fn metered(evaluator: &Evaluator, dag: &Dag, id: NodeId) -> Result<f32> {
         let inputs =
-            evaluator.evaluate_inputs(dag, &Default::default(), &[id]).remove(&id).unwrap()?;
+            evaluator.evaluate_targets(dag, &Default::default(), &[id]).remove(&id).unwrap()?;
         let ctx =
             PrepareContext { runtime: evaluator.runtime().clone(), global: Default::default() };
         let run = <exposure::Definition as GuiNode>::ACTION.unwrap().run;

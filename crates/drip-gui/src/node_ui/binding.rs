@@ -10,7 +10,7 @@ use crate::{
 use drip::{
     Result,
     definition::{Node, Typed},
-    eval::InputValues,
+    eval::{InputValues, TargetValues},
     param::encode,
 };
 use egui::Ui;
@@ -48,7 +48,7 @@ pub trait GuiNode: Typed {
     }
 }
 type PrepareErased =
-    fn(&dyn Node, &InputValues, &PrepareContext, &mut Images) -> Result<Arc<dyn Drawable>>;
+    fn(&dyn Node, &TargetValues, &PrepareContext, &mut Images) -> Result<Arc<dyn Drawable>>;
 pub(super) type ActionErased =
     fn(&dyn Node, &InputValues, &PrepareContext) -> Result<Option<Value>>;
 pub struct Binding {
@@ -98,11 +98,11 @@ impl Binding {
     pub fn prepare(
         &self,
         node: &dyn Node,
-        inputs: &InputValues,
+        values: &TargetValues,
         ctx: &PrepareContext,
         images: &mut Images,
     ) -> Result<Option<Arc<dyn Drawable>>> {
-        self.prepare.map(|prepare| prepare(node, inputs, ctx, images)).transpose()
+        self.prepare.map(|prepare| prepare(node, values, ctx, images)).transpose()
     }
     pub(super) fn action(&self) -> Option<(&'static str, ActionErased)> {
         self.action

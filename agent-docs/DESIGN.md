@@ -401,6 +401,10 @@ decisions from the compute-model migration and later.
   outputs, demanded like any value. A reduction's shape is not scaled, since
   its output has no lattice, and its key carries the scale through its
   input's.
+- **Decided (2026-10-13):** A target hands its frontend `TargetValues`,
+  `Inputs` or `Outputs`, so the type says which, and binding the other kind
+  fails with an error that says so. Actions receive `InputValues`, since a
+  node with an action has no outputs.
 - **Decided (2026-10-13):** Histogram, Waveform and Vectorscope stay GUI
   kinds and are bins nodes whose bin bodies are drip-gui's only device code.
   A view running `Image::count` would have kept the old binding but recounted

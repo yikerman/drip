@@ -18,7 +18,7 @@ use std::time::Instant;
 use crate::model::{Graph, NodeId};
 use crate::node_ui::NodeAction;
 use drip::Error as NodeError;
-use drip::eval::{Evaluator, InputValues, NodeTiming, Policy, Target};
+use drip::eval::{Evaluator, NodeTiming, Policy, Target, TargetValues};
 use drip::lattice::Rect;
 use drip::runtime::{GlobalContext, RuntimeContext};
 use drip::store::Disk;
@@ -473,7 +473,7 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
         Effect::Preview { .. } | Effect::Detail { .. } => Policy::Defer,
         Effect::Perform { .. } => Policy::Wait,
     };
-    let mut inputs = match evaluator {
+    let mut values = match evaluator {
         Ok(evaluator) => {
             evaluator
                 .evaluate_batch(
@@ -483,7 +483,7 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
                     policy,
                     trace.then_some(&mut timings),
                 )
-                .inputs
+                .values
         }
         Err(error) => targets.iter().map(|target| (target.node, Err(error.clone()))).collect(),
     };
@@ -497,12 +497,12 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
                 .iter()
                 .filter_map(|&Target { node: id, .. }| {
                     let node = demand.graph.dag.node(id).ok()?;
-                    let result = match inputs.remove(&id) {
-                        Some(inputs) => inputs.and_then(|inputs| {
+                    let result = match values.remove(&id) {
+                        Some(target) => target.and_then(|target| {
                             prepare_view(
                                 id,
                                 node,
-                                &inputs,
+                                &target,
                                 &ctx,
                                 images,
                                 trace.then_some(&mut timings),
@@ -542,10 +542,10 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
         }
         Effect::Detail { generation, id, region } => {
             let node = demand.graph.dag.node(id);
-            let inputs = inputs.remove(&id).expect("demanded node");
+            let target = values.remove(&id).expect("demanded node");
             let view = node
                 .map_err(|e| e.clone())
-                .and_then(|node| prepare_view(id, node, &inputs?, &ctx, images, None));
+                .and_then(|node| prepare_view(id, node, &target?, &ctx, images, None));
             log::debug!(
                 "detail generation={generation} node={id:?} region={region:?} elapsed={:.1?} {}",
                 start.elapsed(),
@@ -560,9 +560,10 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
                 .node(id)
                 .map_err(|_| "action node no longer exists".to_owned())
                 .and_then(|node| {
-                    let inputs = inputs.remove(&id).expect("demanded node");
-                    inputs
-                        .and_then(|inputs| action.run(node, &inputs, &ctx))
+                    values
+                        .remove(&id)
+                        .expect("demanded node")
+                        .and_then(|target| action.run(node, target.inputs()?, &ctx))
                         .map_err(|e| e.to_string())
                 });
             log::debug!("action {} node={id:?} elapsed={:.1?}", action.name, start.elapsed());
@@ -604,7 +605,7 @@ impl Demand {
 fn prepare_view(
     id: NodeId,
     node: &dyn drip::definition::Node,
-    inputs: &InputValues,
+    values: &TargetValues,
     ctx: &crate::node_ui::data::PrepareContext,
     images: &mut Images,
     timings: Option<&mut Vec<NodeTiming>>,
@@ -614,7 +615,7 @@ fn prepare_view(
         return Ok(None);
     };
     let start = timings.as_ref().map(|_| Instant::now());
-    let result = binding.prepare(node, inputs, ctx, images);
+    let result = binding.prepare(node, values, ctx, images);
     if let (Some(start), Some(timings)) = (start, timings) {
         timings.push(NodeTiming {
             node: id,

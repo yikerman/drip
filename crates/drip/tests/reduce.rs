@@ -247,11 +247,12 @@ fn binning_a_deferred_image_does_not_store_it(runtime: RuntimeContext) {
     let mut first = batch(&dag, &[bins.node.into()]);
     let stats = &first.statistics;
     assert_eq!((stats.fused, stats.reductions, stats.downloads), (0, 1, 0), "{stats:?}");
-    let values = first.inputs.remove(&bins.node).unwrap().unwrap();
+    let values = first.values.remove(&bins.node).unwrap().unwrap();
     let outputs = values.bind_outputs::<tenths_node::Definition>().unwrap();
     assert_eq!(&**outputs.counts.data.host().unwrap(), expected.as_slice());
     assert_eq!(outputs.counts.desc.coordinates, Coordinates::Space(REC2020_D65));
-    assert!(values.bind::<tenths_node::Definition>().is_err(), "a reduction hands its outputs");
+    let error = values.bind::<tenths_node::Definition>().err().unwrap();
+    assert!(error.to_string().contains("hands its outputs"), "{error}");
     let again = batch(&dag, &[bins.node.into()]).statistics;
     assert_eq!((again.nodes, again.reductions, again.hits), (0, 0, 1), "{again:?}");
 
@@ -267,7 +268,7 @@ fn binning_a_deferred_image_does_not_store_it(runtime: RuntimeContext) {
     let both = batch(&dag, &[bins.node.into(), shown.node.into()]);
     let stats = &both.statistics;
     assert_eq!((stats.fused, stats.reductions), (1, 1), "{stats:?}");
-    assert!(both.inputs.values().all(Result::is_ok));
+    assert!(both.values.values().all(Result::is_ok));
 }
 
 /// A reduce node publishes its accumulator, and the deferred tail folds to
@@ -306,7 +307,7 @@ fn reductions_follow_the_scale_and_take_no_region(runtime: RuntimeContext) {
     let region = Some(Rect { origin: [0; 2], extent: [8, 8] });
     let target = Target { node: bins.node, region };
     let mut batch = evaluator.evaluate_batch(&dag, &global, &[target], Policy::Wait, None);
-    assert!(batch.inputs.remove(&bins.node).unwrap().is_err());
+    assert!(batch.values.remove(&bins.node).unwrap().is_err());
 }
 
 fn all(runtime: RuntimeContext) {

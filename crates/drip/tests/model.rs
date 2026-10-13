@@ -1,7 +1,7 @@
 use drip::{
     Error, Result,
     body::matrix,
-    eval::{Evaluator, InputValues, Policy},
+    eval::{Evaluator, Policy, TargetValues},
     graph::Dag,
     image::Description,
     node,
@@ -438,7 +438,7 @@ fn device_chain(runtime: RuntimeContext) {
                 Policy::Wait,
                 Some(&mut timings),
             )
-            .inputs;
+            .values;
         let inputs = values[&observer.node].as_ref().unwrap().bind::<sink::Definition>().unwrap();
         assert_eq!(inputs.image.data.host().unwrap(), result.data.host().unwrap());
         assert_eq!(timings.len(), expected);
@@ -478,7 +478,7 @@ fn node_targets_include_input_only_nodes() {
     d.connect(source, outputs.image).unwrap();
     let eval = Evaluator::new(RuntimeContext::host());
     let sink = sink::add(&mut d, ()).unwrap();
-    let demand = |d: &Dag| eval.evaluate_inputs(d, &Default::default(), &[sink.node]);
+    let demand = |d: &Dag| eval.evaluate_targets(d, &Default::default(), &[sink.node]);
     let missing = |error: &Error| {
         matches!(error, Error::Node { node, source, .. }
             if *node == sink.node && matches!(**source, Error::MissingInput { .. }))
@@ -546,7 +546,7 @@ fn batch_shares_ancestors_and_isolates_failures() {
     let mut timings = Vec::new();
     let values = Evaluator::new(RuntimeContext::host())
         .evaluate_batch(&dag, &Default::default(), &targets, Policy::Wait, Some(&mut timings))
-        .inputs;
+        .values;
     assert_eq!(timings.len(), 7); // Shared nodes once; nodes after a failure skipped.
     assert_eq!(timings.iter().filter(|t| t.node == producer.node).count(), 1);
     let position = |id| timings.iter().position(|t| t.node == id).unwrap();
@@ -579,18 +579,18 @@ fn optional_input_is_absent_only_when_disconnected() {
     let mut dag = Dag::new();
     let observer = optional_sink::add(&mut dag, ()).unwrap();
     let eval = Evaluator::new(RuntimeContext::host());
-    let values = eval.evaluate_inputs(&dag, &Default::default(), &[observer.node]);
+    let values = eval.evaluate_targets(&dag, &Default::default(), &[observer.node]);
     let bind =
-        |values: &InputValues| values.bind::<optional_sink::Definition>().unwrap().image.is_some();
+        |values: &TargetValues| values.bind::<optional_sink::Definition>().unwrap().image.is_some();
     assert!(!bind(values[&observer.node].as_ref().unwrap()));
     let missing = cpu_copy::add(&mut dag, ()).unwrap();
     dag.connect(missing.output, observer.image).unwrap();
     assert!(
-        eval.evaluate_inputs(&dag, &Default::default(), &[observer.node])[&observer.node].is_err()
+        eval.evaluate_targets(&dag, &Default::default(), &[observer.node])[&observer.node].is_err()
     );
     let source = image(&mut dag);
     dag.connect(source, missing.image).unwrap();
-    let values = eval.evaluate_inputs(&dag, &Default::default(), &[observer.node]);
+    let values = eval.evaluate_targets(&dag, &Default::default(), &[observer.node]);
     assert!(bind(values[&observer.node].as_ref().unwrap()));
 }
 
@@ -634,12 +634,12 @@ fn global_context_describes_and_computes_each_request_without_changing_the_dag()
     assert_eq!(&**value.data.host().unwrap(), &[[3.; 3]; 3]);
     let full = evaluator.evaluate::<Rgb>(&dag, &Default::default(), copy.output).unwrap();
     assert_eq!(full.desc.extent.width, 1);
-    let batch = evaluator.evaluate_inputs(&dag, &global, &[copy.node, fixed.node]);
+    let batch = evaluator.evaluate_targets(&dag, &global, &[copy.node, fixed.node]);
     let inputs = batch[&copy.node].as_ref().unwrap().bind::<cpu_copy::Definition>().unwrap();
     assert_eq!(inputs.image.desc.extent.width, 3);
     assert!(batch[&fixed.node].as_ref().err().unwrap().to_string().contains("requires width 1"));
     assert!(
-        evaluator.evaluate_inputs(&dag, &Default::default(), &[fixed.node])[&fixed.node].is_ok()
+        evaluator.evaluate_targets(&dag, &Default::default(), &[fixed.node])[&fixed.node].is_ok()
     );
     assert!(evaluator.evaluate::<Rgb>(&dag, &GlobalContext { scale: 0 }, copy.output).is_err());
 }

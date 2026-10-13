@@ -3,7 +3,7 @@
 use super::{
     Evaluator, NodeTiming, Policy,
     meta::Expansion,
-    values::{InputValues, cut},
+    values::{InputValues, OutputValues, TargetValues, cut},
 };
 use crate::{
     Error, Result,
@@ -393,7 +393,7 @@ impl<'a, 't> Run<'a, 't> {
         &mut self,
         node: NodeId,
         failures: &HashMap<(NodeId, u32), Error>,
-    ) -> Result<InputValues> {
+    ) -> Result<TargetValues> {
         let scale = self.scale_of(node, self.scale);
         let slots = self.consumed(node, scale);
         let kind = self.entry(node).node.kind();
@@ -413,13 +413,16 @@ impl<'a, 't> Run<'a, 't> {
                     .transpose()
                 })
                 .collect::<Result<Vec<_>>>()
-                .map(|values| {
-                    let (values, outputs) = if self.reduces(node) {
-                        (vec![None; kind.inputs.len()], values.into_iter().flatten().collect())
-                    } else {
-                        (values, Vec::new())
-                    };
-                    InputValues { kind, values, outputs, runtime: self.runtime.clone() }
+                .map(|values| match self.reduces(node) {
+                    true => TargetValues::Outputs(OutputValues {
+                        kind,
+                        outputs: values.into_iter().flatten().collect(),
+                    }),
+                    false => TargetValues::Inputs(InputValues {
+                        kind,
+                        values,
+                        runtime: self.runtime.clone(),
+                    }),
                 }),
         };
         for slot in slots.into_iter().flatten() {
