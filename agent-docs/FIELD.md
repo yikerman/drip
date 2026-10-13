@@ -7,7 +7,8 @@ rules and prior art.
 
 Status (2026-10-13): the `RgbField` payload, Interpolate and Sample were
 folded into the value model. Geometry nodes are warps that return projective
-maps, Resample is the explicit materialization, and the fused kernel's
+maps and optionally a radial map ([below](#the-radial-stage)), Resample is
+the explicit materialization, and the fused kernel's
 resampling stage (`plan.rs`) implements the mathematics below
 ([ARCHITECTURE](ARCHITECTURE.md#shapes)). The mathematics, border rules,
 Perspective Transform parameterization, editing view, prior art and open
@@ -52,10 +53,11 @@ When it minifies, `h` dominates (antialiasing). Both are one filter.
 
 Drip's approximation, after OpenImageIO's `warp` [4]: one filter kernel `φ`
 (box, triangle, Mitchell–Netravali [2], Lanczos-3), scaled per source axis by
-the footprint from the map's Jacobian `J_c = ∂m_c/∂y` in source-pixel units,
+the footprint from the map's Jacobian `J_c = ∂m_c/∂y` in source-sample
+units, the length of each row clamped to `[1, 16]`,
 
 ```text
-σ_x = max(1, |J_xx|, |J_xy|),   σ_y = max(1, |J_yx|, |J_yy|)
+σ_x = clamp(|(J_xx, J_xy)|, 1, 16),   σ_y = clamp(|(J_yx, J_yy)|, 1, 16)
 w_{j,c}(k) = φ((p_k − m_c(y_j)) ⊘ σ) / Σ_k φ(…)
 ```
 
@@ -105,6 +107,43 @@ clamping. Minifying by `k` costs `(6k)²` taps per channel and pixel. An
 interpolating filter reproduces samples at sample positions, so the stage
 loads samples for an identity map and copies them for a reindex such as
 Orientation.
+
+### The radial stage
+
+Lens distortion, lateral chromatic aberration and vignetting are radial
+about a centre `o` with a radius `R` in the input's full-detail plane. A
+warp may end in a radial part (`body::Radial`): per channel, a
+piecewise-linear ratio `s_c` on uniform knots, and one gain `g`. With
+`q = m_c(y)` the point the projective maps reach,
+
+```text
+ρ = |q − o| / R,   p_c = q + (s_c(ρ) − 1)(q − o),   F_c(y) = g(|s_c(ρ)| ρ) · f_c(p_c)
+```
+
+so `s_c` is the ratio of source to destination radius, and distinct `s_c`
+correct TCA. The gain is a function of the source radius and multiplies the
+reconstructed value, at the footprint centre. Dividing the source by the
+gain before filtering differs from that only by the gain's curvature across
+the filter support, since normalized weights reproduce a linear gain. The
+gain belongs to the warp because it is defined on the input plane, and map
+bodies see no position.
+
+The footprint is the chained Jacobian `J_radial(q) · J_m(y)` in source
+samples. In the plane
+
+```text
+J_radial = s·I + s′ρ · r̂r̂ᵀ,   r̂ = (q − o) / |q − o|
+```
+
+with eigenvalues `s` across the radius and `s + s′ρ` along it. The radial
+part acts in the input raster's plane, so it joins only a front that
+neither moves nor maps samples, and cuts otherwise. Later warps, reindexes
+and Resample compose on its output side. A window's read bound takes the
+box of the projective corners, scales it about `o` by the least and
+greatest ratio over the box's radii, and grows it by the support times
+`(max|s| + max|s′| ρ_max) · ‖J_m‖`, clamped. Splines hold at most 256
+knots, padded in the kernel's constants so their length stays out of
+kernel identity.
 
 ## Geometry
 

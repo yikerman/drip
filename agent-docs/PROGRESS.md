@@ -5,6 +5,20 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
+- Warps carry a radial map and a vignetting gain (`body::Radial`). On the
+  CPU runtime and on wgpu (`algorithms` tests), ratios of one reproduce the
+  input bit for bit, constant ratios match the affine scaling about the
+  centre within 1e-4 of the largest sample at full detail and at a preview,
+  curved ratios with a gain match the f64 reference resampler within the
+  same bound, windows equal the whole image bit for bit, and a reindex, a
+  rotation and a Resample after the radial warp give the bits of one
+  composed warp. One launch over a synthetic 7968 × 5320 image with a
+  0.01 rad rotation and Lanczos-3, medians of 11 in three runs of
+  `DRIP_BACKEND=wgpu cargo test -p drip --test algorithms -- --ignored
+  radial_stage_cost --nocapture`, including output allocation and the
+  device wait: projective 29.0 to 29.5 ms, radial 29.5 to 30.0, radial
+  with gain 29.5 to 30.0.
+
 All runs below use the Sony fixture (`sony-ilce-7rm3.arw`, 7968 × 5320),
 `DRIP_BACKEND=wgpu` on the RTX 3080 and `RAYON_NUM_THREADS=12` unless
 stated, and report medians (ranges) in ms. Drivers and data are in

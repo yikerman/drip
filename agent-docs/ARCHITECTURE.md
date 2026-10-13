@@ -99,7 +99,7 @@ The shape tells evaluation how to run the node:
 | Kernel | `#[node(contract = f)]` | `()`, after writing its outputs | runs on whole materialized inputs |
 | Foreign | `foreign = memory` or `disk` | `()`, after publishing its outputs | the store runs it on a thread of its own, at full detail, once per key |
 | Map | `map = body` | the constants of a `#[cube]` pixel body | fused with neighbouring steps into one kernel |
-| Warp | `warp` | projective maps from output to input plane, and a filter | composed into the segment's resampling stage |
+| Warp | `warp` | projective maps from output to input plane, an optional radial map with a vignetting gain in the input plane, and a filter | composed into the segment's resampling stage, a radial map only at its start |
 | Resample | `resample` | a filter | resamples once onto the contract's lattice |
 | Stencil | `stencil = BODY` | a reach in full-detail pixels and constants | reads a window of its materialized input, fused with the maps after it |
 | Reduce, Bins | `reduce = BODY`, `bins = BODY` | the body's constants | folds or counts every pixel inside the input's segment |

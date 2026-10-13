@@ -251,6 +251,24 @@ decisions from the compute-model migration and later.
   pixels, and its contract describes ordinary `Rgb` on the output lattice,
   so a domain origin folds into the maps and no field payload exists.
   Filters register as bodies, so the kernel names no node code.
+- **Decided (2026-10-13):** A warp may end in a radial part: a centre and
+  radius in its input's full-detail plane, a piecewise-linear ratio of
+  source to destination radius per channel on uniform knots, and an
+  optional gain of the source radius. Lens distortion, TCA and vignetting
+  reduce to this form, as in darktable's embedded-metadata lens correction.
+  The gain multiplies the reconstructed value. It lives in the warp because
+  it is defined on the input plane, which map bodies cannot see
+  ([FIELD](FIELD.md#the-radial-stage)).
+- **Decided (2026-10-13):** A radial part composes only into a front that
+  neither moves nor maps samples, since it acts in the input raster's
+  plane, and cuts after anything else. Later reindexes, warps and Resample
+  compose on its output side. Without a radial part every kernel and result
+  is unchanged.
+- **Decided (2026-10-13):** The radial stage is a variant of the Filter
+  stage whose gain flag joins kernel identity. Each spline's constants are
+  padded to 256 knots, about 4 KiB per launch, so knot counts do not
+  recompile kernels. It adds 0.3 to 1.3 ms to a 29 to 30 ms projective
+  Lanczos-3 launch at 7968 × 5320 on the RTX 3080.
 - **Decided (2026-10-13):** A step composes only where the result is exact,
   so users never see the grouping. The compiler does not special-case
   linear maps. The rules are in `plan.rs`.

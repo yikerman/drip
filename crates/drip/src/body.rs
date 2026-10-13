@@ -1,7 +1,7 @@
 //! What the deferred shapes hand the segment compiler: the `#[cube]` bodies
-//! of maps, reductions and stencils, resampling filters and warps, and the
-//! [`Pixel`] they read. [`matrix`] holds the 3×3 math that warps and colour
-//! transforms share.
+//! of maps, reductions and stencils, resampling filters, warps with their
+//! optional [`Radial`] part, and the [`Pixel`] they read. [`matrix`] holds the
+//! 3×3 math that warps and colour transforms share.
 //!
 //! A map, reduce, bins or stencil kind registers a `static` body, and its
 //! host function returns the body's constants. The compiler (`plan.rs`)
@@ -9,6 +9,7 @@
 //! compares bodies by name and each sequence compiles once whatever the
 //! constants.
 use crate::{
+    Error, Result,
     lattice::Lattice,
     payload::{DeviceLayout, HostBuffer},
 };
@@ -133,27 +134,195 @@ pub mod matrix {
 
 /// What a warp's host function returns. `maps` take the output plane to the
 /// input plane, per channel, in each description's full-detail pixels
-/// (`[0, full]` along each axis). Output points whose homogeneous `w` is not
-/// positive, or that land outside the input plane, are black.
+/// (`[0, full]` along each axis). With a `radial` part they take the output
+/// plane to the radial part's output side, which shares the input plane's
+/// coordinates, and the radial part takes each channel on to the input:
+///
+/// ```text
+/// output point ─► maps[c] ─► q ─► radial, channel c ─► input point, gain
+/// ```
+///
+/// Output points whose homogeneous `w` is not positive, or that land outside
+/// the input plane, are black.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Warp {
     pub maps: [Projective; 3],
     /// The filter that reconstructs the input where the maps move samples
     /// off the input lattice and no Resample chooses one. `None` declares a
     /// reindex: every output sample lands on an input sample, which
-    /// evaluation checks.
+    /// evaluation checks. A warp with a radial part always filters.
     pub filter: Option<&'static FilterBody>,
+    pub radial: Option<Radial>,
 }
 impl Warp {
     /// One map for every channel that moves samples onto samples only, such
     /// as a reflection or quarter turn of the whole plane.
     pub fn reindex(map: Projective) -> Self {
-        Self { maps: [map; 3], filter: None }
+        Self { maps: [map; 3], filter: None, radial: None }
     }
     /// Maps that may move samples between lattice positions, reconstructed
     /// with `filter`.
     pub fn filtered(maps: [Projective; 3], filter: &'static FilterBody) -> Self {
-        Self { maps, filter: Some(filter) }
+        Self { maps, filter: Some(filter), radial: None }
+    }
+    /// `maps` followed by `radial`, reconstructed with `filter`.
+    pub fn radial(maps: [Projective; 3], radial: Radial, filter: &'static FilterBody) -> Self {
+        Self { maps, filter: Some(filter), radial: Some(radial) }
+    }
+}
+
+/// A radial map of the warp's input plane about `centre`, the form lens
+/// distortion, lateral chromatic aberration and vignetting take. With
+/// `ρ = |q − centre| / radius`, channel `c` of a point `q` reads
+///
+/// ```text
+/// p_c = q + (s_c(ρ) − 1) · (q − centre),   s_c = ratios[c]
+/// ```
+///
+/// so `s_c` is the ratio of the source's distance from the centre to `q`'s.
+/// The value reconstructed at `p_c` is multiplied by `gain(ρ_c)`, where
+/// `ρ_c = |s_c(ρ)| · ρ` is the source's radius. The gain is defined on the
+/// input, which a map body cannot express: map bodies see no position.
+/// Lengths are full-detail pixels of the input plane, so the map is the same
+/// at every lattice of it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Radial {
+    pub centre: [f64; 2],
+    /// Positive: the distance from the centre where `ρ = 1`.
+    pub radius: f64,
+    pub ratios: [Spline; 3],
+    /// `None` multiplies by one, and the kernel skips the gain.
+    pub gain: Option<Spline>,
+}
+impl Radial {
+    /// The point channel `c` reads for `q`.
+    pub fn source(&self, c: usize, q: [f64; 2]) -> [f64; 2] {
+        let s = self.ratios[c].at(self.rho(q));
+        [0, 1].map(|a| q[a] + (s - 1.0) * (q[a] - self.centre[a]))
+    }
+
+    /// The factor channel `c`'s value at `q` is multiplied by.
+    pub fn gain(&self, c: usize, q: [f64; 2]) -> f64 {
+        let rho = self.rho(q);
+        self.gain.as_ref().map_or(1.0, |gain| gain.at(self.ratios[c].at(rho).abs() * rho))
+    }
+
+    /// A box holding the points channel `c` reads for the points of `area`,
+    /// a box given by its least and greatest corner.
+    ///
+    /// Per axis, `p_c − centre = s · (q − centre)` with `s` within the
+    /// ratio's range over the box's radii and `q − centre` within the box,
+    /// so the products of the interval ends bound it.
+    pub fn sources(&self, c: usize, area: [[f64; 2]; 2]) -> [[f64; 2]; 2] {
+        let [lo, hi] = area;
+        let radii = self.radii(area);
+        let ratios = self.ratios[c].range(radii[0], radii[1]);
+        let axis = |a: usize| {
+            let offsets = [lo[a], hi[a]].map(|v| v - self.centre[a]);
+            let products = ratios.iter().flat_map(|s| offsets.map(|d| s * d));
+            let (min, max) = products
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), v| (min.min(v), max.max(v)));
+            [min + self.centre[a], max + self.centre[a]]
+        };
+        let ([x0, x1], [y0, y1]) = (axis(0), axis(1));
+        [[x0, y0], [x1, y1]]
+    }
+
+    /// A bound on how far channel `c` stretches distances inside `area`: the
+    /// operator norm of the map's Jacobian. The Jacobian is
+    /// `s·I + s′ρ · r̂r̂ᵀ` with `r̂` the unit vector from the centre, whose
+    /// eigenvalues are `s` across the radius and `s + s′ρ` along it.
+    pub fn stretch(&self, c: usize, area: [[f64; 2]; 2]) -> f64 {
+        let [near, far] = self.radii(area);
+        let [low, high] = self.ratios[c].range(near, far);
+        low.abs().max(high.abs()) + self.ratios[c].steepest(near, far) * far
+    }
+
+    fn rho(&self, q: [f64; 2]) -> f64 {
+        (q[0] - self.centre[0]).hypot(q[1] - self.centre[1]) / self.radius
+    }
+
+    /// The least and greatest `ρ` of the points of `area`: the centre held
+    /// to the box, and the farthest corner.
+    fn radii(&self, [lo, hi]: [[f64; 2]; 2]) -> [f64; 2] {
+        let near = [0, 1].map(|a| self.centre[a].max(lo[a]).min(hi[a]) - self.centre[a]);
+        let far =
+            [0, 1].map(|a| (lo[a] - self.centre[a]).abs().max((hi[a] - self.centre[a]).abs()));
+        [near[0].hypot(near[1]) / self.radius, far[0].hypot(far[1]) / self.radius]
+    }
+}
+
+/// A piecewise-linear function on uniform knots: `values[i]` at
+/// `start + i · step`, linear between knots, and the first and last value
+/// held beyond them. The fused kernel evaluates it the same way in f32.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Spline {
+    start: f64,
+    step: f64,
+    values: Vec<f64>,
+}
+impl Spline {
+    /// Knots a spline holds at most. The fused kernel reserves constants for
+    /// this many per spline, so a spline's length stays out of kernel
+    /// identity.
+    pub const MAX_KNOTS: usize = 256;
+
+    /// Fails unless `start` is finite, `step` is finite and positive, and
+    /// `values` holds 2 to [`MAX_KNOTS`](Self::MAX_KNOTS) finite values.
+    pub fn new(start: f64, step: f64, values: Vec<f64>) -> Result<Self> {
+        let finite = start.is_finite() && step.is_finite() && values.iter().all(|v| v.is_finite());
+        if !(finite && step > 0.0 && (2..=Self::MAX_KNOTS).contains(&values.len())) {
+            let message =
+                format!("a spline needs a positive step and 2 to {} finite knots", Self::MAX_KNOTS);
+            return Err(Error::Contract(message));
+        }
+        Ok(Self { start, step, values })
+    }
+
+    /// `value` everywhere. Fails when it is not finite.
+    pub fn constant(value: f64) -> Result<Self> {
+        Self::new(0.0, 1.0, vec![value; 2])
+    }
+
+    pub fn start(&self) -> f64 {
+        self.start
+    }
+
+    pub fn step(&self) -> f64 {
+        self.step
+    }
+
+    pub fn values(&self) -> &[f64] {
+        &self.values
+    }
+
+    pub fn at(&self, x: f64) -> f64 {
+        let last = (self.values.len() - 1) as f64;
+        let t = ((x - self.start) / self.step).clamp(0.0, last);
+        let i = (t as usize).min(self.values.len() - 2);
+        self.values[i] + (t - i as f64) * (self.values[i + 1] - self.values[i])
+    }
+
+    /// The least and greatest value over `[lo, hi]`: the ends and the knots
+    /// between them.
+    pub fn range(&self, lo: f64, hi: f64) -> [f64; 2] {
+        let knots = (0..self.values.len()).filter(|&i| (lo..=hi).contains(&self.knot(i)));
+        let values = [self.at(lo), self.at(hi)].into_iter().chain(knots.map(|i| self.values[i]));
+        let (min, max) = values
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), v| (min.min(v), max.max(v)));
+        [min, max]
+    }
+
+    /// The greatest absolute slope over `[lo, hi]`, zero beyond the knots.
+    pub fn steepest(&self, lo: f64, hi: f64) -> f64 {
+        (0..self.values.len() - 1)
+            .filter(|&i| self.knot(i) <= hi && self.knot(i + 1) >= lo)
+            .map(|i| (self.values[i + 1] - self.values[i]).abs() / self.step)
+            .fold(0.0, f64::max)
+    }
+
+    fn knot(&self, i: usize) -> f64 {
+        self.start + i as f64 * self.step
     }
 }
 
@@ -397,3 +566,58 @@ macro_rules! by_name {
     )*};
 }
 by_name!(MapBody, FilterBody, ReduceBody, BinsBody, StencilBody);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_spline_interpolates_its_knots_and_holds_its_ends() {
+        // Knots 1, 2, 0 at 0.5, 0.75, 1.
+        let s = Spline::new(0.5, 0.25, vec![1.0, 2.0, 0.0]).unwrap();
+        let at = [0.0, 0.5, 0.625, 0.875, 2.0].map(|x| s.at(x));
+        assert_eq!(at, [1.0, 1.0, 1.5, 1.0, 0.0]);
+        assert_eq!(s.range(0.6, 0.9), [s.at(0.9), 2.0]);
+        assert_eq!(
+            [s.steepest(0.6, 0.9), s.steepest(0.0, 0.4), s.steepest(1.1, 2.0)],
+            [8.0, 0.0, 0.0]
+        );
+        assert!(Spline::new(0.0, 1.0, vec![1.0]).is_err());
+        assert!(Spline::new(0.0, 0.0, vec![1.0, 1.0]).is_err());
+        assert!(Spline::constant(f64::NAN).is_err());
+    }
+
+    /// Sources and numerical Jacobians over a grid of a box stay inside the
+    /// box `sources` returns and below `stretch`.
+    #[test]
+    fn radial_bounds_hold_the_box_they_describe() {
+        let ratio = Spline::new(0.1, 0.3, vec![1.1, 0.9, 1.05, 1.3]).unwrap();
+        let radial = Radial {
+            centre: [40.0, 30.0],
+            radius: 50.0,
+            ratios: [ratio.clone(), ratio.clone(), ratio],
+            gain: None,
+        };
+        for area in [[[35.0, 20.0], [60.0, 33.0]], [[0.0, 0.0], [12.0, 9.0]]] {
+            let [lo, hi] = radial.sources(0, area);
+            let stretch = radial.stretch(0, area);
+            for i in 0..=20 {
+                for j in 0..=20 {
+                    let t = [i, j].map(|v| f64::from(v) / 20.0);
+                    let q = [0, 1].map(|a| area[0][a] + t[a] * (area[1][a] - area[0][a]));
+                    let p = radial.source(0, q);
+                    let inside = (0..2).all(|a| lo[a] - 1e-9 <= p[a] && p[a] <= hi[a] + 1e-9);
+                    assert!(inside, "{q:?} → {p:?}");
+                    let e = 1e-6;
+                    let dx = radial.source(0, [q[0] + e, q[1]]);
+                    let dy = radial.source(0, [q[0], q[1] + e]);
+                    // Columns of the Jacobian bound its operator norm from below.
+                    for d in [dx, dy] {
+                        let length = (d[0] - p[0]).hypot(d[1] - p[1]) / e;
+                        assert!(length <= stretch + 1e-6, "{q:?}: {length} > {stretch}");
+                    }
+                }
+            }
+        }
+    }
+}

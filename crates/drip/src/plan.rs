@@ -3,7 +3,8 @@
 //!
 //! A [`Plan`] holds a front, resampling or a stencil, then map bodies. A
 //! resampling front holds per-channel projective maps from the image's plane
-//! to its input's plane with their filter. A stencil front holds a
+//! to its input's plane with their filter, and optionally a radial map on
+//! the input's side of them. A stencil front holds a
 //! [`StencilBody`] over the input's own lattice. [`Plan::extend`] adds each
 //! [`Step`] a node publishes. Every kernel of a plan evaluates a pixel the
 //! same way, so intermediate images never reach memory:
@@ -26,6 +27,11 @@
 //!   of sigmoid values is not the sigmoid of the average.
 //! - A Resample fixes the front's filter and lattice, so a filtering step
 //!   after it resamples again.
+//! - A warp with a radial part acts in the input raster's plane, so it
+//!   joins only a front that neither moves nor maps samples, and cuts after
+//!   anything else, a reindex included. Reindexes, filtering warps and a
+//!   Resample after it compose on its output side as above, so the front
+//!   reads `input ← radial ← projective maps ← output`.
 //! - A stencil starts a plan over its materialized input, and any warp or
 //!   Resample after it starts another. Maps after it join it.
 //! - Steps after a fan-out each extend the shared plan and recompute it in
@@ -34,9 +40,11 @@
 //! At run time a resampling front becomes the kernel's stage: it loads
 //! samples when the composed map is the identity on an equal lattice and
 //! the filter interpolates, gathers them when only reindexes composed, and
-//! filters otherwise. A plan that neither moves nor maps samples launches
-//! nothing and shares its input. Kernel identity is the stage and the body
-//! sequence, so each combination compiles once whatever the constants.
+//! filters otherwise. A radial front always filters. A plan that neither
+//! moves nor maps samples launches nothing and shares its input. Kernel
+//! identity is the stage, with its filter and whether a radial part and a
+//! gain apply, and the body sequence, so each combination compiles once
+//! whatever the constants.
 //!
 //! # Windows
 //!
@@ -45,7 +53,10 @@
 //! window through a load, the reindexed corners through a gather, through a
 //! filter the mapped corners grown by the support times the footprint, and
 //! through a stencil the window grown by its reach. A projective map keeps
-//! lines straight, so the corners bound the window's image. The kernel
+//! lines straight, so the corners bound the window's image. A radial part
+//! takes the corners' box to the box its least and greatest ratio over the
+//! box's radii scale it to about the centre ([`Radial::sources`]), and its
+//! stretch bounds the footprint. The kernel
 //! positions samples by whole-lattice index and clamps taps to the stored
 //! window, so a window's samples equal the same samples of the whole image
 //! bit for bit. Tiled export relies on this.
@@ -65,8 +76,8 @@
 use crate::{
     Error, Result,
     body::{
-        Bin, BinsBody, FilterBody, MapBody, MapPayload, Pixel, Position, Projective, ReduceBody,
-        StencilBody, Step, Warp, Window,
+        Bin, BinsBody, FilterBody, MapBody, MapPayload, Pixel, Position, Projective, Radial,
+        ReduceBody, Spline, StencilBody, Step, Warp, Window,
         matrix::{IDENTITY, mul},
     },
     image::Raster,
@@ -112,12 +123,17 @@ enum Front {
     /// Per channel, a map from the image's plane to the input raster's
     /// plane, which the kernel loads, gathers or filters through.
     Resampling {
+        /// To the input raster's plane, or with a radial part to its output
+        /// side.
         maps: [Projective; 3],
         /// The filter where `maps` move samples off the input lattice.
         /// `None` while every warp so far was a reindex.
         filter: Option<&'static FilterBody>,
         /// A Resample fixed the filter and the lattice.
         fixed: bool,
+        /// A radial map in the input raster's plane, after `maps`. Only the
+        /// front's first step adds one.
+        radial: Option<Arc<Radial>>,
     },
     /// `body` over the input's own lattice, reaching `radius` full-detail
     /// pixels.
@@ -125,7 +141,8 @@ enum Front {
 }
 impl Default for Plan {
     fn default() -> Self {
-        let front = Front::Resampling { maps: [IDENTITY; 3], filter: None, fixed: false };
+        let front =
+            Front::Resampling { maps: [IDENTITY; 3], filter: None, fixed: false, radial: None };
         Self { front, bodies: Vec::new(), constants: Vec::new() }
     }
 }
@@ -150,17 +167,23 @@ impl Plan {
                 plan.front = Front::Stencil { body: *body, radius };
                 plan.constants = constants.to_vec();
             }
-            (Step::Warp(warp), Front::Resampling { maps, filter, fixed }) => {
+            (Step::Warp(warp), Front::Resampling { maps, filter, fixed, radial }) => {
                 // A reindex commutes with maps and filters nothing, so it
                 // joins the front and keeps its filter.
                 let reindex = reindexes(warp, from, to)?;
-                if !reindex && (*fixed || mapped) {
+                if let Some(part) = &warp.radial {
+                    // The radial part acts in the input raster's plane.
+                    if !self.is_empty() {
+                        return Ok(None);
+                    }
+                    *radial = Some(Arc::new(part.clone()));
+                } else if !reindex && (*fixed || mapped) {
                     return Ok(None);
                 }
                 *maps = compose(maps, &warp.maps);
                 *filter = if reindex { *filter } else { warp.filter };
             }
-            (Step::Resample(body), Front::Resampling { maps, filter, fixed }) => {
+            (Step::Resample(body), Front::Resampling { maps, filter, fixed, .. }) => {
                 if *fixed || mapped {
                     return Ok(None);
                 }
@@ -178,8 +201,9 @@ impl Plan {
     /// Whether the plan neither moves nor maps samples.
     fn is_empty(&self) -> bool {
         let identity = matches!(
-            self.front,
-            Front::Resampling { maps, filter: None, fixed: false } if maps == [IDENTITY; 3]
+            &self.front,
+            Front::Resampling { maps, filter: None, fixed: false, radial: None }
+                if *maps == [IDENTITY; 3]
         );
         identity && self.bodies.is_empty()
     }
@@ -366,12 +390,15 @@ impl Plan {
                 let [rx, ry] = reach.samples.map(|r| r as f32);
                 (Stage::Stencil(*body), vec![rx, ry, reach.rate[0], reach.rate[1]])
             }
-            Front::Resampling { maps, filter, .. } => {
-                let (stage, maps) = resampling(maps, *filter, from, to)?;
-                let constants: Vec<f32> = match stage {
+            Front::Resampling { maps, filter, radial, .. } => {
+                let (stage, maps) = resampling(maps, *filter, radial.as_deref(), from, to)?;
+                let mut constants: Vec<f32> = match stage {
                     Stage::Load => Vec::new(),
                     _ => maps.iter().flat_map(|m| m.as_flattened()).map(|&v| v as f32).collect(),
                 };
+                if let Some(radial) = radial {
+                    constants.extend(radial_constants(radial, from));
+                }
                 if constants.iter().any(|v| !v.is_finite()) {
                     return Err(Error::Contract("warp maps do not fit f32".into()));
                 }
@@ -387,13 +414,13 @@ impl Plan {
     /// take a corner beyond the horizon, the whole input. A stencil reads
     /// the window grown by its reach.
     pub fn input_window(&self, from: Lattice, to: Lattice) -> Result<Rect> {
-        let (maps, filter) = match &self.front {
+        let (maps, filter, radial) = match &self.front {
             Front::Stencil { radius, .. } => {
                 return Ok(Reach::of(*radius, from).grow(to.window, from.extent));
             }
-            Front::Resampling { maps, filter, .. } => (maps, *filter),
+            Front::Resampling { maps, filter, radial, .. } => (maps, *filter, radial.as_deref()),
         };
-        let (stage, maps) = resampling(maps, filter, from, to)?;
+        let (stage, maps) = resampling(maps, filter, radial, from, to)?;
         if stage == Stage::Load {
             return Ok(to.window);
         }
@@ -404,7 +431,10 @@ impl Plan {
         let [x0, y0] = to.window.origin.map(f64::from);
         let [x1, y1] = to.window.end().map(|end| f64::from(end) - 1.0);
         let (mut low, mut high) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
-        for m in &maps {
+        for (c, m) in maps.iter().enumerate() {
+            // A projective map keeps lines straight, so the box of the
+            // corners' images holds the window's image.
+            let mut area = [[f64::INFINITY; 2], [f64::NEG_INFINITY; 2]];
             for [x, y] in [[x0, y0], [x1, y0], [x0, y1], [x1, y1]] {
                 let w = m[2][0] * x + m[2][1] * y + m[2][2];
                 // Also a NaN `w`, which no comparison orders.
@@ -413,14 +443,26 @@ impl Plan {
                 }
                 for axis in 0..2 {
                     let at = (m[axis][0] * x + m[axis][1] * y + m[axis][2]) / w;
-                    // The kernel's taps reach `support · footprint` samples
-                    // from a position, and its f32 positions differ from
-                    // these by far less than one sample.
-                    let reach = support
-                        .map_or(0.0, |support| f64::from(support) * footprint(m, axis) + 1.0);
-                    low[axis] = low[axis].min(at - reach);
-                    high[axis] = high[axis].max(at + reach);
+                    area[0][axis] = area[0][axis].min(at);
+                    area[1][axis] = area[1][axis].max(at);
                 }
+            }
+            let footprint = match radial {
+                None => [0, 1].map(|axis| footprint(m, axis)),
+                Some(radial) => {
+                    let (sources, footprint) = radial_window(radial, c, m, area, from);
+                    area = sources;
+                    footprint
+                }
+            };
+            for axis in 0..2 {
+                // The kernel's taps reach `support · footprint` samples from
+                // a position, and its f32 positions differ from these by far
+                // less than one sample.
+                let reach =
+                    support.map_or(0.0, |support| f64::from(support) * footprint[axis] + 1.0);
+                low[axis] = low[axis].min(area[0][axis] - reach);
+                high[axis] = high[axis].max(area[1][axis] + reach);
             }
         }
         let axis = |a: usize| {
@@ -434,19 +476,51 @@ impl Plan {
     }
 }
 
-/// How the kernel reads the input of a resampling front with `maps` and
-/// `filter` from lattice `from` onto `to`, and the per-channel index maps it
-/// reads them through. Reindexes are snapped to exact integers, so a filter
-/// sees taps exactly on samples.
+/// Where channel `c` of a radial front reads for the box `area` of input
+/// sample positions that its index map `m` takes the window to, and a
+/// bound on the footprint there per input axis. The kernel's footprint is
+/// the length of each row of `J_radial · J_m` in input samples, and in the
+/// plane `J_radial` stretches by at most [`Radial::stretch`]. Changing to
+/// sample units scales row `a` by at most `rate_a / min(rate)`, and
+/// `‖J_m‖` is at most its Frobenius norm, or unbounded where `m` is
+/// projective.
+fn radial_window(
+    radial: &Radial,
+    c: usize,
+    m: &Projective,
+    area: [[f64; 2]; 2],
+    from: Lattice,
+) -> ([[f64; 2]; 2], [f64; 2]) {
+    let plane = area.map(|corner| [0, 1].map(|a| (corner[a] + 0.5) / from.rate(a)));
+    let sources = radial.sources(c, plane).map(|p| [0, 1].map(|a| p[a] * from.rate(a) - 0.5));
+    let max = f64::from(MAX_FOOTPRINT);
+    let projective = m[2][0] != 0.0 || m[2][1] != 0.0;
+    let norm = m[..2].iter().flat_map(|row| &row[..2]).map(|v| v * v).sum::<f64>().sqrt();
+    let stretch = radial.stretch(c, plane) * norm / from.rate(0).min(from.rate(1));
+    let footprint =
+        |a: usize| if projective { max } else { (stretch * from.rate(a)).clamp(1.0, max) };
+    (sources, [footprint(0), footprint(1)])
+}
+
+/// How the kernel reads the input of a resampling front with `maps`,
+/// `filter` and `radial` from lattice `from` onto `to`, and the per-channel
+/// index maps it reads them through. Reindexes are snapped to exact
+/// integers, so a filter sees taps exactly on samples. A radial front always
+/// filters.
 fn resampling(
     maps: &[Projective; 3],
     filter: Option<&'static FilterBody>,
+    radial: Option<&Radial>,
     from: Lattice,
     to: Lattice,
 ) -> Result<(Stage, [Projective; 3])> {
     let index = maps.each_ref().map(|m| index(m, from, to));
     let snapped = index.each_ref().map(|m| reindex(m, from, to));
     let maps = std::array::from_fn(|c| snapped[c].unwrap_or(index[c]));
+    if let Some(radial) = radial {
+        let filter = *filter.expect("`reindexes` gives a radial warp a filter");
+        return Ok((Stage::Radial { filter, gain: radial.gain.is_some() }, maps));
+    }
     let identity = from.extent == to.extent && snapped.iter().all(|m| *m == Some(IDENTITY));
     // An interpolating filter reproduces samples at their own positions.
     if identity && filter.is_none_or(|f| f.interpolating) {
@@ -492,10 +566,12 @@ impl Reach {
 }
 
 /// Whether `warp` takes every sample of lattice `to` onto a sample of lattice
-/// `from` without leaving it. Such a warp commutes with per-pixel maps. Fails
-/// when a warp declared as a reindex does not.
+/// `from` without leaving it. Such a warp commutes with per-pixel maps. A
+/// radial part never counts as one. Fails when a warp declared as a reindex
+/// does not.
 fn reindexes(warp: &Warp, from: Lattice, to: Lattice) -> Result<bool> {
-    let reindex = warp.maps.iter().all(|m| reindex(&index(m, from, to), from, to).is_some());
+    let reindex = warp.radial.is_none()
+        && warp.maps.iter().all(|m| reindex(&index(m, from, to), from, to).is_some());
     if warp.filter.is_none() && !reindex {
         return Err(Error::Contract("a reindex warp moves samples off the lattice".into()));
     }
@@ -581,6 +657,29 @@ fn compose(a: &[Projective; 3], b: &[Projective; 3]) -> [Projective; 3] {
     std::array::from_fn(|c| mul(&a[c], &b[c]))
 }
 
+/// Where a Radial stage's constants start: after the three index maps.
+const RADIAL: usize = 27;
+/// Constants of one spline in a Radial stage: its first knot, knots per
+/// unit, last knot index, and its values padded to [`Spline::MAX_KNOTS`].
+const SPLINE: usize = 3 + Spline::MAX_KNOTS;
+
+/// The constants a Radial stage reads after the index maps, in sample units
+/// of the input lattice `from`: the centre as a sample position and
+/// `1 / (radius · rate)` per axis, which takes an offset in samples to `ρ`,
+/// then the ratio splines and the gain spline, if any.
+fn radial_constants(radial: &Radial, from: Lattice) -> Vec<f32> {
+    let centre = [0, 1].map(|a| radial.centre[a] * from.rate(a) - 0.5);
+    let mut k: Vec<f64> =
+        centre.into_iter().chain([0, 1].map(|a| 1.0 / (radial.radius * from.rate(a)))).collect();
+    for spline in radial.ratios.iter().chain(&radial.gain) {
+        let values = spline.values();
+        k.extend([spline.start(), 1.0 / spline.step(), (values.len() - 1) as f64]);
+        k.extend(values);
+        k.resize(k.len() + Spline::MAX_KNOTS - values.len(), 0.0);
+    }
+    k.into_iter().map(|v| v as f32).collect()
+}
+
 /// How the fused kernel reads its input, part of its CubeCL kernel identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Stage {
@@ -590,18 +689,23 @@ enum Stage {
     Gather,
     /// Each output sample filters the input around its mapped position.
     Filter(FilterBody),
+    /// As `Filter`, through the front's radial part after the maps, and
+    /// times its gain when `gain`.
+    Radial { filter: FilterBody, gain: bool },
     /// Each output sample is the stencil body over the input's window
     /// around it, on the same lattice.
     Stencil(StencilBody),
 }
 impl Stage {
     /// Constants the stage reads ahead of the map bodies' constants: a 3×3
-    /// row-major index map per channel when it gathers or filters, a
-    /// stencil's reach and rate per axis and then its body's constants.
+    /// row-major index map per channel when it gathers or filters, then a
+    /// radial part's ([`radial_constants`]), or a stencil's reach and rate
+    /// per axis and then its body's constants.
     fn constants(self) -> usize {
         match self {
             Self::Load => 0,
-            Self::Gather | Self::Filter(_) => 27,
+            Self::Gather | Self::Filter(_) => RADIAL,
+            Self::Radial { gain, .. } => RADIAL + 4 + (3 + usize::from(gain)) * SPLINE,
             Self::Stencil(body) => 4 + body.constants,
         }
     }
@@ -989,6 +1093,11 @@ mod kernel {
                 g: filtered(input, k, fx, fy, stored, 1usize, filter),
                 b: filtered(input, k, fx, fy, stored, 2usize, filter),
             },
+            Stage::Radial { filter, gain } => Pixel {
+                r: radial(input, k, fx, fy, stored, 0usize, filter, gain),
+                g: radial(input, k, fx, fy, stored, 1usize, filter, gain),
+                b: radial(input, k, fx, fy, stored, 2usize, filter, gain),
+            },
             Stage::Stencil(body) => {
                 let w = Window::<'a> {
                     input,
@@ -1036,11 +1145,8 @@ mod kernel {
     /// Channel `c` at output sample `(x, y)` resampled after Heckbert: the
     /// projective map in `k` takes it to the input, where `filter` is centred
     /// and widened by the map's local derivative, so magnifying interpolates
-    /// and minifying antialiases with one filter. Weights are normalized.
-    /// Positions outside the input lattice or beyond the map's horizon
-    /// (`w ≤ 0`) are black, and taps beyond its edge repeat the edge sample.
-    /// Taps clamp to the stored window, which holds every tap inside the
-    /// lattice ([`Plan::input_window`]).
+    /// and minifying antialiases with one filter. Positions beyond the map's
+    /// horizon (`w ≤ 0`) are black, and [`taps`] handles the rest.
     #[cube]
     fn filtered(
         input: &[f32],
@@ -1052,54 +1158,172 @@ mod kernel {
         #[comptime] filter: FilterBody,
     ) -> f32 {
         let m = c * 9;
-        let support = comptime!(filter.support);
         let hw = k[m + 6] * x + k[m + 7] * y + k[m + 8];
         let mut value = 0.0f32;
         if hw > 0.0f32 {
             let u = (k[m] * x + k[m + 1] * y + k[m + 2]) / hw;
             let v = (k[m + 3] * x + k[m + 4] * y + k[m + 5]) / hw;
-            let last_u = f32::cast_from(stored.lattice_width) - 0.5f32;
-            let last_v = f32::cast_from(stored.lattice_height) - 0.5f32;
-            if u >= -0.5f32 && u <= last_u && v >= -0.5f32 && v <= last_v {
-                // Derivatives of the projective map: the source extent of
-                // one output step along each source axis sets the footprint.
-                // Heckbert fits an ellipse (EWA). This scales the filter per
-                // source axis by the length of each Jacobian row.
-                let ux = (k[m] - u * k[m + 6]) / hw;
-                let uy = (k[m + 1] - u * k[m + 7]) / hw;
-                let vx = (k[m + 3] - v * k[m + 6]) / hw;
-                let vy = (k[m + 4] - v * k[m + 7]) / hw;
-                let su = f32::clamp((ux * ux + uy * uy).sqrt(), 1.0f32, MAX_FOOTPRINT);
-                let sv = f32::clamp((vx * vx + vy * vy).sqrt(), 1.0f32, MAX_FOOTPRINT);
-                let u0 = i32::cast_from((u - support * su).ceil());
-                let u1 = i32::cast_from((u + support * su).floor());
-                let v0 = i32::cast_from((v - support * sv).ceil());
-                let v1 = i32::cast_from((v + support * sv).floor());
-                let min_col = i32::cast_from(stored.x);
-                let min_row = i32::cast_from(stored.y);
-                let max_col = min_col + i32::cast_from(stored.width) - 1i32;
-                let max_row = min_row + i32::cast_from(stored.height) - 1i32;
-                // −0 is the additive identity, so an exact hit keeps −0.
-                let mut sum = f32::reinterpret(0x8000_0000u32);
-                let mut total = 0.0f32;
-                for b in v0..v1 + 1 {
-                    let wy = weight((f32::cast_from(b) - v) / sv, filter);
-                    let row =
-                        usize::cast_from(i32::clamp(b, min_row, max_row) - min_row) * stored.width;
-                    for a in u0..u1 + 1 {
-                        let w = weight((f32::cast_from(a) - u) / su, filter) * wy;
-                        // Zero weights skip their tap, so non-finite
-                        // neighbours of an exact hit cannot leak in.
-                        if w != 0.0f32 {
-                            let col = usize::cast_from(i32::clamp(a, min_col, max_col) - min_col);
-                            sum += w * input[(row + col) * 3 + c];
-                            total += w;
-                        }
+            // Derivatives of the projective map: the source extent of one
+            // output step along each source axis sets the footprint.
+            // Heckbert fits an ellipse (EWA). This scales the filter per
+            // source axis by the length of each Jacobian row.
+            let ux = (k[m] - u * k[m + 6]) / hw;
+            let uy = (k[m + 1] - u * k[m + 7]) / hw;
+            let vx = (k[m + 3] - v * k[m + 6]) / hw;
+            let vy = (k[m + 4] - v * k[m + 7]) / hw;
+            let su = (ux * ux + uy * uy).sqrt();
+            let sv = (vx * vx + vy * vy).sqrt();
+            value = taps(input, u, v, su, sv, stored, c, filter);
+        }
+        value
+    }
+
+    /// Channel `c` at output sample `(x, y)` through a radial front: the
+    /// projective map in `k` takes it to `q`, the radial part on to
+    /// `p = q + (s(ρ) − 1)(q − centre)`, and the filter is widened by the
+    /// rows of the chained Jacobian `J_radial · J_projective`. In sample
+    /// units, with `d = q − centre` and `n = d ⊙ inv` (so `ρ = |n|`),
+    ///
+    /// ```text
+    /// J_radial = s·I + (s′ / ρ) · d · (n ⊙ inv)ᵀ
+    /// ```
+    ///
+    /// which is the plane's `s·I + s′ρ · r̂r̂ᵀ` in each axis's sample units.
+    /// The result is multiplied by the gain at the source's radius `|s|·ρ`
+    /// when `gain`.
+    #[cube]
+    fn radial(
+        input: &[f32],
+        k: &[f32],
+        x: f32,
+        y: f32,
+        stored: &Stored,
+        #[comptime] c: usize,
+        #[comptime] filter: FilterBody,
+        #[comptime] gain: bool,
+    ) -> f32 {
+        let m = c * 9;
+        let hw = k[m + 6] * x + k[m + 7] * y + k[m + 8];
+        let mut value = 0.0f32;
+        if hw > 0.0f32 {
+            let qu = (k[m] * x + k[m + 1] * y + k[m + 2]) / hw;
+            let qv = (k[m + 3] * x + k[m + 4] * y + k[m + 5]) / hw;
+            let ux = (k[m] - qu * k[m + 6]) / hw;
+            let uy = (k[m + 1] - qu * k[m + 7]) / hw;
+            let vx = (k[m + 3] - qv * k[m + 6]) / hw;
+            let vy = (k[m + 4] - qv * k[m + 7]) / hw;
+            let du = qu - k[RADIAL];
+            let dv = qv - k[RADIAL + 1];
+            let nu = du * k[RADIAL + 2];
+            let nv = dv * k[RADIAL + 3];
+            let rho = (nu * nu + nv * nv).sqrt();
+            let ratio = spline(k, comptime!(RADIAL + 4 + c * SPLINE), rho);
+            let s = ratio.value;
+            // `s − 1` is exactly zero for a ratio of one, so the identity
+            // keeps positions exact.
+            let u = qu + (s - 1.0f32) * du;
+            let v = qv + (s - 1.0f32) * dv;
+            let mut g = 0.0f32;
+            if rho > 0.0f32 {
+                g = ratio.slope / rho;
+            }
+            let (au, av) = (g * du, g * dv);
+            let (bu, bv) = (nu * k[RADIAL + 2], nv * k[RADIAL + 3]);
+            let jux = (s + au * bu) * ux + au * bv * vx;
+            let juy = (s + au * bu) * uy + au * bv * vy;
+            let jvx = av * bu * ux + (s + av * bv) * vx;
+            let jvy = av * bu * uy + (s + av * bv) * vy;
+            let su = (jux * jux + juy * juy).sqrt();
+            let sv = (jvx * jvx + jvy * jvy).sqrt();
+            value = taps(input, u, v, su, sv, stored, c, filter);
+            if comptime!(gain) {
+                value *= spline(k, comptime!(RADIAL + 4 + 3 * SPLINE), s.abs() * rho).value;
+            }
+        }
+        value
+    }
+
+    /// A spline's value and slope at one argument.
+    #[derive(CubeType)]
+    struct Interpolated {
+        value: f32,
+        slope: f32,
+    }
+
+    /// The spline whose constants start at `k[o]` at `x`, as
+    /// [`Spline::at`] computes it. The slope is zero beyond the knots.
+    #[cube]
+    fn spline(k: &[f32], #[comptime] o: usize, x: f32) -> Interpolated {
+        let last = k[o + 2];
+        let t = (x - k[o]) * k[o + 1];
+        let held = f32::clamp(t, 0.0f32, last);
+        // The bound also keeps a NaN `x`, cast to any index, in range.
+        let segments = usize::cast_from(last);
+        let mut i = usize::cast_from(held);
+        if i >= segments {
+            i = segments - 1;
+        }
+        let a = k[o + 3 + i];
+        let b = k[o + 4 + i];
+        let mut slope = 0.0f32;
+        if t >= 0.0f32 && t <= last {
+            slope = (b - a) * k[o + 1];
+        }
+        Interpolated { value: a + (held - f32::cast_from(i)) * (b - a), slope }
+    }
+
+    /// Channel `c` filtered at input sample position `(u, v)`, the filter
+    /// widened per input axis by `su` and `sv` clamped to `[1, MAX_FOOTPRINT]`.
+    /// Weights are normalized. Positions outside the input lattice are
+    /// black, and taps beyond its edge repeat the edge sample. Taps clamp to
+    /// the stored window, which holds every tap inside the lattice
+    /// ([`Plan::input_window`]).
+    #[cube]
+    fn taps(
+        input: &[f32],
+        u: f32,
+        v: f32,
+        su: f32,
+        sv: f32,
+        stored: &Stored,
+        #[comptime] c: usize,
+        #[comptime] filter: FilterBody,
+    ) -> f32 {
+        let support = comptime!(filter.support);
+        let mut value = 0.0f32;
+        let last_u = f32::cast_from(stored.lattice_width) - 0.5f32;
+        let last_v = f32::cast_from(stored.lattice_height) - 0.5f32;
+        if u >= -0.5f32 && u <= last_u && v >= -0.5f32 && v <= last_v {
+            let su = f32::clamp(su, 1.0f32, MAX_FOOTPRINT);
+            let sv = f32::clamp(sv, 1.0f32, MAX_FOOTPRINT);
+            let u0 = i32::cast_from((u - support * su).ceil());
+            let u1 = i32::cast_from((u + support * su).floor());
+            let v0 = i32::cast_from((v - support * sv).ceil());
+            let v1 = i32::cast_from((v + support * sv).floor());
+            let min_col = i32::cast_from(stored.x);
+            let min_row = i32::cast_from(stored.y);
+            let max_col = min_col + i32::cast_from(stored.width) - 1i32;
+            let max_row = min_row + i32::cast_from(stored.height) - 1i32;
+            // −0 is the additive identity, so an exact hit keeps −0.
+            let mut sum = f32::reinterpret(0x8000_0000u32);
+            let mut total = 0.0f32;
+            for b in v0..v1 + 1 {
+                let wy = weight((f32::cast_from(b) - v) / sv, filter);
+                let row =
+                    usize::cast_from(i32::clamp(b, min_row, max_row) - min_row) * stored.width;
+                for a in u0..u1 + 1 {
+                    let w = weight((f32::cast_from(a) - u) / su, filter) * wy;
+                    // Zero weights skip their tap, so non-finite
+                    // neighbours of an exact hit cannot leak in.
+                    if w != 0.0f32 {
+                        let col = usize::cast_from(i32::clamp(a, min_col, max_col) - min_col);
+                        sum += w * input[(row + col) * 3 + c];
+                        total += w;
                     }
                 }
-                if total != 0.0f32 {
-                    value = sum / total;
-                }
+            }
+            if total != 0.0f32 {
+                value = sum / total;
             }
         }
         value
@@ -1176,8 +1400,72 @@ mod tests {
         assert!(matches!(plan.front, Front::Stencil { body, .. } if body == BODY));
     }
 
+    /// A radial warp with ratios from 1 at the centre to 1.1 at `ρ = 1` and
+    /// the given maps before it.
+    fn radial(maps: Projective) -> Warp {
+        let ratio = Spline::new(0.0, 0.5, vec![1.0, 1.02, 1.1]).unwrap();
+        let radial = Radial {
+            centre: [4.0, 4.0],
+            radius: 5.0,
+            ratios: [ratio.clone(), ratio.clone(), ratio],
+            gain: None,
+        };
+        Warp::radial([maps; 3], radial, &crate::body::BOX)
+    }
+
+    #[test]
+    fn a_radial_warp_starts_a_front_and_later_geometry_composes_after_it() {
+        let extend = |plan: &Plan, step| plan.extend(&step, LATTICE, LATTICE).unwrap();
+        let lens = radial(IDENTITY);
+        let flip = Warp::reindex([[-1.0, 0.0, 8.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]);
+        let turn = Warp::filtered([[[0.9, -0.1, 1.0], [0.1, 0.9, 0.0], [0.0, 0.0, 1.0]]; 3], &BOX);
+        let map = Step::Map(&MAP, &[]);
+        // After a map, a reindex, a Resample or another radial warp it cuts.
+        for before in [map, Step::Warp(&flip), Step::Resample(&BOX), Step::Warp(&lens)] {
+            let plan = extend(&Plan::default(), before).unwrap();
+            assert!(extend(&plan, Step::Warp(&lens)).is_none());
+        }
+        // A reindex, a filtering warp and a Resample after it compose on its
+        // output side, and a map follows them.
+        let mut plan = extend(&Plan::default(), Step::Warp(&lens)).unwrap();
+        for after in [Step::Warp(&flip), Step::Warp(&turn), Step::Resample(&BOX), map] {
+            plan = extend(&plan, after).unwrap();
+        }
+        let Front::Resampling { maps, radial, .. } = &plan.front else { unreachable!() };
+        assert_eq!(radial.as_deref(), lens.radial.as_ref());
+        assert_eq!(maps[0], mul(&flip.maps[0], &turn.maps[0]));
+        // It always filters, even where the ratios are one.
+        let stage = resampling(maps, Some(&BOX), radial.as_deref(), LATTICE, LATTICE).unwrap().0;
+        assert_eq!(stage, Stage::Radial { filter: BOX, gain: false });
+        let declared = Warp { filter: None, ..lens };
+        assert!(Plan::default().extend(&Step::Warp(&declared), LATTICE, LATTICE).is_err());
+    }
+
+    #[test]
+    fn a_radial_window_holds_every_tap() {
+        let lens = radial([[0.8, 0.0, 1.0], [0.0, 0.8, 0.5], [0.0, 0.0, 1.0]]);
+        let plan = Plan::default().extend(&Step::Warp(&lens), LATTICE, LATTICE).unwrap().unwrap();
+        let window = |origin, extent| LATTICE.with(Rect { origin, extent });
+        // Output sample (6, 6) sits at 6.5 on each axis, the maps take it to
+        // (6.2, 5.7) and the radial part to (6.26, 5.75): sample (5.76,
+        // 5.25), whose Box taps read sample (6, 5). The bound adds one
+        // sample and the support times a footprint of at most 1.27.
+        let source = lens.radial.as_ref().unwrap().source(0, [6.2, 5.7]);
+        assert!((source[0] - 6.264).abs() < 1e-3 && (source[1] - 5.749).abs() < 1e-3);
+        let read = plan.input_window(LATTICE, window([6, 6], [1, 1])).unwrap();
+        assert_eq!(read, Rect { origin: [4, 3], extent: [4, 5] });
+    }
+
     const LATTICE: Lattice =
         Lattice { extent: [8, 8], full: [8, 8], window: Rect { origin: [0; 2], extent: [8, 8] } };
+
+    use crate::body::BOX;
+    static MAP: MapBody = MapBody { name: "plan::tests::same", constants: 0, expand: same::expand };
+
+    #[cube]
+    fn same(px: Pixel, _k: &[f32]) -> Pixel {
+        px
+    }
 
     static BODY: StencilBody = StencilBody {
         name: "plan::tests::centre",

@@ -203,7 +203,9 @@ impl Image {
     /// new plan over this image. Fails when a map or stencil's `desc` is on
     /// another lattice, its constants are not as long as its body reads, a
     /// stencil's radius is negative or not finite, a warp's maps are not
-    /// finite, or a warp declared as a reindex moves samples off the lattice.
+    /// finite, a radial part's centre is not finite or its radius not
+    /// positive, or a warp declared as a reindex moves samples off the
+    /// lattice.
     pub fn step<P: MapPayload>(&self, step: Step<'_>, desc: Description) -> Result<Image> {
         let (from, to) = (lattice::<P>(&self.desc), lattice::<P>(&desc));
         let keeps = |shape: &str| {
@@ -228,6 +230,15 @@ impl Image {
             Step::Warp(warp) => {
                 if !warp.maps.as_flattened().as_flattened().iter().all(|v| v.is_finite()) {
                     return Err(Error::Contract("warp maps must be finite".into()));
+                }
+                let radial = warp.radial.as_ref();
+                if radial.is_some_and(|r| {
+                    !(r.centre.iter().all(|v| v.is_finite())
+                        && r.radius.is_finite()
+                        && r.radius > 0.0)
+                }) {
+                    let message = "a radial warp needs a finite centre and a positive radius";
+                    return Err(Error::Contract(message.into()));
                 }
             }
             Step::Resample(_) => {}

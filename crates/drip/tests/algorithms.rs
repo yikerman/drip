@@ -3,6 +3,8 @@ use drip::{
     runtime::RuntimeContext,
 };
 
+#[path = "algorithms/radial.rs"]
+mod radial;
 #[path = "algorithms/resample.rs"]
 mod resample;
 #[path = "algorithms/rgb_reduction.rs"]
@@ -24,6 +26,7 @@ fn algorithms(runtime: RuntimeContext) {
     bayer_reduction(&evaluator);
     rgb_reduction::check(&evaluator);
     resample::check(&evaluator);
+    radial::check(&evaluator);
     resident_highlights(&evaluator);
     bayer_host_island(&evaluator);
     context_driven_demosaic(&evaluator);
@@ -345,4 +348,9 @@ fn bayer_host_island(evaluator: &Evaluator) {
     drop(inputs);
     drop(dag);
     assert!(b.iter().enumerate().all(|(i, &v)| v == i as f32));
+}
+#[test]
+#[ignore = "times kernels on the DRIP_BACKEND runtime; run explicitly with --nocapture"]
+fn radial_stage_cost() {
+    radial::time_stages(RuntimeContext::from_env().unwrap());
 }

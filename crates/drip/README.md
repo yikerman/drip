@@ -26,7 +26,7 @@ them a node file may name.
 |---|---|
 | `definition.rs` | `Kind`, `Tag`, the `Node` and `Typed` traits, actions, assets, and the `Identity` and `Durability` the store keys and evicts by |
 | `shape.rs` | `Shape`: how evaluation runs a kind, and the disk `Codec`s |
-| `body.rs` | the bodies, filters and warps the segment compiler fuses, `Pixel`, and 3×3 `matrix` math |
+| `body.rs` | the bodies, filters and warps the segment compiler fuses, warps' `Radial` part and its `Spline`s, `Pixel`, and 3×3 `matrix` math |
 | `lattice.rs` | `Lattice` and `Rect`: where samples sit on the full-detail plane |
 | `plan.rs` | the segment compiler: composition rules, input windows, the fused kernel, reduction passes |
 | `eval/` | `Evaluator` and its rules (`mod.rs`), one call's scheduling (`run.rs`), meta sub-graphs joining the run (`meta.rs`) and `TargetValues` (`values.rs`) |
@@ -190,7 +190,8 @@ The first `Point` is the mapped input and the second the output. Other
 inputs are `Read` and arrive materialized, as `camera_to_rgb.rs` reads its
 metadata. A warp, `#[node(warp)]`, has the same ports and returns a `Warp`
 of projective maps from the output plane to the input plane, as in
-`orientation.rs` and `perspective.rs`. `resample.rs` is the one resample.
+`orientation.rs` and `perspective.rs`, optionally followed by a radial map
+with a gain (`Warp::radial`). `resample.rs` is the one resample.
 
 ### Foreign node
 

@@ -1,7 +1,7 @@
 //! Resample and warps against an independent f64 resampler.
 use drip::{
     body::{
-        Step, Warp,
+        Radial, Step, Warp,
         matrix::{self, Mat3},
     },
     eval::Evaluator,
@@ -35,7 +35,7 @@ fn settings(filter: Filter, factor: f64) -> Settings {
     Settings { filter, size: Size::Factor(Factor { factor }) }
 }
 
-fn pattern(width: u32, height: u32) -> Vec<[f32; 3]> {
+pub fn pattern(width: u32, height: u32) -> Vec<[f32; 3]> {
     (0..width * height)
         .map(|i| {
             let (x, y) = ((i % width) as f32, (i / width) as f32);
@@ -61,18 +61,20 @@ fn resample(
 }
 
 /// Per-channel maps from the rectangle `origin + [0, size]` into the plane of
-/// `source`, as the reference resampler reads them.
+/// `source`, then an optional radial part, as the reference resampler reads
+/// them.
 #[derive(Clone)]
-struct Warped {
-    source: RgbDesc,
-    origin: [f64; 2],
-    size: [f64; 2],
-    maps: [Mat3; 3],
+pub struct Warped {
+    pub source: RgbDesc,
+    pub origin: [f64; 2],
+    pub size: [f64; 2],
+    pub maps: [Mat3; 3],
+    pub radial: Option<Radial>,
 }
 
 /// `warped` through a warp whose maps differ per channel, then a Resample by
 /// `p`, through the image API. The rectangle's size is whole pixels.
-fn resample_warped(
+pub fn resample_warped(
     evaluator: &Evaluator,
     warped: &Warped,
     pixels: Vec<[f32; 3]>,
@@ -84,7 +86,11 @@ fn resample_warped(
     let source = Raster::<Rgb>::from_host(warped.source.clone(), pixels.into()).unwrap();
     let [x, y] = warped.origin;
     let shift = [[1.0, 0.0, x], [0.0, 1.0, y], [0.0, 0.0, 1.0]];
-    let warp = Warp::filtered(warped.maps.map(|m| matrix::mul(&m, &shift)), p.filter.body());
+    let maps = warped.maps.map(|m| matrix::mul(&m, &shift));
+    let warp = match &warped.radial {
+        Some(radial) => Warp::radial(maps, radial.clone(), p.filter.body()),
+        None => Warp::filtered(maps, p.filter.body()),
+    };
     let extent = |scale: f64| {
         let [w, h] = warped.size.map(|v| (v * scale).round() as u32);
         let desc: Description = Arc::new(RgbDesc::new(
@@ -127,7 +133,7 @@ fn constants_survive_any_map_and_scale(evaluator: &Evaluator) {
     let pixels = vec![value; (width * height) as usize];
     let source = RgbDesc::new(Extent { width, height }, Coordinates::Space(REC2020_D65));
     let maps = [rotation(0.2, [6.5, 5.5]), rotation(-0.1, [6.5, 5.5]), shear(0.3)];
-    let warped = Warped { source, origin: [3.0, 3.0], size: [7.0, 5.0], maps };
+    let warped = Warped { source, origin: [3.0, 3.0], size: [7.0, 5.0], maps, radial: None };
     for filter in FILTERS {
         for factor in [0.37, 1.0, 2.5] {
             let (_, data) =
@@ -173,7 +179,7 @@ fn per_channel_maps_match_the_reference(evaluator: &Evaluator) {
     };
     let perspective = [[1.0, 0.05, -0.4], [0.02, 0.95, 0.3], [0.004, -0.003, 1.0]];
     let maps = [rotation(0.3, [9.0, 7.0]), perspective, shear(-0.2)];
-    let warped = Warped { source, origin: [1.5, -2.0], size: [16.0, 15.0], maps };
+    let warped = Warped { source, origin: [1.5, -2.0], size: [16.0, 15.0], maps, radial: None };
     let magnitude = pixels.iter().flatten().fold(1.0f32, |m, v| m.max(v.abs()));
     // Box is discontinuous at its edge: f32 and f64 positions disagree on which
     // taps sit exactly there. The exact tests above cover it.
@@ -260,6 +266,7 @@ fn perspective_crops_exactly_and_matches_the_reference(evaluator: &Evaluator) {
             origin: [0.0, 0.0],
             size: frame.size,
             maps: [frame.map; 3],
+            radial: None,
         };
         (warped, result.desc.clone(), data)
     };
@@ -290,16 +297,16 @@ fn perspective_crops_exactly_and_matches_the_reference(evaluator: &Evaluator) {
 }
 
 /// Sample bits, with NaN payloads, which arithmetic may canonicalize, as `None`.
-fn bits(v: &[[f32; 3]]) -> Vec<Option<u32>> {
+pub fn bits(v: &[[f32; 3]]) -> Vec<Option<u32>> {
     v.iter().flatten().map(|v| if v.is_nan() { None } else { Some(v.to_bits()) }).collect()
 }
 
-fn rotation(angle: f64, [cx, cy]: [f64; 2]) -> [[f64; 3]; 3] {
+pub fn rotation(angle: f64, [cx, cy]: [f64; 2]) -> [[f64; 3]; 3] {
     let (s, c) = angle.sin_cos();
     [[c, -s, cx - c * cx + s * cy], [s, c, cy - s * cx - c * cy], [0.0, 0.0, 1.0]]
 }
 
-fn shear(k: f64) -> [[f64; 3]; 3] {
+pub fn shear(k: f64) -> [[f64; 3]; 3] {
     [[1.0, k, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 }
 
@@ -331,28 +338,37 @@ fn weight(filter: Filter, x: f64) -> f64 {
     }
 }
 
-/// Plane geometry written out directly: output pixel centre → rectangle → map →
-/// source plane → source index, with a numerically differentiated footprint.
-fn reference(warped: &Warped, pixels: &[[f32; 3]], out: &Extent, filter: Filter) -> Vec<[f64; 3]> {
+/// Plane geometry written out directly: output pixel centre → rectangle → map
+/// → radial part → source plane → source index, with a numerically
+/// differentiated footprint and the radial part's gain.
+pub fn reference(
+    warped: &Warped,
+    pixels: &[[f32; 3]],
+    out: &Extent,
+    filter: Filter,
+) -> Vec<[f64; 3]> {
     let source = &warped.source;
     let (w, h) = (source.extent.width as i64, source.extent.height as i64);
     let support = f64::from(filter.body().support);
     let mut result = vec![[0.0; 3]; out.pixels()];
     for (c, m) in warped.maps.iter().enumerate() {
-        let index = |j: f64, k: f64| -> Option<[f64; 2]> {
+        // The point the maps take output sample (j, k) to, before the radial
+        // part.
+        let point = |j: f64, k: f64| -> Option<[f64; 2]> {
             let y = [
                 warped.origin[0] + (j + 0.5) * warped.size[0] / f64::from(out.width),
                 warped.origin[1] + (k + 0.5) * warped.size[1] / f64::from(out.height),
             ];
             let q = m.map(|r| r[0] * y[0] + r[1] * y[1] + r[2]);
-            (q[2] > 0.0).then(|| {
-                [
-                    q[0] / q[2] * f64::from(source.extent.width) / f64::from(source.full.width)
-                        - 0.5,
-                    q[1] / q[2] * f64::from(source.extent.height) / f64::from(source.full.height)
-                        - 0.5,
-                ]
-            })
+            (q[2] > 0.0).then(|| [q[0] / q[2], q[1] / q[2]])
+        };
+        let index = |j: f64, k: f64| -> Option<[f64; 2]> {
+            let q = point(j, k)?;
+            let p = warped.radial.as_ref().map_or(q, |radial| radial.source(c, q));
+            Some([
+                p[0] * f64::from(source.extent.width) / f64::from(source.full.width) - 0.5,
+                p[1] * f64::from(source.extent.height) / f64::from(source.full.height) - 0.5,
+            ])
         };
         for (i, result) in result.iter_mut().enumerate() {
             let (j, k) = ((i % out.width as usize) as f64, (i / out.width as usize) as f64);
@@ -376,7 +392,9 @@ fn reference(warped: &Warped, pixels: &[[f32; 3]], out: &Extent, filter: Filter)
                     total += weight;
                 }
             }
-            result[c] = sum / total;
+            let gain =
+                warped.radial.as_ref().map_or(1.0, |radial| radial.gain(c, point(j, k).unwrap()));
+            result[c] = sum / total * gain;
         }
     }
     result
