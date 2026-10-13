@@ -172,7 +172,8 @@ The drip README has compiled examples of most shapes. Put the node in
 - **Warp.** A geometric operation: maps per channel from the output plane
   to the input plane in full-detail pixels, and a filter. A warp that only
   reorders samples returns `Warp::reindex`, so it moves across maps.
-  Examples: `orientation.rs` (reindex), `perspective.rs` (Lanczos-3).
+  Examples: `orientation.rs` (reindex), `perspective.rs` (Lanczos-3),
+  `lens/` (a radial map with a vignetting gain).
 - **Resample.** `resample.rs` is the one resample: its contract sets the
   output lattice, and its function picks the filter.
 - **Stencil.** A neighbourhood operation: the reach and constants, and a

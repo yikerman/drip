@@ -18,6 +18,7 @@ beside each algorithm identify the source and explain changes made for Drip.
 | [Luis Sanz Rodríguez](https://github.com/LuisSR/RCD-Demosaicing), Ingo Weyrich, Hanno Schwalm and darktable contributors | RCD demosaicing, adapted from the pinned darktable revision above; bilinear border in Drip | Original RCD: GPL-3.0; darktable integration: GPL-3.0-or-later |
 | garagecoder and Iain (G’MIC), Hanno Schwalm and [darktable contributors](https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/hlreconstruct) | Inpaint-opposed highlight reconstruction; Bayer adaptation with complete edge neighborhoods | GPL-3.0-or-later |
 | [darktable developers](https://github.com/darktable-org/darktable/tree/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/common), including Freddie Witherden's embedded lens correction | Tag identities, per-vendor layouts and validation of embedded lens correction data, ported to Rust in `drip-raw` [28] | GPL-3.0-or-later |
+| [darktable developers](https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/lens.cc), including Freddie Witherden's embedded lens correction | Conversion of embedded lens correction data into radial ratio and vignetting splines, adapted in `node/lens/embedded.rs` [30], [31] | GPL-3.0-or-later |
 | [Dave Coffin, dcraw](https://www.dechifro.org/dcraw/) | Reference for camera matrix normalization and RAW black-level conventions, through LibRaw | dcraw's source contains multiple licensing options; credited here as an algorithm reference, not a vendored dependency |
 
 Further algorithm ports must add their authors, exact source revision and license
@@ -375,3 +376,29 @@ each deviation. DNG opcode lists follow the DNG specification [29].
 
 [29] Adobe Inc., “Digital Negative (DNG) Specification,” ver. 1.7.1.0,
 Sep. 2023, ch. 7, “Opcode List Processing.”
+
+`crates/drip/src/node/lens/embedded.rs` adapts darktable's conversion of
+those values into per-channel ratios of source to destination radius and a
+vignetting divisor (`_init_coeffs_md_v2`) [30], the algorithm Freddie
+Witherden contributed [31]. Polynomials are sampled at 256 knots instead of
+16, Fujifilm's remap to destination radii at 256 points, and Panasonic's
+inversion iterates to convergence. DNG warps sit at the opcode's optical
+centre with the DNG specification's normalization [29], and their red and
+blue planes act as CA relative to green. darktable's autoscale is replaced
+by the node's fill zoom. The module lists each deviation. The manual models
+follow Lensfun's published `ptlens`, linear TCA and `pa` formulas and
+coordinate conventions [32]. No Lensfun code is copied. A test compares the
+Sony fixture's table with Lensfun's profile of its lens, three coefficients
+from the Lensfun database (`mil-tamron.xml`, CC BY-SA 3.0).
+
+[30] darktable developers, “lens.cc” (`_init_coeffs_md_v2`), `src/iop/`,
+commit 61dea294bedb3ab6c7cca1a45530b1ab5c0461f3, 2026. [Online]. Available:
+<https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/lens.cc>
+
+[31] F. Witherden, “Embedded lens correction,” darktable pull request 7092,
+2020. [Online]. Available: <https://github.com/darktable-org/darktable/pull/7092>
+
+[32] Lensfun contributors, “Lens corrections,” *Lensfun Manual*, and
+“lensfun.h,” `lfDistortionModel`, `lfTCAModel` and `lfVignettingModel`.
+[Online]. Available: <https://lensfun.github.io/manual/latest/corrections.html>.
+Accessed: Oct. 13, 2026.

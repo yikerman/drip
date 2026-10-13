@@ -11,6 +11,7 @@ pub mod exposure;
 pub mod filter;
 pub mod highlights;
 pub mod hot_pixels;
+pub mod lens;
 pub mod orientation;
 pub mod perspective;
 pub mod profile;

@@ -162,8 +162,8 @@ decisions from the compute-model migration and later.
 - **Decided (2026-10-12):** Perspective Transform has its own editing view
   without proofing, whose Frame, Level and Perspective tools edit the same
   quad. A view's window may edit its node ([FIELD](FIELD.md#editing-view)).
-- **Open:** Lens-correction coordinates and single-channel geometry for
-  masks ([FIELD](FIELD.md#open-questions)). The compute model proposes masks
+- **Open:** Single-channel geometry for masks
+  ([FIELD](FIELD.md#open-questions)). The compute model proposes masks
   as scalar images instead of a `MonoField` payload.
 - **Tentative:** The node order in [TODO](TODO.md#next-image-nodes) serves
   ordinary still-photo editing first and reuses Exposure, CAT16 and Sigmoid.
@@ -224,11 +224,36 @@ decisions from the compute-model migration and later.
   from restricting the filter's samples.
 - **Requirement:** Capture provenance and model applicability stay separate.
   Processing updates or discards metadata whose assumptions it changes.
-- **Tentative:** Lens correction needs lens identification, crop factor and
-  profiles, and vignetting may need focus distance rather than minimum focus
-  distance. Correct before orientation or account for transformed
-  coordinates. Distortion and lateral CA are per-channel coordinate maps,
-  and vignetting is a per-pixel gain.
+- **Decided (2026-10-13):** Lens correction is one warp node with a radial
+  part: distortion and lateral CA are per-channel ratios of source to
+  destination radius, and vignetting is a gain of the source radius. The
+  map is about the frame centre, normalized by the half diagonal, which
+  commutes with the eight EXIF orientations, except where a DNG states its
+  own centre and normalization. A crop or perspective before it moves the
+  centre, which its help states.
+- **Decided (2026-10-13):** Lens correction's `embedded` source converts
+  each vendor's tables with darktable's `_init_coeffs_md_v2` and its
+  fine-tune factors. Metadata without correction data, or no metadata,
+  passes the image unchanged: missing data is not logically wrong. The
+  `manual` source takes Lensfun's `ptlens`, linear TCA and `pa` models in
+  Lensfun's units and ignores the profile's crop factor, real focal length
+  and centre offsets. Switches turn distortion, CA and vignetting off. The
+  node returns an identity reindex when nothing changes, so it launches
+  nothing.
+- **Decided (2026-10-13):** Lens correction samples polynomials at 256
+  uniform knots to `ρ = 1.25`, under 0.002 px from the fixture lens's
+  Lensfun profile at 7968 × 5320. Fujifilm tables are resampled onto
+  uniform knots after darktable's remap to destination radii. DNG warps
+  keep the opcode's centre, and their red and blue planes are CA relative
+  to green, so switches and fine-tunes mean the same for every vendor.
+  Panasonic's inversion converges, where darktable's two iterations miss by
+  up to 0.5 % of the radius on the DMC-TZ70 fixture.
+- **Decided (2026-10-13):** Lens correction's `fit` is `fill` by default:
+  the least zoom about the centre at which every channel of every output
+  pixel reads inside the input, which may be below one. `keep` does not
+  zoom. This replaces darktable's autoscale and image scale.
+- **Tentative:** Lensfun database lookup needs lens identification, crop
+  factor and focus distance rather than minimum focus distance.
 - **Decided (2026-10-13):** `drip-raw` reads the lens correction tables
   cameras embed, for darktable's vendor set: Sony, Fujifilm, DNG
   `OpcodeList3`, Olympus and Panasonic. LibRaw parses these tags but keeps

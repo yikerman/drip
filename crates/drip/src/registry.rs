@@ -8,7 +8,7 @@ use crate::{
     definition::{Kind, Node},
     node::{
         bayer_2x2, bayer_gains, camera_to_rgb, chromatic_adaptation, export, exposure, highlights,
-        hot_pixels, orientation, perspective, pyramid, raw, rcd, reduce, resample, sharpen,
+        hot_pixels, lens, orientation, perspective, pyramid, raw, rcd, reduce, resample, sharpen,
         sigmoid,
     },
 };
@@ -60,6 +60,7 @@ pub static NODES: &[&Kind] = &[
     &highlights::reconstruct::KIND,
     &bayer_2x2::compute::KIND,
     &rcd::compute::KIND,
+    &lens::correct::KIND,
     &camera_to_rgb::compute::KIND,
     &chromatic_adaptation::compute::KIND,
     &orientation::compute::KIND,

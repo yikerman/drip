@@ -191,7 +191,7 @@ inputs are `Read` and arrive materialized, as `camera_to_rgb.rs` reads its
 metadata. A warp, `#[node(warp)]`, has the same ports and returns a `Warp`
 of projective maps from the output plane to the input plane, as in
 `orientation.rs` and `perspective.rs`, optionally followed by a radial map
-with a gain (`Warp::radial`). `resample.rs` is the one resample.
+with a gain (`Warp::radial`), as in `lens/`. `resample.rs` is the one resample.
 
 ### Foreign node
 

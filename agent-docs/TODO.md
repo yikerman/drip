@@ -4,7 +4,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 
 | Work | Status | Remaining scope |
 |------|--------|-----------------|
-| Compute model coverage | Follow-up | Deferred shapes read only `Rgb`, and warps are projective. Other payloads, lens distortion and many-frame foreign inputs wait for a node that needs them. |
+| Compute model coverage | Follow-up | Deferred shapes read only `Rgb`, and warps are projective with an optional radial part. Other payloads and many-frame foreign inputs wait for a node that needs them. |
 | Waveform pass | Follow-up | The generic bins pass counts a level-1 waveform in 2.3 ms against 1.6 ms for the per-column kernel it replaced. A bins body that confines counts to a column could accumulate per workgroup in shared memory. |
 | Scope output ports | Open | The scopes' `Counts` output shows as a port no node accepts. Decide whether the canvas hides outputs nothing consumes. |
 | Reduction readback | Follow-up | Each reduction reads its result back before the next node runs, so three scopes wait three times. Keep results on the device until read, and measure. |
@@ -58,7 +58,11 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | End-to-end latency | Measured | Full-detail worker latency is 164–171 ms, with about 64 ms of CPU preview packing and 86 ms of GPU completion and readback. Profile display upload and consider device packing. |
 | Memory and drawing cost | Deferred | Measure retained RAWs, export buffers, duplicate uploads across windows and scope meshes before streaming or sharing textures. |
 | Evaluation performance | Deferred | Cooperative cancellation and backend tuning, driven by measured latency. |
-| Lens-correction metadata | Deferred | Crop factor, Lensfun profiles, exposure focus distance and image-to-capture geometry. `drip-raw` reads embedded tables for darktable's vendor set, but not Nikon Z coefficients, which darktable does not read either. |
+| Lensfun lookup | Deferred | Find Lens correction's manual profile in the Lensfun database from the lens model, focal length, aperture and focus distance. Needs crop factor and the exposure's focus distance, which LibRaw does not report as such. |
+| Lensfun profile geometry | Deferred | Manual lens correction ignores a profile's crop factor, real focal length and centre offsets, so it fits only uncropped images of the calibrated format. Rescale coefficients as Lensfun's `rescale_polynomial_coefficients` does. |
+| Nikon lens tables | Deferred | Nikon Z files embed radial coefficients that darktable does not read yet. Follow darktable when it does. |
+| Lens projections | Idea | Fisheye to rectilinear and other projection changes are radial maps too, with ratios far from one. Check the fill zoom and the 256-knot sampling before offering them. |
+| Per-tap vignetting | Idea | Lens correction multiplies the reconstructed value by the gain at the footprint centre. Divide each tap instead if a lens shows the difference, which is under 0.1 % across a Lanczos-3 support on the Sony fixture. |
 | Capture metadata | Deferred | Time zone and maker-note passthrough, and a wider TIFF EXIF export. |
 | HDR | Deferred | Define headroom and metadata, and track Windows desktop SDR white. |
 | Native windows | Deferred | Pop-out parenting on Windows and macOS, pin control, and pacing and occlusion across windows. Retest hidden-window pacing and native dialogs. |
@@ -82,7 +86,7 @@ until implementation.
 | 4 | Masks and blend | Brighten a face or darken the sky. | A mask payload with its Blend consumer, linear and radial producers, a mask view and direct manipulation, reusing existing adjustments. Brush and colour or luminance selections follow. |
 | 5 | Denoise | Clean up a high-ISO photograph. | A documented algorithm with luminance and chroma controls that behaves predictably at preview scales. Verify detail and artifacts at full resolution, and choose its input domain with it. |
 | 6 | Sharpen | Restore apparent detail, including after resizing. | Landed 2026-10-13 as an unsharp mask. A threshold and the recommended placement remain. |
-| 7 | Lens correction | Remove barrel distortion, dark corners and lateral colour fringes. | Load lens models apart from applying them, starting with distortion and vignetting, then lateral CA. Use capture metadata, an explicit image-to-capture mapping and applicability checks. |
+| 7 | Lens correction | Remove barrel distortion, dark corners and lateral colour fringes. | Landed 2026-10-13 from embedded tables or a manual Lensfun model. The Lensfun database lookup remains. |
 
 Keep local edits compositional: an adjusted image and its base feed Blend,
 rather than embedding masking separately into every adjustment.

@@ -145,6 +145,15 @@ greatest ratio over the box's radii, and grows it by the support times
 knots, padded in the kernel's constants so their length stays out of
 kernel identity.
 
+Lens correction (`node/lens/`) returns such a warp. Its centre is the
+frame's and `R` the half diagonal, or a DNG's optical centre and its
+greatest distance to a corner. Its projective map zooms about the centre by
+`1/z`. With *fill*, `z` is the least zoom at which every channel of every
+output pixel reads inside the input. The frame holds the centre and the
+map keeps directions about it, so a boundary point at distance `t` reads
+inside iff `s_c(t / (z R)) ≤ z`, and `z` is the fixed point of the
+greatest ratio over the boundary's radii.
+
 ## Geometry
 
 ### Borders and auto-crop
@@ -295,7 +304,8 @@ with no samples are deferred until masks exist.
 - EWA versus the scaled-filter footprint, after measuring extreme keystones,
   and a prefiltered pyramid for reductions beyond 16 samples per output
   sample.
-- Lens correction coordinates: capture geometry, orientation and crop.
+- Lens correction after a crop or perspective transform: the node takes
+  the frame it receives for the captured one.
 - One map shared by an image and its mask.
 - Deferred nonlinear value operations (above).
 - A citable derivation of cumulative loss under repeated resampling, to state

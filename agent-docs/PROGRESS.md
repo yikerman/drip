@@ -5,6 +5,21 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
+- Lens correction (`node::lens`) turns embedded tables into one radial
+  warp. At darktable's knots, the Sony A7R III fixture's ratios and gain
+  equal `_init_coeffs_md_v2` within 1e-15, the Fujifilm GFX50S II, Pixel
+  4 XL DNG and OM TG-7 fixtures and synthetic 11-knot Fujifilm and
+  three-plane DNG tables within 1e-6, and Fujifilm gains within 0.3 %,
+  where uniform knots cut the table's kinks. The Panasonic DMC-TZ70 source
+  radius inverts its polynomial within 1e-5, where darktable's two
+  iterations miss by up to 0.5 %. The Sony table's corner-to-centre ratio
+  agrees with Lensfun's ptlens profile of the lens at 28 mm within 0.08 %.
+  256 knots hold that profile within 0.01 px at 7968 × 5320. Fill keeps
+  every channel of the boundary inside and a zoom 0.1 % smaller does not,
+  for barrel and pincushion. On the GPU at full detail, the segment from
+  RCD's stored output through Orientation takes 11.06 to 11.31 ms without
+  the node and 29.65 to 30.97 with it, medians of five in two runs of
+  `../drip-benchmark-results/2026-10-13-lens/lens_segment.rs`.
 - `drip-raw` reads embedded lens correction data (`Lens::correction`). On
   the Sony A7R III fixture and new raw.pixls.us samples from a Fujifilm
   GFX50S II, a Google Pixel 4 XL DNG, an OM System TG-7 and a Panasonic
