@@ -41,7 +41,8 @@
 //!   and runs foreign nodes, and [`expand`] builds the sub-graphs of meta
 //!   nodes.
 //! - **Nodes.** [`node`](mod@node) holds the processing nodes, their payloads and
-//!   colour management. [`runtime`] selects the compute device.
+//!   colour management, and [`templates`] wires them into the chains the
+//!   built-in templates start from. [`runtime`] selects the compute device.
 //!
 //! Contracts check declared compatibility, not physical accuracy.
 //!
@@ -91,6 +92,7 @@ pub mod runtime;
 pub mod shape;
 mod source;
 pub mod store;
+pub mod templates;
 
 pub use drip_macros::{Choice, Parameters, node};
 pub use error::{Error, Result};

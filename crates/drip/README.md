@@ -17,7 +17,8 @@ colorimetry (`color.rs`, `camera.rs`, `profile.rs`), resampling filters
 matrix multiplication and Bayer reduction, never unrelated node kernels.
 
 Modules outside `node/` are infrastructure and name no concrete node or
-payload, except `registry.rs`, which lists the kinds by hand.
+payload, except `registry.rs`, which lists the kinds by hand, and
+`templates.rs`, which wires them into the built-in templates' chains.
 [ARCHITECTURE](../../agent-docs/ARCHITECTURE.md#modules) states which of
 them a node file may name.
 
@@ -39,6 +40,7 @@ them a node file may name.
 | `param.rs` | parameter schemas, encoding and validation |
 | `project.rs` | `.drip` persistence, loaded through a `Registry` |
 | `registry.rs` | `NODES`, `TAGS` and `Registry` |
+| `templates.rs` | the processing chains of the built-in templates |
 | `runtime.rs` | the compute client, budgets and `DRIP_BACKEND` selection |
 
 File organization never justifies splitting one algorithm into more nodes.

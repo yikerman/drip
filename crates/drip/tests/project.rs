@@ -1,53 +1,19 @@
 use drip::registry::{NODES, Registry};
-use drip::{eval::Evaluator, node, node::data::*, project::Project, runtime::RuntimeContext};
+use drip::{
+    eval::Evaluator, node, node::data::*, project::Project, runtime::RuntimeContext, templates,
+};
 use serde_json::json;
 
 fn registry() -> Registry {
     Registry::new(&[NODES])
 }
 
-/// Handles a test edits in the RAW pipeline of the built-in Neutral restore template.
-struct RawPipeline {
-    raw: node::raw::Ports,
-    demosaic: node::rcd::Ports,
-    orientation: node::orientation::Ports,
+fn raw_pipeline() -> drip::Result<(drip::graph::Dag, templates::Chain)> {
+    let mut dag = drip::graph::Dag::new();
+    let chain = templates::neutral_restore(&mut dag)?;
+    Ok((dag, chain))
 }
 
-/// The processing chain of `templates/neutral-restore.drip-template`, without
-/// its GUI views, for core tests that need a complete RAW pipeline.
-fn raw_pipeline() -> drip::Result<(drip::graph::Dag, RawPipeline)> {
-    let mut dag = drip::graph::Dag::new();
-    let raw = node::raw::add(&mut dag, Default::default())?;
-    let (mosaic, metadata) = (raw.mosaic, raw.metadata);
-    let gains = node::bayer_gains::add(&mut dag, ())?;
-    let highlights = node::highlights::reconstruct::add(&mut dag, Default::default())?;
-    let demosaic = node::rcd::add(&mut dag, ())?;
-    let color = node::camera_to_rgb::add(&mut dag, ())?;
-    let adaptation = node::chromatic_adaptation::add(&mut dag, Default::default())?;
-    let orientation = node::orientation::add(&mut dag, Default::default())?;
-    let exposure = node::exposure::add(&mut dag, Default::default())?;
-    let sigmoid = node::sigmoid::apply::add(&mut dag, Default::default())?;
-    let export = node::export::tiff::add(&mut dag, Default::default())?;
-    dag.edit(|edit| {
-        edit.connect(mosaic, gains.image)?;
-        edit.connect(metadata, gains.metadata)?;
-        edit.connect(gains.levels, highlights.levels)?;
-        edit.connect(gains.output, highlights.image)?;
-        edit.connect(highlights.output, demosaic.image)?;
-        edit.connect(demosaic.output, color.image)?;
-        edit.connect(metadata, color.metadata)?;
-        edit.connect(color.output, adaptation.image)?;
-        edit.connect(metadata, adaptation.metadata)?;
-        edit.connect(adaptation.output, orientation.image)?;
-        edit.connect(metadata, orientation.metadata)?;
-        edit.connect(orientation.output, exposure.image)?;
-        edit.connect(exposure.output, sigmoid.image)?;
-        edit.connect(sigmoid.output, export.image)?;
-        edit.connect(metadata, export.metadata)?;
-        Ok(())
-    })?;
-    Ok((dag, RawPipeline { raw, demosaic, orientation }))
-}
 #[test]
 fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     let mut p = Project::default();
@@ -205,12 +171,44 @@ fn edits_and_project_open_do_not_depend_on_loaded_sources() {
         // Skipping color conversion leaves Sigmoid, after Orientation and
         // Exposure, with camera RGB; only its evaluation reports that.
         dag.edit(|e| {
-            e.disconnect(t.orientation.image.id())?;
-            e.connect(t.demosaic.output, t.orientation.image)
+            e.disconnect(t.develop.orientation.image.id())?;
+            e.connect(t.develop.demosaic.output, t.develop.orientation.image)
         })
         .unwrap();
         dag.set_parameters(t.raw.node, raw.clone()).unwrap();
         let project = Project { dag, ..Default::default() };
         Project::from_json(&project.to_json().unwrap(), &registry()).unwrap();
     }
+}
+
+/// Each built-in chain develops a RAW file into finite RGB at a preview
+/// scale, and the steps All adds to Neutral correction start as identities.
+#[test]
+fn built_in_chains_develop_a_raw() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/raw/pixls/nikon-d70s.nef");
+    let evaluator = Evaluator::new(RuntimeContext::from_env().unwrap());
+    let global = drip::runtime::GlobalContext { scale: 8 };
+    let develop = |chain: fn(&mut drip::graph::Dag) -> drip::Result<templates::Chain>| {
+        let mut dag = drip::graph::Dag::new();
+        let chain = chain(&mut dag).unwrap();
+        dag.set_parameters(chain.raw.node, json!({ "path": fixture })).unwrap();
+        let result = evaluator.evaluate::<Rgb>(&dag, &global, chain.output).unwrap();
+        assert!(result.desc.extent.pixels() > 0);
+        let pixels = result.data.host().unwrap().to_vec();
+        assert!(pixels.iter().flatten().all(|v| v.is_finite()));
+        (result.desc.extent.clone(), pixels)
+    };
+    develop(templates::neutral_restore);
+    let corrected = develop(templates::neutral_correction);
+    let all = develop(templates::all);
+    assert_eq!(all.0, corrected.0);
+    let worst = all
+        .1
+        .iter()
+        .flatten()
+        .zip(corrected.1.iter().flatten())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0, f32::max);
+    assert!(worst < 1e-4, "{worst}");
 }

@@ -31,7 +31,8 @@ A node file names only the node-facing modules above, the `Parameters`
 trait of its own parameters, and the shared image code in `node/`, such as
 `data.rs`, `color.rs` and `filter.rs`. A payload on a plane also names
 `image::Plane`, which `Payload::PLANE` holds. Files outside `node/` name no
-concrete node or payload, except `registry.rs`, which lists the kinds.
+concrete node or payload, except `registry.rs`, which lists the kinds, and
+`templates.rs`, which wires them into the built-in templates' chains.
 
 ## Values
 
