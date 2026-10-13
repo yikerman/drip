@@ -66,8 +66,8 @@ pub struct Export {
     #[param(flatten)]
     #[serde(flatten)]
     pub output: profile::Settings,
-    /// 8 and 16 bit clip to the profile's range. 32-bit float keeps values
-    /// beyond it.
+    /// u8/u16 clip to the output range, and f32 keeps the profile's
+    /// floating-point range.
     #[param]
     pub depth: Depth,
     /// Lossless TIFF compression, or None for an uncompressed file.
@@ -82,8 +82,8 @@ impl Assets for Export {
 }
 
 /// Write the image to a TIFF file through an RGB output profile, at full
-/// resolution whatever the preview shows. 8- and 16-bit files clip to the
-/// profile's range, and 32-bit float keeps values beyond it. Compression is
+/// resolution whatever the preview shows. u8 and u16 clip to the
+/// profile's range, and f32 keeps values beyond it. Compression is
 /// lossless. Capture metadata is copied when connected. A profile file is read
 /// at the first export. Choose it again to pick up changes.
 // An image larger than the device budget is computed in bands of rows and

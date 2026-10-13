@@ -93,16 +93,23 @@ fn contract(global: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(Rg
     Ok((RgbDesc { extent, full, window: None, coordinates: image.coordinates.clone() },))
 }
 
-/// Change the image's size. Size scales by a factor, fits the long edge to a
-/// pixel count, or sets width and height, which stretches the image when the
-/// aspect ratio changes.
+/// Change the image's size, and choose the filter that rebuilds pixels.
 ///
-/// Filter sets how pixels are rebuilt. Lanczos-3, the default, is the sharpest
-/// but leaves light and dark rings beside strong highlights. Mitchell rings
-/// less, and Catmull–Rom is a little sharper than Mitchell. Triangle and Box
-/// do not ring and are softer, and Box looks blocky when enlarging. Directly
-/// after Perspective Transform or Lens correction, it also sets their filter,
-/// and the image is still resampled once.
+/// Size scales by a factor, fits the long edge to a pixel count, or sets width
+/// and height, which stretches the image when the aspect ratio changes.
+///
+/// Geometry nodes such as Perspective Transform and Lens correction do not each
+/// resample the image. Consecutive geometry nodes are combined and resampled
+/// once, with Lanczos-3, or with the filter of a Resample that ends the run.
+/// Orientation moves whole pixels and never resamples. A run ends at a Resample
+/// and at any node that changes pixel values, such as Exposure or Sharpen, so
+/// geometry after them resamples again. Lens correction always starts a new
+/// run.
+///
+/// Lanczos-3, the default filter, is the sharpest but leaves light and dark
+/// rings beside strong highlights. Mitchell rings less, and Catmull–Rom is a
+/// little sharper than Mitchell. Triangle and Box do not ring and are softer,
+/// and Box looks blocky when enlarging.
 // After Heckbert, the filter is centered on each output sample's position in
 // the input and widened by the local footprint, so magnifying interpolates and
 // minifying antialiases. Weights are normalized, and taps beyond the edge

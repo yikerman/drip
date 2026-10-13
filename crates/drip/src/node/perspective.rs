@@ -185,8 +185,6 @@ fn contract(global: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(Rg
 /// rotated one straightens. Aspect from corners averages opposite sides. Set a
 /// ratio when the photographed rectangle's true proportions differ. Three
 /// corners on a line are rejected, and areas outside the image are black.
-/// Samples are reconstructed with Lanczos-3. To choose another filter or an
-/// output size, put a Resample directly after it.
 // Every perspective transform corresponds to exactly one set of corners and
 // aspect. Anything beyond the horizon that a crossed or concave quad puts
 // inside the frame is black.

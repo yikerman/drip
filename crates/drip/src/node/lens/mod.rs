@@ -167,8 +167,6 @@ fn contract(
 /// The switches turn each correction off. Fill zooms in just enough that no
 /// empty border shows, or zooms out to keep more of the frame when it can.
 /// Keep leaves the scale alone, so edges the correction exposes are black.
-/// Samples are reconstructed with Lanczos-3. To choose another filter, put a
-/// Resample directly after it.
 // Each correction is a radial map about the optical center: channel by
 // channel, the output at radius ρ reads the input at s_c(ρ)·ρ, times a
 // vignetting gain of that source radius. The center is the frame's, or a DNG's
