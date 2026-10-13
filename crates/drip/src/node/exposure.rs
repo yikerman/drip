@@ -31,16 +31,16 @@ fn exposure_contract(_: &GlobalContext, _: &Exposure, image: &RgbDesc) -> Result
 pub fn compute(
     ctx: &KernelContext<'_>,
     params: &Exposure,
-    image: Read<'_, Device<Rgb>>,
-    output: Write<'_, Device<Rgb>>,
+    image: Read<'_, Rgb>,
+    output: Write<'_, Rgb>,
 ) -> Result<()> {
     let (count, dim) = dispatch_dims(image.desc.extent.pixels() * 3);
     kernel::exposure::launch(
         ctx.client()?,
         count,
         dim,
-        image.data.argument(),
-        output.data.argument(),
+        image.data.device(ctx)?.argument(),
+        output.device(ctx)?.argument(),
         params.ev.exp2(),
     );
     Ok(())

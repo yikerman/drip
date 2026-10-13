@@ -1,7 +1,7 @@
 use drip::{
     Error as KernelError,
     node::data::{Coordinates, Extent, REC2020_D65, Rgb, RgbDesc},
-    ports::{Cpu, Write},
+    ports::Write,
     runtime::KernelContext,
 };
 use serde::{Deserialize, Serialize};
@@ -122,13 +122,13 @@ mod preview_logs_only_changed_root_failures_at_their_severity_fixture {
     fn diagnostics(
         _: &KernelContext<'_>,
         p: &Source,
-        image: Write<'_, Cpu<Rgb>>,
+        mut image: Write<'_, Rgb>,
     ) -> drip::Result<()> {
         match p.state {
             State::Incomplete => Err(KernelError::Contract("choose a file".into())),
             State::Failed => Err("decode failed".into()),
             State::Ok => {
-                image.data[0] = [1., 1., 0.];
+                image.host()[0] = [1., 1., 0.];
                 Ok(())
             }
         }
@@ -263,7 +263,7 @@ mod latest_targets_win_and_a_replaced_worker_skips_queued_work_fixture {
     fn blocking(
         _: &KernelContext<'_>,
         p: &SourceKernel,
-        image: Write<'_, Cpu<Rgb>>,
+        mut image: Write<'_, Rgb>,
     ) -> drip::Result<()> {
         CALLS.lock().unwrap().push(p.value);
         if p.block {
@@ -272,7 +272,7 @@ mod latest_targets_win_and_a_replaced_worker_skips_queued_work_fixture {
             started.send(()).unwrap();
             release.recv_timeout(TIMEOUT).unwrap();
         }
-        image.data[0] = [p.value, 1.0, 0.0];
+        image.host()[0] = [p.value, 1.0, 0.0];
         Ok(())
     }
 
@@ -363,10 +363,10 @@ mod exports_read_current_files_at_full_detail_fixture {
     }
     // Reads on every run, unlike nodes that keep their files, to exercise worker ordering.
     #[drip::node(id="test-file", name="file", contract=image_contract)]
-    fn file(_: &KernelContext<'_>, p: &FileKernel, image: Write<'_, Cpu<Rgb>>) -> drip::Result<()> {
+    fn file(_: &KernelContext<'_>, p: &FileKernel, mut image: Write<'_, Rgb>) -> drip::Result<()> {
         let path = p.path.as_ref().ok_or_else(|| KernelError::Contract("choose a file".into()))?;
         let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-        image.data[0] = [text.parse().unwrap(), 1.0, 0.0];
+        image.host()[0] = [text.parse().unwrap(), 1.0, 0.0];
         Ok(())
     }
     #[test]

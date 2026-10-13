@@ -178,11 +178,10 @@ fn contract(_: &GlobalContext, p: &Settings, field: &RgbFieldDesc) -> Result<(Rg
 pub fn transform(
     _: &KernelContext<'_>,
     _: &Settings,
-    field: Read<'_, Device<RgbField>>,
-    output: Forward<'_, Device<RgbField>>,
+    field: Read<'_, RgbField>,
+    output: Forward<'_, RgbField>,
 ) -> Result<()> {
-    output.set(field.data.clone());
-    Ok(())
+    output.set(field.data)
 }
 
 /// What Fit keeps while it enlarges the frame.

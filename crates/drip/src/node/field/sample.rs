@@ -99,10 +99,11 @@ fn contract(global: &GlobalContext, p: &Settings, field: &RgbFieldDesc) -> Resul
 pub fn realize(
     ctx: &KernelContext<'_>,
     p: &Settings,
-    field: Read<'_, Device<RgbField>>,
-    output: Write<'_, Device<Rgb>>,
+    field: Read<'_, RgbField>,
+    output: Write<'_, Rgb>,
 ) -> Result<()> {
-    render(ctx, field.desc, field.data, p.filter, &output.desc.extent, output.data)
+    let samples = field.data.device(ctx)?;
+    render(ctx, field.desc, samples, p.filter, &output.desc.extent, output.device(ctx)?)
 }
 
 /// Sample `field` over its whole domain into `output`, `extent` samples. Also

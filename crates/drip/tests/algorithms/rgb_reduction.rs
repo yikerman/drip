@@ -1,4 +1,4 @@
-use drip::{eval::Evaluator, graph::Dag, node, node::data::*, ports::*};
+use drip::{eval::Evaluator, graph::Dag, node, node::data::*};
 
 pub fn check(evaluator: &Evaluator) {
     for (width, height, factor) in
@@ -53,14 +53,14 @@ fn check_case(evaluator: &Evaluator, width: u32, height: u32, factor: i64, pixel
     dag.connect(color_source, color_node.image).unwrap();
     // Explicit reduction uses its parameter, not the request's demosaic scale.
     let context = drip::runtime::GlobalContext { scale: 4 };
-    let a = evaluator.evaluate::<Cpu<Rgb>>(&dag, &context, camera_node.output).unwrap();
-    let b = evaluator.evaluate::<Cpu<Rgb>>(&dag, &context, color_node.output).unwrap();
+    let a = evaluator.evaluate::<Rgb>(&dag, &context, camera_node.output).unwrap();
+    let b = evaluator.evaluate::<Rgb>(&dag, &context, color_node.output).unwrap();
     assert_eq!(a.desc.extent, output_extent);
     assert_eq!(b.desc.extent, output_extent);
     assert_eq!(a.desc.full, output_extent);
     assert_eq!(a.desc.coordinates, camera);
     assert_eq!(b.desc.coordinates, color);
-    for result in [&*a.data, &*b.data] {
+    for result in [a.data.host().unwrap(), b.data.host().unwrap()] {
         assert_eq!(result.len(), expected.len());
         for (i, (&actual, &expected)) in
             result.iter().flatten().zip(expected.iter().flatten()).enumerate()
@@ -115,8 +115,8 @@ fn resident_chain(evaluator: &Evaluator) {
     dag.connect(source, before.image).unwrap();
     dag.connect(before.output, reduced.image).unwrap();
     dag.connect(reduced.output, after.image).unwrap();
-    let result = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), after.output).unwrap();
+    let result = evaluator.evaluate::<Rgb>(&dag, &Default::default(), after.output).unwrap();
     assert_eq!(result.statistics.uploads, 1);
-    assert_eq!(result.statistics.downloads, 1);
-    assert_eq!(&**result.data, &[[0.25; 3]; 6]);
+    assert_eq!(result.statistics.downloads, 0);
+    assert_eq!(&**result.data.host().unwrap(), &[[0.25; 3]; 6]);
 }

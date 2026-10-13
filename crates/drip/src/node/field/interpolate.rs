@@ -25,9 +25,8 @@ fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(RgbFieldDesc,
 pub fn lift(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Device<Rgb>>,
-    output: Forward<'_, Device<RgbField>>,
+    image: Read<'_, Rgb>,
+    output: Forward<'_, RgbField>,
 ) -> Result<()> {
-    output.set(image.data.share_as());
-    Ok(())
+    output.set(image.data)
 }

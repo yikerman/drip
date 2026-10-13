@@ -15,7 +15,7 @@ impl GuiNode for exposure::Definition {
     // Meter before sigmoid; bright or dark subjects may need a manual adjustment.
     const ACTION: Option<Action<Self>> = Some(Action {
         name: "Auto exposure",
-        run: |_, inputs, ctx| Ok(Some(meter(&DeviceRgb::new(&inputs.image), ctx.client()?)?)),
+        run: |_, inputs, ctx| Ok(Some(meter(&DeviceRgb::new(&inputs.image, ctx)?, ctx.client()?)?)),
     });
 }
 
@@ -114,8 +114,8 @@ pub(crate) mod tests {
         graph::Dag,
         node,
         node::data::*,
-        ports::{Device, NodeId},
-        runtime::RuntimeContext,
+        ports::NodeId,
+        runtime::{KernelContext, RuntimeContext},
     };
 
     /// Source → Exposure → Sigmoid; returns Exposure's node.
@@ -142,7 +142,7 @@ pub(crate) mod tests {
         let inputs =
             evaluator.evaluate_inputs(dag, &Default::default(), &[id]).remove(&id).unwrap()?;
         let ctx =
-            PrepareContext { client: evaluator.client().ok().cloned(), global: Default::default() };
+            PrepareContext { runtime: evaluator.runtime().clone(), global: Default::default() };
         let run = <exposure::Definition as GuiNode>::ACTION.unwrap().run;
         let node = exposure::Definition::of(dag.node(id)?)?;
         Ok(run(node, inputs.bind::<exposure::Definition>()?, &ctx)?.unwrap().ev)
@@ -195,11 +195,12 @@ pub(crate) mod tests {
                 / count as f64;
             let (dag, id) = graph(pixels);
             let output = dag.typed_output(dag.output_port(id, "output").unwrap()).unwrap();
-            let image =
-                evaluator.evaluate::<Device<Rgb>>(&dag, &Default::default(), output).unwrap();
+            let image = evaluator.evaluate::<Rgb>(&dag, &Default::default(), output).unwrap();
             assert_eq!(image.statistics.downloads, 0);
-            let actual =
-                mean_luminance(evaluator.client().unwrap(), image.data.argument(), count).unwrap();
+            let global = Default::default();
+            let kernels = KernelContext::new(&global, evaluator.runtime());
+            let input = image.data.device(&kernels).unwrap().argument();
+            let actual = mean_luminance(kernels.client().unwrap(), input, count).unwrap();
             assert!(
                 (actual - expected).abs() <= expected.abs() * 2e-6,
                 "{count}: {actual} vs {expected}"

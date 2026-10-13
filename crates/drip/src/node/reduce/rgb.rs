@@ -19,16 +19,16 @@ fn contract(_: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(RgbDesc
 pub fn compute(
     ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Device<Rgb>>,
-    output: Write<'_, Device<Rgb>>,
+    image: Read<'_, Rgb>,
+    output: Write<'_, Rgb>,
 ) -> Result<()> {
     let (count, dim) = crate::runtime::dispatch_dims(output.desc.extent.pixels() * 3);
     crate::node::shared_kernel::reduce_rgb::launch(
         ctx.client()?,
         count,
         dim,
-        image.data.argument(),
-        output.data.argument(),
+        image.data.device(ctx)?.argument(),
+        output.device(ctx)?.argument(),
         image.desc.extent.width as usize,
         image.desc.extent.height as usize,
         output.desc.extent.width as usize,

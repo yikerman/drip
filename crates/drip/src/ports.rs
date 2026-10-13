@@ -1,72 +1,17 @@
-//! Typed views at nodes; type erasure is confined to the graph adapter.
+//! Typed views of a node's ports, requirements and port identities.
+//!
+//! A port names a payload and an interpretation requirement, never a
+//! placement. `Read` borrows an input [`Raster`] and the node asks it for
+//! `host()` or `device(ctx)`. `Write` creates the output where the node writes
+//! it; `Forward` publishes samples the node already holds; `Load` sets a
+//! source's output. Type erasure is confined to the generated node adapter.
 use crate::{
     Error, Result,
-    payload::{self, DeviceBuffer, DeviceLayout, Payload},
-    runtime::RuntimeContext,
+    image::{Description, Image, Raster},
+    payload::{DeviceBuffer, DeviceLayout, Payload},
+    runtime::KernelContext,
 };
-use std::{any::TypeId, marker::PhantomData, sync::Arc};
-
-pub type Description = Arc<dyn std::any::Any + Send + Sync>;
-pub type Data = Arc<dyn std::any::Any + Send + Sync>;
-pub struct Cpu<P>(PhantomData<P>);
-pub struct Device<P>(PhantomData<P>);
-
-/// A port's payload and placement. Only payloads with a device layout have a
-/// device placement:
-///
-/// ```compile_fail
-/// use drip::{node::data::CaptureMetadata, ports::{Device, Port}};
-/// fn port<P: Port>() {}
-/// port::<Device<CaptureMetadata>>();
-/// ```
-pub trait Port: Send + Sync + 'static {
-    type Payload: Payload;
-    type Storage: Send + Sync + 'static;
-    /// Device ports transfer between placements; host ports never transfer.
-    const TRANSFERS: Option<Transfers>;
-    fn check(desc: &<Self::Payload as Payload>::Desc, data: &Self::Storage) -> Result<()>;
-    fn allocate(
-        desc: &<Self::Payload as Payload>::Desc,
-        runtime: &RuntimeContext,
-    ) -> Result<Self::Storage>;
-}
-impl<P: Payload> Port for Cpu<P> {
-    type Payload = P;
-    type Storage = P::Host;
-    const TRANSFERS: Option<Transfers> = None;
-    fn check(desc: &P::Desc, data: &P::Host) -> Result<()> {
-        P::check(desc, data)
-    }
-    fn allocate(desc: &P::Desc, _: &RuntimeContext) -> Result<P::Host> {
-        Ok(P::allocate(desc))
-    }
-}
-impl<P: DeviceLayout> Port for Device<P> {
-    type Payload = P;
-    type Storage = DeviceBuffer<P>;
-    const TRANSFERS: Option<Transfers> = Some(Transfers {
-        upload: |v, d, r| Ok(Arc::new(payload::upload::<P>(downcast(d), downcast(v), r)?)),
-        download: |v, d, r| Ok(Arc::new(payload::download::<P>(downcast(d), downcast(v), r)?)),
-    });
-    fn check(desc: &P::Desc, data: &DeviceBuffer<P>) -> Result<()> {
-        if data.handle.size_in_used() != P::byte_len(desc) as u64 {
-            return Err(Error::Contract(format!("{} extent/storage mismatch", P::NAME)));
-        }
-        Ok(())
-    }
-    fn allocate(desc: &P::Desc, runtime: &RuntimeContext) -> Result<DeviceBuffer<P>> {
-        Ok(DeviceBuffer::new(runtime.client()?.empty(P::byte_len(desc))))
-    }
-}
-
-type Transfer = fn(&Data, &Description, &RuntimeContext) -> Result<Data>;
-/// Host/device movement of one device-capable payload. Evaluation uses the
-/// device side of an edge: the consumer's upload or the producer's download.
-#[derive(Clone, Copy)]
-pub struct Transfers {
-    pub(crate) upload: Transfer,
-    pub(crate) download: Transfer,
-}
+use std::{any::TypeId, cell::OnceCell, marker::PhantomData, sync::Arc};
 
 /// An interpretation a port requires (inputs) or guarantees (outputs), checked
 /// on descriptions before and after the node's contract.
@@ -84,118 +29,143 @@ impl<P: Payload> Requirement<P> for Any {
     }
 }
 
-type Desc<P> = <<P as Port>::Payload as Payload>::Desc;
-
-pub struct Read<'a, P: Port, R = Any> {
-    pub data: &'a P::Storage,
-    pub desc: &'a Desc<P>,
+/// An evaluated input. `desc` is `data.desc()`, checked against `R`.
+pub struct Read<'a, P: Payload, R = Any> {
+    pub desc: &'a P::Desc,
+    pub data: &'a Raster<P>,
     requirement: PhantomData<R>,
 }
-pub struct Write<'a, P: Port, R = Any> {
-    pub data: &'a mut P::Storage,
-    pub desc: &'a Desc<P>,
-    requirement: PhantomData<R>,
-}
-
-impl<'a, P: Port, R> Read<'a, P, R> {
-    pub fn new(desc: &'a Desc<P>, data: &'a P::Storage) -> Self {
-        Self { data, desc, requirement: PhantomData }
+impl<'a, P: Payload, R> Read<'a, P, R> {
+    pub fn new(data: &'a Raster<P>) -> Self {
+        Self { desc: data.desc(), data, requirement: PhantomData }
     }
     #[doc(hidden)]
-    pub fn bind(value: Option<&'a (Description, Data)>) -> Option<Self> {
-        value.map(|(desc, data)| Self::new(downcast(desc), downcast(data)))
+    pub fn bind(image: Option<&'a Image>) -> Option<Self> {
+        image.map(|image| Self::new(image.downcast().expect("typed node adapter invariant")))
     }
 }
 
-impl<'a, P: Port, R> Write<'a, P, R> {
-    pub fn new(desc: &'a Desc<P>, data: &'a mut P::Storage) -> Self {
-        Self { data, desc, requirement: PhantomData }
-    }
-}
-
-/// Fresh output storage owned by the generated node adapter until publication.
-#[doc(hidden)]
-pub struct OutputSlot<'a, P: Port> {
-    desc: &'a Desc<P>,
-    data: P::Storage,
-}
-impl<'a, P: Port> OutputSlot<'a, P> {
-    pub fn allocate(
-        desc: &'a Description,
-        context: &crate::runtime::KernelContext<'_>,
-    ) -> Result<Self> {
-        let desc = downcast(desc);
-        Ok(Self { desc, data: context.allocate::<P>(desc)? })
-    }
-    pub fn write<R>(&mut self) -> Write<'_, P, R> {
-        Write::new(self.desc, &mut self.data)
-    }
-    pub fn finish(self) -> Result<Data> {
-        P::check(self.desc, &self.data)?;
-        Ok(Arc::new(self.data))
-    }
-}
-
-/// An output published from storage the node already holds, typically an
-/// input's allocation under a new description ([`DeviceBuffer::share_as`]).
-/// Published storage is never written again, so sharing it keeps nodes pure.
-pub struct Forward<'a, P: Port, R = Any> {
-    pub desc: &'a Desc<P>,
-    slot: &'a mut Option<P::Storage>,
+/// An output under construction, described by the contract. The node writes
+/// one representation: `host()` or `device(ctx)`, each allocated on first
+/// use. The adapter publishes it as a [`Raster`] after the node returns and
+/// rejects an output written on both sides or neither.
+pub struct Write<'a, P: Payload, R = Any> {
+    pub desc: &'a P::Desc,
+    pending: &'a mut Pending<P>,
     requirement: PhantomData<R>,
 }
-impl<P: Port, R> Forward<'_, P, R> {
-    pub fn set(self, data: P::Storage) {
-        *self.slot = Some(data);
+struct Pending<P: Payload> {
+    host: Option<P::Host>,
+    // Kernels write device storage through a handle, so `device` takes
+    // `&self`; host storage is written through `&mut`.
+    device: OnceCell<Raster<P>>,
+}
+impl<P: Payload, R> Write<'_, P, R> {
+    /// Host storage, allocated with [`Payload::allocate`] on the first call.
+    pub fn host(&mut self) -> &mut P::Host {
+        self.pending.host.get_or_insert_with(|| P::allocate(self.desc))
+    }
+}
+impl<P: DeviceLayout, R> Write<'_, P, R> {
+    /// Uninitialized device storage of `P::byte_len(desc)` bytes for kernels to fill.
+    pub fn device(&self, ctx: &KernelContext<'_>) -> Result<&DeviceBuffer<P>> {
+        let raster = match self.pending.device.get() {
+            Some(raster) => raster,
+            None => {
+                let buffer = ctx.device_buffer::<P>(self.desc)?;
+                let raster = Raster::from_device(self.desc.clone(), buffer, ctx)?;
+                self.pending.device.get_or_init(|| raster)
+            }
+        };
+        raster.device(ctx)
+    }
+}
+
+/// Output storage owned by the generated node adapter until publication.
+#[doc(hidden)]
+pub struct OutputSlot<P: Payload> {
+    desc: Arc<P::Desc>,
+    pending: Pending<P>,
+}
+impl<P: Payload> OutputSlot<P> {
+    pub fn new(desc: impl Into<Arc<P::Desc>>) -> Self {
+        Self { desc: desc.into(), pending: Pending { host: None, device: OnceCell::new() } }
+    }
+    pub fn write<R>(&mut self) -> Write<'_, P, R> {
+        Write { desc: &self.desc, pending: &mut self.pending, requirement: PhantomData }
+    }
+    pub fn finish(self) -> Result<Image> {
+        match (self.pending.host, self.pending.device.into_inner()) {
+            (Some(host), None) => Ok(Raster::<P>::from_host(self.desc, host)?.into()),
+            (None, Some(raster)) => Ok(raster.into()),
+            (None, None) => Err(Error::Contract("node did not write its output".into())),
+            (Some(_), Some(_)) => {
+                Err(Error::Contract("node wrote its output on both host and device".into()))
+            }
+        }
+    }
+}
+
+/// An output published from samples the node already holds, typically an
+/// input under the contract's new description. Published rasters are never
+/// written again, so sharing them keeps nodes pure.
+pub struct Forward<'a, P: Payload, R = Any> {
+    desc: &'a Arc<P::Desc>,
+    slot: &'a mut Option<Raster<P>>,
+    requirement: PhantomData<R>,
+}
+impl<P: DeviceLayout, R> Forward<'_, P, R> {
+    /// Publish `raster`'s samples as this output ([`Raster::share_as`]).
+    pub fn set<Q: DeviceLayout>(self, raster: &Raster<Q>) -> Result<()> {
+        *self.slot = Some(raster.share_as(self.desc.clone())?);
+        Ok(())
     }
 }
 
 /// A forwarded output held by the generated node adapter until publication.
 #[doc(hidden)]
-pub struct ForwardSlot<'a, P: Port> {
-    desc: &'a Desc<P>,
-    data: Option<P::Storage>,
+pub struct ForwardSlot<P: Payload> {
+    desc: Arc<P::Desc>,
+    raster: Option<Raster<P>>,
 }
-impl<'a, P: Port> ForwardSlot<'a, P> {
-    pub fn new(desc: &'a Description) -> Self {
-        Self { desc: downcast(desc), data: None }
+impl<P: Payload> ForwardSlot<P> {
+    pub fn new(desc: impl Into<Arc<P::Desc>>) -> Self {
+        Self { desc: desc.into(), raster: None }
     }
     pub fn forward<R>(&mut self) -> Forward<'_, P, R> {
-        Forward { desc: self.desc, slot: &mut self.data, requirement: PhantomData }
+        Forward { desc: &self.desc, slot: &mut self.raster, requirement: PhantomData }
     }
-    pub fn finish(self) -> Result<Data> {
-        let data =
-            self.data.ok_or_else(|| Error::Contract("node did not set its output".into()))?;
-        P::check(self.desc, &data)?;
-        Ok(Arc::new(data))
+    pub fn finish(self) -> Result<Image> {
+        let raster =
+            self.raster.ok_or_else(|| Error::Contract("node did not set its output".into()))?;
+        Ok(raster.into())
     }
 }
 
 /// An output of a source node, set once when the node is first evaluated.
 /// Setting it is the boundary check of the loaded value.
 pub struct Load<'a, P> {
-    slot: &'a mut Option<(Description, Data)>,
+    slot: &'a mut Option<Image>,
     payload: PhantomData<P>,
 }
 impl<'a, P: Payload> Load<'a, P> {
     #[doc(hidden)]
-    pub fn new(slot: &'a mut Option<(Description, Data)>) -> Self {
+    pub fn new(slot: &'a mut Option<Image>) -> Self {
         Self { slot, payload: PhantomData }
     }
     pub fn set(self, desc: P::Desc, host: P::Host) -> Result<()> {
         P::validate(&desc)?;
-        P::check(&desc, &host)?;
-        *self.slot = Some((Arc::new(desc), Arc::new(host)));
+        *self.slot = Some(Raster::<P>::from_host(desc, host)?.into());
         Ok(())
     }
 }
 
 /// Check a connected input against its port requirement before the contract.
 #[doc(hidden)]
-pub fn input<'a, P: Port, R: Requirement<P::Payload>>(
+pub fn input<'a, P: Payload, R: Requirement<P>>(
     port: &str,
     desc: Option<&'a Description>,
-) -> Result<Option<&'a Desc<P>>> {
+) -> Result<Option<&'a P::Desc>> {
     desc.map(|desc| {
         let desc = downcast(desc);
         R::check(desc).map_err(|e| requirement_error(port, R::LABEL, e))?;
@@ -205,11 +175,8 @@ pub fn input<'a, P: Port, R: Requirement<P::Payload>>(
 }
 /// Validate a contract's output and its guaranteed interpretation.
 #[doc(hidden)]
-pub fn output<P: Port, R: Requirement<P::Payload>>(
-    port: &str,
-    desc: Desc<P>,
-) -> Result<Description> {
-    P::Payload::validate(&desc)?;
+pub fn output<P: Payload, R: Requirement<P>>(port: &str, desc: P::Desc) -> Result<Description> {
+    P::validate(&desc)?;
     R::check(&desc).map_err(|e| requirement_error(port, R::LABEL, e))?;
     Ok(Arc::new(desc))
 }
@@ -218,8 +185,13 @@ fn requirement_error(port: &str, label: &str, error: Error) -> Error {
 }
 
 #[doc(hidden)]
-pub fn downcast<T: std::any::Any>(value: &Arc<dyn std::any::Any + Send + Sync>) -> &T {
-    value.downcast_ref().expect("typed node adapter invariant")
+pub fn downcast<T: std::any::Any>(desc: &Description) -> &T {
+    desc.downcast_ref().expect("typed node adapter invariant")
+}
+/// A contract's output description as the typed `Arc` an output slot shares.
+#[doc(hidden)]
+pub fn typed<T: std::any::Any + Send + Sync>(desc: &Description) -> Arc<T> {
+    desc.clone().downcast().expect("typed node adapter invariant")
 }
 
 #[derive(Clone, Copy)]
@@ -231,17 +203,15 @@ pub struct PortSpec {
     pub requirement: &'static str,
     pub optional: bool,
     pub(crate) payload_type: TypeId,
-    pub(crate) transfers: Option<Transfers>,
 }
 impl PortSpec {
-    pub const fn of<P: Port, R: Requirement<P::Payload>>(name: &'static str) -> Self {
+    pub const fn of<P: Payload, R: Requirement<P>>(name: &'static str) -> Self {
         Self {
             name,
-            payload: P::Payload::NAME,
+            payload: P::NAME,
             requirement: R::LABEL,
             optional: false,
-            payload_type: TypeId::of::<P::Payload>(),
-            transfers: P::TRANSFERS,
+            payload_type: TypeId::of::<P>(),
         }
     }
     pub const fn optional(mut self) -> Self {

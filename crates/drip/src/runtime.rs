@@ -1,6 +1,14 @@
 //! One explicit compute device per evaluator. Host nodes remain ordinary Rust.
-use crate::{Error, Result};
-use cubecl::prelude::*;
+//! The runtime counts image transfers, which `eval::Statistics` reports.
+use crate::{
+    Error, Result,
+    payload::{DeviceBuffer, DeviceLayout},
+};
+use cubecl::{bytes::Bytes, prelude::*, server::Handle};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering::Relaxed},
+};
 
 mod backend;
 
@@ -26,8 +34,18 @@ impl GlobalContext {
     }
 }
 
+/// A compute client, or none for host-only evaluation. Clones share the client
+/// and the transfer counts, so a raster keeps the runtime its device buffer
+/// belongs to.
+#[derive(Clone)]
 pub struct RuntimeContext {
-    pub(crate) client: Option<Client>,
+    client: Option<Client>,
+    transfers: Arc<Transfers>,
+}
+#[derive(Default)]
+struct Transfers {
+    uploads: AtomicUsize,
+    downloads: AtomicUsize,
 }
 
 impl RuntimeContext {
@@ -44,17 +62,36 @@ impl RuntimeContext {
     }
 
     pub fn host() -> Self {
-        Self { client: None }
+        Self { client: None, transfers: Default::default() }
     }
 
     /// Adopt an explicitly initialized compute client. Device identity belongs
-    /// to this context; port buffers are allocated by its evaluator.
+    /// to this context and its clones.
     pub fn from_client(client: Client) -> Self {
-        Self { client: Some(client) }
+        Self { client: Some(client), transfers: Default::default() }
     }
 
-    pub(crate) fn client(&self) -> Result<&Client> {
+    pub fn client(&self) -> Result<&Client> {
         self.client.as_ref().ok_or_else(|| Error::Runtime("no compute runtime is bound".into()))
+    }
+
+    /// Image uploads and downloads on this runtime so far. Constants and
+    /// scratch are not counted.
+    pub(crate) fn transfers(&self) -> (usize, usize) {
+        (self.transfers.uploads.load(Relaxed), self.transfers.downloads.load(Relaxed))
+    }
+
+    pub(crate) fn upload(&self, bytes: Bytes) -> Result<Handle> {
+        let handle = self.client()?.create(bytes);
+        self.transfers.uploads.fetch_add(1, Relaxed);
+        Ok(handle)
+    }
+
+    /// Waits for the queued work that writes `handle`.
+    pub(crate) fn download(&self, handle: Handle) -> Result<Bytes> {
+        let bytes = self.client()?.read_one(handle).map_err(|e| Error::Runtime(e.to_string()))?;
+        self.transfers.downloads.fetch_add(1, Relaxed);
+        Ok(bytes)
     }
 
     pub(crate) fn finish(&self) -> Result<()> {
@@ -71,9 +108,9 @@ pub(crate) fn dispatch_dims(elements: usize) -> (CubeCount, CubeDim) {
     (CubeCount::Static(x as u32, groups.div_ceil(x) as u32, 1), CubeDim::new_1d(256))
 }
 
-/// Dispatch and scratch access supplied by evaluation. Nodes use the client to
-/// launch kernels; evaluator-owned port transfers are a convention, not a
-/// restriction on CubeCL's client API.
+/// Dispatch and device allocation supplied by evaluation. Nodes use the client
+/// to launch kernels; image transfers go through [`crate::image::Raster`], so
+/// they are counted.
 pub struct KernelContext<'a> {
     pub global: &'a GlobalContext,
     pub(crate) runtime: &'a RuntimeContext,
@@ -84,33 +121,33 @@ impl<'a> KernelContext<'a> {
     pub fn new(global: &'a GlobalContext, runtime: &'a RuntimeContext) -> Self {
         Self { global, runtime }
     }
-    #[doc(hidden)]
-    pub fn allocate<P: crate::ports::Port>(
-        &self,
-        desc: &<P::Payload as crate::payload::Payload>::Desc,
-    ) -> Result<P::Storage> {
-        P::allocate(desc, self.runtime)
+
+    pub fn client(&self) -> Result<&'a Client> {
+        self.runtime.client()
     }
 
-    pub fn client(&self) -> Result<&Client> {
-        self.runtime.client()
+    /// Uninitialized device storage for one `P` described by `desc`, for
+    /// samples a node computes outside its outputs (a reduced input) or a
+    /// frontend computes outside evaluation. Wrap it with
+    /// [`Raster::from_device`](crate::image::Raster::from_device) to read it back.
+    pub fn device_buffer<P: DeviceLayout>(&self, desc: &P::Desc) -> Result<DeviceBuffer<P>> {
+        Ok(DeviceBuffer::new(self.client()?.empty(P::byte_len(desc))))
     }
 
     /// Per-invocation constants a kernel reads, such as a matrix flattened from
     /// a host payload. Like scratch, they have no port meaning.
-    pub fn constants(&self, values: &[f32]) -> Result<crate::payload::DeviceBuffer<()>> {
-        let bytes = cubecl::bytes::Bytes::from_elems(values.to_vec());
-        Ok(crate::payload::DeviceBuffer::new(self.client()?.create(bytes)))
+    pub fn constants(&self, values: &[f32]) -> Result<DeviceBuffer<()>> {
+        let bytes = Bytes::from_elems(values.to_vec());
+        Ok(DeviceBuffer::new(self.client()?.create(bytes)))
     }
 
     /// Algorithm-local scratch for 32-bit scalars (f32 or u32), with no port
     /// meaning. Kernels must initialize each element before reading it.
-    pub fn scratch_32(&self, elements: usize) -> Result<crate::payload::DeviceBuffer<()>> {
+    pub fn scratch_32(&self, elements: usize) -> Result<DeviceBuffer<()>> {
         let bytes = elements
             .checked_mul(4)
             .filter(|&n| n > 0)
             .ok_or_else(|| Error::Runtime("invalid scratch extent".into()))?;
-        let handle = self.client()?.empty(bytes);
-        Ok(crate::payload::DeviceBuffer::new(handle))
+        Ok(DeviceBuffer::new(self.client()?.empty(bytes)))
     }
 }

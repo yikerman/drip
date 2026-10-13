@@ -37,24 +37,24 @@ fn total_balance(image: &BayerDesc, metadata: &drip_raw::Metadata) -> Result<[f3
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Device<Bayer>>,
-    metadata: Read<'_, Cpu<CaptureMetadata>>,
-    output: Write<'_, Device<Bayer>>,
-    levels: Write<'_, Cpu<BayerLevels>>,
+    image: Read<'_, Bayer>,
+    metadata: Read<'_, CaptureMetadata>,
+    output: Write<'_, Bayer>,
+    mut levels: Write<'_, BayerLevels>,
 ) -> Result<()> {
-    let m = metadata.data;
+    let m = metadata.data.host()?;
     let clipping = camera::site_levels(m)?;
     let total = camera::sites(m, total_balance(image.desc, m)?);
-    *levels.data = std::array::from_fn(|i| clipping[i] * total[i]);
+    *levels.host() = std::array::from_fn(|i| clipping[i] * total[i]);
     let gains = ctx.constants(&camera::sites(m, camera::as_shot_balance(m)?))?;
     let (count, dim) = dispatch_dims(image.desc.extent.pixels());
     kernel::bayer_gains::launch(
         ctx.client()?,
         count,
         dim,
-        image.data.argument(),
+        image.data.device(ctx)?.argument(),
         gains.argument(),
-        output.data.argument(),
+        output.device(ctx)?.argument(),
         image.desc.extent.width as usize,
     );
     Ok(())

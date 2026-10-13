@@ -54,7 +54,9 @@ Settled with the user on 2026-10-11 after a review against
   Files are assumed not to change, so the cache does not change the node's
   outputs; it holds file contents, not intermediate results. Graph snapshots
   share it; a parameter edit admits a new node, which reads again. To pick up a
-  changed file, choose it again.
+  changed file, choose it again. Each evaluation receives the loaded host
+  samples in a fresh raster (2026-10-13), so a device upload of them belongs to
+  that evaluation and is not retained with the node.
 - **Decided:** One sequential queue with one evaluator runs previews, export
   and auto exposure. Edits read no files; project open reads only the project
   JSON. A preview or an action is a `Demand`: a graph snapshot forced under one
@@ -76,10 +78,20 @@ Settled with the user on 2026-10-11 after a review against
   same space, so an ICC profile near Rec.709 is a different space.
 - **Decided:** `Payload { NAME, Desc, Host, validate, check, allocate }`. The
   subtrait `DeviceLayout` (`byte_len`, `encode`, `decode`) marks payloads a
-  kernel reads; `Device<P: DeviceLayout>` and `Cpu<P>` are port placements, so
-  a device port of a host-only payload does not compile. Transfers use the
-  device-side port's functions. Structured data stays on the CPU; nodes flatten
-  the numbers a kernel needs into per-invocation constants.
+  kernel reads. Structured data stays on the CPU; nodes flatten the numbers a
+  kernel needs into per-invocation constants.
+- **Decided (2026-10-13):** Ports name payloads; residency left node
+  signatures. An edge carries an `Image`, today always a `Raster`: a
+  description with at most one host and one device representation, the
+  missing one made once on request (`data.host()`, `data.device(ctx)`) and
+  counted on the runtime. `device` exists only for `DeviceLayout` payloads, so
+  a device read of a host-only payload does not compile. A `Write` is
+  materialized where the node writes it (`host()` or `device(ctx)`, one of
+  the two). This replaces the `Cpu<P>`/`Device<P>` placements, whose
+  evaluator transferred on the device side of each edge. Transfers between
+  nodes are unchanged; `evaluate` returns the result where its node produced
+  it, and `Statistics` counts transfers during the call. It supersedes the [TYPE_SYSTEM](TYPE_SYSTEM.md) principle that
+  placement is known at connect time: placement is now known when a node runs.
 - **Decided:** Payloads: `Rgb` and `Bayer` (`HostBuffer` storage),
   `BayerLevels` (`[f32; 4]`) and host-only `CaptureMetadata`, whose `Desc` is
   the shared `Arc` of the decoded facts. Samples are linear; there is no scale
@@ -90,7 +102,7 @@ Settled with the user on 2026-10-11 after a review against
   `BayerDesc { extent, phase, response }`. Applying gains to balanced data
   composes the balance. `Display` impls supply every interpretation label.
 - **Decided:** Requirements are port type arguments,
-  `Read<'_, Device<Rgb>, Rec2020>`, defaulting to `Any`; on `Write` they are
+  `Read<'_, Rgb, Rec2020>`, defaulting to `Any`; on `Write` they are
   guarantees checked on contract output. The checker, help and canvas labels
   read the same declaration.
 
@@ -104,12 +116,13 @@ Settled with the user on 2026-10-11 after a review against
   `fn(&KernelContext, &Params, Read..., Write...) -> Result<()>`, with an empty
   body for views and actions. Sources: `fn(&Params, Load<'_, P>...)`, run once
   when first forced; `Load::set` validates at the boundary.
-- **Decided (2026-10-12):** An output may be `Forward` instead of `Write`: the
-  node sets it from storage it holds, typically an input's allocation shared
-  with `DeviceBuffer::share_as`, under the contract's new description.
-  Published storage is never written again, so sharing keeps nodes pure. The
-  adapter checks forwarded and written outputs alike; device storage must
-  match its description's byte length.
+- **Decided (2026-10-13):** An output may be `Forward` instead of `Write`: the
+  node sets it from a raster it holds, typically an input, with
+  `Forward::set`, which shares every existing representation under the
+  contract's new description (`Raster::share_as`). Published rasters are never
+  written again, so sharing keeps nodes pure. The byte length of both
+  descriptions must agree; written outputs are checked against their
+  description too.
 - **Decided:** Other files a node names (output ICC profiles in Export TIFF and
   Preview proofing) are assets: `#[node(assets)]` with `impl Assets for Params`.
   Actions and preparations receive the admitted node and its assets.
@@ -257,9 +270,16 @@ Settled with the user on 2026-10-11 after a review against
   evaluation fuses segments between materialization points, derives regions
   and preview scale from shapes, and memoizes by content hash with a disk
   tier for expensive nodes. Research, routes and experiments in
-  [COMPUTE_MODEL](COMPUTE_MODEL.md). This questions the placement-typed
-  ports, the demosaic-internal reduction, the no-cache requirement and the
-  free-form contracts above.
+  [COMPUTE_MODEL](COMPUTE_MODEL.md). This questions the demosaic-internal
+  reduction, the no-cache requirement and the free-form contracts above. The
+  proposal's eight-step migration is under way.
+- **Decided (2026-10-13):** Step 1 of that migration. `Kind::shape` declares
+  how evaluation runs a kind: `Shape::Kernel` (the node's function, every
+  evaluation) or `Shape::Source` (loaded once). Every existing node is one of
+  the two; later shapes are added beside them. A run's values live in a
+  `Store` keyed by output port with use counts; step 4 grows it into the memo.
+  `image.rs` (`Image`, `Raster`) and `store.rs` hold the value model; nodes
+  reach values through their ports.
 - **Decided:** CubeCL computation with one kernel source per algorithm across
   runtimes; wgpu presentation and color management stay frontend-owned.
   `DRIP_BACKEND` selects explicitly and never falls back (crate README).

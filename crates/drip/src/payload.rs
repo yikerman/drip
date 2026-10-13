@@ -1,5 +1,7 @@
 //! Logical payload families and their concrete host/device representations.
-use crate::{Result, runtime::RuntimeContext};
+//! A payload names its Rust host type and description; `DeviceLayout` adds
+//! the byte layout kernels read. Residency and transfers live in `image`.
+use crate::Result;
 use cubecl::{bytes::Bytes, prelude::BufferArg, server::Handle};
 use std::{fmt::Debug, marker::PhantomData};
 mod host;
@@ -28,28 +30,6 @@ pub trait DeviceLayout: Payload {
     fn decode(desc: &Self::Desc, bytes: Bytes) -> Result<Self::Host>;
 }
 
-pub fn upload<P: DeviceLayout>(
-    desc: &P::Desc,
-    host: &P::Host,
-    runtime: &RuntimeContext,
-) -> Result<DeviceBuffer<P>> {
-    Ok(DeviceBuffer::new(runtime.client()?.create(P::encode(desc, host)?)))
-}
-
-pub fn download<P: DeviceLayout>(
-    desc: &P::Desc,
-    buffer: &DeviceBuffer<P>,
-    runtime: &RuntimeContext,
-) -> Result<P::Host> {
-    let bytes = runtime
-        .client()?
-        .read_one(buffer.handle.clone())
-        .map_err(|e| crate::Error::Runtime(e.to_string()))?;
-    let host = P::decode(desc, bytes)?;
-    P::check(desc, &host)?;
-    Ok(host)
-}
-
 /// A CubeCL allocation tagged with its logical payload (or `()` for scratch
 /// and per-invocation constants). Clones retain the same allocation.
 pub struct DeviceBuffer<P> {
@@ -64,12 +44,6 @@ impl<P> Clone for DeviceBuffer<P> {
 impl<P> DeviceBuffer<P> {
     pub(crate) fn new(handle: Handle) -> Self {
         Self { handle, marker: PhantomData }
-    }
-    /// The same allocation read as payload `Q`, for forwarding an input under
-    /// a new description. Publication checks the byte length against `Q`'s
-    /// description; the element layout is the caller's claim.
-    pub fn share_as<Q>(&self) -> DeviceBuffer<Q> {
-        DeviceBuffer::new(self.handle.clone())
     }
     pub fn argument(&self) -> BufferArg {
         // SAFETY: payload layouts and scratch allocators determine the byte layout.

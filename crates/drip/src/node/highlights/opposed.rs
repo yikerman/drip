@@ -16,10 +16,9 @@
 use crate::{
     Result,
     node::{
-        data::{Bayer, DeviceBuffer},
+        data::{Bayer, BayerDesc, DeviceBuffer},
         shared_kernel::site,
     },
-    ports::{Device, Read},
     runtime::{KernelContext, dispatch_dims},
 };
 use cubecl::prelude::*;
@@ -37,12 +36,13 @@ impl Partial {
 
 pub(super) fn process(
     ctx: &KernelContext<'_>,
-    image: &Read<'_, Device<Bayer>>,
+    desc: &BayerDesc,
+    input: &DeviceBuffer<Bayer>,
     clips: [f32; 4],
-    output: &mut DeviceBuffer<Bayer>,
+    output: &DeviceBuffer<Bayer>,
 ) -> Result<()> {
-    let (w, h) = (image.desc.extent.width as usize, image.desc.extent.height as usize);
-    let phase = image.desc.phase as usize;
+    let (w, h) = (desc.extent.width as usize, desc.extent.height as usize);
+    let phase = desc.phase as usize;
     let (mw, mh) = (w.div_ceil(3), h.div_ceil(3));
     // Masks hold three channel bits per u32 word.
     let mask = ctx.scratch_32(mw * mh)?;
@@ -53,7 +53,7 @@ pub(super) fn process(
         client,
         count.clone(),
         dim,
-        image.data.argument(),
+        input.argument(),
         mask.argument(),
         w,
         h,
@@ -68,14 +68,14 @@ pub(super) fn process(
 
     // Each invocation owns one fixed 256-sample block. Subsequent passes reduce
     // 256 partials at a time, with no atomics or cross-workgroup communication.
-    let mut groups = image.desc.extent.pixels().div_ceil(256);
+    let mut groups = desc.extent.pixels().div_ceil(256);
     let mut partial = Partial::allocate(ctx, groups)?;
     let (count, dim) = dispatch_dims(groups);
     chrominance::launch(
         client,
         count,
         dim,
-        image.data.argument(),
+        input.argument(),
         near.argument(),
         partial.sums.argument(),
         partial.counts.argument(),
@@ -105,12 +105,12 @@ pub(super) fn process(
         partial = next;
         groups = next_groups;
     }
-    let (count, dim) = dispatch_dims(image.desc.extent.pixels());
+    let (count, dim) = dispatch_dims(desc.extent.pixels());
     reconstruct::launch(
         client,
         count,
         dim,
-        image.data.argument(),
+        input.argument(),
         partial.sums.argument(),
         partial.counts.argument(),
         output.argument(),

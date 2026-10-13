@@ -23,8 +23,9 @@ fn bayer_contract(_: &GlobalContext, p: &Settings, input: &BayerDesc) -> Result<
 pub fn compute(
     ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Device<Bayer>>,
-    output: Write<'_, Device<Bayer>>,
+    image: Read<'_, Bayer>,
+    output: Write<'_, Bayer>,
 ) -> Result<()> {
-    dispatch_bayer(ctx, &image, output.desc, output.data, p.factor as u32)
+    let input = (image.desc, image.data.device(ctx)?);
+    dispatch_bayer(ctx, input, (output.desc, output.device(ctx)?), p.factor as u32)
 }

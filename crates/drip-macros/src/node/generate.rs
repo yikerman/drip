@@ -21,7 +21,7 @@ pub(super) fn node(
     let ports = ports(signature, &vis);
     let inputs = inputs(signature, &vis);
     let (contract, run) = if signature.source {
-        (loaded_contract(), loaded_run())
+        (loaded_contract(), loaded_run(signature))
     } else {
         (contract(options, signature), run(name, signature))
     };
@@ -30,15 +30,14 @@ pub(super) fn node(
     // parameter edit admits a new node, which reads them again.
     let (definition, admission) = if signature.source {
         let load = load(name, signature);
-        let values = quote!([(::drip::ports::Description, ::drip::ports::Data)]);
         (
             quote! {
                 #vis struct Definition {
                     #vis parameters: #parameters,
-                    loaded: ::std::sync::OnceLock<::drip::Result<Vec<(::drip::ports::Description, ::drip::ports::Data)>>>,
+                    loaded: ::std::sync::OnceLock<::drip::Result<Vec<::drip::image::Image>>>,
                 }
                 impl Definition {
-                    fn loaded(&self) -> ::drip::Result<&#values> {
+                    fn loaded(&self) -> ::drip::Result<&[::drip::image::Image]> {
                         let loaded = self.loaded.get_or_init(|| load(&self.parameters));
                         loaded.as_deref().map_err(Clone::clone)
                     }
@@ -116,11 +115,6 @@ pub(super) fn node(
     }
 }
 
-fn payload(port: &Port) -> TokenStream {
-    let ty = &port.ty;
-    quote!(<#ty as ::drip::ports::Port>::Payload)
-}
-
 /// The static description: metadata, schema, defaults and port declarations.
 fn kind(
     function: &syn::ItemFn,
@@ -136,6 +130,11 @@ fn kind(
     let parameters = &signature.parameters;
     let inputs = signature.inputs().map(port_spec);
     let outputs = signature.outputs().map(port_spec);
+    let shape = if signature.source {
+        quote!(::drip::definition::Shape::Source)
+    } else {
+        quote!(::drip::definition::Shape::Kernel)
+    };
     let action = match &options.action {
         None => quote!(None),
         Some(path) => {
@@ -165,6 +164,7 @@ fn kind(
             build: |json| definition(::drip::param::decode(json)?),
             inputs: &[#(#inputs),*],
             outputs: &[#(#outputs),*],
+            shape: #shape,
             action: #action,
         };
     }
@@ -172,9 +172,9 @@ fn kind(
 
 fn port_spec(port: &Port) -> TokenStream {
     let name = port.name.to_string();
-    let ty = &port.ty;
+    let payload = &port.payload;
     let requirement = &port.requirement;
-    let spec = quote!(::drip::ports::PortSpec::of::<#ty, #requirement>(#name));
+    let spec = quote!(::drip::ports::PortSpec::of::<#payload, #requirement>(#name));
     if port.optional { quote!(#spec.optional()) } else { spec }
 }
 
@@ -184,7 +184,7 @@ fn ports(signature: &Signature, vis: &TokenStream) -> TokenStream {
     for port in signature.inputs().chain(signature.outputs()) {
         let name = &port.name;
         let index = port.index;
-        let payload = payload(port);
+        let payload = &port.payload;
         let handle = match port.direction {
             Direction::Input => quote!(::drip::ports::Input),
             Direction::Output => quote!(::drip::ports::Output),
@@ -214,9 +214,9 @@ fn inputs(signature: &Signature, vis: &TokenStream) -> TokenStream {
     for port in signature.inputs() {
         let name = &port.name;
         let index = port.index;
-        let ty = &port.ty;
+        let payload = &port.payload;
         let requirement = &port.requirement;
-        let read = quote!(::drip::ports::Read<'a, #ty, #requirement>);
+        let read = quote!(::drip::ports::Read<'a, #payload, #requirement>);
         let bind = quote!(::drip::ports::Read::bind(inputs[#index].as_ref()));
         if port.optional {
             fields.push(quote!(#vis #name: Option<#read>));
@@ -239,9 +239,7 @@ fn inputs(signature: &Signature, vis: &TokenStream) -> TokenStream {
             const KIND: &'static ::drip::definition::Kind = &KIND;
             type Parameters = #parameters;
             type Inputs<'a> = Inputs<'a>;
-            fn bind(
-                inputs: &[Option<(::drip::ports::Description, ::drip::ports::Data)>],
-            ) -> ::drip::Result<Inputs<'_>> {
+            fn bind(inputs: &[Option<::drip::image::Image>]) -> ::drip::Result<Inputs<'_>> {
                 Ok(Inputs { #(#binds,)* _lifetime: ::std::marker::PhantomData })
             }
         }
@@ -255,10 +253,10 @@ fn contract(options: &Options, signature: &Signature) -> TokenStream {
         let local = &port.name;
         let name = local.to_string();
         let index = port.index;
-        let ty = &port.ty;
+        let payload = &port.payload;
         let requirement = &port.requirement;
         let check =
-            quote!(::drip::ports::input::<#ty, #requirement>(#name, inputs[#index].as_ref())?);
+            quote!(::drip::ports::input::<#payload, #requirement>(#name, inputs[#index].as_ref())?);
         checks.push(if port.optional {
             quote!(let #local = #check;)
         } else {
@@ -271,9 +269,9 @@ fn contract(options: &Options, signature: &Signature) -> TokenStream {
     let outputs = signature.outputs().map(|port| {
         let name = port.name.to_string();
         let index = syn::Index::from(port.index);
-        let ty = &port.ty;
+        let payload = &port.payload;
         let requirement = &port.requirement;
-        quote!(::drip::ports::output::<#ty, #requirement>(#name, described.#index)?)
+        quote!(::drip::ports::output::<#payload, #requirement>(#name, described.#index)?)
     });
     let call = match &options.contract {
         Some(contract) => {
@@ -285,8 +283,8 @@ fn contract(options: &Options, signature: &Signature) -> TokenStream {
         fn contract(
             &self,
             global: &::drip::runtime::GlobalContext,
-            inputs: &[Option<::drip::ports::Description>],
-        ) -> ::drip::Result<Vec<::drip::ports::Description>> {
+            inputs: &[Option<::drip::image::Description>],
+        ) -> ::drip::Result<Vec<::drip::image::Description>> {
             #(#checks)*
             #call
             Ok(vec![#(#outputs),*])
@@ -295,7 +293,7 @@ fn contract(options: &Options, signature: &Signature) -> TokenStream {
 }
 
 fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
-    let mut allocations = Vec::new();
+    let mut slots = Vec::new();
     let mut arguments = Vec::new();
     let mut results = Vec::new();
     for port in &signature.ports {
@@ -304,20 +302,20 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
             Direction::Input => arguments.push(quote!(inputs.#local)),
             Direction::Output => {
                 let index = port.index;
-                let ty = &port.ty;
+                let payload = &port.payload;
                 let requirement = &port.requirement;
                 let slot = format_ident!("output_{index}");
-                if port.forward {
-                    allocations.push(quote! {
-                        let mut #slot = ::drip::ports::ForwardSlot::<#ty>::new(&outputs[#index]);
-                    });
-                    arguments.push(quote!(#slot.forward::<#requirement>()));
+                let (kind, view) = if port.forward {
+                    (quote!(ForwardSlot), quote!(forward))
                 } else {
-                    allocations.push(quote! {
-                        let mut #slot = ::drip::ports::OutputSlot::<#ty>::allocate(&outputs[#index], context)?;
-                    });
-                    arguments.push(quote!(#slot.write::<#requirement>()));
-                }
+                    (quote!(OutputSlot), quote!(write))
+                };
+                slots.push(quote! {
+                    let mut #slot = ::drip::ports::#kind::<#payload>::new(
+                        ::drip::ports::typed(&outputs[#index]),
+                    );
+                });
+                arguments.push(quote!(#slot.#view::<#requirement>()));
                 results.push(quote!(#slot.finish()?));
             }
         }
@@ -326,11 +324,11 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
         fn run(
             &self,
             context: &::drip::runtime::KernelContext<'_>,
-            inputs: &[Option<(::drip::ports::Description, ::drip::ports::Data)>],
-            outputs: &[::drip::ports::Description],
-        ) -> ::drip::Result<Vec<::drip::ports::Data>> {
+            inputs: &[Option<::drip::image::Image>],
+            outputs: &[::drip::image::Description],
+        ) -> ::drip::Result<Vec<::drip::image::Image>> {
             let inputs = <Definition as ::drip::definition::Typed>::bind(inputs)?;
-            #(#allocations)*
+            #(#slots)*
             super::#name(context, &self.parameters, #(#arguments),*)?;
             Ok(vec![#(#results),*])
         }
@@ -344,17 +342,14 @@ fn load(name: &syn::Ident, signature: &Signature) -> TokenStream {
         signature.outputs().map(|port| format_ident!("slot_{}", port.index)).collect();
     let names = signature.outputs().map(|port| port.name.to_string());
     let loads = signature.outputs().zip(&slots).map(|(port, slot)| {
-        let payload = payload(port);
+        let payload = &port.payload;
         quote!(::drip::ports::Load::<#payload>::new(#slot))
     });
     let count = slots.len();
     let parameters = &signature.parameters;
     quote! {
-        fn load(
-            parameters: &#parameters,
-        ) -> ::drip::Result<Vec<(::drip::ports::Description, ::drip::ports::Data)>> {
-            let mut slots: [Option<(::drip::ports::Description, ::drip::ports::Data)>; #count] =
-                ::std::array::from_fn(|_| None);
+        fn load(parameters: &#parameters) -> ::drip::Result<Vec<::drip::image::Image>> {
+            let mut slots: [Option<::drip::image::Image>; #count] = ::std::array::from_fn(|_| None);
             let [#(#slots),*] = &mut slots;
             super::#name(parameters, #(#loads),*)?;
             slots
@@ -373,22 +368,34 @@ fn loaded_contract() -> TokenStream {
         fn contract(
             &self,
             _: &::drip::runtime::GlobalContext,
-            _: &[Option<::drip::ports::Description>],
-        ) -> ::drip::Result<Vec<::drip::ports::Description>> {
-            Ok(self.loaded()?.iter().map(|(desc, _)| desc.clone()).collect())
+            _: &[Option<::drip::image::Description>],
+        ) -> ::drip::Result<Vec<::drip::image::Description>> {
+            Ok(self.loaded()?.iter().map(|image| image.desc().clone()).collect())
         }
     }
 }
 
-fn loaded_run() -> TokenStream {
+/// Each evaluation receives the loaded host samples in a fresh raster, so a
+/// device copy is the evaluation's, like any computed output.
+fn loaded_run(signature: &Signature) -> TokenStream {
+    let images = signature.outputs().map(|port| {
+        let index = port.index;
+        let payload = &port.payload;
+        quote! {
+            ::drip::image::Image::from(
+                loaded[#index].downcast::<#payload>().expect("loaded payload").share_host()?,
+            )
+        }
+    });
     quote! {
         fn run(
             &self,
             _: &::drip::runtime::KernelContext<'_>,
-            _: &[Option<(::drip::ports::Description, ::drip::ports::Data)>],
-            _: &[::drip::ports::Description],
-        ) -> ::drip::Result<Vec<::drip::ports::Data>> {
-            Ok(self.loaded()?.iter().map(|(_, data)| data.clone()).collect())
+            _: &[Option<::drip::image::Image>],
+            _: &[::drip::image::Description],
+        ) -> ::drip::Result<Vec<::drip::image::Image>> {
+            let loaded = self.loaded()?;
+            Ok(vec![#(#images),*])
         }
     }
 }

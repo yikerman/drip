@@ -1,8 +1,8 @@
 //! Concrete port values, CPU contracts, and demand-driven CubeCL execution.
 //!
 //! Graph edits check ports only. Evaluation runs the contracts of the nodes it
-//! forces, supplies their declared CPU/device representations and allocates
-//! fresh outputs.
+//! forces and hands each node its input images; a node asks them for host or
+//! device samples and writes its outputs where it computes them.
 //! Passing a contract establishes declared compatibility, not physical accuracy.
 
 extern crate self as drip;
@@ -10,6 +10,7 @@ extern crate self as drip;
 pub mod definition;
 pub mod eval;
 pub mod graph;
+pub mod image;
 pub mod node;
 pub mod param;
 pub mod payload;
@@ -17,6 +18,7 @@ pub mod ports;
 pub mod project;
 pub mod registry;
 pub mod runtime;
+mod store;
 
 pub use drip_macros::{Choice, Parameters, node};
 pub use error::{Error, Result};

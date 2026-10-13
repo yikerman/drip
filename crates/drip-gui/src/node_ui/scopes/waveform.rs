@@ -28,18 +28,14 @@ pub struct Settings {
 /// color conversion; camera RGB shows native channels. Exposure is measured
 /// relative to sample value 1; the density scale controls bin brightness.
 #[drip::node(id = "waveform", name = "Waveform", tags = [tag::VIEW, tag::SCOPE])]
-pub fn observe(
-    _: &KernelContext<'_>,
-    _: &Settings,
-    _image: Read<'_, Device<Rgb>>,
-) -> drip::Result<()> {
+pub fn observe(_: &KernelContext<'_>, _: &Settings, _image: Read<'_, Rgb>) -> drip::Result<()> {
     Ok(())
 }
 impl crate::node_ui::GuiNode for observe::Definition {
     type Presentation = Arc<Scope>;
     const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|node, inputs, ctx| {
         let p = &node.parameters;
-        waveform(&p.range, p.scale, &DeviceRgb::new(&inputs.image), ctx)
+        waveform(&p.range, p.scale, &DeviceRgb::new(&inputs.image, ctx)?, ctx)
     });
 }
 

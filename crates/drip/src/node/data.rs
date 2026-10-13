@@ -1,6 +1,9 @@
 //! Concrete image and calibration payloads shared by processing nodes.
-pub use crate::payload::{DeviceBuffer, DeviceLayout, HostBuffer, Payload};
 use crate::{Error, Result, node::color, payload::decode_array, ports::Requirement};
+pub use crate::{
+    image::Raster,
+    payload::{DeviceBuffer, DeviceLayout, HostBuffer, Payload},
+};
 use cubecl::bytes::Bytes;
 use std::{fmt, sync::Arc};
 

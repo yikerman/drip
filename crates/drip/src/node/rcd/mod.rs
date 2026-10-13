@@ -24,12 +24,12 @@ fn rcd_contract(global: &GlobalContext, _: &(), image: &BayerDesc) -> Result<(Rg
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Device<Bayer>>,
-    output: Write<'_, Device<Rgb>, CameraRgb>,
+    image: Read<'_, Bayer>,
+    output: Write<'_, Rgb, CameraRgb>,
 ) -> Result<()> {
-    let reduced = reduce::for_demosaic(ctx, &image)?;
+    let reduced = reduce::for_demosaic(ctx, image.desc, image.data.device(ctx)?)?;
     let image = match &reduced {
-        Some((desc, data)) => Read::new(desc, data),
+        Some(raster) => Read::new(raster),
         None => image,
     };
 
@@ -46,7 +46,7 @@ pub fn compute(
         client,
         count.clone(),
         dim,
-        image.data.argument(),
+        image.data.device(ctx)?.argument(),
         vh.argument(),
         low.argument(),
         p.argument(),
@@ -60,7 +60,7 @@ pub fn compute(
         client,
         count.clone(),
         dim,
-        image.data.argument(),
+        image.data.device(ctx)?.argument(),
         vh.argument(),
         low.argument(),
         rgb.argument(),
@@ -101,10 +101,10 @@ pub fn compute(
         client,
         count,
         dim,
-        image.data.argument(),
+        image.data.device(ctx)?.argument(),
         other.argument(),
         vh.argument(),
-        output.data.argument(),
+        output.device(ctx)?.argument(),
         w,
         h,
         phase,

@@ -2,7 +2,6 @@
 use crate::{
     Error, Result,
     node::data::*,
-    ports::*,
     runtime::{GlobalContext, KernelContext},
 };
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
@@ -33,9 +32,8 @@ pub(super) fn bayer_extent(input: &Extent, factor: u32) -> Extent {
 
 pub(super) fn dispatch_bayer(
     ctx: &KernelContext<'_>,
-    input: &Read<'_, Device<Bayer>>,
-    desc: &BayerDesc,
-    output: &DeviceBuffer<Bayer>,
+    (input_desc, input): (&BayerDesc, &DeviceBuffer<Bayer>),
+    (desc, output): (&BayerDesc, &DeviceBuffer<Bayer>),
     factor: u32,
 ) -> Result<()> {
     let (count, dim) = crate::runtime::dispatch_dims(desc.extent.pixels());
@@ -43,10 +41,10 @@ pub(super) fn dispatch_bayer(
         ctx.client()?,
         count,
         dim,
-        input.data.argument(),
+        input.argument(),
         output.argument(),
-        input.desc.extent.width as usize,
-        input.desc.extent.height as usize,
+        input_desc.extent.width as usize,
+        input_desc.extent.height as usize,
         desc.extent.width as usize,
         factor as usize,
     );
@@ -57,16 +55,17 @@ pub(super) fn dispatch_bayer(
 /// operation or port transfer. The same kernel serves the explicit reducer.
 pub(super) fn for_demosaic(
     ctx: &KernelContext<'_>,
-    input: &Read<'_, Device<Bayer>>,
-) -> Result<Option<(BayerDesc, DeviceBuffer<Bayer>)>> {
-    let extent = demosaic_extent(ctx.global, &input.desc.extent);
-    if extent == input.desc.extent {
+    input_desc: &BayerDesc,
+    input: &DeviceBuffer<Bayer>,
+) -> Result<Option<Raster<Bayer>>> {
+    let extent = demosaic_extent(ctx.global, &input_desc.extent);
+    if extent == input_desc.extent {
         return Ok(None);
     }
-    let desc = BayerDesc { extent, ..input.desc.clone() };
-    let data = ctx.allocate::<Device<Bayer>>(&desc)?;
-    dispatch_bayer(ctx, input, &desc, &data, ctx.global.scale)?;
-    Ok(Some((desc, data)))
+    let desc = BayerDesc { extent, ..input_desc.clone() };
+    let output = ctx.device_buffer::<Bayer>(&desc)?;
+    dispatch_bayer(ctx, (input_desc, input), (&desc, &output), ctx.global.scale)?;
+    Raster::from_device(desc, output, ctx).map(Some)
 }
 
 pub(super) fn demosaic_extent(global: &GlobalContext, input: &Extent) -> Extent {

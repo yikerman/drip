@@ -26,12 +26,12 @@ fn bin2x2_contract(global: &GlobalContext, _: &(), image: &BayerDesc) -> Result<
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Device<Bayer>>,
-    output: Write<'_, Device<Rgb>, CameraRgb>,
+    image: Read<'_, Bayer>,
+    output: Write<'_, Rgb, CameraRgb>,
 ) -> Result<()> {
-    let reduced = reduce::for_demosaic(ctx, &image)?;
+    let reduced = reduce::for_demosaic(ctx, image.desc, image.data.device(ctx)?)?;
     let image = match &reduced {
-        Some((desc, data)) => Read::new(desc, data),
+        Some(raster) => Read::new(raster),
         None => image,
     };
 
@@ -40,8 +40,8 @@ pub fn compute(
         ctx.client()?,
         count,
         dim,
-        image.data.argument(),
-        output.data.argument(),
+        image.data.device(ctx)?.argument(),
+        output.device(ctx)?.argument(),
         image.desc.extent.width as usize,
         image.desc.extent.height as usize,
         image.desc.phase as usize,

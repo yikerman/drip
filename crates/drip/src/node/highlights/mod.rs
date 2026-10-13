@@ -47,12 +47,14 @@ fn contract(
 pub fn reconstruct(
     ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Device<Bayer>>,
-    levels: Read<'_, Cpu<BayerLevels>>,
-    output: Write<'_, Device<Bayer>>,
+    image: Read<'_, Bayer>,
+    levels: Read<'_, BayerLevels>,
+    output: Write<'_, Bayer>,
 ) -> Result<()> {
-    if levels.data.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+    let levels = levels.data.host()?;
+    if levels.iter().any(|v| !v.is_finite() || *v <= 0.0) {
         return Err(Error::Contract("highlight levels must be finite and positive".into()));
     }
-    opposed::process(ctx, &image, levels.data.map(|v| v * p.threshold), output.data)
+    let clips = levels.map(|v| v * p.threshold);
+    opposed::process(ctx, image.desc, image.data.device(ctx)?, clips, output.device(ctx)?)
 }

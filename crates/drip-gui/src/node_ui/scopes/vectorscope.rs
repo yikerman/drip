@@ -21,11 +21,7 @@ const RADIUS: f32 = 0.5;
 /// are clipped for visualization; black has no chromaticity and is omitted.
 /// Density uses logarithmic counts.
 #[drip::node(id = "vectorscope", name = "Vectorscope", tags = [tag::VIEW, tag::SCOPE])]
-pub fn observe(
-    _: &KernelContext<'_>,
-    _: &(),
-    _image: Read<'_, Device<Rgb>, Rec2020>,
-) -> drip::Result<()> {
+pub fn observe(_: &KernelContext<'_>, _: &(), _image: Read<'_, Rgb, Rec2020>) -> drip::Result<()> {
     Ok(())
 }
 pub fn vectorscope(image: &DeviceRgb, ctx: &PrepareContext) -> Result<Arc<Scope>, KernelError> {
@@ -94,7 +90,7 @@ fn vector_counts(pixels: &[[f32; 3]], matrix: &color::Mat3) -> Vec<[u32; 3]> {
 impl crate::node_ui::GuiNode for observe::Definition {
     type Presentation = Arc<Scope>;
     const PREPARE: Option<crate::node_ui::Prepare<Self>> =
-        Some(|_, inputs, ctx| vectorscope(&DeviceRgb::new(&inputs.image), ctx));
+        Some(|_, inputs, ctx| vectorscope(&DeviceRgb::new(&inputs.image, ctx)?, ctx));
 }
 
 #[cfg(test)]

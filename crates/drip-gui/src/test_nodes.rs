@@ -5,7 +5,7 @@ use crate::node_ui::{
 };
 use drip::{
     node::data::{Coordinates, Extent, REC2020_D65, Rgb, RgbDesc},
-    ports::{Cpu, Read, Write},
+    ports::{Read, Write},
     runtime::KernelContext,
 };
 use serde::{Deserialize, Serialize};
@@ -35,8 +35,8 @@ fn source_contract(_: &drip::runtime::GlobalContext, _: &()) -> drip::Result<(Rg
     Ok((RgbDesc::new(Extent { width: 2, height: 2 }, Coordinates::Space(REC2020_D65)),))
 }
 #[drip::node(id="test-proof-source", name="display", contract=source_contract)]
-pub fn display(_: &KernelContext<'_>, _: &(), image: Write<'_, Cpu<Rgb>>) -> drip::Result<()> {
-    image.data.copy_from_slice(&PIXELS);
+pub fn display(_: &KernelContext<'_>, _: &(), mut image: Write<'_, Rgb>) -> drip::Result<()> {
+    image.host().copy_from_slice(&PIXELS);
     Ok(())
 }
 
@@ -133,11 +133,7 @@ fn sink_contract(
 }
 /// A frontend action that writes the first input pixel at full detail.
 #[drip::node(id="test-write", name="write", contract=sink_contract)]
-pub fn write(
-    _: &KernelContext<'_>,
-    _: &WriteKernel,
-    _image: Read<'_, Cpu<Rgb>>,
-) -> drip::Result<()> {
+pub fn write(_: &KernelContext<'_>, _: &WriteKernel, _image: Read<'_, Rgb>) -> drip::Result<()> {
     Ok(())
 }
 impl GuiNode for write::Definition {
@@ -146,7 +142,7 @@ impl GuiNode for write::Definition {
         name: "write",
         run: |node, inputs, ctx| {
             assert_eq!(ctx.global.scale, 1);
-            let image = inputs.image.data;
+            let image = inputs.image.data.host()?;
             std::fs::write(node.parameters.path.as_ref().unwrap(), format!("{:?}", image[0]))
                 .map_err(|e| drip::Error::Runtime(e.to_string()))?;
             Ok(None)

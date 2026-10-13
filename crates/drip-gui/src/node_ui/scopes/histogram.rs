@@ -43,18 +43,14 @@ pub struct Settings {
 /// RGB shows native channels. Exposure is measured relative to sample value 1;
 /// the density scale controls counts, not the exposure axis.
 #[drip::node(id = "histogram", name = "Histogram", tags = [tag::VIEW, tag::SCOPE])]
-pub fn observe(
-    _: &KernelContext<'_>,
-    _: &Settings,
-    _image: Read<'_, Device<Rgb>>,
-) -> drip::Result<()> {
+pub fn observe(_: &KernelContext<'_>, _: &Settings, _image: Read<'_, Rgb>) -> drip::Result<()> {
     Ok(())
 }
 impl crate::node_ui::GuiNode for observe::Definition {
     type Presentation = Arc<Histogram>;
     const PREPARE: Option<crate::node_ui::Prepare<Self>> = Some(|node, inputs, ctx| {
         let p = &node.parameters;
-        histogram(&p.range, p.scale, &DeviceRgb::new(&inputs.image), ctx)
+        histogram(&p.range, p.scale, &DeviceRgb::new(&inputs.image, ctx)?, ctx)
     });
 }
 

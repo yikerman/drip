@@ -2,6 +2,7 @@ use drip::{
     Error, Result,
     eval::{Evaluator, InputValues},
     graph::Dag,
+    image::Description,
     node,
     node::{color, data::*},
     ports::*,
@@ -49,10 +50,10 @@ fn copy_contract(_: &drip::runtime::GlobalContext, _: &(), i: &RgbDesc) -> Resul
 fn cpu_copy(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<Rgb>>,
-    output: Write<'_, Cpu<Rgb>>,
+    image: Read<'_, Rgb>,
+    mut output: Write<'_, Rgb>,
 ) -> Result<()> {
-    output.data.copy_from_slice(image.data);
+    output.host().copy_from_slice(image.data.host()?);
     Ok(())
 }
 
@@ -124,16 +125,16 @@ fn incomplete_nodes_do_not_make_unrelated_targets_unevaluable() {
     let source = image(&mut d);
     let incomplete = cpu_copy::add(&mut d, ()).unwrap();
     let eval = Evaluator::new(RuntimeContext::host());
-    assert!(eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), source).is_ok());
+    assert!(eval.evaluate::<Rgb>(&d, &Default::default(), source).is_ok());
     assert!(matches!(
-        eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), incomplete.output),
+        eval.evaluate::<Rgb>(&d, &Default::default(), incomplete.output),
         Err(Error::MissingInput { .. })
     ));
     let downstream = cpu_copy::add(&mut d, ()).unwrap();
     d.connect(incomplete.output, downstream.image).unwrap();
-    assert!(eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), downstream.output).is_err());
+    assert!(eval.evaluate::<Rgb>(&d, &Default::default(), downstream.output).is_err());
     d.connect(source, incomplete.image).unwrap();
-    assert!(eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), downstream.output).is_ok());
+    assert!(eval.evaluate::<Rgb>(&d, &Default::default(), downstream.output).is_ok());
 }
 #[test]
 fn rejects_cycles_occupancy_foreign_handles_and_wrong_directions() {
@@ -157,7 +158,7 @@ fn rejects_cycles_occupancy_foreign_handles_and_wrong_directions() {
     assert!(d.connect_ids(a.image.id(), b.output.id()).is_err());
     assert_eq!(
         Evaluator::new(RuntimeContext::host())
-            .evaluate::<Cpu<Rgb>>(&d, &Default::default(), b.output)
+            .evaluate::<Rgb>(&d, &Default::default(), b.output)
             .unwrap()
             .statistics
             .nodes,
@@ -203,10 +204,10 @@ fn relabel_contract(
 fn relabel(
     _: &KernelContext<'_>,
     _: &Relabel,
-    image: Read<'_, Cpu<Rgb>>,
-    output: Write<'_, Cpu<Rgb>>,
+    image: Read<'_, Rgb>,
+    mut output: Write<'_, Rgb>,
 ) -> Result<()> {
-    output.data.copy_from_slice(image.data);
+    output.host().copy_from_slice(image.data.host()?);
     Ok(())
 }
 /// Relabels on the device without copying: the output shares the input's
@@ -216,11 +217,10 @@ fn relabel(
 fn forward(
     _: &KernelContext<'_>,
     _: &Relabel,
-    image: Read<'_, Device<Rgb>>,
-    output: Forward<'_, Device<Rgb>>,
+    image: Read<'_, Rgb>,
+    output: Forward<'_, Rgb>,
 ) -> Result<()> {
-    output.set(image.data.share_as());
-    Ok(())
+    output.set(image.data)
 }
 fn forward_contract(
     global: &drip::runtime::GlobalContext,
@@ -254,10 +254,10 @@ fn forwarded_outputs(runtime: RuntimeContext) {
     d.connect(source, relabeled.image).unwrap();
     d.connect(source, mismatched.image).unwrap();
     let eval = Evaluator::new(runtime);
-    let output = eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), relabeled.output).unwrap();
+    let output = eval.evaluate::<Rgb>(&d, &Default::default(), relabeled.output).unwrap();
     assert_eq!(output.desc.coordinates, Coordinates::Space(REC2020_D65));
-    assert_eq!(&output.data[..], &[[0.1, -0.2, 2.0]; 2]);
-    let Err(error) = eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), mismatched.output) else {
+    assert_eq!(&output.data.host().unwrap()[..], &[[0.1, -0.2, 2.0]; 2]);
+    let Err(error) = eval.evaluate::<Rgb>(&d, &Default::default(), mismatched.output) else {
         panic!("a forward must match its description")
     };
     assert!(error.to_string().contains("RGB extent/storage mismatch"), "{error}");
@@ -272,9 +272,8 @@ fn parameter_edits_ignore_downstream_and_batch_edits_commit_together() {
     d.connect(source, a.image).unwrap();
     d.connect(a.output, b.image).unwrap();
     let eval = Evaluator::new(RuntimeContext::host());
-    let coordinates = |d: &Dag| {
-        eval.evaluate::<Cpu<Rgb>>(d, &Default::default(), a.output).unwrap().desc.coordinates
-    };
+    let coordinates =
+        |d: &Dag| eval.evaluate::<Rgb>(d, &Default::default(), a.output).unwrap().desc.coordinates;
     let relabeled = || relabel::definition(Relabel { camera: true });
     let occupied = d.edit(|e| {
         e.replace(a.node, relabeled()?)?;
@@ -302,13 +301,13 @@ fn split_contract(
 fn split(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<Rgb>>,
-    copy: Write<'_, Cpu<Rgb>>,
-    levels: Write<'_, Cpu<BayerLevels>>,
+    image: Read<'_, Rgb>,
+    mut copy: Write<'_, Rgb>,
+    mut levels: Write<'_, BayerLevels>,
 ) -> Result<()> {
     PRODUCED.fetch_add(1, Ordering::Relaxed);
-    copy.data.copy_from_slice(image.data);
-    *levels.data = LEVELS;
+    copy.host().copy_from_slice(image.data.host()?);
+    *levels.host() = LEVELS;
     Ok(())
 }
 fn consume_contract(
@@ -323,11 +322,11 @@ fn consume_contract(
 fn consume(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<Rgb>>,
-    _levels: Read<'_, Cpu<BayerLevels>>,
-    output: Write<'_, Cpu<Rgb>>,
+    image: Read<'_, Rgb>,
+    _levels: Read<'_, BayerLevels>,
+    mut output: Write<'_, Rgb>,
 ) -> Result<()> {
-    output.data.copy_from_slice(image.data);
+    output.host().copy_from_slice(image.data.host()?);
     Ok(())
 }
 #[test]
@@ -342,25 +341,25 @@ fn independent_outputs_share_one_producer_per_evaluation_without_persistent_cach
     d.connect(split.levels, consumer.levels).unwrap();
     let eval = Evaluator::new(RuntimeContext::host());
     for expected in 1..=2 {
-        let result = eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), consumer.output).unwrap();
+        let result = eval.evaluate::<Rgb>(&d, &Default::default(), consumer.output).unwrap();
         assert_eq!(result.statistics.nodes, 3);
         assert_eq!(PRODUCED.load(Ordering::Relaxed), expected);
     }
-    let levels = eval.evaluate::<Cpu<BayerLevels>>(&d, &Default::default(), split.levels).unwrap();
-    assert_eq!(*levels.data, LEVELS); // image output may be unused
+    let levels = eval.evaluate::<BayerLevels>(&d, &Default::default(), split.levels).unwrap();
+    assert_eq!(*levels.data.host().unwrap(), LEVELS); // image output may be unused
 }
 
 #[node(id="test-value-check",contract=copy_contract)]
 fn checked(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<Rgb>>,
-    output: Write<'_, Cpu<Rgb>>,
+    image: Read<'_, Rgb>,
+    mut output: Write<'_, Rgb>,
 ) -> Result<()> {
-    if image.data.iter().any(|p| p[0] == 0.0) {
+    if image.data.host()?.iter().any(|p| p[0] == 0.0) {
         return Err(Error::Contract("data-dependent zero divisor".into()));
     }
-    output.data.copy_from_slice(image.data);
+    output.host().copy_from_slice(image.data.host()?);
     Ok(())
 }
 #[test]
@@ -370,7 +369,7 @@ fn data_dependent_checks_remain_at_eval() {
     let checked = checked::add(&mut d, ()).unwrap();
     d.connect(source, checked.image).unwrap();
     let error = Evaluator::new(RuntimeContext::host())
-        .evaluate::<Cpu<Rgb>>(&d, &Default::default(), checked.output)
+        .evaluate::<Rgb>(&d, &Default::default(), checked.output)
         .err()
         .unwrap();
     assert!(error.to_string().contains("zero divisor"));
@@ -402,17 +401,17 @@ fn device_chain(runtime: RuntimeContext) {
     d.connect(exposure.output, island.image).unwrap();
     d.connect(island.output, after.image).unwrap();
     let eval = Evaluator::new(runtime);
-    let result = eval.evaluate::<Cpu<Rgb>>(&d, &Default::default(), after.output).unwrap();
+    let result = eval.evaluate::<Rgb>(&d, &Default::default(), after.output).unwrap();
     assert_eq!(result.desc.extent, Extent { width: 2, height: 1 });
-    for p in result.data.iter() {
+    for p in result.data.host().unwrap().iter() {
         for v in p {
             assert!((*v - 0.5).abs() < 2e-6);
         }
     }
     assert_eq!(result.statistics.nodes, 7);
     assert_eq!(result.statistics.uploads, 2);
-    assert_eq!(result.statistics.downloads, 2);
-    let resident = eval.evaluate::<Device<Rgb>>(&d, &Default::default(), exposure.output).unwrap();
+    assert_eq!(result.statistics.downloads, 1); // The island's input; the result stays.
+    let resident = eval.evaluate::<Rgb>(&d, &Default::default(), exposure.output).unwrap();
     assert_eq!(resident.statistics.downloads, 0);
     assert_eq!(resident.statistics.uploads, 1);
 
@@ -421,7 +420,7 @@ fn device_chain(runtime: RuntimeContext) {
     let mut timings = Vec::new();
     let values = eval.evaluate_batch(&d, &Default::default(), &[observer.node], Some(&mut timings));
     let inputs = values[&observer.node].as_ref().unwrap().bind::<sink::Definition>().unwrap();
-    assert_eq!(inputs.image.data, result.data.as_ref());
+    assert_eq!(inputs.image.data.host().unwrap(), result.data.host().unwrap());
     assert_eq!(timings.len(), 8);
     assert!(timings.iter().all(|timing| timing.success));
 }
@@ -443,8 +442,8 @@ fn cubecl_cpu_same_kernels() {
 }
 
 #[node(id = "test-input-only")]
-fn sink(_: &KernelContext<'_>, _: &(), image: Read<'_, Cpu<Rgb>>) -> Result<()> {
-    if image.data.is_empty() {
+fn sink(_: &KernelContext<'_>, _: &(), image: Read<'_, Rgb>) -> Result<()> {
+    if image.data.host()?.is_empty() {
         return Err(Error::Contract("empty sink input".into()));
     }
     Ok(())
@@ -466,17 +465,17 @@ fn node_targets_include_input_only_nodes() {
     assert!(demand(&d)[&sink.node].as_ref().is_err_and(missing));
     d.connect(outputs.output, sink.image).unwrap();
     let inputs = demand(&d).remove(&sink.node).unwrap().unwrap();
-    assert_eq!(inputs.bind::<sink::Definition>().unwrap().image.data.len(), 2);
+    assert_eq!(inputs.bind::<sink::Definition>().unwrap().image.data.host().unwrap().len(), 2);
 }
 
 #[node(id = "test-bad-producer", contract = copy_contract)]
 fn bad_producer(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<Rgb>>,
-    output: Write<'_, Cpu<Rgb>>,
+    image: Read<'_, Rgb>,
+    mut output: Write<'_, Rgb>,
 ) -> Result<()> {
-    *output.data = image.data[..1].to_vec().into();
+    *output.host() = image.data.host()?[..1].to_vec().into();
     Ok(())
 }
 #[test]
@@ -486,7 +485,7 @@ fn invalid_storage_cannot_escape_a_node_adapter() {
     let bad = bad_producer::add(&mut d, ()).unwrap();
     d.connect(source, bad.image).unwrap();
     let error = Evaluator::new(RuntimeContext::host())
-        .evaluate::<Cpu<Rgb>>(&d, &Default::default(), bad.output)
+        .evaluate::<Rgb>(&d, &Default::default(), bad.output)
         .err()
         .unwrap();
     assert!(error.to_string().contains("extent/storage mismatch"));
@@ -497,11 +496,11 @@ static BATCH_PRODUCED: AtomicUsize = AtomicUsize::new(0);
 fn batch_producer(
     _: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<Rgb>>,
-    output: Write<'_, Cpu<Rgb>>,
+    image: Read<'_, Rgb>,
+    mut output: Write<'_, Rgb>,
 ) -> Result<()> {
     BATCH_PRODUCED.fetch_add(1, Ordering::Relaxed);
-    output.data.copy_from_slice(image.data);
+    output.host().copy_from_slice(image.data.host()?);
     Ok(())
 }
 
@@ -550,9 +549,9 @@ fn batch_shares_ancestors_and_isolates_failures() {
 }
 
 #[node(id = "test-optional-input")]
-fn optional_sink(_: &KernelContext<'_>, _: &(), image: Option<Read<'_, Cpu<Rgb>>>) -> Result<()> {
+fn optional_sink(_: &KernelContext<'_>, _: &(), image: Option<Read<'_, Rgb>>) -> Result<()> {
     if let Some(image) = image {
-        assert_eq!(image.data.len(), 2);
+        assert_eq!(image.data.host().unwrap().len(), 2);
     }
     Ok(())
 }
@@ -580,9 +579,9 @@ fn context_contract(global: &drip::runtime::GlobalContext, _: &()) -> Result<(Rg
     Ok((RgbDesc::new(Extent { width: global.scale, height: 1 }, image_desc().coordinates),))
 }
 #[node(id="test-global-context",contract=context_contract)]
-fn context_source(context: &KernelContext<'_>, _: &(), output: Write<'_, Cpu<Rgb>>) -> Result<()> {
+fn context_source(context: &KernelContext<'_>, _: &(), mut output: Write<'_, Rgb>) -> Result<()> {
     assert_eq!(output.desc.extent.width, context.global.scale);
-    output.data.fill([context.global.scale as f32; 3]);
+    output.host().fill([context.global.scale as f32; 3]);
     Ok(())
 }
 fn fixed_width_contract(_: &drip::runtime::GlobalContext, _: &(), image: &RgbDesc) -> Result<()> {
@@ -592,7 +591,7 @@ fn fixed_width_contract(_: &drip::runtime::GlobalContext, _: &(), image: &RgbDes
     Ok(())
 }
 #[node(id="test-fixed-width",contract=fixed_width_contract)]
-fn fixed_width(_: &KernelContext<'_>, _: &(), _image: Read<'_, Cpu<Rgb>>) -> Result<()> {
+fn fixed_width(_: &KernelContext<'_>, _: &(), _image: Read<'_, Rgb>) -> Result<()> {
     Ok(())
 }
 
@@ -607,10 +606,10 @@ fn global_context_describes_and_computes_each_request_without_changing_the_dag()
     dag.connect(source.output, fixed.image).unwrap();
     let evaluator = Evaluator::new(RuntimeContext::host());
     let global = GlobalContext { scale: 3 };
-    let value = evaluator.evaluate::<Cpu<Rgb>>(&dag, &global, copy.output).unwrap();
+    let value = evaluator.evaluate::<Rgb>(&dag, &global, copy.output).unwrap();
     assert_eq!(value.desc.extent.width, 3);
-    assert_eq!(&**value.data, &[[3.; 3]; 3]);
-    let full = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), copy.output).unwrap();
+    assert_eq!(&**value.data.host().unwrap(), &[[3.; 3]; 3]);
+    let full = evaluator.evaluate::<Rgb>(&dag, &Default::default(), copy.output).unwrap();
     assert_eq!(full.desc.extent.width, 1);
     let batch = evaluator.evaluate_inputs(&dag, &global, &[copy.node, fixed.node]);
     let inputs = batch[&copy.node].as_ref().unwrap().bind::<cpu_copy::Definition>().unwrap();
@@ -619,7 +618,5 @@ fn global_context_describes_and_computes_each_request_without_changing_the_dag()
     assert!(
         evaluator.evaluate_inputs(&dag, &Default::default(), &[fixed.node])[&fixed.node].is_ok()
     );
-    assert!(
-        evaluator.evaluate::<Cpu<Rgb>>(&dag, &GlobalContext { scale: 0 }, copy.output).is_err()
-    );
+    assert!(evaluator.evaluate::<Rgb>(&dag, &GlobalContext { scale: 0 }, copy.output).is_err());
 }

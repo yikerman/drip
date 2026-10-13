@@ -2,8 +2,9 @@
 use crate::{
     Error, Result,
     eval::InputValues,
+    image::{Description, Image},
     param::{ParamSpec, Parameters},
-    ports::{Data, Description, PortSpec},
+    ports::PortSpec,
     runtime::KernelContext,
 };
 use std::{any::Any, sync::Arc};
@@ -25,9 +26,23 @@ pub struct Kind {
     pub build: fn(serde_json::Value) -> Result<Arc<dyn Node>>,
     pub inputs: &'static [PortSpec],
     pub outputs: &'static [PortSpec],
+    pub shape: Shape,
     /// An effect run on evaluated inputs, such as writing a file. Any frontend,
     /// headless or interactive, runs it the same way.
     pub action: Option<Action>,
+}
+/// How evaluation runs a node kind. The segment compiler adds shapes it can
+/// fuse into one kernel (maps, warps) and derive regions and scale from;
+/// `Kernel` and `Source` stay opaque to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    /// The node's function runs on every evaluation. It asks its inputs for
+    /// the residency it needs, and each output is materialized where the
+    /// node wrote it.
+    Kernel,
+    /// The node loads its outputs once, when first evaluated, and keeps them
+    /// with the admitted node.
+    Source,
 }
 /// A registered label for finding nodes by purpose, listed in `registry::TAGS`.
 pub struct Tag {
@@ -65,13 +80,13 @@ pub trait Node: Any + Send + Sync {
         global: &crate::runtime::GlobalContext,
         inputs: &[Option<Description>],
     ) -> Result<Vec<Description>>;
-    /// Produce every output described by the contract.
+    /// Produce every output described by the contract, in output order.
     fn run(
         &self,
         context: &KernelContext<'_>,
-        inputs: &[Option<(Description, Data)>],
+        inputs: &[Option<Image>],
         outputs: &[Description],
-    ) -> Result<Vec<Data>>;
+    ) -> Result<Vec<Image>>;
 }
 
 /// A declared node type: its kind, typed parameters and typed input views.
@@ -81,7 +96,7 @@ pub trait Typed: Node + Sized {
     type Parameters: Parameters + serde::Serialize + serde::de::DeserializeOwned;
     type Inputs<'a>;
     /// View erased input values in this node's input order and types.
-    fn bind(inputs: &[Option<(Description, Data)>]) -> Result<Self::Inputs<'_>>;
+    fn bind(inputs: &[Option<Image>]) -> Result<Self::Inputs<'_>>;
     /// View an admitted node as this type.
     fn of(node: &dyn Node) -> Result<&Self> {
         (node as &dyn Any)

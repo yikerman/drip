@@ -24,27 +24,33 @@ remain outside. File organization does not justify splitting one algorithm
 into more DAG nodes or changing GUI interaction behavior.
 
 Payloads keep concrete Rust data types and a host description that contracts
-read. A payload implements `DeviceLayout` only when a kernel reads it on the
-device; `Device<P>` ports require it, and structured data stays on the host.
-Nodes flatten the numbers a kernel needs into `KernelContext::constants`.
-Interpretations are typed values in descriptions (camera responses or numeric
-RGB spaces, compared exactly). Ports declare requirements as type arguments,
-`Read<'_, Device<Rgb>, Rec2020>`; the checker, help and editor read the same
-declaration. Do not flatten unrelated ports merely to make storage uniform.
+read. A port names a payload, not where its samples live: an input is a
+`Raster` that the node asks for `data.host()` or `data.device(ctx)`, and an
+output is materialized where the node writes it. A payload implements
+`DeviceLayout` only when a kernel reads it on the device; only then does
+`device` exist, and structured data stays on the host. Nodes flatten the
+numbers a kernel needs into `KernelContext::constants`. Interpretations are
+typed values in descriptions (camera responses or numeric RGB spaces, compared
+exactly). Ports declare requirements as type arguments, `Read<'_, Rgb,
+Rec2020>`; the checker, help and editor read the same declaration. Do not
+flatten unrelated ports merely to make storage uniform.
 
 ## Files
 
 The non-trivial files outside `node/`:
 
-- `definition.rs`: what `#[node]` generates against: `Kind`, `Tag`, the
-  `Node`/`Typed` traits, `Action`, `Assets`.
+- `definition.rs`: what `#[node]` generates against: `Kind` and its `Shape`,
+  `Tag`, the `Node`/`Typed` traits, `Action`, `Assets`.
 - `registry.rs`: the hand-maintained `NODES`, `TAGS` and `Registry`.
 - `graph.rs`: `Dag` and transactional edits, checked on ports only.
 - `eval.rs`: `Evaluator`, demand-driven evaluation of the requested subgraph;
   contracts run here.
-- `ports.rs`: port views (`Read`/`Write`/`Load`), `Cpu`/`Device` residency and
+- `image.rs`: `Image`, the value on an edge, and `Raster`, its samples with
+  lazy host and device residency and counted transfers.
+- `store.rs`: the values of one evaluation, kept until their last consumer.
+- `ports.rs`: port views (`Read`, `Write`, `Forward`, `Load`) and
   interpretation requirements.
-- `payload.rs`: payload families and their host/device storage.
+- `payload.rs`: payload families, their host types and device byte layouts.
 - `param.rs`: parameter schemas, encoding and validation.
 - `project.rs`: `.drip` persistence, loaded through a `Registry`.
 - `runtime.rs`: one compute client per evaluator; `DRIP_BACKEND` selection.
@@ -90,11 +96,11 @@ fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(RgbDesc,)> {
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Device<Rgb>>,
-    output: Write<'_, Device<Rgb>>,
+    image: Read<'_, Rgb>,
+    output: Write<'_, Rgb>,
 ) -> Result<()> {
     let (count, dim) = dispatch_dims(image.desc.extent.pixels() * 3);
-    let (input, output) = (image.data.argument(), output.data.argument());
+    let (input, output) = (image.data.device(ctx)?.argument(), output.device(ctx)?.argument());
     kernel::double::launch(ctx.client()?, count, dim, input, output);
     Ok(())
 }
@@ -122,16 +128,18 @@ mod kernel {
    let double = node::double::compute::add(&mut dag, ())?;
    dag.connect(source, double.image)?;
    let result = Evaluator::new(RuntimeContext::from_env()?)
-       .evaluate::<Cpu<Rgb>>(&dag, &Default::default(), double.output)?;
-   assert_eq!(&**result.data, &[[0.2, -0.4, 4.0]; 2]);
+       .evaluate::<Rgb>(&dag, &Default::default(), double.output)?;
+   assert_eq!(&**result.data.host()?, &[[0.2, -0.4, 4.0]; 2]);
    ```
 
 `#[node]` generates the rest: the `Kind` (ID, help from the Rustdoc, ports,
-schema), `add`, typed `Ports` and `Inputs`. The contract runs at evaluation
-and states what the output describes; reject inputs it cannot handle there.
-An output declared `Forward<'_, P>` instead of `Write` is set from storage the
-node already holds, such as `image.data.share_as()`, so a node that only
-changes the description copies nothing.
+schema, shape), `add`, typed `Ports` and `Inputs`. The contract runs at
+evaluation and states what the output describes; reject inputs it cannot
+handle there. A host node writes `output.host()` instead of `output.device(ctx)`
+and reads `image.data.host()?`; evaluation transfers what the next node asks
+for. An output declared `Forward<'_, P>` instead of `Write` is set from samples
+the node already holds, `output.set(image.data)`, so a node that only changes
+the description copies nothing.
 The ID is the persistence key, so keep it once projects use it. Tags say what
 the node is for: at most one stage tag, then any others that help finding it.
 Parameters are a struct deriving `Parameters` in place of `()`; see

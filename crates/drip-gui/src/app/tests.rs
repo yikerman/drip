@@ -611,7 +611,7 @@ mod undocumented_nodes_show_generated_port_help_fixture {
 
     use drip::node::data::{Rgb, RgbDesc};
     use drip::ports::Read;
-    use drip::ports::{Cpu, Write};
+    use drip::ports::Write;
     fn contract(
         _: &drip::runtime::GlobalContext,
         _: &(),
@@ -623,10 +623,10 @@ mod undocumented_nodes_show_generated_port_help_fixture {
     fn generic(
         _: &KernelContext<'_>,
         _: &(),
-        image: Read<'_, Cpu<Rgb>>,
-        output: Write<'_, Cpu<Rgb>>,
+        image: Read<'_, Rgb>,
+        mut output: Write<'_, Rgb>,
     ) -> drip::Result<()> {
-        output.data.copy_from_slice(image.data);
+        output.host().copy_from_slice(image.data.host()?);
         Ok(())
     }
 

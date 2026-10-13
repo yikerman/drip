@@ -45,7 +45,7 @@ pub fn prepare(
 impl super::GuiNode for observe::Definition {
     type Presentation = PreviewImage;
     const PREPARE: Option<super::Prepare<Self>> = Some(|node, inputs, ctx| {
-        let image = Arc::new(HostImage::new(&inputs.image, ctx.global.scale));
+        let image = Arc::new(HostImage::new(&inputs.image, ctx.global.scale)?);
         prepare(&node.parameters, node.assets()?.as_ref(), &image)
     });
 }
@@ -53,7 +53,7 @@ impl super::GuiNode for observe::Definition {
 use drip::{
     definition::Assets,
     node::data::{Rec2020, Rgb},
-    ports::{Cpu, Read},
+    ports::Read,
     runtime::KernelContext,
 };
 use serde::{Deserialize, Serialize};
@@ -98,7 +98,7 @@ impl Assets for Preview {
 pub fn observe(
     _: &KernelContext<'_>,
     _: &Preview,
-    _image: Read<'_, Cpu<Rgb>, Rec2020>,
+    _image: Read<'_, Rgb, Rec2020>,
 ) -> drip::Result<()> {
     Ok(())
 }

@@ -1,4 +1,7 @@
-use drip::{eval::Evaluator, graph::Dag, node, node::data::*, ports::*, runtime::RuntimeContext};
+use drip::{
+    eval::Evaluator, graph::Dag, image::Raster, node, node::data::*, ports::*,
+    runtime::RuntimeContext,
+};
 
 #[path = "algorithms/rgb_reduction.rs"]
 mod rgb_reduction;
@@ -9,8 +12,12 @@ fn algorithms(runtime: RuntimeContext) {
     let descriptor = RgbDesc::new(Extent { width: 2, height: 1 }, Coordinates::Space(REC2020_D65));
     let bits = [[0x80000000, 0x7fc01234, 0x7f800000], [1, 0xff800000, 0x3f800000]];
     let pixels: Vec<[f32; 3]> = bits.map(|p| p.map(f32::from_bits)).to_vec();
-    let device = drip::payload::upload::<Rgb>(&descriptor, &pixels.into(), &runtime).unwrap();
-    let restored = drip::payload::download::<Rgb>(&descriptor, &device, &runtime).unwrap();
+    let global = Default::default();
+    let ctx = drip::runtime::KernelContext::new(&global, &runtime);
+    let host = Raster::<Rgb>::from_host(descriptor.clone(), pixels.into()).unwrap();
+    let device = host.device(&ctx).unwrap().clone();
+    let restored = Raster::<Rgb>::from_device(descriptor, device, &ctx).unwrap();
+    let restored = restored.host().unwrap();
     assert_eq!(restored.iter().map(|p| p.map(f32::to_bits)).collect::<Vec<_>>(), bits);
 
     let evaluator = Evaluator::new(runtime);
@@ -38,7 +45,7 @@ fn algorithms(runtime: RuntimeContext) {
         .unwrap();
         let rcd = node::rcd::add(&mut dag, ()).unwrap();
         dag.connect(source, rcd.image).unwrap();
-        let output = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), rcd.output).unwrap();
+        let output = evaluator.evaluate::<Rgb>(&dag, &Default::default(), rcd.output).unwrap();
         let mut max_error = 0f32;
         let mut sum = 0.;
         let mut count = 0;
@@ -47,7 +54,7 @@ fn algorithms(runtime: RuntimeContext) {
             if v[0] as usize != phase_index {
                 continue;
             }
-            let pixel = output.data[v[1] as usize * w as usize + v[2] as usize];
+            let pixel = output.data.host().unwrap()[v[1] as usize * w as usize + v[2] as usize];
             for c in 0..3 {
                 let error = (pixel[c] - v[3 + c]).abs();
                 max_error = max_error.max(error);
@@ -74,8 +81,8 @@ fn algorithms(runtime: RuntimeContext) {
         .unwrap();
         let n = node::rcd::add(&mut dag, ()).unwrap();
         dag.connect(source, n.image).unwrap();
-        let out = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), n.output).unwrap();
-        assert!(out.data.iter().flatten().all(|v| v.is_finite()));
+        let out = evaluator.evaluate::<Rgb>(&dag, &Default::default(), n.output).unwrap();
+        assert!(out.data.host().unwrap().iter().flatten().all(|v| v.is_finite()));
     }
     let mut dag = Dag::new();
     let source = node::source::<Rgb>(
@@ -86,15 +93,16 @@ fn algorithms(runtime: RuntimeContext) {
     .unwrap();
     let n = node::sigmoid::apply::add(&mut dag, Default::default()).unwrap();
     dag.connect(source, n.image).unwrap();
-    let out = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), n.output).unwrap();
-    assert!(out.data.iter().flatten().all(|v| v.is_finite()));
-    for v in out.data[1] {
+    let out = evaluator.evaluate::<Rgb>(&dag, &Default::default(), n.output).unwrap();
+    let out = out.data.host().unwrap();
+    assert!(out.iter().flatten().all(|v| v.is_finite()));
+    for v in out[1] {
         assert!((v - 0.18).abs() < 1e-5);
     }
-    for v in out.data[3] {
+    for v in out[3] {
         assert!((v - 1.).abs() < 1e-5);
     }
-    assert_eq!(out.data[0], [0.; 3]);
+    assert_eq!(out[0], [0.; 3]);
 }
 #[cfg(feature = "wgpu")]
 #[test]
@@ -133,16 +141,15 @@ fn bayer_reduction(evaluator: &Evaluator) {
             let reduced =
                 node::reduce::bayer::add(&mut dag, node::reduce::Settings { factor }).unwrap();
             dag.connect(source, reduced.image).unwrap();
-            let result = evaluator
-                .evaluate::<Cpu<Bayer>>(&dag, &Default::default(), reduced.output)
-                .unwrap();
+            let result =
+                evaluator.evaluate::<Bayer>(&dag, &Default::default(), reduced.output).unwrap();
             assert_eq!(result.desc.phase, phase);
-            for (i, &value) in result.data.iter().enumerate() {
+            for (i, &value) in result.data.host().unwrap().iter().enumerate() {
                 let w = result.desc.extent.width as usize;
                 assert_eq!(value, ((i / w) % 2 * 2 + (i % w) % 2) as f32 + 1.);
             }
             if factor == 1 {
-                assert_eq!(&**result.data, pixels.as_slice());
+                assert_eq!(&**result.data.host().unwrap(), pixels.as_slice());
             }
         }
     }
@@ -166,8 +173,8 @@ fn bayer_reduction(evaluator: &Evaluator) {
         let reduced = node::reduce::bayer::add(&mut dag, Default::default()).unwrap();
         dag.connect(source, reduced.image).unwrap();
         let result =
-            evaluator.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), reduced.output).unwrap();
-        for (actual, expected) in result.data.iter().zip(expected) {
+            evaluator.evaluate::<Bayer>(&dag, &Default::default(), reduced.output).unwrap();
+        for (actual, expected) in result.data.host().unwrap().iter().zip(expected) {
             assert!(actual.is_finite());
             assert!(
                 (*actual - expected).abs() <= expected.abs().max(1.) * 1e-6,
@@ -206,15 +213,16 @@ fn context_driven_demosaic(evaluator: &Evaluator) {
     let node_count = dag.nodes().count();
     let edges: Vec<_> = dag.edges().collect();
     let global = GlobalContext { scale: 2 };
-    let image = evaluator.evaluate::<Cpu<Rgb>>(&dag, &global, convert.output).unwrap();
+    let image = evaluator.evaluate::<Rgb>(&dag, &global, convert.output).unwrap();
     assert_eq!(image.desc.extent, Extent { width: 32, height: 24 });
-    assert_eq!(image.data.len(), 32 * 24);
     assert_eq!(image.statistics.nodes, 4); // No inserted reduction node.
     assert_eq!(image.statistics.uploads, 1);
-    assert_eq!(image.statistics.downloads, 1);
+    // The result stays where it was computed; reading it below is the test's download.
+    assert_eq!(image.statistics.downloads, 0);
+    assert_eq!(image.data.host().unwrap().len(), 32 * 24);
     assert_eq!(dag.nodes().count(), node_count);
     assert_eq!(dag.edges().collect::<Vec<_>>(), edges);
-    let binned = evaluator.evaluate::<Cpu<Rgb>>(&dag, &global, preview.output).unwrap();
+    let binned = evaluator.evaluate::<Rgb>(&dag, &global, preview.output).unwrap();
     assert_eq!(binned.desc.extent, Extent { width: 16, height: 12 });
     // An explicit reduction followed by full-detail demosaic is the reference.
     let mut explicit = dag.clone();
@@ -230,14 +238,15 @@ fn context_driven_demosaic(evaluator: &Evaluator) {
         })
         .unwrap();
     let expected =
-        evaluator.evaluate::<Cpu<Rgb>>(&explicit, &Default::default(), convert.output).unwrap();
-    for (a, b) in image.data.iter().flatten().zip(expected.data.iter().flatten()) {
+        evaluator.evaluate::<Rgb>(&explicit, &Default::default(), convert.output).unwrap();
+    let (image, expected) = (image.data.host().unwrap(), expected.data.host().unwrap());
+    for (a, b) in image.iter().flatten().zip(expected.iter().flatten()) {
         assert!((a - b).abs() < 2e-6);
     }
     let expected =
-        evaluator.evaluate::<Cpu<Rgb>>(&explicit, &Default::default(), preview.output).unwrap();
-    assert_eq!(*binned.data, *expected.data);
-    let full = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), convert.output).unwrap();
+        evaluator.evaluate::<Rgb>(&explicit, &Default::default(), preview.output).unwrap();
+    assert_eq!(*binned.data.host().unwrap(), *expected.data.host().unwrap());
+    let full = evaluator.evaluate::<Rgb>(&dag, &Default::default(), convert.output).unwrap();
     assert_eq!(full.desc.extent, Extent { width: 64, height: 48 });
 }
 
@@ -270,11 +279,11 @@ fn resident_highlights(evaluator: &Evaluator) {
     dag.connect(before.output, highlights.image).unwrap();
     dag.connect(levels, highlights.levels).unwrap();
     dag.connect(highlights.output, after.image).unwrap();
-    let output = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), after.output).unwrap();
-    assert!(output.data.iter().flatten().all(|v| (*v - 0.5).abs() < 1e-6));
+    let output = evaluator.evaluate::<Rgb>(&dag, &Default::default(), after.output).unwrap();
     // Highlights must keep the image on the device between its two neighbors.
     assert_eq!(output.statistics.uploads, 1);
-    assert_eq!(output.statistics.downloads, 1);
+    assert_eq!(output.statistics.downloads, 0);
+    assert!(output.data.host().unwrap().iter().flatten().all(|v| (*v - 0.5).abs() < 1e-6));
 }
 
 fn bayer_copy_contract(
@@ -289,10 +298,10 @@ fn bayer_copy_contract(
 fn bayer_cpu_copy(
     _: &drip::runtime::KernelContext<'_>,
     _: &(),
-    image: Read<'_, Cpu<Bayer>>,
-    output: Write<'_, Cpu<Bayer>>,
+    image: Read<'_, Bayer>,
+    mut output: Write<'_, Bayer>,
 ) -> drip::Result<()> {
-    output.data.copy_from_slice(image.data);
+    output.host().copy_from_slice(image.data.host()?);
     Ok(())
 }
 
@@ -319,16 +328,16 @@ fn bayer_host_island(evaluator: &Evaluator) {
     dag.connect(before.output, island.image).unwrap();
     dag.connect(before.output, sibling.image).unwrap();
     dag.connect(island.output, after.image).unwrap();
-    let result = evaluator.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), after.output).unwrap();
+    let result = evaluator.evaluate::<Bayer>(&dag, &Default::default(), after.output).unwrap();
     assert_eq!(result.statistics.uploads, 2);
-    assert_eq!(result.statistics.downloads, 2);
-    assert!(result.data.iter().enumerate().all(|(i, &v)| v == i as f32));
+    assert_eq!(result.statistics.downloads, 1); // The island's input; the result stays.
+    assert!(result.data.host().unwrap().iter().enumerate().all(|(i, &v)| v == i as f32));
 
     let inputs = evaluator.evaluate_inputs(&dag, &Default::default(), &[island.node, sibling.node]);
     // Clones share storage, so both consumers see the same host allocation.
     let image = |id| {
         let inputs = inputs[id].as_ref().unwrap();
-        inputs.bind::<bayer_cpu_copy::Definition>().unwrap().image.data.clone()
+        inputs.bind::<bayer_cpu_copy::Definition>().unwrap().image.data.host().unwrap().clone()
     };
     let (a, b) = (image(&island.node), image(&sibling.node));
     assert_eq!(a.as_ptr(), b.as_ptr());

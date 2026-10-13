@@ -15,7 +15,7 @@ use crate::theme::{self, Tip};
 use drip::{
     node::{
         color::{self, Mat3},
-        data::{Extent, Rgb, RgbDesc},
+        data::{Extent, Raster, Rgb, RgbDesc},
         field::{
             Rect as Plane, RgbField, RgbFieldDesc, Stage,
             perspective::{self, Aspect, Fit, Frame, Ratio, Settings},
@@ -23,8 +23,7 @@ use drip::{
         },
         filter::Filter,
     },
-    ports::{Device, Read},
-    runtime::{KernelContext, RuntimeContext},
+    ports::Read,
 };
 use egui::{Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, Ui, pos2, vec2};
 use std::sync::Arc;
@@ -51,11 +50,11 @@ pub struct Prepared {
 
 fn prepare(
     p: &Settings,
-    field: &Read<'_, Device<RgbField>>,
+    field: &Read<'_, RgbField>,
     ctx: &PrepareContext,
 ) -> drip::Result<Prepared> {
-    let runtime = RuntimeContext::from_client(ctx.client()?.clone());
-    let kernels = KernelContext::new(&ctx.global, &runtime);
+    let kernels = ctx.kernels();
+    let samples = field.data.device(&kernels)?;
     let render = |desc: &RgbFieldDesc| -> drip::Result<HostImage> {
         let [w, h] = desc.domain.size.map(|v| v.round().clamp(1.0, f64::from(u32::MAX)) as u32);
         let divisor = ctx.global.scale.max(w.max(h).div_ceil(MAX_SIDE));
@@ -65,9 +64,9 @@ fn prepare(
             full: Extent { width: w, height: h },
             coordinates: desc.source.coordinates.clone(),
         };
-        let output = kernels.allocate::<Device<Rgb>>(&desc_out)?;
-        sample::render(&kernels, desc, field.data, Filter::Lanczos3, &extent, &output)?;
-        let pixels = drip::payload::download::<Rgb>(&desc_out, &output, &runtime)?;
+        let output = kernels.device_buffer::<Rgb>(&desc_out)?;
+        sample::render(&kernels, desc, samples, Filter::Lanczos3, &extent, &output)?;
+        let pixels = Raster::from_device(desc_out, output, &kernels)?.host()?.clone();
         Ok(HostImage {
             width: extent.width as usize,
             height: extent.height as usize,

@@ -92,11 +92,11 @@ pub(super) struct Port {
     /// The argument name without a leading underscore: `_image` declares port
     /// `image` on a node that does not read it.
     pub name: syn::Ident,
-    pub ty: syn::Type,
+    pub payload: syn::Type,
     /// The port's requirement (input) or guarantee (output); `Any` if omitted.
     pub requirement: syn::Type,
     pub direction: Direction,
-    /// `Forward`: the node sets the output from storage it holds.
+    /// `Forward`: the node sets the output from samples it holds.
     pub forward: bool,
     pub optional: bool,
     /// Index within this direction, independent of the function argument order.
@@ -217,29 +217,40 @@ impl Port {
         if optional && direction == Direction::Output {
             return Err(syn::Error::new(wrapper.span(), "output ports cannot be optional"));
         }
-        let (ty, requirement) = match types.as_slice() {
-            // A source loads host values; its ports are CPU outputs of that payload.
-            [payload] if wrapper.ident == "Load" => (
-                syn::parse_quote!(::drip::ports::Cpu<#payload>),
-                syn::parse_quote!(::drip::ports::Any),
-            ),
+        let (payload, requirement) = match types.as_slice() {
             [ty] => ((*ty).clone(), syn::parse_quote!(::drip::ports::Any)),
             [ty, requirement] => ((*ty).clone(), (*requirement).clone()),
             _ => {
                 return Err(syn::Error::new(
                     wrapper.span(),
-                    "expected <Port> or <Port, Requirement>",
+                    "expected <Payload> or <Payload, Requirement>",
                 ));
             }
         };
+        if let Some(placement) = placement(&payload) {
+            let message = format!(
+                "ports name payloads; the {placement} placement left node signatures. \
+                 Read the value with `data.host()` or `data.device(ctx)`"
+            );
+            return Err(syn::Error::new(payload.span(), message));
+        }
         let forward = wrapper.ident == "Forward";
-        Ok(Self { name, ty, requirement, direction, forward, optional, index: 0 })
+        Ok(Self { name, payload, requirement, direction, forward, optional, index: 0 })
     }
+}
+
+/// The wrapper's name when `ty` wraps a payload in a former `Cpu` or `Device` placement.
+fn placement(ty: &syn::Type) -> Option<String> {
+    let syn::Type::Path(ty) = ty else { return None };
+    let segment = ty.path.segments.last()?;
+    let wrapped = matches!(segment.arguments, syn::PathArguments::AngleBracketed(_));
+    (wrapped && (segment.ident == "Cpu" || segment.ident == "Device"))
+        .then(|| segment.ident.to_string())
 }
 
 fn wrapper_type(ty: &syn::Type, span: Span) -> syn::Result<(&syn::PathSegment, Vec<&syn::Type>)> {
     let syn::Type::Path(ty) = ty else {
-        return Err(syn::Error::new(span, "expected Read<Port> or Write<Port>"));
+        return Err(syn::Error::new(span, "expected Read<Payload> or Write<Payload>"));
     };
     let wrapper = ty.path.segments.last().expect("type path has a segment");
     let syn::PathArguments::AngleBracketed(arguments) = &wrapper.arguments else {

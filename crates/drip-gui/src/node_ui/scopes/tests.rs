@@ -51,7 +51,7 @@ fn exposure_scopes_use_samples_in_both_rgb_interpretations() {
     let device = |id| {
         let inputs = values[id].as_ref().unwrap();
         let inputs = inputs.bind::<super::histogram::observe::Definition>().unwrap();
-        crate::node_ui::data::DeviceRgb::new(&inputs.image)
+        crate::node_ui::data::DeviceRgb::new(&inputs.image, &ctx).unwrap()
     };
     let (a, b) = (device(&targets[0]), device(&targets[1]));
     fn prepare(
@@ -138,7 +138,7 @@ fn vectorscope_uses_working_rec2020_coordinates() {
 
 pub(crate) fn context() -> PrepareContext {
     let evaluator = Evaluator::new(RuntimeContext::from_env().unwrap());
-    PrepareContext { client: Some(evaluator.client().unwrap().clone()), ..Default::default() }
+    PrepareContext { runtime: evaluator.runtime().clone(), ..Default::default() }
 }
 
 pub(crate) fn device(image: &HostImage, ctx: &PrepareContext) -> crate::node_ui::data::DeviceRgb {
@@ -146,8 +146,8 @@ pub(crate) fn device(image: &HostImage, ctx: &PrepareContext) -> crate::node_ui:
         Extent { width: image.width as u32, height: image.height as u32 },
         Coordinates::Space(REC2020_D65),
     );
-    let runtime = RuntimeContext::from_client(ctx.client().unwrap().clone());
-    let pixels = drip::payload::upload::<Rgb>(&desc, &image.pixels, &runtime).unwrap();
+    let raster = Raster::<Rgb>::from_host(desc.clone(), image.pixels.clone()).unwrap();
+    let pixels = raster.device(&ctx.kernels()).unwrap().clone();
     crate::node_ui::data::DeviceRgb { desc, pixels }
 }
 

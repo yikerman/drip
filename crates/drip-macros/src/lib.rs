@@ -9,8 +9,11 @@ mod parameters;
 
 use documentation::documentation;
 
-/// Declare `fn(context, &parameters, Read<Port>..., Write<Port>...) -> Result<()>`.
-/// A port may name a requirement, `Read<'_, Device<Rgb>, Rec2020>`, checked on
+/// Declare `fn(context, &parameters, Read<Payload>..., Write<Payload>...) -> Result<()>`.
+/// Ports name payloads, never a placement: the node reads an input with
+/// `data.host()` or `data.device(ctx)` and writes an output through `host()` or
+/// `device(ctx)`. `Forward<Payload>` publishes samples the node holds with `set`.
+/// A port may name a requirement, `Read<'_, Rgb, Rec2020>`, checked on
 /// its description before the contract (inputs) or after it (outputs).
 /// `contract` takes `&GlobalContext`, parameters and one known description per
 /// input (`&Desc`, or `Option<&Desc>` for an optional input, `None` when
@@ -21,8 +24,10 @@ use documentation::documentation;
 /// registered `Tag` statics (see `drip::registry`).
 /// The parameter type supplies its schema through `Parameters` (usually derived).
 /// Use `&()` for nodes without parameters.
-/// `Option<Read<Port>>` declares an optional input; output ports remain required.
+/// `Option<Read<Payload>>` declares an optional input; output ports remain required.
 /// A node without computation names an unread port `_image`; the port is `image`.
+/// A source is `fn(&parameters, Load<Payload>...)`, without a context or
+/// contract; it loads its outputs once, when first evaluated.
 #[proc_macro_attribute]
 pub fn node(args: TokenStream, item: TokenStream) -> TokenStream {
     node::expand(args.into(), parse_macro_input!(item as syn::ItemFn))

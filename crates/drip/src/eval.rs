@@ -1,15 +1,17 @@
-//! Evaluate the requested dependency subgraph. Materializations live for one run.
+//! Evaluate the requested dependency subgraph. Values live for one run, in
+//! the run's `Store`.
 use crate::{
     Error, Result,
     definition::{Kind, Typed},
     graph::Dag,
+    image::{Image, Raster},
     payload::Payload,
     ports::*,
     runtime::{GlobalContext, KernelContext, RuntimeContext},
+    store::Store,
 };
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -23,17 +25,21 @@ pub struct NodeTiming {
     pub success: bool,
 }
 
+/// Work done by one `evaluate` call. Transfers are counted on the evaluator's
+/// runtime while the call runs; reading the result's other side afterwards
+/// is the caller's transfer.
 #[derive(Default, Debug)]
 pub struct Statistics {
     pub nodes: usize,
-    /// Port materializations from CPU to device; excludes algorithm-local constants.
+    /// Rasters copied from host to device; excludes constants and scratch.
     pub uploads: usize,
-    /// Port materializations from device to CPU.
+    /// Rasters copied from device to host.
     pub downloads: usize,
 }
-pub struct Evaluation<P: Port> {
-    pub desc: <P::Payload as Payload>::Desc,
-    pub data: Arc<P::Storage>,
+/// The target output's raster, where its node produced it.
+pub struct Evaluation<P: Payload> {
+    pub desc: P::Desc,
+    pub data: Raster<P>,
     pub statistics: Statistics,
 }
 pub struct Evaluator {
@@ -44,10 +50,10 @@ impl Evaluator {
         Self { runtime }
     }
 
-    /// The compute client that owns this evaluator's device inputs. External
-    /// consumers can dispatch presentation kernels against retained inputs.
-    pub fn client(&self) -> Result<&cubecl::prelude::Client> {
-        self.runtime.client()
+    /// The runtime that owns this evaluator's device rasters. External
+    /// consumers read retained inputs and dispatch presentation kernels on it.
+    pub fn runtime(&self) -> &RuntimeContext {
+        &self.runtime
     }
 
     /// Prepare declared inputs for several external consumers in one run.
@@ -88,10 +94,8 @@ impl Evaluator {
         let mut run = Run::new(dag, &self.runtime, global, &needed);
         run.timings = timings;
         for request in requests.values().filter_map(|r| r.as_ref().ok()) {
-            for (from, _) in &request.inputs {
-                if let Some(from) = from {
-                    run.retain(*from);
-                }
+            for &from in request.inputs.iter().flatten() {
+                run.store.retain(from);
             }
         }
         let failures = run.execute_batch(&needed);
@@ -110,44 +114,36 @@ impl Evaluator {
         results
     }
 
-    /// P selects the endpoint representation; node placements come from signatures.
-    pub fn evaluate<P: Port>(
+    /// Evaluate `target` and the nodes it depends on.
+    pub fn evaluate<P: Payload>(
         &self,
         dag: &Dag,
         global: &GlobalContext,
-        target: Output<P::Payload>,
+        target: Output<P>,
     ) -> Result<Evaluation<P>> {
-        dag.output_of::<P::Payload>(target.id)?;
+        dag.output_of::<P>(target.id)?;
         global.validate()?;
+        let (uploads, downloads) = self.runtime.transfers();
         let needed = required_nodes(dag, target.node())?;
         let mut run = Run::new(dag, &self.runtime, global, &needed);
-        run.retain(target.id);
+        run.store.retain(target.id);
         for &index in dag.order.iter().filter(|i| needed.contains(i)) {
             run.execute(dag.entries[index].as_ref().unwrap())?;
         }
-        let (desc, data) = run.materialize(target.id, &PortSpec::of::<P, Any>("result"))?;
+        let data =
+            run.value(target.id)?.downcast::<P>().expect("output payload is checked").clone();
         // One terminal wait; host consumers have already waited at read boundaries.
         self.runtime.finish()?;
-        Ok(Evaluation {
-            desc: downcast::<<P::Payload as Payload>::Desc>(&desc).clone(),
-            data: data
-                .downcast()
-                .map_err(|_| Error::Runtime("result representation mismatch".into()))?,
-            statistics: run.statistics,
-        })
+        let (uploaded, downloaded) = self.runtime.transfers();
+        let statistics = Statistics {
+            nodes: run.nodes,
+            uploads: uploaded - uploads,
+            downloads: downloaded - downloads,
+        };
+        Ok(Evaluation { desc: data.desc().clone(), data, statistics })
     }
 }
 
-type DescribedValue = (Description, Data);
-
-/// One logical output and its at-most-one transferred representation.
-struct Value {
-    desc: Description,
-    /// The producer's transfers when it is a device port.
-    transfers: Option<Transfers>,
-    native: Data,
-    transferred: Option<Data>,
-}
 fn output_id(node: NodeId, index: usize) -> PortId {
     PortId { node, index, direction: Direction::Output }
 }
@@ -169,9 +165,8 @@ struct Run<'a, 't> {
     dag: &'a Dag,
     runtime: &'a RuntimeContext,
     global: &'a GlobalContext,
-    values: HashMap<PortId, Value>,
-    uses: HashMap<PortId, usize>,
-    statistics: Statistics,
+    store: Store,
+    nodes: usize,
     timings: Option<&'t mut Vec<NodeTiming>>,
 }
 impl<'a, 't> Run<'a, 't> {
@@ -181,25 +176,14 @@ impl<'a, 't> Run<'a, 't> {
         global: &'a GlobalContext,
         needed: &HashSet<usize>,
     ) -> Self {
-        let mut run = Self {
-            dag,
-            runtime,
-            global,
-            values: HashMap::new(),
-            uses: HashMap::new(),
-            statistics: Statistics::default(),
-            timings: None,
-        };
+        let mut run =
+            Self { dag, runtime, global, store: Store::default(), nodes: 0, timings: None };
         for &index in needed {
             for from in dag.entries[index].as_ref().unwrap().inputs.iter().flatten() {
-                run.retain(*from);
+                run.store.retain(*from);
             }
         }
         run
-    }
-
-    fn retain(&mut self, port: PortId) {
-        *self.uses.entry(port).or_default() += 1;
     }
 
     fn execute_batch(&mut self, needed: &HashSet<usize>) -> HashMap<NodeId, Error> {
@@ -238,44 +222,20 @@ impl<'a, 't> Run<'a, 't> {
             request
                 .inputs
                 .iter()
-                .map(|(from, spec)| from.map(|from| self.materialize(from, spec)).transpose())
+                .map(|from| from.map(|from| self.value(from).cloned()).transpose())
                 .collect::<Result<Vec<_>>>()
                 .map(|values| InputValues { kind, values })
         };
-        for (from, _) in request.inputs {
-            if let Some(from) = from {
-                self.release(from);
-            }
+        for from in request.inputs.into_iter().flatten() {
+            self.store.release(from);
         }
         result
     }
 
-    fn materialize(&mut self, from: PortId, spec: &PortSpec) -> Result<DescribedValue> {
-        let value = self
-            .values
-            .get_mut(&from)
-            .ok_or_else(|| Error::Contract("requested source value is unavailable".into()))?;
-        // The device side of the edge supplies the transfer.
-        let transfer = match (value.transfers, spec.transfers) {
-            (None, None) | (Some(_), Some(_)) => {
-                return Ok((value.desc.clone(), value.native.clone()));
-            }
-            (None, Some(consumer)) => consumer.upload,
-            (Some(producer), None) => producer.download,
-        };
-        let data = match &value.transferred {
-            Some(data) => data.clone(),
-            None => {
-                let data = transfer(&value.native, &value.desc, self.runtime)?;
-                if spec.transfers.is_some() {
-                    self.statistics.uploads += 1;
-                } else {
-                    self.statistics.downloads += 1;
-                }
-                value.transferred.insert(data).clone()
-            }
-        };
-        Ok((value.desc.clone(), data))
+    fn value(&self, from: PortId) -> Result<&Image> {
+        self.store
+            .get(from)
+            .ok_or_else(|| Error::Contract("requested source value is unavailable".into()))
     }
     fn execute(&mut self, e: &crate::graph::Entry) -> Result<()> {
         let start = self.timings.as_ref().map(|_| Instant::now());
@@ -296,10 +256,9 @@ impl<'a, 't> Run<'a, 't> {
         let inputs = e
             .inputs
             .iter()
-            .zip(e.node.kind().inputs)
-            .map(|(from, spec)| from.map(|from| self.materialize(from, spec)).transpose())
+            .map(|from| from.map(|from| self.value(from).cloned()).transpose())
             .collect::<Result<Vec<_>>>()?;
-        let descs: Vec<_> = inputs.iter().map(|v| v.as_ref().map(|(d, _)| d.clone())).collect();
+        let descs: Vec<_> = inputs.iter().map(|v| v.as_ref().map(|i| i.desc().clone())).collect();
         let outputs = e.node.contract(self.global, &descs)?;
         let specs = e.node.kind().outputs;
         if outputs.len() != specs.len() {
@@ -310,37 +269,24 @@ impl<'a, 't> Run<'a, 't> {
         if result.len() != specs.len() {
             return Err(Error::Runtime("node result arity mismatch".into()));
         }
-        self.statistics.nodes += 1;
-        for (port, ((data, desc), spec)) in result.into_iter().zip(outputs).zip(specs).enumerate() {
-            let id = output_id(e.id, port);
-            if self.uses.contains_key(&id) {
-                let value =
-                    Value { desc, transfers: spec.transfers, native: data, transferred: None };
-                self.values.insert(id, value);
-            }
+        self.nodes += 1;
+        for (port, image) in result.into_iter().enumerate() {
+            self.store.insert(output_id(e.id, port), image);
         }
         Ok(())
     }
 
     fn release_inputs(&mut self, e: &crate::graph::Entry) {
         for from in e.inputs.iter().flatten() {
-            self.release(*from);
-        }
-    }
-
-    fn release(&mut self, port: PortId) {
-        let remaining = self.uses.get_mut(&port).unwrap();
-        *remaining -= 1;
-        if *remaining == 0 {
-            self.values.remove(&port);
+            self.store.release(*from);
         }
     }
 }
 
-/// A node's evaluated inputs, in its input order and declared placements.
+/// A node's evaluated inputs, in its input order.
 pub struct InputValues {
     kind: &'static Kind,
-    values: Vec<Option<DescribedValue>>,
+    values: Vec<Option<Image>>,
 }
 impl InputValues {
     /// Typed views as declared by node type `N`; these must be `N`'s inputs.
@@ -356,13 +302,11 @@ impl InputValues {
     }
 }
 struct InputRequest {
-    inputs: Vec<(Option<PortId>, PortSpec)>,
+    inputs: Vec<Option<PortId>>,
     needed: HashSet<usize>,
 }
 fn input_request(dag: &Dag, id: NodeId) -> Result<InputRequest> {
-    let entry = dag.entry(id)?;
-    let inputs: Vec<_> =
-        entry.inputs.iter().copied().zip(entry.node.kind().inputs.iter().copied()).collect();
+    let inputs = dag.entry(id)?.inputs.clone();
     let needed = required_nodes(dag, id)?;
     Ok(InputRequest { inputs, needed })
 }

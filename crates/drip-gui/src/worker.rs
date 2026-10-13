@@ -13,7 +13,7 @@ use crate::model::{Graph, NodeId};
 use crate::node_ui::NodeAction;
 use drip::Error as NodeError;
 use drip::eval::{Evaluator, InputValues, NodeTiming};
-use drip::runtime::GlobalContext;
+use drip::runtime::{GlobalContext, RuntimeContext};
 use serde_json::Value as Json;
 
 use crate::render::node_views::{Drawable, Images};
@@ -321,7 +321,7 @@ fn force(demand: &Demand, evaluator: Result<&Evaluator, &NodeError>, images: &mu
     let mut timings = Vec::new();
     let ctx = crate::node_ui::data::PrepareContext {
         global: demand.global,
-        client: evaluator.ok().and_then(|e| e.client().ok()).cloned(),
+        runtime: evaluator.map_or_else(|_| RuntimeContext::host(), |e| e.runtime().clone()),
     };
     let targets = demand.targets();
     let mut inputs = match evaluator {

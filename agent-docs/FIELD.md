@@ -156,8 +156,8 @@ pub struct RgbField;            // Host = HostBuffer<[f32; 3]>, DeviceLayout as 
   undefined transforms (a quad with three collinear corners) and compute
   domains on the host before allocation.
 - **Pass-through outputs (done):** a field node declares
-  `output: Forward<'_, Device<RgbField>>` and sets it to
-  `image.data.share_as()`, the input's allocation under a new description.
+  `output: Forward<'_, RgbField>` and sets it with `output.set(image.data)`,
+  the input's samples under a new description.
   Storage is already shared and immutable, so purity holds. Nodes that only
   reinterpret (assigning RGB meaning to camera numbers) can use it too.
 

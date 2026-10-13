@@ -120,20 +120,20 @@ fn contract(
 pub fn compute(
     ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Device<Rgb>, Rec2020>,
-    metadata: Option<Read<'_, Cpu<CaptureMetadata>>>,
-    output: Write<'_, Device<Rgb>, Rec2020>,
+    image: Read<'_, Rgb, Rec2020>,
+    metadata: Option<Read<'_, CaptureMetadata>>,
+    output: Write<'_, Rgb, Rec2020>,
 ) -> Result<()> {
-    let values = matrix(p, metadata.as_ref().map(|m| &**m.data))?;
+    let values = matrix(p, metadata.map(|m| m.data.host().map(|m| &**m)).transpose()?)?;
     let coefficients = ctx.constants(values.as_flattened())?;
     let (count, dim) = dispatch_dims(image.desc.extent.pixels());
     super::shared_kernel::matrix::launch(
         ctx.client()?,
         count,
         dim,
-        image.data.argument(),
+        image.data.device(ctx)?.argument(),
         coefficients.argument(),
-        output.data.argument(),
+        output.device(ctx)?.argument(),
     );
     Ok(())
 }
@@ -204,9 +204,8 @@ mod tests {
         .unwrap();
         let cat = add(&mut dag, custom([0.44757, 0.40745])).unwrap();
         dag.connect(input, cat.image).unwrap();
-        let output = Evaluator::new(runtime)
-            .evaluate::<Cpu<Rgb>>(&dag, &Default::default(), cat.output)
-            .unwrap();
+        let output =
+            Evaluator::new(runtime).evaluate::<Rgb>(&dag, &Default::default(), cat.output).unwrap();
         // Colour 0.4.7: RGB_to_XYZ -> CAT16 A-to-D65 -> XYZ_to_RGB, BT.2020.
         let expected = [
             [0.0150916964441549, 0.432812976444011, 2.31325856901239],
@@ -214,7 +213,8 @@ mod tests {
             [0., 0., 0.],
             [14.2259813421445, -1.65111855363381, 1.52244860850617],
         ];
-        for (actual, expected) in output.data.iter().flatten().zip(expected.iter().flatten()) {
+        let actual = output.data.host().unwrap();
+        for (actual, expected) in actual.iter().flatten().zip(expected.iter().flatten()) {
             assert!((f64::from(*actual) - expected).abs() < 5e-6, "{actual} != {expected}");
         }
         assert_eq!(output.desc.coordinates, Coordinates::Space(REC2020_D65));

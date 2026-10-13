@@ -152,10 +152,9 @@ fn softproof_matches_bounded_export_across_profiles_and_intents() {
                 let node = project.graph.dag.node(preview).unwrap();
                 let node = <super::observe::Definition as Typed>::of(node).unwrap();
                 let bound = values.bind::<super::observe::Definition>().unwrap();
-                let image = std::sync::Arc::new(crate::node_ui::data::HostImage::new(
-                    &bound.image,
-                    ctx.global.scale,
-                ));
+                let image = std::sync::Arc::new(
+                    crate::node_ui::data::HostImage::new(&bound.image, ctx.global.scale).unwrap(),
+                );
                 let output = node.assets().unwrap();
                 let shown = super::prepare(&node.parameters, output.as_ref(), &image).unwrap();
                 let values = inputs.remove(&tiff).unwrap().unwrap();

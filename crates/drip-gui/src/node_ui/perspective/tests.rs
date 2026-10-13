@@ -4,6 +4,7 @@ use drip::{
     eval::Evaluator,
     graph::Dag,
     node::{self, data::*},
+    runtime::RuntimeContext,
 };
 
 const INPUT: Plane = Plane { origin: [0.0, 0.0], size: [400.0, 300.0] };
@@ -26,7 +27,7 @@ fn prepared(p: Settings, scale: u32) -> (Prepared, Vec<[f32; 3]>) {
     let global = drip::runtime::GlobalContext { scale };
     let id = transform.node;
     let inputs = evaluator.evaluate_inputs(&dag, &global, &[id]).remove(&id).unwrap().unwrap();
-    let ctx = PrepareContext { client: evaluator.client().ok().cloned(), global };
+    let ctx = PrepareContext { runtime: evaluator.runtime().clone(), global };
     let prepare = <perspective::Definition as GuiNode>::PREPARE.unwrap();
     let node = perspective::Definition::of(dag.node(id).unwrap()).unwrap();
     (

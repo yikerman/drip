@@ -30,12 +30,12 @@ fn rejects_invalid_options() {
 #[test]
 fn nodes_with_outputs_need_a_contract() {
     let function = syn::parse_quote! {
-        fn x(c: &Context, p: &Params, output: Write<Cpu<Image>>) -> Result<()> { Ok(()) }
+        fn x(c: &Context, p: &Params, output: Write<Image>) -> Result<()> { Ok(()) }
     };
     let error = expand(quote!(id = "x"), function).unwrap_err();
     assert_eq!(error.to_string(), "a node with outputs needs a contract");
     let function = syn::parse_quote! {
-        fn x(c: &Context, p: &Params, image: Read<Cpu<Image>>) -> Result<()> { Ok(()) }
+        fn x(c: &Context, p: &Params, image: Read<Image>) -> Result<()> { Ok(()) }
     };
     generated_module(expand(quote!(id = "x"), function).unwrap());
 }
@@ -43,18 +43,18 @@ fn nodes_with_outputs_need_a_contract() {
 #[test]
 fn an_unread_port_drops_its_underscore() {
     let function = syn::parse_quote! {
-        fn x(c: &Context, p: &Params, _image: Read<Cpu<Image>>) -> Result<()> { Ok(()) }
+        fn x(c: &Context, p: &Params, _image: Read<Image>) -> Result<()> { Ok(()) }
     };
     let module = generated_module(expand(quote!(id = "x"), function).unwrap());
     assert_port_specs(
         &module,
         "inputs",
-        quote!(::drip::ports::PortSpec::of::<Cpu<Image>, ::drip::ports::Any>("image")),
+        quote!(::drip::ports::PortSpec::of::<Image, ::drip::ports::Any>("image")),
     );
 }
 
 #[test]
-fn sources_load_cpu_outputs_without_a_contract() {
+fn sources_load_host_outputs_without_a_contract() {
     let function: syn::ItemFn = syn::parse_quote! {
         fn read(p: &Settings, mosaic: Load<'_, Bayer>, metadata: Load<'_, Facts>) -> Result<()> {
             Ok(())
@@ -67,19 +67,19 @@ fn sources_load_cpu_outputs_without_a_contract() {
         &module,
         "outputs",
         quote!(
-            ::drip::ports::PortSpec::of::<::drip::ports::Cpu<Bayer>, ::drip::ports::Any>("mosaic"),
-            ::drip::ports::PortSpec::of::<::drip::ports::Cpu<Facts>, ::drip::ports::Any>(
-                "metadata"
-            )
+            ::drip::ports::PortSpec::of::<Bayer, ::drip::ports::Any>("mosaic"),
+            ::drip::ports::PortSpec::of::<Facts, ::drip::ports::Any>("metadata")
         ),
     );
+    let shape = kind_field(&module, "shape");
+    assert_eq!(quote!(#shape).to_string(), quote!(::drip::definition::Shape::Source).to_string());
     let items = &module.content.as_ref().unwrap().1;
     assert!(items.iter().any(|item| matches!(item, syn::Item::Fn(f) if f.sig.ident == "load")));
     let error = expand(quote!(id = "raw", contract = c), function).unwrap_err();
     assert!(error.to_string().contains("remove the contract"));
     for declaration in [
         quote!(
-            fn x(p: &P, a: Load<A>, b: Read<Cpu<B>>) {}
+            fn x(p: &P, a: Load<A>, b: Read<B>) {}
         ),
         quote!(
             fn x(c: &C, p: &P, a: Load<A>) {}
@@ -93,7 +93,7 @@ fn sources_load_cpu_outputs_without_a_contract() {
 #[test]
 fn actions_are_declared_with_the_node_and_named_from_their_function() {
     let function = syn::parse_quote! {
-        fn tiff(c: &Context, p: &Export, image: Read<Cpu<Rgb>>) -> Result<()> { Ok(()) }
+        fn tiff(c: &Context, p: &Export, image: Read<Rgb>) -> Result<()> { Ok(()) }
     };
     let module = generated_module(expand(quote!(id = "x", action = write_file), function).unwrap());
     let action = kind_field(&module, "action");
@@ -111,7 +111,7 @@ fn actions_are_declared_with_the_node_and_named_from_their_function() {
 #[test]
 fn assets_load_when_first_used_and_reach_the_action() {
     let function: syn::ItemFn = syn::parse_quote! {
-        fn tiff(c: &Context, p: &Export, image: Read<Cpu<Rgb>>) -> Result<()> { Ok(()) }
+        fn tiff(c: &Context, p: &Export, image: Read<Rgb>) -> Result<()> { Ok(()) }
     };
     let options = quote!(id = "x", action = export, assets);
     let module = generated_module(expand(options, function.clone()).unwrap());
@@ -193,7 +193,7 @@ fn rejects_unsupported_signatures() {
             quote!(
                 fn x(c: &C, p: &P, a: &A) {}
             ),
-            "expected Read<Port> or Write<Port>",
+            "expected Read<Payload> or Write<Payload>",
         ),
         (
             quote!(
@@ -205,13 +205,13 @@ fn rejects_unsupported_signatures() {
             quote!(
                 fn x(c: &C, p: &P, a: Read<'_>) {}
             ),
-            "expected <Port> or <Port, Requirement>",
+            "expected <Payload> or <Payload, Requirement>",
         ),
         (
             quote!(
                 fn x(c: &C, p: &P, a: Read<A, B, C>) {}
             ),
-            "expected <Port> or <Port, Requirement>",
+            "expected <Payload> or <Payload, Requirement>",
         ),
         (
             quote!(
@@ -240,15 +240,27 @@ fn rejects_unsupported_signatures() {
 }
 
 #[test]
+fn rejects_placements_in_port_types() {
+    for placement in ["Cpu", "Device"] {
+        let wrapper = quote::format_ident!("{placement}");
+        let function = syn::parse_quote! {
+            fn x(c: &C, p: &P, image: Option<Read<'_, ports::#wrapper<Rgb>, Rec2020>>) {}
+        };
+        let error = expand(quote!(id = "x", contract = c), function).unwrap_err().to_string();
+        assert!(error.contains(&format!("the {placement} placement left")), "{error}");
+    }
+}
+
+#[test]
 fn accepts_qualified_ports_and_indexes_each_direction_independently() {
     let function: syn::ItemFn = syn::parse_quote! {
         fn mix(
             context: &Context,
             parameters: &Params,
-            first: ports::Write<'_, Cpu<A>>,
-            input: ports::Read<'_, Cpu<B>>,
-            second: ports::Write<Cpu<C>>,
-            other: ports::Read<Device<D>>,
+            first: ports::Write<'_, A>,
+            input: ports::Read<'_, B>,
+            second: ports::Write<C>,
+            other: ports::Read<D>,
         ) -> Result<()> { Ok(()) }
     };
     let signature = Signature::parse(&function.sig).unwrap();
@@ -289,7 +301,7 @@ fn preserves_public_bindings_and_metadata() {
     let function = syn::parse_quote! {
         /// First line.
         /// Second line.
-        pub fn source(context: &Context, parameters: &Params, image: Write<Cpu<Image>>)
+        pub fn source(context: &Context, parameters: &Params, image: Write<Image>)
             -> Result<()> { Ok(()) }
     };
     let module = generated_module(
@@ -320,6 +332,8 @@ fn preserves_public_bindings_and_metadata() {
         generated_method(&module, method);
     }
     assert_eq!(literal(&module, "help"), "First line.\nSecond line.");
+    let shape = kind_field(&module, "shape");
+    assert_eq!(quote!(#shape).to_string(), quote!(::drip::definition::Shape::Kernel).to_string());
 }
 
 #[test]
@@ -365,26 +379,26 @@ fn optional_inputs_keep_their_port_type_and_direction_index() {
         fn mix(
             context: &Context,
             parameters: &Params,
-            image: Read<Cpu<Image>>,
-            metadata: Option<ports::Read<'_, Cpu<Metadata>>>,
-            output: Write<Cpu<Image>>,
-            mask: std::option::Option<ports::Read<'_, Device<Mask>>>,
+            image: Read<Image>,
+            metadata: Option<ports::Read<'_, Metadata>>,
+            output: Write<Image>,
+            mask: std::option::Option<ports::Read<'_, Mask>>,
         ) {}
     };
     let signature = Signature::parse(&function.sig).unwrap();
     let inputs: Vec<_> = signature
         .inputs()
         .map(|port| {
-            let ty = &port.ty;
+            let ty = &port.payload;
             (port.name.to_string(), quote!(#ty).to_string(), port.optional, port.index)
         })
         .collect();
     assert_eq!(
         inputs,
         [
-            ("image".into(), quote!(Cpu<Image>).to_string(), false, 0),
-            ("metadata".into(), quote!(Cpu<Metadata>).to_string(), true, 1),
-            ("mask".into(), quote!(Device<Mask>).to_string(), true, 2),
+            ("image".into(), quote!(Image).to_string(), false, 0),
+            ("metadata".into(), quote!(Metadata).to_string(), true, 1),
+            ("mask".into(), quote!(Mask).to_string(), true, 2),
         ]
     );
     let module = generated_module(expand(quote!(id = "mix", contract = c), function).unwrap());
@@ -398,7 +412,7 @@ fn optional_inputs_keep_their_port_type_and_direction_index() {
 #[test]
 fn optional_execution_is_nullable_and_contracts_keep_one_description_per_input() {
     let function = syn::parse_quote! {
-        fn x(context: &Context, parameters: &Params, image: Read<Cpu<Image>>, metadata: Option<Read<Cpu<Metadata>>>) {}
+        fn x(context: &Context, parameters: &Params, image: Read<Image>, metadata: Option<Read<Metadata>>) {}
     };
     let module = generated_module(expand(quote!(id = "x", contract = c), function).unwrap());
     let run = generated_method(&module, "run");
@@ -441,13 +455,15 @@ fn optional_execution_is_nullable_and_contracts_keep_one_description_per_input()
 #[test]
 fn forwarded_outputs_publish_storage_the_node_sets() {
     let function = syn::parse_quote! {
-        fn x(c: &C, p: &P, image: Read<Device<A>>, kept: Forward<Device<B>, R>, made: Write<Cpu<C>>) {}
+        fn x(c: &C, p: &P, image: Read<A>, kept: Forward<B, R>, made: Write<C>) {}
     };
     let module = generated_module(expand(quote!(id = "x", contract = c), function).unwrap());
     let run = generated_method(&module, "run");
     let statements: Vec<_> = run.block.stmts.iter().map(|s| quote!(#s).to_string()).collect();
-    assert!(statements[1].contains("ForwardSlot :: < Device < B > > :: new (& outputs [0usize])"));
-    assert!(statements[2].contains("OutputSlot :: < Cpu < C > > :: allocate (& outputs [1usize]"));
+    assert!(statements[1].contains("ForwardSlot :: < B > :: new"));
+    assert!(statements[1].contains("typed (& outputs [0usize])"));
+    assert!(statements[2].contains("OutputSlot :: < C > :: new"));
+    assert!(statements[2].contains("typed (& outputs [1usize])"));
     let call = kernel_call(run, "x");
     let arguments: Vec<_> = call.args.iter().skip(3).map(|a| quote!(#a).to_string()).collect();
     assert_eq!(
@@ -461,8 +477,8 @@ fn forwarded_outputs_publish_storage_the_node_sets() {
         &module,
         "outputs",
         quote!(
-            ::drip::ports::PortSpec::of::<Device<B>, R>("kept"),
-            ::drip::ports::PortSpec::of::<Cpu<C>, ::drip::ports::Any>("made")
+            ::drip::ports::PortSpec::of::<B, R>("kept"),
+            ::drip::ports::PortSpec::of::<C, ::drip::ports::Any>("made")
         ),
     );
 }
@@ -473,10 +489,10 @@ fn port_specs_carry_requirements_and_default_to_any() {
         fn x(
             context: &Context,
             parameters: &Params,
-            image: Read<Cpu<Rgb>>,
-            coefficients: Option<Read<ports::Device<Coefficients>>>,
-            working: Read<'_, Device<Rgb>, Rec2020>,
-            output: Write<Cpu<Rgb>, Rec2020>,
+            image: Read<Rgb>,
+            coefficients: Option<Read<Coefficients>>,
+            working: Read<'_, Rgb, Rec2020>,
+            output: Write<Rgb, Rec2020>,
         ) {}
     };
     let module = generated_module(expand(quote!(id = "x", contract = c), function).unwrap());
@@ -484,15 +500,13 @@ fn port_specs_carry_requirements_and_default_to_any() {
         (
             "inputs",
             quote!(
-                ::drip::ports::PortSpec::of::<Cpu<Rgb>, ::drip::ports::Any>("image"),
-                ::drip::ports::PortSpec::of::<ports::Device<Coefficients>, ::drip::ports::Any>(
-                    "coefficients"
-                )
-                .optional(),
-                ::drip::ports::PortSpec::of::<Device<Rgb>, Rec2020>("working")
+                ::drip::ports::PortSpec::of::<Rgb, ::drip::ports::Any>("image"),
+                ::drip::ports::PortSpec::of::<Coefficients, ::drip::ports::Any>("coefficients")
+                    .optional(),
+                ::drip::ports::PortSpec::of::<Rgb, Rec2020>("working")
             ),
         ),
-        ("outputs", quote!(::drip::ports::PortSpec::of::<Cpu<Rgb>, Rec2020>("output"))),
+        ("outputs", quote!(::drip::ports::PortSpec::of::<Rgb, Rec2020>("output"))),
     ] {
         assert_port_specs(&module, method, expected);
     }

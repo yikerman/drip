@@ -11,7 +11,6 @@ use drip::{
         },
         filter::Filter,
     },
-    ports::*,
     runtime::GlobalContext,
 };
 use std::f64::consts::PI;
@@ -56,8 +55,8 @@ fn resample(
     let sample = node::field::sample::add(&mut dag, p).unwrap();
     dag.connect(source, field.image).unwrap();
     dag.connect(field.output, sample.field).unwrap();
-    let result = evaluator.evaluate::<Cpu<Rgb>>(&dag, global, sample.output).unwrap();
-    (result.desc.clone(), result.data.to_vec())
+    let result = evaluator.evaluate::<Rgb>(&dag, global, sample.output).unwrap();
+    (result.desc.clone(), result.data.host().unwrap().to_vec())
 }
 
 /// Sample a field built directly, so maps can differ per channel.
@@ -71,8 +70,8 @@ fn sample_field(
     let source = node::source::<RgbField>(&mut dag, field, pixels).unwrap();
     let sample = node::field::sample::add(&mut dag, p).unwrap();
     dag.connect(source, sample.field).unwrap();
-    let result = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), sample.output).unwrap();
-    (result.desc.clone(), result.data.to_vec())
+    let result = evaluator.evaluate::<Rgb>(&dag, &Default::default(), sample.output).unwrap();
+    (result.desc.clone(), result.data.host().unwrap().to_vec())
 }
 
 fn identity_is_exact_for_interpolating_filters(evaluator: &Evaluator) {
@@ -234,9 +233,9 @@ fn perspective_crops_exactly_and_matches_the_reference(evaluator: &Evaluator) {
         dag.connect(source, field.image).unwrap();
         dag.connect(field.output, transform.field).unwrap();
         dag.connect(transform.output, sample.field).unwrap();
-        let field = evaluator.evaluate::<Cpu<RgbField>>(&dag, global, transform.output).unwrap();
-        let result = evaluator.evaluate::<Cpu<Rgb>>(&dag, global, sample.output).unwrap();
-        (field.desc.clone(), result.desc.clone(), result.data.to_vec())
+        let field = evaluator.evaluate::<RgbField>(&dag, global, transform.output).unwrap();
+        let result = evaluator.evaluate::<Rgb>(&dag, global, sample.output).unwrap();
+        (field.desc.clone(), result.desc.clone(), result.data.host().unwrap().to_vec())
     };
     // Columns 2..6, rows 0..3.
     let crop = [[0.25, 0.0], [0.75, 0.0], [0.75, 0.5], [0.25, 0.5]];

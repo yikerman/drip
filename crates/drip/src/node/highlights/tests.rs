@@ -1,8 +1,5 @@
 use super::*;
-use crate::{
-    payload::{download, upload},
-    runtime::RuntimeContext,
-};
+use crate::{image::Raster, runtime::RuntimeContext};
 
 const PHASES: [BayerPhase; 4] =
     [BayerPhase::Rggb, BayerPhase::Grbg, BayerPhase::Gbrg, BayerPhase::Bggr];
@@ -26,18 +23,20 @@ fn evaluate(
     };
     let levels_desc = BayerLevelsDesc { phase, response: desc.response.clone() };
     let levels = std::array::from_fn(|i| clips[reference::color(phase, i / 2, i % 2)]);
-    let input = upload::<Bayer>(&desc, &samples.to_vec().into(), runtime).unwrap();
-    let mut output = <Device<Bayer> as Port>::allocate(&desc, runtime).unwrap();
+    let input = Raster::<Bayer>::from_host(desc.clone(), samples.to_vec().into()).unwrap();
+    let levels = Raster::<BayerLevels>::from_host(levels_desc, levels).unwrap();
+    let mut output = OutputSlot::<Bayer>::new(desc);
     let ctx = KernelContext { global: &GlobalContext::default(), runtime };
     reconstruct(
         &ctx,
         &Settings { threshold },
-        Read::new(&desc, &input),
-        Read::new(&levels_desc, &levels),
-        Write::new(&desc, &mut output),
+        Read::new(&input),
+        Read::new(&levels),
+        output.write(),
     )
     .unwrap();
-    download::<Bayer>(&desc, &output, runtime).unwrap().to_vec()
+    let output = output.finish().unwrap();
+    output.downcast::<Bayer>().unwrap().host().unwrap().to_vec()
 }
 fn fixture(width: usize, height: usize, phase: BayerPhase, clips: [f32; 4]) -> Vec<f32> {
     (0..width * height)

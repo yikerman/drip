@@ -1,4 +1,6 @@
-use drip::{eval::Evaluator, graph::Dag, node, node::data::*, ports::*, runtime::RuntimeContext};
+use drip::{
+    eval::Evaluator, graph::Dag, image::Description, node, node::data::*, runtime::RuntimeContext,
+};
 use std::sync::Arc;
 
 /// As-shot R, G, B and second-G gains 2, 1, 4, 3; the second green's black is
@@ -37,14 +39,13 @@ fn combined_gains(runtime: RuntimeContext) {
         let node = node::bayer_gains::add(&mut dag, ()).unwrap();
         dag.connect(source, node.image).unwrap();
         dag.connect(metadata, node.metadata).unwrap();
-        let image = eval.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), node.output).unwrap();
+        let image = eval.evaluate::<Bayer>(&dag, &Default::default(), node.output).unwrap();
         // Local sites repeat every two columns and rows, including partial cells.
         let expected: Vec<f32> =
             samples.iter().enumerate().map(|(i, v)| v * gains[i / 3 % 2 * 2 + i % 3 % 2]).collect();
-        assert_eq!(image.data.as_ref().as_ref(), expected.as_slice());
-        let result =
-            eval.evaluate::<Cpu<BayerLevels>>(&dag, &Default::default(), node.levels).unwrap();
-        assert_eq!(*result.data, levels);
+        assert_eq!(image.data.host().unwrap().as_ref(), expected.as_slice());
+        let result = eval.evaluate::<BayerLevels>(&dag, &Default::default(), node.levels).unwrap();
+        assert_eq!(*result.data.host().unwrap(), levels);
         assert_eq!(result.desc.phase, phase);
         assert_eq!(result.desc.response, image.desc.response);
         assert_eq!(image.desc.response.balance, Some([2., 1., 4., 3.]));

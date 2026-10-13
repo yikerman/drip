@@ -6,7 +6,7 @@ use crate::{
     node::data::{CaptureMetadata, Rec2020, Rgb, RgbDesc},
     node::profile,
     payload::Payload,
-    ports::{Cpu, Read, Requirement},
+    ports::{Read, Requirement},
     registry::tag,
     runtime::KernelContext,
 };
@@ -94,16 +94,16 @@ impl Assets for Export {
 pub fn tiff(
     _: &KernelContext<'_>,
     _: &Export,
-    _image: Read<'_, Cpu<Rgb>, Rec2020>,
-    _metadata: Option<Read<'_, Cpu<CaptureMetadata>>>,
+    _image: Read<'_, Rgb, Rec2020>,
+    _metadata: Option<Read<'_, CaptureMetadata>>,
 ) -> Result<()> {
     Ok(())
 }
 /// Encode and write the file named by the settings.
 fn export(p: &Export, output: &profile::Output, inputs: tiff::Inputs<'_>) -> Result<()> {
     let path = p.path.as_ref().ok_or_else(|| Error::Contract("no output file chosen".into()))?;
-    let metadata = inputs.metadata.map(|m| &**m.data);
-    let bytes = encode(p, output, inputs.image.desc, inputs.image.data, metadata)?;
+    let metadata = inputs.metadata.map(|m| m.data.host().map(|m| &**m)).transpose()?;
+    let bytes = encode(p, output, inputs.image.desc, inputs.image.data.host()?, metadata)?;
     std::fs::write(path, bytes).map_err(|e| Error::Runtime(format!("{}: {e}", path.display())))
 }
 

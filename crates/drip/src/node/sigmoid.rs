@@ -92,8 +92,8 @@ references=[("darktable sigmoid", "https://github.com/darktable-org/darktable/bl
 pub fn apply(
     ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Device<Rgb>, Rec2020>,
-    output: Write<'_, Device<Rgb>, Rec2020>,
+    image: Read<'_, Rgb, Rec2020>,
+    output: Write<'_, Rgb, Rec2020>,
 ) -> Result<()> {
     let coefficients = ctx.constants(&prepare_values(p))?;
     let (count, dim) = crate::runtime::dispatch_dims(image.desc.extent.pixels());
@@ -101,9 +101,9 @@ pub fn apply(
         ctx.client()?,
         count,
         dim,
-        image.data.argument(),
+        image.data.device(ctx)?.argument(),
         coefficients.argument(),
-        output.data.argument(),
+        output.device(ctx)?.argument(),
     );
     Ok(())
 }

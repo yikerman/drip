@@ -1,7 +1,5 @@
 use drip::registry::{NODES, Registry};
-use drip::{
-    eval::Evaluator, node, node::data::*, ports::*, project::Project, runtime::RuntimeContext,
-};
+use drip::{eval::Evaluator, node, node::data::*, project::Project, runtime::RuntimeContext};
 use serde_json::json;
 
 fn registry() -> Registry {
@@ -68,7 +66,7 @@ fn project_round_trip_uses_named_ports_and_revalidates_parameters() {
     let output = restored.dag.typed_output::<Rgb>(output).unwrap();
     // An incomplete image pipeline loads; evaluation reports what is missing.
     let eval = Evaluator::new(RuntimeContext::host());
-    let error = eval.evaluate::<Cpu<Rgb>>(&restored.dag, &Default::default(), output).err();
+    let error = eval.evaluate::<Rgb>(&restored.dag, &Default::default(), output).err();
     assert!(matches!(error, Some(drip::Error::MissingInput { port: "image", .. })));
     let mut data: serde_json::Value = serde_json::from_str(&serialized).unwrap();
     data["nodes"][0]["parameters"]["contrast"] = json!(-1.);
@@ -144,7 +142,7 @@ fn missing_raw_preserves_editable_parameters_and_reports_load_error() {
     let target = restored.dag.output_port(sigmoid, "output").unwrap();
     let target = restored.dag.typed_output::<Rgb>(target).unwrap();
     let error = Evaluator::new(RuntimeContext::host())
-        .evaluate::<Cpu<Rgb>>(&restored.dag, &Default::default(), target)
+        .evaluate::<Rgb>(&restored.dag, &Default::default(), target)
         .err()
         .unwrap();
     assert!(error.to_string().contains("drip-deliberately-missing-raw-source.nef"));
@@ -174,13 +172,14 @@ fn raw_is_decoded_once_when_forced_and_again_only_when_chosen_again() {
     let output = dag.typed_output::<Bayer>(dag.output_port(source, "mosaic").unwrap()).unwrap();
     let evaluator = Evaluator::new(RuntimeContext::host());
     let evaluate = |dag: &drip::graph::Dag| {
-        evaluator.evaluate::<Cpu<Bayer>>(dag, &Default::default(), output).map(|e| e.data)
+        evaluator.evaluate::<Bayer>(dag, &Default::default(), output).map(|e| e.data)
     };
     let first = evaluate(&dag).unwrap();
     std::fs::remove_file(&temporary).unwrap();
     // Files are assumed unchanged: the node and every graph snapshot sharing it
     // keep the first decode.
-    assert!(std::sync::Arc::ptr_eq(&first, &evaluate(&dag.clone()).unwrap()));
+    let again = evaluate(&dag.clone()).unwrap();
+    assert_eq!(first.host().unwrap().as_ptr(), again.host().unwrap().as_ptr());
     // Choosing the file again admits a new node, which reads it again.
     dag.set_parameters(source, json!({"path":temporary})).unwrap();
     assert!(evaluate(&dag).is_err());

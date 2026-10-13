@@ -29,20 +29,20 @@ fn camera_to_rgb_contract(
 pub fn compute(
     ctx: &KernelContext<'_>,
     _: &(),
-    image: Read<'_, Device<Rgb>, CameraRgb>,
-    metadata: Read<'_, Cpu<CaptureMetadata>>,
-    output: Write<'_, Device<Rgb>, Rec2020>,
+    image: Read<'_, Rgb, CameraRgb>,
+    metadata: Read<'_, CaptureMetadata>,
+    output: Write<'_, Rgb, Rec2020>,
 ) -> Result<()> {
-    let matrix = camera::matrix(metadata.data, image.desc.response()?.balance)?;
+    let matrix = camera::matrix(metadata.data.host()?, image.desc.response()?.balance)?;
     let coefficients = ctx.constants(color::to_f32(&matrix).as_flattened())?;
     let (count, dim) = dispatch_dims(image.desc.extent.pixels());
     super::shared_kernel::matrix::launch(
         ctx.client()?,
         count,
         dim,
-        image.data.argument(),
+        image.data.device(ctx)?.argument(),
         coefficients.argument(),
-        output.data.argument(),
+        output.device(ctx)?.argument(),
     );
     Ok(())
 }

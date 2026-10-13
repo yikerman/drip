@@ -88,18 +88,19 @@ fn orientation_contract(
 pub fn compute(
     ctx: &KernelContext<'_>,
     p: &Settings,
-    image: Read<'_, Device<Rgb>>,
-    metadata: Option<Read<'_, Cpu<CaptureMetadata>>>,
-    output: Write<'_, Device<Rgb>>,
+    image: Read<'_, Rgb>,
+    metadata: Option<Read<'_, CaptureMetadata>>,
+    output: Write<'_, Rgb>,
 ) -> Result<()> {
-    let orientation = p.orientation.resolve(metadata.as_ref().map(|m| &**m.data));
+    let orientation =
+        p.orientation.resolve(metadata.map(|m| m.data.host().map(|m| &**m)).transpose()?);
     let (count, dim) = dispatch_dims(image.desc.extent.pixels());
     kernel::orient::launch(
         ctx.client()?,
         count,
         dim,
-        image.data.argument(),
-        output.data.argument(),
+        image.data.device(ctx)?.argument(),
+        output.device(ctx)?.argument(),
         image.desc.extent.width as usize,
         image.desc.extent.height as usize,
         orientation as usize,
@@ -142,10 +143,7 @@ mod kernel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        payload::{download, upload},
-        runtime::RuntimeContext,
-    };
+    use crate::{image::Raster, runtime::RuntimeContext};
     use std::sync::Arc;
 
     const EXPLICIT: [Orientation; 8] = [
@@ -247,7 +245,7 @@ mod tests {
         let image = RgbDesc::new(Extent { width, height }, image_desc().coordinates);
         let samples: Vec<[f32; 3]> =
             (0..image.extent.pixels()).map(|i| [i as f32, -(i as f32), 8.0]).collect();
-        let input = upload::<Rgb>(&image, &samples.clone().into(), runtime).unwrap();
+        let input = Raster::<Rgb>::from_host(image.clone(), samples.clone().into()).unwrap();
         let ctx = KernelContext { global: &GlobalContext::default(), runtime };
         for (index, orientation) in EXPLICIT.into_iter().enumerate() {
             // Exercise both metadata resolution and replacement of a conflicting
@@ -260,16 +258,18 @@ mod tests {
                 let metadata = (mode != 2).then_some(&metadata);
                 let (output_desc,) =
                     orientation_contract(ctx.global, &p, &image, metadata).unwrap();
-                let mut output = <Device<Rgb> as Port>::allocate(&output_desc, runtime).unwrap();
+                let metadata = metadata.map(|m| Raster::from_host(m.clone(), m.clone()).unwrap());
+                let mut output = OutputSlot::<Rgb>::new(output_desc);
                 compute(
                     &ctx,
                     &p,
-                    Read::new(&image, &input),
-                    metadata.map(|m| Read::new(m, m)),
-                    Write::new(&output_desc, &mut output),
+                    Read::new(&input),
+                    metadata.as_ref().map(Read::new),
+                    output.write(),
                 )
                 .unwrap();
-                let actual = download::<Rgb>(&output_desc, &output, runtime).unwrap();
+                let output = output.finish().unwrap();
+                let actual = output.downcast::<Rgb>().unwrap().host().unwrap();
                 assert_eq!(actual.len(), expected[index].len());
                 for (actual, &source) in actual.iter().zip(expected[index]) {
                     for (actual, expected) in actual.iter().zip(samples[source]) {

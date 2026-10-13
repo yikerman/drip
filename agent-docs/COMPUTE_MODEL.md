@@ -457,6 +457,7 @@ Falsifiable steps, in order, each a day or two:
 
 Added 2026-10-13 after the user asked how to put the model into this
 project, including foreign and expensive computations. Status: Open.
+Implementation status (2026-10-13): step 1 landed; decisions are in [DESIGN](DESIGN.md#compute).
 
 ### Decisions proposed
 

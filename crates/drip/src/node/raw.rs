@@ -101,7 +101,7 @@ mod tests {
 
     #[test]
     fn missing_or_unreadable_files_stay_editable_and_fail_evaluation() {
-        use crate::{eval::Evaluator, ports::Cpu, runtime::RuntimeContext};
+        use crate::{eval::Evaluator, runtime::RuntimeContext};
         let mut dag = crate::graph::Dag::new();
         let unset = add(&mut dag, Settings::default()).unwrap();
         let missing = Settings { path: Some("/nonexistent/drip.nef".into()) };
@@ -110,7 +110,7 @@ mod tests {
         for (ports, reason) in [(unset, "select a RAW"), (missing, "/nonexistent/drip.nef")] {
             assert!(dag.node(ports.node).unwrap().parameters().is_ok());
             let error =
-                eval.evaluate::<Cpu<Bayer>>(&dag, &Default::default(), ports.mosaic).err().unwrap();
+                eval.evaluate::<Bayer>(&dag, &Default::default(), ports.mosaic).err().unwrap();
             assert!(error.to_string().contains(reason), "{error}");
         }
     }
@@ -118,7 +118,7 @@ mod tests {
     #[cfg(feature = "cpu")]
     #[test]
     fn raw_neutral_survives_as_shot_to_reference_and_cat16() {
-        use crate::{eval::Evaluator, node, node::color, ports::Cpu, runtime::RuntimeContext};
+        use crate::{eval::Evaluator, node, node::color, runtime::RuntimeContext};
         let mut r = raw();
         r.metadata.sensor.width = 64;
         r.metadata.sensor.height = 64;
@@ -158,12 +158,11 @@ mod tests {
         dag.connect(color.output, cat.image).unwrap();
         dag.connect(metadata, cat.metadata).unwrap();
         let evaluator = Evaluator::new(RuntimeContext::cpu());
-        let levels = evaluator
-            .evaluate::<Cpu<BayerLevels>>(&dag, &Default::default(), gains.levels)
-            .unwrap();
-        assert_eq!(*levels.data, [2., 1., 1., 4.]);
-        let output = evaluator.evaluate::<Cpu<Rgb>>(&dag, &Default::default(), cat.output).unwrap();
-        for pixel in output.data.iter() {
+        let levels =
+            evaluator.evaluate::<BayerLevels>(&dag, &Default::default(), gains.levels).unwrap();
+        assert_eq!(*levels.data.host().unwrap(), [2., 1., 1., 4.]);
+        let output = evaluator.evaluate::<Rgb>(&dag, &Default::default(), cat.output).unwrap();
+        for pixel in output.data.host().unwrap().iter() {
             for value in pixel {
                 assert!((f64::from(*value) - expected_y).abs() < 2e-5);
             }

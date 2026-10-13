@@ -2,6 +2,25 @@
 
 Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
+## 2026-10-13
+
+- Explicit compute model, step 1: residency left node signatures. Ports name
+  payloads (`Read<'_, Rgb, Rec2020>`); an edge carries an `Image`, today a
+  `Raster` with lazy host and device representations; `Write` is materialized
+  where the node writes it; `Kind::shape` is `Kernel` or `Source`; a run's
+  values live in a `Store`. `Cpu`, `Device`, `Port` and `Transfers` are gone;
+  the macro rejects a placement in a port type. All 17 library kinds, the GUI
+  views, scopes, Perspective Transform's view and auto exposure moved
+  mechanically. Transfer counts between nodes are unchanged; five tests that
+  counted the final download of an `evaluate::<Cpu<_>>` result now expect one
+  download fewer, since the caller reads the result. Sources hand each
+  evaluation a fresh raster of their loaded host samples, so uploads are not
+  retained with the node, as before. The workspace gate passes with default
+  features (wgpu on the RTX 3080), with `drip/cpu`, the doctests (including a
+  new `compile_fail` for a device read of `CaptureMetadata`) and the
+  `selected_backend` tests; the ignored GUI scope tests pass on the GPU. No
+  benchmarks were run.
+
 ## 2026-10-12
 
 - Researched an explicit computation model for the user ([COMPUTE_MODEL](COMPUTE_MODEL.md)):
