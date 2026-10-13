@@ -9,8 +9,10 @@
 //! them into one kernel per segment instead of launching one per node, over
 //! the [`Lattice`] window a consumer asks for. A reduce or bins node names a
 //! [`ReduceBody`] or [`BinsBody`], which `plan` runs over a segment's pixels
-//! without storing them and reads back as a small host value. The shape also
-//! says whether a kind's outputs depend on the requested scale
+//! without storing them and reads back as a small host value. A stencil
+//! names a [`StencilBody`], a `#[cube]` function of a [`Window`] of its
+//! materialized input, and starts a segment that the maps after it join. The
+//! shape also says whether a kind's outputs depend on the requested scale
 //! ([`Shape::scaled`]).
 use crate::{
     Error, Result,
@@ -21,9 +23,9 @@ use cubecl::prelude::*;
 use std::io::{Read, Write};
 
 /// How evaluation runs a node kind. The segment compiler fuses maps, warps
-/// and resamples, and runs reductions and bins over the fused pixels.
-/// `Kernel`, `Source` and `Foreign` stay opaque to it and receive and produce
-/// whole images.
+/// and resamples, runs stencils with the maps after them, and runs
+/// reductions and bins over the fused pixels. `Kernel`, `Source` and
+/// `Foreign` stay opaque to it and receive and produce whole images.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
     /// The node's function runs on every evaluation. Its inputs are
@@ -56,6 +58,12 @@ pub enum Shape {
     /// As `Reduce`, with the output the number of pixels in each bin per
     /// channel.
     Bins(&'static BinsBody),
+    /// The node's host function returns a [`Stencil`]: the reach of the body
+    /// in full-detail pixels and its constants. The output is a deferred
+    /// image whose segment reads the materialized input through a [`Window`]
+    /// around each sample, so a window of the output reads that window grown
+    /// by the reach.
+    Stencil(&'static StencilBody),
 }
 impl Shape {
     /// Whether the kind's contract reads the requested scale to choose its
@@ -397,6 +405,106 @@ pub struct BinsBody {
     pub bin: BinsExpand,
 }
 
+/// What a stencil's host function returns: how far the body reads, in
+/// full-detail pixels of the input's plane, and the `N` constants the body
+/// reads as `k[0..N]`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Stencil<const N: usize> {
+    /// Finite and not negative. The compiler converts it to samples of the
+    /// input's lattice ([`Window::radius_x`]).
+    pub radius: f32,
+    pub constants: [f32; N],
+}
+
+/// What [`Window::at`] returns for a position outside the input's lattice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Border {
+    /// The nearest edge sample.
+    Repeat,
+    /// Black, zero in every channel.
+    Zero,
+}
+
+/// The neighbourhood of one output sample as a stencil body reads it, on the
+/// lattice of the stencil's input, which is the output's.
+///
+/// `radius_x` and `radius_y` are the host function's radius converted to
+/// samples of this lattice, `ceil(radius · extent / full)` and at least one,
+/// and `rate_x` and `rate_y` are samples per full-detail pixel,
+/// `extent / full`. A body states lengths in full-detail pixels and scales
+/// them by the rate, so a preview computes the same image at its detail.
+#[derive(CubeType)]
+pub struct Window<'a> {
+    pub(crate) input: &'a [f32],
+    /// The output sample's position in the lattice.
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    /// The stored window: its first sample and its width, the row stride.
+    pub(crate) left: i32,
+    pub(crate) top: i32,
+    pub(crate) stride: i32,
+    /// The lattice's extent.
+    pub(crate) width: i32,
+    pub(crate) height: i32,
+    pub radius_x: i32,
+    pub radius_y: i32,
+    pub rate_x: f32,
+    pub rate_y: f32,
+    #[cube(comptime)]
+    pub(crate) border: Border,
+}
+
+#[cube]
+impl<'a> Window<'a> {
+    /// The input sample `dx` columns right of and `dy` rows below the output
+    /// sample's position, both at most the radius on their axis. A position
+    /// outside the lattice follows the body's [`Border`].
+    pub fn at(&self, dx: i32, dy: i32) -> Pixel {
+        let mut u = self.x + dx;
+        let mut v = self.y + dy;
+        let mut inside = true;
+        if comptime!(self.border == Border::Repeat) {
+            u = i32::clamp(u, 0i32, self.width - 1i32);
+            v = i32::clamp(v, 0i32, self.height - 1i32);
+        } else {
+            inside = u >= 0i32 && u < self.width && v >= 0i32 && v < self.height;
+        }
+        let mut r = 0.0f32;
+        let mut g = 0.0f32;
+        let mut b = 0.0f32;
+        // The stored window holds the reach of every output sample it
+        // serves, clamped to the lattice (`Plan::input_window`).
+        if inside {
+            let i = usize::cast_from((v - self.top) * self.stride + u - self.left) * 3;
+            r = self.input[i];
+            g = self.input[i + 1];
+            b = self.input[i + 2];
+        }
+        Pixel { r, g, b }
+    }
+}
+
+/// The expansion of a stencil body `#[cube] fn(w: &Window, k: &[f32]) ->
+/// Pixel`, the output sample computed from the window around it.
+pub type StencilExpand = for<'a> fn(
+    &Scope,
+    &<Window<'a> as CubeType>::ExpandType,
+    &<[f32] as CubeType>::ExpandType,
+) -> <Pixel as CubeType>::ExpandType;
+
+/// A stencil as a stencil node or [`Image::stencil`] runs it. Kernel
+/// identity compares bodies by name, so each body compiles once per
+/// sequence of maps after it, whatever its radius and constants.
+#[derive(Clone, Copy)]
+pub struct StencilBody {
+    /// Unique among stencil bodies.
+    pub name: &'static str,
+    /// How many constants `expand` reads from `k`.
+    pub constants: usize,
+    pub border: Border,
+    pub expand: StencilExpand,
+}
+
 /// Equality, hashing and debug output by `name`, which kernel identity
 /// compares.
 macro_rules! by_name {
@@ -419,4 +527,4 @@ macro_rules! by_name {
         }
     )*};
 }
-by_name!(FilterBody, ReduceBody, BinsBody);
+by_name!(FilterBody, ReduceBody, BinsBody, StencilBody);

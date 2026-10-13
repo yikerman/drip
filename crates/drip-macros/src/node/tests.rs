@@ -89,7 +89,7 @@ fn foreign_nodes_publish_host_outputs_without_a_contract() {
         (quote!(id = "raw", foreign = cloud), "expected foreign = memory or disk"),
         (
             quote!(id = "raw", foreign = disk, warp),
-            "at most one of map, warp, resample, reduce, bins and foreign",
+            "at most one of map, warp, resample, reduce, bins, stencil and foreign",
         ),
     ] {
         let error = expand(options, function.clone()).unwrap_err();
@@ -755,6 +755,29 @@ fn reductions_publish_the_host_value_their_body_computes() {
 }
 
 #[test]
+fn stencils_publish_their_input_through_the_body_with_the_returned_reach() {
+    let function = syn::parse2(quote! {
+        fn x(p: &P, image: Point<'_, Rgb>, metadata: Read<'_, Facts>, _output: Point<'_, Rgb>) -> Result<Stencil<2>> {
+            unimplemented!()
+        }
+    })
+    .unwrap();
+    let options = quote!(id = "x", contract = c, stencil = kernel::UNSHARP);
+    let module = generated_module(expand(options, function).unwrap());
+    let shape = kind_field(&module, "shape");
+    let expected = quote!(::drip::shape::Shape::Stencil(&super::kernel::UNSHARP));
+    assert_eq!(quote!(#shape).to_string(), expected.to_string());
+    let run = generated_method(&module, "run");
+    let run = quote!(#run).to_string();
+    // Only the Read input is materialized here. The stencil materializes its
+    // input when a consumer runs it.
+    assert_eq!(run.matches("materialize").count(), 1);
+    let publish = "image . stencil :: < Rgb > (& super :: kernel :: UNSHARP , stencil . radius , \
+                   & stencil . constants , outputs [0] . clone () ,)";
+    assert!(run.contains(publish), "{run}");
+}
+
+#[test]
 fn rejects_malformed_maps() {
     for (options, declaration, message) in [
         (
@@ -762,7 +785,8 @@ fn rejects_malformed_maps() {
             quote!(
                 fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "Point ports declare map = body, warp, resample, reduce = BODY or bins = BODY",
+            "Point ports declare map = body, warp, resample, reduce = BODY, bins = BODY or \
+             stencil = BODY",
         ),
         (
             quote!(id = "x", contract = c, map = body),
@@ -818,7 +842,7 @@ fn rejects_malformed_maps() {
             quote!(
                 fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "a node is at most one of map, warp, resample, reduce, bins and foreign",
+            "a node is at most one of map, warp, resample, reduce, bins, stencil and foreign",
         ),
         (
             quote!(id = "x", contract = c, warp, warp),
@@ -849,11 +873,25 @@ fn rejects_malformed_maps() {
             "a reduce or bins node returns Result<[f32; N]>, the constants of its body",
         ),
         (
+            quote!(id = "x", contract = c, stencil = BODY),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Point<A>) {}
+            ),
+            "a stencil returns Result<Stencil<N>>, its radius and the constants of its body",
+        ),
+        (
+            quote!(id = "x", contract = c, stencil = "BODY"),
+            quote!(
+                fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<Stencil<1>> {}
+            ),
+            "expected a StencilBody static path",
+        ),
+        (
             quote!(id = "x", contract = c, reduce = A, bins = B),
             quote!(
                 fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "a node is at most one of map, warp, resample, reduce, bins and foreign",
+            "a node is at most one of map, warp, resample, reduce, bins, stencil and foreign",
         ),
     ] {
         let error = expand(options, syn::parse2(declaration).unwrap()).unwrap_err();

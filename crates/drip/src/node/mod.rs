@@ -19,6 +19,7 @@ pub mod rcd;
 pub mod reduce;
 pub mod resample;
 mod shared_kernel;
+pub mod sharpen;
 pub mod sigmoid;
 pub mod source;
 pub use source::source;

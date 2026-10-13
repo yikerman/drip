@@ -67,6 +67,7 @@ struct Counts {
     fused: AtomicUsize,
     samples: AtomicUsize,
     reductions: AtomicUsize,
+    approximated: AtomicUsize,
 }
 
 impl RuntimeContext {
@@ -133,6 +134,16 @@ impl RuntimeContext {
 
     pub(crate) fn count_reduction(&self) {
         self.counts.reductions.fetch_add(1, Relaxed);
+    }
+
+    /// Stencil launches on this runtime so far whose radius fell below one
+    /// sample of a preview lattice.
+    pub(crate) fn approximated(&self) -> usize {
+        self.counts.approximated.load(Relaxed)
+    }
+
+    pub(crate) fn count_approximated(&self) {
+        self.counts.approximated.fetch_add(1, Relaxed);
     }
 
     pub(crate) fn upload(&self, bytes: Bytes) -> Result<Handle> {

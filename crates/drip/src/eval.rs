@@ -59,6 +59,11 @@ pub struct Statistics {
     /// [`Image::count`], by reduce and bins nodes or frontends. A pass over a
     /// deferred image computes its pixels without a fused launch.
     pub reductions: usize,
+    /// Stencil launches and passes whose radius spans less than one sample
+    /// of a lattice coarser than full detail. The stencil then reads one
+    /// sample on that axis, and the preview shows less of its effect than
+    /// full detail does.
+    pub approximated: usize,
     /// Demanded values the store served.
     pub hits: usize,
     /// Values among `hits` read from the disk tier.
@@ -273,6 +278,7 @@ struct Counts {
     transfers: (usize, usize),
     fused: (usize, usize),
     reductions: usize,
+    approximated: usize,
 }
 impl Counts {
     fn of(runtime: &RuntimeContext) -> Self {
@@ -280,6 +286,7 @@ impl Counts {
             transfers: runtime.transfers(),
             fused: runtime.fused(),
             reductions: runtime.reductions(),
+            approximated: runtime.approximated(),
         }
     }
 
@@ -293,6 +300,7 @@ impl Counts {
             fused: fused - self.fused.0,
             samples: samples - self.fused.1,
             reductions: runtime.reductions() - self.reductions,
+            approximated: runtime.approximated() - self.approximated,
             hits: run.hits,
             reads: run.reads,
             evictions: run.evictions,

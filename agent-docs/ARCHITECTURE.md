@@ -40,11 +40,12 @@ not compile. `share_as` reads the same storage as another payload under a
 description of equal byte length. Nothing writes a published raster, so
 fan-out and forwarded outputs share storage while nodes stay pure.
 
-A deferred image holds an input image and a `Plan` (`plan.rs`): one
-resampling stage, per-channel projective maps from the image's plane to the
-input's plane with their filter, then the map bodies to apply and their
-constants. The input is a raster, or a deferred image where the plan cuts
-(see [Segments](#segments)). `Image::materialize` materializes the input,
+A deferred image holds an input image and a `Plan` (`plan.rs`): one stage,
+then the map bodies to apply and their constants. The stage resamples,
+through per-channel projective maps from the image's plane to the input's
+plane with their filter, or runs a stencil over the input's lattice
+([Stencils](#stencils)). The input is a raster, or a deferred image where
+the plan cuts (see [Segments](#segments)). `Image::materialize` materializes the input,
 runs the plan once as one fused kernel into a device raster and drops the
 plan and its input, so a segment never stores its intermediate images.
 Later calls and clones share the result. `Image::raster` materializes and
@@ -106,9 +107,9 @@ has no disk tier.
 `Kind::shape` (`shape.rs`) declares how evaluation runs a kind. `#[node]`
 derives it from the declaration: `foreign = memory` or `foreign = disk` with
 `Publish` ports makes a foreign node, `map = body`, `warp`, `resample`,
-`reduce = BODY` or `bins = BODY` with two `Point` ports make a map, warp,
-resample, reduce or bins node, and any other function is a kernel,
-`Shape::Kernel { scaled }`. `Source` is the shape of bound in-memory data,
+`reduce = BODY`, `bins = BODY` or `stencil = BODY` with two `Point` ports
+make a map, warp, resample, reduce, bins or stencil node, and any other
+function is a kernel, `Shape::Kernel { scaled }`. `Source` is the shape of bound in-memory data,
 `node::source`, which hands each run its raster.
 
 `Shape::scaled` is true for a kernel declared `#[node(scaled)]`, a warp and
@@ -130,6 +131,7 @@ scale (`Key::reduced`).
 | `Resample` | `#[node(resample)] fn(&Params, Point<In>, Point<Out>) -> Result<&'static FilterBody>`, with a contract | as for a map | as for a map | the function returns the filter. The contract's description sets the output lattice, and the stage resamples onto it |
 | `Reduce(&ReduceBody)` | `#[node(reduce = BODY)] fn(&Params, Point<In>, Read..., Point<Out>) -> Result<[f32; N]>`, with a contract | as for a map | the second `Point`, a host value whose `Host` converts from the accumulator's `Vec<f32>` | the function returns the constants of `BODY`, and the node folds every pixel of its input with it ([Reductions](#reductions)) |
 | `Bins(&BinsBody)` | `#[node(bins = BODY)] fn(&Params, Point<In>, Read..., Point<Out>) -> Result<[f32; N]>`, with a contract | as for a map | the second `Point`, a host value whose `Host` converts from the counts' `Vec<u32>`, `Counts` for every bins node so far | as for `Reduce`, counting pixels into the bins of `BODY` |
+| `Stencil(&StencilBody)` | `#[node(stencil = BODY)] fn(&Params, Point<In>, Read..., Point<Out>) -> Result<Stencil<N>>`, with a contract | as for a map | as for a map | the function returns the reach in full-detail pixels and the constants of `BODY`, a `#[cube] fn(w: &Window, k: &[f32]) -> Pixel`. The input materializes, and the stencil's kernel computes the samples a consumer asks for, with the maps after it ([Stencils](#stencils)) |
 
 A `Write` allocates on first use: `host()` through `Payload::allocate`,
 `device(ctx)` as `byte_len` uninitialized bytes. After the function returns,
@@ -139,8 +141,8 @@ usually an input, under the contract's description, sharing every
 representation it has. Views and actions are kernels with inputs only and an
 empty body.
 
-Maps, warps and resamples read only `MapPayload`s, today `Rgb` as packed
-`[f32; 3]`, whose `lattice` gives the stored extent and the full-detail
+Maps, warps, resamples and stencils read only `MapPayload`s, today `Rgb` as
+packed `[f32; 3]`, whose `lattice` gives the stored extent and the full-detail
 plane. A map keeps its input's lattice (`Image::map` fails otherwise). A
 step on a deferred image extends its plan where [Segments](#segments)
 allow, and otherwise starts a plan over that image. A step on a raster, or
@@ -169,6 +171,9 @@ by one:
   a new plan resamples it, two launches.
 - A Resample fixes the stage's filter and lattice, so a filtering warp or
   Resample after it cuts too.
+- A stencil is a stage of its own over its materialized input, so it always
+  starts a plan, and any warp or Resample after it cuts. Maps after it join
+  its plan.
 
 At run time the stage loads samples when the composed map is the identity
 on an equal lattice and the filter interpolates, gathers them when only
@@ -184,12 +189,42 @@ answers which part of the input a window reads: the same window through a
 load, the reindexed corners through a gather, and through a filter the
 corners mapped into the input, grown by the filter's support times the
 footprint (`MAX_FOOTPRINT` for a projective map, whose footprint varies),
-plus one sample. Projective maps keep lines straight, so the corners bound
+plus one sample, and through a stencil the window grown by its reach. Projective maps keep lines straight, so the corners bound
 the window's image, and a corner beyond the horizon asks for the whole
 input. A plan that cuts asks its own input for that window in turn. The
 kernel positions samples by their whole-lattice index and clamps taps to
 the stored window, so a window's samples equal the same samples of the whole
 image bit for bit.
+
+### Stencils
+
+A stencil node's host function returns a `Stencil { radius, constants }`:
+how far the body reads, in full-detail pixels of the input's plane, and the
+constants of its `StencilBody` (`shape.rs`). The body is a `#[cube] fn(w:
+&Window, k: &[f32]) -> Pixel` that reads `w.at(dx, dy)` for `|dx| <=
+w.radius_x` and `|dy| <= w.radius_y`. The body's `border` rule answers
+positions outside the lattice: `Border::Repeat` gives the nearest edge
+sample, `Border::Zero` black. A stencil keeps its input's lattice.
+
+Lengths are in full-detail pixels wherever a parameter states one, and the
+compiler converts a stencil's reach to the samples of the lattice it reads:
+`ceil(radius · extent / full)` per axis and at least one. `w.rate_x` and
+`w.rate_y`, `extent / full`, convert the body's own lengths, so a preview
+computes the same operation on its samples. A reach below one sample on an
+axis of a preview lattice counts in `Statistics::approximated`. The
+stencil then reads one sample on that axis, and the preview shows less of
+its effect than full detail does.
+
+A stencil reads samples around each output sample, so its input
+materializes, and maps before it run in the input's own plan. The stencil
+runs as one kernel with the maps after it. A crop of its output grows the
+window by the reach, clamped to the lattice, crops the input to that, and
+runs the stencil on the window, so a 100 % view through Sharpen computes the
+crop and its halo only. The whole output is stored under the node's key and
+a crop under `Key::region`, like any image. A stencil reads its input at
+the requested scale, reduced by evaluation's box filter where it is finer,
+and its shape is not scaled. Bayer stencils need windows aligned to CFA
+cells, and none exists yet.
 
 A foreign node is the boundary for work that is expensive or outside
 CubeCL: a decoder, a solver, host code over a whole image. Its function
@@ -260,7 +295,8 @@ at evaluation), and targets. `Evaluator::evaluate::<P>(dag, global, output)`
 forces one output. It returns the raster where its node produced it, a
 deferred target materialized on the device, and `Statistics`: nodes run,
 uploads, downloads, fused launches and the samples they wrote on the
-runtime, reduction passes (`reductions`), values the store served (`hits`),
+runtime, reduction passes (`reductions`), stencil launches whose reach fell
+below one preview sample (`approximated`), values the store served (`hits`),
 those of them read from disk (`reads`) and representations it dropped
 (`evictions`) during the call. `evaluate_inputs` forces several target nodes
 in one run and returns each target's `InputValues`, which a frontend binds
@@ -280,7 +316,9 @@ whole. Only a node without outputs, a view or an action, takes a region, so
 a reduction target does not: its outputs would be keyed as the whole
 image's.
 Kernels, foreign nodes and sources run on whole images, so a region bounds
-the work of the segments between the last of them and the target.
+the work of the segments between the last of them and the target. A
+stencil's segment reads its region grown by the reach, so regions pass
+through stencils.
 
 A call first decides the scale each needed node runs at. From the targets
 every node is read at the requested scale, and a foreign node reads its
@@ -450,6 +488,13 @@ parameters and descriptions into constants, and a `#[cube]` body over one
 `exposure.rs` is the smallest real map, and `camera_to_rgb.rs` also reads a
 `Read` input on the host to build its matrix.
 
+An operation on a neighbourhood of `Rgb` samples is a stencil: a host
+function that returns the reach and constants, a `static StencilBody` with a
+name unique among stencil bodies, and its `#[cube]` body. `sharpen.rs` is the
+one stencil. State lengths in full-detail pixels, return the reach that
+covers the body's taps, and scale lengths inside the body by the window's
+rate.
+
 Outputs are stored under keys that include `Kind::version`. When a change
 alters what a kind computes for the same parameters and inputs, bump it with
 `#[node(version = N)]` (1 by default). RAW decode uses
@@ -497,8 +542,8 @@ a `Dag`, bind inputs with `node::source` and evaluate. Device kernels belong
 in `tests/algorithms.rs`, with the resampling reference in
 `tests/algorithms/resample.rs`, segments in `tests/fusion.rs`, the store in
 `tests/store.rs`, foreign jobs and the disk tier in `tests/foreign.rs`,
-regions, scale and tiled export in `tests/regions.rs`, and reductions in
-`tests/reduce.rs`. A test that counts
+regions, scale and tiled export in `tests/regions.rs`, reductions in
+`tests/reduce.rs`, and stencils in `tests/stencil.rs`. A test that counts
 the work of one evaluation uses a new `Evaluator`, whose store is empty. A
 test with a disk tier gives it a temporary directory. Each file runs its
 checks on the CPU runtime with `--features drip/cpu` and on the
@@ -557,4 +602,5 @@ claim and evaluation's box reduction, made Export TIFF write in bands over
 the device budget and gave the GUI's image view full-detail crops at 100 %.
 Kernels stay whole, without halos. Step 7 added the reduce and bins shapes,
 made the scopes bins nodes and auto exposure a library reduction, and
-removed drip-gui's kernels. Step 8 is next: `stencil` and `meta`.
+removed drip-gui's kernels. Step 8 added the stencil shape and Sharpen, and
+`meta` is next.

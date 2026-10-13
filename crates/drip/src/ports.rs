@@ -5,8 +5,8 @@
 //! `host()` or `device(ctx)`. `Write` creates the output where the node writes
 //! it; `Forward` publishes samples the node already holds; a foreign node
 //! describes and fills each output through `Publish`. The host function of a
-//! map, warp, resample, reduce or bins node sees its input and output as
-//! `Point`, a description without samples. Type erasure is confined to the
+//! map, warp, resample, reduce, bins or stencil node sees its input and
+//! output as `Point`, a description without samples. Type erasure is confined to the
 //! generated node adapter.
 use crate::{
     Error, Result,
@@ -50,10 +50,10 @@ impl<'a, P: Payload, R> Read<'a, P, R> {
     }
 }
 
-/// The input or the output of a map, warp, resample, reduce or bins node, as
-/// its host function sees them: the description only. The samples exist once
-/// a consumer materializes the output, or for a reduce or bins node once its
-/// body has run. `desc` is checked against `R`.
+/// The input or the output of a map, warp, resample, reduce, bins or stencil
+/// node, as its host function sees them: the description only. The samples
+/// exist once a consumer materializes the output, or for a reduce or bins
+/// node once its body has run. `desc` is checked against `R`.
 pub struct Point<'a, P: Payload, R = Any> {
     pub desc: &'a P::Desc,
     requirement: PhantomData<R>,

@@ -6,7 +6,7 @@ use crate::{
     definition::{Kind, Node},
     node::{
         bayer_2x2, bayer_gains, camera_to_rgb, chromatic_adaptation, export, exposure, highlights,
-        hot_pixels, orientation, perspective, raw, rcd, reduce, resample, sigmoid,
+        hot_pixels, orientation, perspective, raw, rcd, reduce, resample, sharpen, sigmoid,
     },
 };
 use std::sync::Arc;
@@ -63,6 +63,7 @@ pub static NODES: &[&Kind] = &[
     &resample::compute::KIND,
     &reduce::rgb::compute::KIND,
     &exposure::compute::KIND,
+    &sharpen::compute::KIND,
     &sigmoid::apply::KIND,
     &export::tiff::KIND,
     &export::jpeg::write::KIND,

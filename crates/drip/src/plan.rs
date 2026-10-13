@@ -1,12 +1,14 @@
-//! The segment compiler: warps, a resample and the maps after them run as
-//! one kernel.
+//! The segment compiler: warps, a resample or a stencil, and the maps after
+//! them run as one kernel.
 //!
-//! Map, warp and resample nodes publish deferred images. A [`Plan`] holds one
-//! resampling stage, per-channel projective maps from the image's plane to
-//! its input raster's plane with their filter, then the map bodies. The fused
-//! kernel resamples each output pixel, applies the bodies in order and stores
-//! the result, so intermediate images never reach memory. A step composes
-//! into a plan only where the result is exact:
+//! Map, warp, resample and stencil nodes publish deferred images. A [`Plan`]
+//! holds one stage, then the map bodies. A resampling stage holds
+//! per-channel projective maps from the image's plane to its input raster's
+//! plane with their filter, and a stencil stage a [`StencilBody`] over the
+//! input's own lattice. The fused kernel computes each output pixel through
+//! the stage, applies the bodies in order and stores the result, so
+//! intermediate images never reach memory. A step composes into a plan only
+//! where the result is exact:
 //!
 //! - A reindex (Orientation) commutes with per-pixel maps and joins the stage
 //!   wherever it sits.
@@ -16,13 +18,16 @@
 //!   Before any map they fuse.
 //! - A Resample fixes the stage's lattice, so a filtering step after it
 //!   resamples again.
+//! - A stencil starts a plan over its input, which materializes, and every
+//!   warp or resample after it starts another. Maps after it join it.
 //!
 //! A plan computes the window of its output lattice that a consumer asks
 //! for, and [`Plan::input_window`] bounds what that window reads: the same
 //! window through loads, the reindexed corners through gathers, and through a
 //! filter the mapped corners grown by the filter's support times its
-//! footprint. A projective map keeps lines straight, so the corners bound the
-//! window's image. The kernel positions samples on whole lattices, so a
+//! footprint, and through a stencil the window grown by its reach. A
+//! projective map keeps lines straight, so the corners bound the window's
+//! image. The kernel positions samples on whole lattices, so a
 //! window's samples equal the same samples of the whole image bit for bit.
 //!
 //! Preview scale reduces samples once, early: in demosaic, or where
@@ -35,7 +40,7 @@ use crate::{
     runtime::{KernelContext, dispatch_dims},
     shape::{
         Bin, BinsBody, FilterBody, Lattice, MapBody, MapPayload, Pixel, Position, Projective, Rect,
-        ReduceBody, Warp,
+        ReduceBody, StencilBody, Warp, Window,
     },
 };
 use cubecl::prelude::*;
@@ -64,8 +69,8 @@ const SHARDS: usize = 32;
 /// copies and 2.0 ms in five.
 const SHARD_COUNTS: usize = 1 << 20;
 
-/// A resampling stage followed by map bodies, with the bodies' constants
-/// concatenated.
+/// A stage, resampling or a stencil, followed by map bodies, with the
+/// stencil's and the bodies' constants concatenated.
 #[derive(Clone)]
 pub(crate) struct Plan {
     /// Per channel, the image's plane to the input raster's plane.
@@ -75,6 +80,9 @@ pub(crate) struct Plan {
     filter: Option<&'static FilterBody>,
     /// A Resample fixed the stage's filter and lattice.
     resampled: bool,
+    /// The stage is this stencil over the input's lattice, with its radius
+    /// in full-detail pixels, and `maps` are the identity.
+    stencil: Option<(StencilBody, f32)>,
     bodies: Vec<MapBody>,
     constants: Vec<f32>,
 }
@@ -84,12 +92,25 @@ impl Default for Plan {
             maps: [IDENTITY; 3],
             filter: None,
             resampled: false,
+            stencil: None,
             bodies: Vec::new(),
             constants: Vec::new(),
         }
     }
 }
 impl Plan {
+    /// `body` with `radius` and `constants` as the stage of a new plan.
+    /// `None` unless this plan is empty: a stencil reads materialized
+    /// samples, so it starts a segment.
+    pub fn stencil(&self, body: &StencilBody, radius: f32, constants: &[f32]) -> Option<Self> {
+        let empty = self.maps == [IDENTITY; 3] && self.filter.is_none() && self.open();
+        empty.then(|| Self {
+            stencil: Some((*body, radius)),
+            constants: constants.to_vec(),
+            ..Self::default()
+        })
+    }
+
     /// This plan followed by `body`. `constants` holds `body.constants` values.
     pub fn then(&self, body: &MapBody, constants: &[f32]) -> Self {
         let mut plan = self.clone();
@@ -103,11 +124,8 @@ impl Plan {
     pub fn warp(&self, warp: &Warp, reindex: bool) -> Option<Self> {
         // A reindex filters nothing, so the stage keeps its filter.
         let filter = if reindex { self.filter } else { warp.filter };
-        (reindex || self.open()).then(|| Self {
-            maps: compose(&self.maps, &warp.maps),
-            filter,
-            ..self.clone()
-        })
+        let composes = reindex && self.stencil.is_none() || self.open();
+        composes.then(|| Self { maps: compose(&self.maps, &warp.maps), filter, ..self.clone() })
     }
 
     /// This plan resampled with `filter` from its output lattice `from` onto
@@ -129,10 +147,15 @@ impl Plan {
         })
     }
 
-    /// No body has run and no Resample fixed the stage, so a filtering step
-    /// still composes into it.
+    /// The stencil's reach on its input lattice `from`, if the stage is one.
+    fn reach(&self, from: Lattice) -> Option<Reach> {
+        self.stencil.map(|(_, radius)| Reach::of(radius, from))
+    }
+
+    /// No body has run, no Resample fixed the stage and the stage is no
+    /// stencil, so a filtering step still composes into it.
     fn open(&self) -> bool {
-        !self.resampled && self.bodies.is_empty()
+        !self.resampled && self.bodies.is_empty() && self.stencil.is_none()
     }
 
     /// Run the plan on `input` into a new raster described by `desc`, which
@@ -147,7 +170,7 @@ impl Plan {
         ctx: &KernelContext<'_>,
     ) -> Result<Raster<P>> {
         let (from, to) = (P::lattice(input.desc()), P::lattice(&desc));
-        let (kernel, constants) = self.compile(from, to)?;
+        let (kernel, constants) = self.compile(from, to, ctx)?;
         if kernel.stage == Stage::Load && self.bodies.is_empty() && from.window == to.window {
             return input.share_as(desc);
         }
@@ -161,7 +184,7 @@ impl Plan {
             input.device(ctx)?.argument(),
             constants.argument(),
             output.device(ctx)?.argument(),
-            window(from),
+            stored(from),
             domain(to),
             kernel,
         );
@@ -181,7 +204,7 @@ impl Plan {
         ctx: &KernelContext<'_>,
     ) -> Result<Vec<f32>> {
         let from = P::lattice(input.desc());
-        let (kernel, mut k) = self.compile(from, to)?;
+        let (kernel, mut k) = self.compile(from, to, ctx)?;
         k.extend_from_slice(body.identity);
         k.extend_from_slice(constants);
         let client = ctx.client()?;
@@ -198,7 +221,7 @@ impl Plan {
             input.device(ctx)?.argument(),
             ctx.constants(&k)?.argument(),
             partial.argument(),
-            window(from),
+            stored(from),
             domain(to),
             kernel,
             *body,
@@ -238,7 +261,7 @@ impl Plan {
             return Err(Error::Contract(format!("{} needs bins and 1 to 3 channels", body.name)));
         }
         let from = P::lattice(input.desc());
-        let (kernel, mut k) = self.compile(from, to)?;
+        let (kernel, mut k) = self.compile(from, to, ctx)?;
         k.extend_from_slice(constants);
         let client = ctx.client()?;
         let (input, k) = (input.device(ctx)?.argument(), ctx.constants(&k)?);
@@ -258,7 +281,7 @@ impl Plan {
                 input,
                 k.argument(),
                 partial.argument(),
-                window(from),
+                stored(from),
                 domain(to),
                 kernel,
                 *body,
@@ -275,7 +298,7 @@ impl Plan {
                 input,
                 k.argument(),
                 partial.argument(),
-                window(from),
+                stored(from),
                 domain(to),
                 shards,
                 kernel,
@@ -298,13 +321,27 @@ impl Plan {
     }
 
     /// The kernel identity and constants that compute the window of lattice
-    /// `to` from lattice `from`: the stage's index maps, unless it loads,
-    /// then the bodies' constants.
-    fn compile(&self, from: Lattice, to: Lattice) -> Result<(Kernel, Vec<f32>)> {
+    /// `to` from lattice `from`: the stage's index maps, unless it loads, or
+    /// a stencil's reach and rate per axis, then the stencil's and the
+    /// bodies' constants. Counts a stencil that reaches less than one sample
+    /// of a preview lattice on `ctx`'s runtime.
+    fn compile(
+        &self,
+        from: Lattice,
+        to: Lattice,
+        ctx: &KernelContext<'_>,
+    ) -> Result<(Kernel, Vec<f32>)> {
         let (stage, maps) = self.stage(from, to)?;
-        let mut constants: Vec<f32> = match stage {
-            Stage::Load => Vec::new(),
-            Stage::Gather | Stage::Filter(_) => {
+        let mut constants: Vec<f32> = match (stage, self.reach(from)) {
+            (_, Some(reach)) => {
+                if reach.approximates {
+                    ctx.runtime.count_approximated();
+                }
+                let [rx, ry] = reach.samples.map(|r| r as f32);
+                vec![rx, ry, reach.rate[0], reach.rate[1]]
+            }
+            (Stage::Load | Stage::Stencil(_), None) => Vec::new(),
+            (Stage::Gather | Stage::Filter(_), None) => {
                 maps.iter().flat_map(|m| m.as_flattened()).map(|&v| v as f32).collect()
             }
         };
@@ -317,12 +354,16 @@ impl Plan {
 
     /// The window of the input lattice `from` that computing the window of
     /// the output lattice `to` reads, clamped to the input. Where the maps
-    /// take a corner beyond the horizon, the whole input.
+    /// take a corner beyond the horizon, the whole input. A stencil reads
+    /// the window grown by its reach.
     pub fn input_window(&self, from: Lattice, to: Lattice) -> Result<Rect> {
+        if let Some(reach) = self.reach(from) {
+            return Ok(reach.grow(to.window, from.extent));
+        }
         let (stage, maps) = self.stage(from, to)?;
         let support = match stage {
             Stage::Load => return Ok(to.window),
-            Stage::Gather => None,
+            Stage::Gather | Stage::Stencil(_) => None,
             Stage::Filter(filter) => Some(filter.support),
         };
         let whole = Rect { origin: [0; 2], extent: from.extent };
@@ -362,6 +403,9 @@ impl Plan {
     /// per-channel index maps it reads them through. Reindexes are snapped to
     /// exact integers, so a filter sees taps exactly on samples.
     fn stage(&self, from: Lattice, to: Lattice) -> Result<(Stage, [Projective; 3])> {
+        if let Some((body, _)) = self.stencil {
+            return Ok((Stage::Stencil(body), self.maps));
+        }
         let index = self.maps.each_ref().map(|m| index(m, from, to));
         let snapped = index.each_ref().map(|m| reindex(m, from, to));
         let maps = std::array::from_fn(|c| snapped[c].unwrap_or(index[c]));
@@ -375,6 +419,39 @@ impl Plan {
             None if snapped.iter().all(Option::is_some) => Ok((Stage::Gather, maps)),
             None => Err(Error::Runtime("composed reindexes move samples off the lattice".into())),
         }
+    }
+}
+
+/// A stencil's radius on the lattice it reads.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Reach {
+    /// Samples per axis, `ceil(radius · extent / full)` and at least one.
+    samples: [u32; 2],
+    /// Samples per full-detail pixel per axis, `extent / full`.
+    rate: [f32; 2],
+    /// On an axis where the lattice is coarser than full detail, the radius
+    /// spans less than one sample, so the stencil's effect at full detail
+    /// falls between the samples of this preview.
+    approximates: bool,
+}
+impl Reach {
+    fn of(radius: f32, lattice: Lattice) -> Self {
+        let rate = |a: usize| f64::from(lattice.extent[a]) / f64::from(lattice.full[a]);
+        let span = |a: usize| f64::from(radius) * rate(a);
+        Self {
+            samples: [0, 1].map(|a| (span(a).ceil() as u32).max(1)),
+            rate: [0, 1].map(|a| rate(a) as f32),
+            approximates: (0..2).any(|a| lattice.extent[a] < lattice.full[a] && span(a) < 1.0),
+        }
+    }
+
+    /// `window` grown by the reach on each side, clamped to a lattice of
+    /// `extent` samples.
+    fn grow(&self, window: Rect, extent: [u32; 2]) -> Rect {
+        let end = window.end();
+        let start = [0, 1].map(|a| window.origin[a].saturating_sub(self.samples[a]));
+        let end = [0, 1].map(|a| end[a].saturating_add(self.samples[a]).min(extent[a]));
+        Rect { origin: start, extent: [0, 1].map(|a| end[a] - start[a]) }
     }
 }
 
@@ -445,11 +522,11 @@ fn footprint(m: &Projective, axis: usize) -> f64 {
 }
 
 /// The input's stored samples as the kernels address them.
-fn window(from: Lattice) -> kernel::WindowLaunch {
+fn stored(from: Lattice) -> kernel::StoredLaunch {
     let [x, y] = from.window.origin.map(|v| v as usize);
     let [width, height] = from.window.extent.map(|v| v as usize);
     let [lattice_width, lattice_height] = from.extent.map(|v| v as usize);
-    kernel::WindowLaunch::new(x, y, width, height, lattice_width, lattice_height)
+    kernel::StoredLaunch::new(x, y, width, height, lattice_width, lattice_height)
 }
 
 /// The output samples a kernel computes: `to`'s window.
@@ -490,12 +567,20 @@ enum Stage {
     Gather,
     /// Each output sample filters the input around its mapped position.
     Filter(FilterBody),
+    /// Each output sample is the stencil body over the input's window
+    /// around it, on the same lattice.
+    Stencil(StencilBody),
 }
 impl Stage {
-    /// Constants the stage reads ahead of the bodies' constants: a 3×3
-    /// row-major index map per channel, unless it loads.
+    /// Constants the stage reads ahead of the map bodies' constants: a 3×3
+    /// row-major index map per channel when it gathers or filters, a
+    /// stencil's reach and rate per axis and then its body's constants.
     fn constants(self) -> usize {
-        if self == Self::Load { 0 } else { 27 }
+        match self {
+            Self::Load => 0,
+            Self::Gather | Self::Filter(_) => 27,
+            Self::Stencil(body) => 4 + body.constants,
+        }
     }
 }
 
@@ -525,13 +610,13 @@ mod kernel {
         input: &[f32],
         k: &[f32],
         output: &mut [f32],
-        window: Window,
+        stored: Stored,
         domain: Domain,
         #[comptime] kernel: Kernel,
     ) {
         let p = ABSOLUTE_POS;
         if p * 3 < output.len() {
-            let px = evaluate(input, k, p, &window, &domain, &kernel);
+            let px = evaluate(input, k, p, &stored, &domain, &kernel);
             output[p * 3] = px.r;
             output[p * 3 + 1] = px.g;
             output[p * 3 + 2] = px.b;
@@ -546,7 +631,7 @@ mod kernel {
         input: &[f32],
         k: &[f32],
         partial: &mut [f32],
-        window: Window,
+        stored: Stored,
         domain: Domain,
         #[comptime] kernel: Kernel,
         #[comptime] body: ReduceBody,
@@ -564,7 +649,7 @@ mod kernel {
             let cells = domain.width * domain.height;
             let mut p = i;
             while p < cells {
-                let px = evaluate(input, k, p, &window, &domain, &kernel);
+                let px = evaluate(input, k, p, &stored, &domain, &kernel);
                 accumulate(px, constants, acc.as_mut_slice(), body);
                 p += lanes;
             }
@@ -605,7 +690,7 @@ mod kernel {
         input: &[f32],
         k: &[f32],
         partial: &mut [u32],
-        window: Window,
+        stored: Stored,
         domain: Domain,
         #[comptime] kernel: Kernel,
         #[comptime] body: BinsBody,
@@ -621,7 +706,7 @@ mod kernel {
         let cells = domain.width * domain.height;
         let mut p = ABSOLUTE_POS;
         while p < cells {
-            let bin = bin_of(input, k, p, &window, &domain, &kernel, body);
+            let bin = bin_of(input, k, p, &stored, &domain, &kernel, body);
             tally(&mut counts, bin.c0, 0usize, body);
             if comptime!(body.channels > 1) {
                 tally(&mut counts, bin.c1, 1usize, body);
@@ -660,7 +745,7 @@ mod kernel {
         input: &[f32],
         k: &[f32],
         counts: &mut [Atomic<u32>],
-        window: Window,
+        stored: Stored,
         domain: Domain,
         shards: usize,
         #[comptime] kernel: Kernel,
@@ -677,7 +762,7 @@ mod kernel {
         let cells = domain.width * domain.height;
         let mut p = ABSOLUTE_POS;
         while p < cells {
-            let bin = bin_of(input, k, p, &window, &domain, &kernel, body);
+            let bin = bin_of(input, k, p, &stored, &domain, &kernel, body);
             extend(
                 counts,
                 shard,
@@ -785,13 +870,13 @@ mod kernel {
         input: &[f32],
         k: &[f32],
         p: usize,
-        window: &Window,
+        stored: &Stored,
         domain: &Domain,
         #[comptime] kernel: &Kernel,
     ) -> Pixel {
         let x = p % domain.width + domain.x;
         let y = p / domain.width + domain.y;
-        let px = sample(input, k, x, y, window, comptime!(kernel.stage));
+        let px = sample(input, k, x, y, stored, comptime!(kernel.stage));
         apply(px, k, kernel)
     }
 
@@ -802,12 +887,12 @@ mod kernel {
         input: &[f32],
         k: &[f32],
         p: usize,
-        window: &Window,
+        stored: &Stored,
         domain: &Domain,
         #[comptime] kernel: &Kernel,
         #[comptime] body: BinsBody,
     ) -> Bin {
-        let px = evaluate(input, k, p, window, domain, kernel);
+        let px = evaluate(input, k, p, stored, domain, kernel);
         let at = Position {
             x: u32::cast_from(p % domain.width),
             y: u32::cast_from(p / domain.width),
@@ -836,7 +921,7 @@ mod kernel {
     /// Where the input's samples sit: `width × height` stored from `(x, y)`
     /// of a lattice of `lattice_width × lattice_height` samples.
     #[derive(CubeType, CubeLaunch)]
-    pub struct Window {
+    pub struct Stored {
         x: usize,
         y: usize,
         width: usize,
@@ -856,32 +941,55 @@ mod kernel {
     }
 
     #[cube]
-    fn sample(
-        input: &[f32],
+    fn sample<'a>(
+        input: &'a [f32],
         k: &[f32],
         x: usize,
         y: usize,
-        window: &Window,
+        stored: &Stored,
         #[comptime] stage: Stage,
     ) -> Pixel {
         let (fx, fy) = (f32::cast_from(x), f32::cast_from(y));
         #[comptime]
         match stage {
             Stage::Load => {
-                let i = ((y - window.y) * window.width + x - window.x) * 3;
+                let i = ((y - stored.y) * stored.width + x - stored.x) * 3;
                 Pixel { r: input[i], g: input[i + 1], b: input[i + 2] }
             }
             Stage::Gather => Pixel {
-                r: gather(input, k, fx, fy, window, 0usize),
-                g: gather(input, k, fx, fy, window, 1usize),
-                b: gather(input, k, fx, fy, window, 2usize),
+                r: gather(input, k, fx, fy, stored, 0usize),
+                g: gather(input, k, fx, fy, stored, 1usize),
+                b: gather(input, k, fx, fy, stored, 2usize),
             },
             Stage::Filter(filter) => Pixel {
-                r: filtered(input, k, fx, fy, window, 0usize, filter),
-                g: filtered(input, k, fx, fy, window, 1usize, filter),
-                b: filtered(input, k, fx, fy, window, 2usize, filter),
+                r: filtered(input, k, fx, fy, stored, 0usize, filter),
+                g: filtered(input, k, fx, fy, stored, 1usize, filter),
+                b: filtered(input, k, fx, fy, stored, 2usize, filter),
             },
+            Stage::Stencil(body) => {
+                let w = Window::<'a> {
+                    input,
+                    x: i32::cast_from(x),
+                    y: i32::cast_from(y),
+                    left: i32::cast_from(stored.x),
+                    top: i32::cast_from(stored.y),
+                    stride: i32::cast_from(stored.width),
+                    width: i32::cast_from(stored.lattice_width),
+                    height: i32::cast_from(stored.lattice_height),
+                    radius_x: i32::cast_from(k[0]),
+                    radius_y: i32::cast_from(k[1]),
+                    rate_x: k[2],
+                    rate_y: k[3],
+                    border: comptime!(body.border),
+                };
+                stencil(&w, k.slice(4, comptime!(4 + body.constants)), body)
+            }
         }
+    }
+
+    #[cube]
+    fn stencil(w: &Window, k: &[f32], #[comptime] body: StencilBody) -> Pixel {
+        intrinsic!(|scope| (body.expand)(scope, w, k))
     }
 
     /// Channel `c` of the input sample that the reindex in `k` takes output
@@ -893,13 +1001,13 @@ mod kernel {
         k: &[f32],
         x: f32,
         y: f32,
-        window: &Window,
+        stored: &Stored,
         #[comptime] c: usize,
     ) -> f32 {
         let m = c * 9;
-        let u = usize::cast_from(k[m] * x + k[m + 1] * y + k[m + 2]) - window.x;
-        let v = usize::cast_from(k[m + 3] * x + k[m + 4] * y + k[m + 5]) - window.y;
-        input[(v * window.width + u) * 3 + c]
+        let u = usize::cast_from(k[m] * x + k[m + 1] * y + k[m + 2]) - stored.x;
+        let v = usize::cast_from(k[m + 3] * x + k[m + 4] * y + k[m + 5]) - stored.y;
+        input[(v * stored.width + u) * 3 + c]
     }
 
     /// Channel `c` at output sample `(x, y)` resampled after Heckbert: the
@@ -916,7 +1024,7 @@ mod kernel {
         k: &[f32],
         x: f32,
         y: f32,
-        window: &Window,
+        stored: &Stored,
         #[comptime] c: usize,
         #[comptime] filter: FilterBody,
     ) -> f32 {
@@ -927,8 +1035,8 @@ mod kernel {
         if hw > 0.0f32 {
             let u = (k[m] * x + k[m + 1] * y + k[m + 2]) / hw;
             let v = (k[m + 3] * x + k[m + 4] * y + k[m + 5]) / hw;
-            let last_u = f32::cast_from(window.lattice_width) - 0.5f32;
-            let last_v = f32::cast_from(window.lattice_height) - 0.5f32;
+            let last_u = f32::cast_from(stored.lattice_width) - 0.5f32;
+            let last_v = f32::cast_from(stored.lattice_height) - 0.5f32;
             if u >= -0.5f32 && u <= last_u && v >= -0.5f32 && v <= last_v {
                 // Derivatives of the projective map: the source extent of
                 // one output step along each source axis sets the footprint.
@@ -944,17 +1052,17 @@ mod kernel {
                 let u1 = i32::cast_from((u + support * su).floor());
                 let v0 = i32::cast_from((v - support * sv).ceil());
                 let v1 = i32::cast_from((v + support * sv).floor());
-                let min_col = i32::cast_from(window.x);
-                let min_row = i32::cast_from(window.y);
-                let max_col = min_col + i32::cast_from(window.width) - 1i32;
-                let max_row = min_row + i32::cast_from(window.height) - 1i32;
+                let min_col = i32::cast_from(stored.x);
+                let min_row = i32::cast_from(stored.y);
+                let max_col = min_col + i32::cast_from(stored.width) - 1i32;
+                let max_row = min_row + i32::cast_from(stored.height) - 1i32;
                 // −0 is the additive identity, so an exact hit keeps −0.
                 let mut sum = f32::reinterpret(0x8000_0000u32);
                 let mut total = 0.0f32;
                 for b in v0..v1 + 1 {
                     let wy = weight((f32::cast_from(b) - v) / sv, filter);
                     let row =
-                        usize::cast_from(i32::clamp(b, min_row, max_row) - min_row) * window.width;
+                        usize::cast_from(i32::clamp(b, min_row, max_row) - min_row) * stored.width;
                     for a in u0..u1 + 1 {
                         let w = weight((f32::cast_from(a) - u) / su, filter) * wy;
                         // Zero weights skip their tap, so non-finite
@@ -995,5 +1103,66 @@ mod kernel {
             }
             px
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A lattice of `extent` samples over a plane of `full` pixels.
+    fn lattice(extent: [u32; 2], full: [u32; 2]) -> Lattice {
+        Lattice::whole(extent, full)
+    }
+
+    #[test]
+    fn a_reach_rounds_up_to_samples_and_reports_sub_sample_previews() {
+        let full = Reach::of(4.0, lattice([64, 48], [64, 48]));
+        assert_eq!((full.samples, full.approximates), ([4, 4], false));
+        let half = Reach::of(4.0, lattice([32, 24], [64, 48]));
+        assert_eq!((half.samples, half.rate, half.approximates), ([2, 2], [0.5, 0.5], false));
+        // `div_ceil` leaves 51 samples over 101 pixels: 2.02 samples.
+        assert_eq!(Reach::of(4.0, lattice([51, 24], [101, 48])).samples, [3, 2]);
+        // Below one sample only at a preview, and at least one sample.
+        assert_eq!(Reach::of(0.5, lattice([64, 48], [64, 48])).samples, [1, 1]);
+        assert!(!Reach::of(0.5, lattice([64, 48], [64, 48])).approximates);
+        assert!(Reach::of(1.5, lattice([16, 12], [64, 48])).approximates);
+    }
+
+    #[test]
+    fn a_stencil_reads_its_window_grown_by_the_reach_within_the_lattice() {
+        let plan = Plan::default().stencil(&BODY, 3.0, &[]).unwrap();
+        let whole = lattice([40, 30], [40, 30]);
+        let window = |origin, extent| whole.with(Rect { origin, extent });
+        let read = plan.input_window(whole, window([10, 10], [5, 5])).unwrap();
+        assert_eq!(read, Rect { origin: [7, 7], extent: [11, 11] });
+        let read = plan.input_window(whole, window([0, 28], [4, 2])).unwrap();
+        assert_eq!(read, Rect { origin: [0, 25], extent: [7, 5] });
+    }
+
+    #[test]
+    fn a_stencil_starts_a_plan_and_only_maps_join_it() {
+        let filtered = Plan::default().resample(&crate::shape::BOX, LATTICE, LATTICE).unwrap();
+        assert!(filtered.stencil(&BODY, 1.0, &[]).is_none());
+        let plan = Plan::default().stencil(&BODY, 1.0, &[]).unwrap();
+        assert!(plan.resample(&crate::shape::BOX, LATTICE, LATTICE).is_none());
+        let reindex = Warp::reindex(IDENTITY);
+        assert!(plan.warp(&reindex, true).is_none());
+        assert_eq!(plan.stage(LATTICE, LATTICE).unwrap().0, Stage::Stencil(BODY));
+    }
+
+    const LATTICE: Lattice =
+        Lattice { extent: [8, 8], full: [8, 8], window: Rect { origin: [0; 2], extent: [8, 8] } };
+
+    static BODY: StencilBody = StencilBody {
+        name: "plan::tests::centre",
+        constants: 0,
+        border: crate::shape::Border::Zero,
+        expand: centre::expand,
+    };
+
+    #[cube]
+    fn centre(w: &Window, _k: &[f32]) -> Pixel {
+        w.at(0i32, 0i32)
     }
 }

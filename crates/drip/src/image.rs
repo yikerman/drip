@@ -5,9 +5,10 @@
 //! one device representation; the missing one is made on first request and
 //! counted as a transfer on its runtime. An [`Image`] is the type-erased value
 //! that evaluation and the store pass between nodes: a raster, or a deferred
-//! image that a map, warp or resample published. `plan` decides how each step
-//! composes, and materializes a deferred image into a raster when a consumer
-//! first needs samples, whole or only a window of it ([`Image::crop`]). A
+//! image that a map, warp, resample or stencil published. `plan` decides how
+//! each step composes, and materializes a deferred image into a raster when
+//! a consumer first needs samples, whole or only a window of it
+//! ([`Image::crop`]). A
 //! payload's [`Plane`] lets evaluation reduce and crop images without their
 //! type. [`Image::fold`] and [`Image::count`] reduce an image to a few host
 //! values, running a deferred image's plan per pixel without storing it. A
@@ -19,7 +20,10 @@ use crate::{
     plan::{self, Plan},
     ports::typed,
     runtime::{KernelContext, RuntimeContext},
-    shape::{self, BinsBody, FilterBody, Lattice, MapBody, MapPayload, Rect, ReduceBody, Warp},
+    shape::{
+        self, BinsBody, FilterBody, Lattice, MapBody, MapPayload, Rect, ReduceBody, StencilBody,
+        Warp,
+    },
 };
 use cubecl::bytes::Bytes;
 use std::{
@@ -195,10 +199,43 @@ impl Image {
         desc: Description,
     ) -> Result<Image> {
         reads(body.name, body.constants, constants)?;
-        if P::lattice(&typed(&self.desc)) != P::lattice(&typed(&desc)) {
-            return Err(Error::Contract(format!("a map keeps its input's {} lattice", P::NAME)));
-        }
+        self.keeps_lattice::<P>(&desc, "map")?;
         Ok(self.defer::<P>(desc, |plan| Some(plan.then(body, constants))))
+    }
+
+    /// The image `body` makes from the windows of this one that reach
+    /// `radius` full-detail pixels around each sample, with `constants`,
+    /// described by `desc`. The stencil reads this image materialized, and
+    /// maps after it join its kernel. Fails when `desc` is on another
+    /// lattice, `radius` is negative or not finite, or `constants` is not
+    /// `body.constants` long.
+    pub fn stencil<P: MapPayload>(
+        &self,
+        body: &StencilBody,
+        radius: f32,
+        constants: &[f32],
+        desc: Description,
+    ) -> Result<Image> {
+        reads(body.name, body.constants, constants)?;
+        self.keeps_lattice::<P>(&desc, "stencil")?;
+        if !(radius.is_finite() && radius >= 0.0) {
+            return Err(Error::Contract(format!(
+                "{} needs a finite radius of zero or more",
+                body.name
+            )));
+        }
+        Ok(self.defer::<P>(desc, |plan| plan.stencil(body, radius, constants)))
+    }
+
+    /// Fails unless `desc` states this image's lattice.
+    fn keeps_lattice<P: MapPayload>(&self, desc: &Description, shape: &str) -> Result<()> {
+        if P::lattice(&typed(&self.desc)) != P::lattice(&typed(desc)) {
+            return Err(Error::Contract(format!(
+                "a {shape} keeps its input's {} lattice",
+                P::NAME
+            )));
+        }
+        Ok(())
     }
 
     /// This image through `warp` onto the lattice `desc` states. Fails when

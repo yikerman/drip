@@ -54,6 +54,11 @@ use documentation::documentation;
 /// Their output is a deferred image, and the segment compiler runs warps, a
 /// resample and maps as one kernel when a consumer needs samples. `Read`
 /// inputs arrive materialized.
+/// A stencil, `#[node(stencil = BODY, ...)]`, has the same ports and returns
+/// `Result<Stencil<N>>`: the reach of the `StencilBody` static `BODY` in
+/// full-detail pixels and the `N` constants it reads. The body is
+/// `#[cube] fn(w: &Window, k: &[f32]) -> Pixel`. Its input is materialized
+/// and the maps after it join its kernel.
 #[proc_macro_attribute]
 pub fn node(args: TokenStream, item: TokenStream) -> TokenStream {
     node::expand(args.into(), parse_macro_input!(item as syn::ItemFn))

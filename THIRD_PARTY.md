@@ -27,6 +27,13 @@ darktable's area exposure mapping [20]. This is an original implementation with
 a fixed linear Y target of 0.18, rather than darktable's configurable L* target;
 no darktable source code is copied.
 
+Sharpen's unsharp mask follows darktable's sharpen module [27]: the
+Gaussian's standard deviation is the radius parameter, and the blur reaches
+2.5 standard deviations with weights normalized over that reach. This is an
+original implementation per channel of linear RGB without darktable's
+threshold, repeating edge samples where darktable leaves the border
+unsharpened. No darktable source code is copied.
+
 ## Runtime dependencies
 
 | Project and credit | Use | License |
@@ -335,3 +342,7 @@ doi: [10.1175/1520-0450(1979)018<1016:LFIOAT>2.0.CO;2](https://doi.org/10.1175/1
 M.S. thesis, Univ. of California, Berkeley, Tech. Rep. UCB/CSD-89-516,
 Jun. 1989. [Online]. Available:
 <https://www2.eecs.berkeley.edu/Pubs/TechRpts/1989/5504.html>
+
+[27] darktable developers, “sharpen.c,” `src/iop/sharpen.c`, commit
+61dea294bedb3ab6c7cca1a45530b1ab5c0461f3, 2026. [Online]. Available:
+<https://github.com/darktable-org/darktable/blob/61dea294bedb3ab6c7cca1a45530b1ab5c0461f3/src/iop/sharpen.c>

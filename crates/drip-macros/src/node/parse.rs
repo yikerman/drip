@@ -49,6 +49,9 @@ pub(super) enum Deferred {
     /// `bins = BODY`: a `BinsBody` static, with the constants the host
     /// function returns.
     Bins(syn::Path),
+    /// `stencil = BODY`: a `StencilBody` static. The host function returns
+    /// a `Stencil`, the radius and the body's constants.
+    Stencil(syn::Path),
 }
 impl Deferred {
     /// The shape as messages name it.
@@ -59,6 +62,7 @@ impl Deferred {
             Self::Resample => "resample",
             Self::Reduce(_) => "reduce",
             Self::Bins(_) => "bins",
+            Self::Stencil(_) => "stencil",
         }
     }
 }
@@ -77,6 +81,7 @@ impl Options {
         let mut map = None;
         let mut reduce = None;
         let mut bins = None;
+        let mut stencil = None;
         let mut foreign = None;
         let mut flags = Vec::new();
 
@@ -105,6 +110,7 @@ impl Options {
                 "map" => &mut map,
                 "reduce" => &mut reduce,
                 "bins" => &mut bins,
+                "stencil" => &mut stencil,
                 "foreign" => &mut foreign,
                 _ => return Err(syn::Error::new(entry.span(), "unknown node option")),
             };
@@ -131,6 +137,7 @@ impl Options {
         let map = map.map(|expr| path(expr, "a #[cube] body function path")).transpose()?;
         let reduce = reduce.map(|expr| path(expr, "a ReduceBody static path")).transpose()?;
         let bins = bins.map(|expr| path(expr, "a BinsBody static path")).transpose()?;
+        let stencil = stencil.map(|expr| path(expr, "a StencilBody static path")).transpose()?;
         let foreign = foreign
             .map(|expr| match &expr {
                 syn::Expr::Path(path) if path.path.is_ident("memory") => Ok(Foreign::Memory),
@@ -145,12 +152,14 @@ impl Options {
             flag("resample").then_some(Deferred::Resample),
             reduce.map(Deferred::Reduce),
             bins.map(Deferred::Bins),
+            stencil.map(Deferred::Stencil),
         ]
         .into_iter()
         .flatten();
         let deferred = shapes.next();
         if shapes.next().is_some() || deferred.is_some() && foreign.is_some() {
-            let message = "a node is at most one of map, warp, resample, reduce, bins and foreign";
+            let message =
+                "a node is at most one of map, warp, resample, reduce, bins, stencil and foreign";
             return Err(syn::Error::new(span, message));
         }
         if flag("scaled") && (deferred.is_some() || foreign.is_some()) {
@@ -188,8 +197,8 @@ pub(super) enum View {
     Forward,
     /// A foreign node's output, set with its description and host samples.
     Publish,
-    /// The input, then the output, of a map, warp, resample, reduce or bins
-    /// node: descriptions only.
+    /// The input, then the output, of a map, warp, resample, reduce, bins or
+    /// stencil node: descriptions only.
     Point,
 }
 
@@ -214,7 +223,7 @@ pub(super) struct Signature {
     /// describes its outputs as it publishes them.
     pub foreign: bool,
     /// `fn(&Params, Point<In>, Read..., Point<Out>) -> Result<T>`: the host
-    /// function of a map, warp, resample, reduce or bins node.
+    /// function of a map, warp, resample, reduce, bins or stencil node.
     pub point: bool,
     /// `T` in the function's `-> Result<T>`, if it returns one.
     pub result: Option<syn::Type>,

@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn selected_tags_must_all_be_carried() {
-        assert_eq!(names("", &[&tag::LOOK]), ["Exposure"]);
+        assert_eq!(names("", &[&tag::LOOK]), ["Exposure", "Sharpen"]);
         assert_eq!(
             names("", &[&tag::BAYER_RAW, &tag::DEMOSAIC]),
             ["Bayer 2×2 demosaic", "RCD demosaic"]

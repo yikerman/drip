@@ -282,8 +282,8 @@ Settled with the user on 2026-10-11 and revised by the compute model
   derives regions and preview scale from shapes, and memoizes in one store.
   It is executed in eight steps. Step 4 replaced the no-cache requirement
   under Performance with the store, step 5 added its disk tier, step 6
-  regions and the scale rule, and step 7 reductions, which removed the GUI's
-  kernels.
+  regions and the scale rule, step 7 reductions, which removed the GUI's
+  kernels, and step 8 stencils.
 - **Decided (2026-10-13):** Step 1. `Kind::shape` declares how evaluation runs
   a kind, `Kernel` or `Source`, and later shapes are added beside them. A
   run's values lived in a `Store`, which step 4 grew into the memo.
@@ -404,15 +404,15 @@ Settled with the user on 2026-10-11 and revised by the compute model
   view would need every kernel to take strides.
 - **Open (2026-10-13):** Kernel halos. Kernels, foreign nodes and sources
   receive and produce whole images, so a region bounds only the segments
-  after the last of them. Running a kernel on its output region plus a
-  declared `halo` needs that region before the kernel runs, but warps
-  between it and the target describe their maps only when their host
+  after the last of them. Running an opaque kernel on its output region
+  plus a declared `halo` needs that region before the kernel runs, but
+  warps between it and the target describe their maps only when their host
   functions run, after the kernel. It needs lazily run kernels, or a pass
   that describes the graph before running it, and Bayer windows aligned to
   CFA cells. RCD and the 2×2 demosaic therefore run whole and declare no
   halo. At 100 % the whole RCD output is computed once at scale 1 and
-  stored, and pans recompute only the tail. Step 8's stencils need the same
-  machinery.
+  stored, and pans recompute only the tail. Stencils do not need this
+  (step 8, below).
 - **Decided (2026-10-13):** Scale dependence derives from shapes. From the
   targets every node is read at the requested scale, and a foreign node
   reads its inputs at scale 1, so its inputs and outputs are full detail
@@ -442,6 +442,52 @@ Settled with the user on 2026-10-11 and revised by the compute model
   is a preview approximation: it never applies at scale 1, export runs at
   scale 1, and a stage clamps footprints at `MAX_FOOTPRINT`, so reductions
   beyond 16 alias. This replaces demosaic reducing for the whole graph.
+- **Decided (2026-10-13):** Step 8, stencils. A stencil node (`#[node(stencil
+  = BODY)]`) names a `StencilBody` static: a name, a constant count, a
+  `Border` and a `#[cube] fn(w: &Window, k: &[f32]) -> Pixel` that reads
+  `w.at(dx, dy)` within the reach. Its host function returns a `Stencil {
+  radius, constants }`. The brief put the radius in the body static, but
+  Sharpen's radius is a parameter, so the host function returns it, as a
+  warp returns its maps. The output is a deferred image whose plan's stage
+  is the stencil over the input image. This resolves the halo question for
+  stencils without lazily run kernels or a describing pass: a crop of the
+  output grows the window by the reach, crops the input to it, which runs
+  the earlier segment on that window only, and runs the stencil on the
+  crop. A 1600 × 1000 crop through the template's tail and Sharpen writes
+  3 226 100 samples in 1.01 ms where the whole image writes 84 779 520 in
+  24.77 ms ([PROGRESS](PROGRESS.md#2026-10-13)). Whole outputs are stored
+  under the node's key and crops under `Key::region`.
+- **Decided (2026-10-13):** A stencil's input always materializes, and maps
+  before it run in the input's plan. Fusing them into the taps would
+  recompute them per tap, so the brief's `linear` load-fusion flag is not
+  implemented ([TODO](TODO.md)). Maps after a stencil join its kernel
+  through the same `#[cube]` evaluation of a pixel that fused kernels and
+  reductions call. Warps and Resample after a stencil start a new plan.
+  Stencils read only `MapPayload`s: a Bayer stencil needs windows aligned
+  to CFA cells.
+- **Decided (2026-10-13):** Lengths in parameters are full-detail pixels.
+  The compiler converts a stencil's reach to the samples of the lattice it
+  reads, `ceil(radius · extent / full)` per axis and at least one, and the
+  body receives `extent / full` to convert its own lengths. A stencil reads
+  its input at the requested scale, box-reduced where it is finer, and its
+  shape is not scaled. Where the reach spans less than one sample of a
+  preview lattice, `Statistics::approximated` counts the launch, and the
+  preview shows less of the stencil than full detail. Rounding the reach up
+  to one sample keeps the body's weights, so full detail is never
+  approximated.
+- **Decided (2026-10-13):** `Border::Repeat` reads the nearest edge sample
+  and `Border::Zero` reads black, so a window of the output equals the
+  same samples of the whole output bit for bit. Sharpen repeats edges.
+  darktable's sharpen leaves a border of the reach unsharpened instead.
+- **Decided (2026-10-13):** Sharpen (`sharpen`) is an unsharp mask per
+  channel of linear RGB with a Gaussian whose standard deviation is the
+  `radius` parameter (0.25 to 4 full-detail pixels) and whose reach is 2.5
+  radii, after darktable's sharpen, and an `amount` from −1 to 4. Negative
+  amounts soften and −1 outputs the blur. It has no
+  threshold: a threshold in linear light has no fixed meaning across
+  exposures. One 2D window of `(2R + 1)²` taps per sample costs 14 ms over
+  the tail at full detail with the default reach of 5. A separable pair of
+  passes would cost `2(2R + 1)` taps ([TODO](TODO.md)).
 - **Decided (2026-10-13):** `Policy::Wait` blocks on a running job, for
   headless evaluation, actions and tests. `Policy::Defer` fails the job's
   node and its consumers with `Error::Pending`, inside the `Error::Node` that

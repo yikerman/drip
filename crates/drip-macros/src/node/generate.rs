@@ -143,6 +143,9 @@ fn kind(
         (None, Some(Deferred::Resample)) => quote!(::drip::shape::Shape::Resample),
         (None, Some(Deferred::Reduce(body))) => quote!(::drip::shape::Shape::Reduce(&super::#body)),
         (None, Some(Deferred::Bins(body))) => quote!(::drip::shape::Shape::Bins(&super::#body)),
+        (None, Some(Deferred::Stencil(body))) => {
+            quote!(::drip::shape::Shape::Stencil(&super::#body))
+        }
         (None, None) => {
             let scaled = options.scaled;
             quote!(::drip::shape::Shape::Kernel { scaled: #scaled })
@@ -378,10 +381,10 @@ fn run(name: &syn::Ident, signature: &Signature) -> TokenStream {
     }
 }
 
-/// The adapter of a map, warp, resample, reduce or bins node: materialize
-/// the `Read` inputs, call the host function on descriptions, and publish
-/// the deferred input extended by what it returns, or, for a reduce or bins
-/// node, the host value its body computes from the input.
+/// The adapter of a map, warp, resample, reduce, bins or stencil node:
+/// materialize the `Read` inputs, call the host function on descriptions,
+/// and publish the deferred input extended by what it returns, or, for a
+/// reduce or bins node, the host value its body computes from the input.
 fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -> TokenStream {
     let mut binds = Vec::new();
     let mut arguments = Vec::new();
@@ -444,6 +447,15 @@ fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -
             quote!(::drip::ports::reduced::<#output, _>(
                 &outputs[0],
                 image.count::<#payload>(&super::#body, &constants, context)?,
+            )),
+        ),
+        Deferred::Stencil(body) => (
+            quote!(stencil),
+            quote!(image.stencil::<#payload>(
+                &super::#body,
+                stencil.radius,
+                &stencil.constants,
+                outputs[0].clone(),
             )),
         ),
     };

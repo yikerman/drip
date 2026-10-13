@@ -33,8 +33,8 @@ pub(crate) fn expand(args: TokenStream, function: syn::ItemFn) -> syn::Result<To
             return Err(syn::Error::new(span, message));
         }
         (None, true) => {
-            let message =
-                "Point ports declare map = body, warp, resample, reduce = BODY or bins = BODY";
+            let message = "Point ports declare map = body, warp, resample, reduce = BODY, bins = BODY or \
+                 stencil = BODY";
             return Err(syn::Error::new(span, message));
         }
         (Some(deferred), true) if signature.result.is_none() => {
@@ -44,6 +44,9 @@ pub(crate) fn expand(args: TokenStream, function: syn::ItemFn) -> syn::Result<To
                 Deferred::Resample => "a resample returns Result<&'static FilterBody>",
                 Deferred::Reduce(_) | Deferred::Bins(_) => {
                     "a reduce or bins node returns Result<[f32; N]>, the constants of its body"
+                }
+                Deferred::Stencil(_) => {
+                    "a stencil returns Result<Stencil<N>>, its radius and the constants of its body"
                 }
             };
             return Err(syn::Error::new(function.sig.output.span(), message));

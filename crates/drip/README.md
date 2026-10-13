@@ -40,13 +40,14 @@ The non-trivial files outside `node/`:
   `Node`/`Typed` traits, `Action`, `Assets`, and the `Identity` and
   `Durability` the store keys and evicts by.
 - `shape.rs`: how evaluation runs a kind (`Shape`: kernel, bound source,
-  foreign, map, warp, resample, reduce or bins, and whether it reads the
-  scale), where a foreign node's outputs are kept (`Cache`, `Codec`), and
-  what the segment compiler composes: `MapBody` and the `Pixel` it maps,
-  `Warp`, `FilterBody` and the `BOX` filter that reduces to the requested
-  scale, `ReduceBody` and `BinsBody` with the `Position` and `Bin` a bin
-  body sees and returns, and the `Lattice` of a `MapPayload` with the window
-  a raster holds, in `Rect`s.
+  foreign, map, warp, resample, reduce, bins or stencil, and whether it
+  reads the scale), where a foreign node's outputs are kept (`Cache`,
+  `Codec`), and what the segment compiler composes: `MapBody` and the
+  `Pixel` it maps, `Warp`, `FilterBody` and the `BOX` filter that reduces to
+  the requested scale, `ReduceBody` and `BinsBody` with the `Position` and
+  `Bin` a bin body sees and returns, `StencilBody` with its `Border` and the
+  `Window` it reads, and the `Lattice` of a `MapPayload` with the window a
+  raster holds, in `Rect`s.
 - `registry.rs`: the hand-maintained `NODES`, `TAGS` and `Registry`.
 - `graph.rs`: `Dag` and transactional edits, checked on ports only.
 - `eval.rs`: `Evaluator`, demand-driven evaluation of the requested subgraph;
@@ -57,21 +58,22 @@ The non-trivial files outside `node/`:
   foreign job or reports it pending, and `InputValues` hands frontends and
   actions the inputs, whole or in bands, or a reduction's outputs.
 - `image.rs`: `Image`, the value on an edge, a raster or the deferred output of
-  a map, warp or resample, materialized on first need, whole or by window
+  a map, warp, resample or stencil, materialized on first need, whole or by window
   (`Image::crop`), or reduced to host values without storing it
   (`Image::fold`, `Image::count`), `Raster`, samples with lazy host and
   device residency and counted transfers, and `Plane`, what evaluation does
   to an image on a plane without its type.
-- `plan.rs`: the segment compiler: a `Plan` of one resampling stage and map
-  bodies, the rules for composing steps into it, the input window a window of
-  its output reads, the fused kernel that runs it on a window, and the
-  passes that fold or count its pixels.
+- `plan.rs`: the segment compiler: a `Plan` of one stage, resampling or a
+  stencil, and map bodies, the rules for composing steps into it, the input
+  window a window of its output reads, a stencil's reach in samples, the
+  fused kernel that runs it on a window, and the passes that fold or count
+  its pixels.
 - `store.rs`: the evaluator's memo of materialized values across demands:
   content keys, eviction by durability and recency within per-side byte
   budgets, foreign jobs, and the `Disk` tier.
 - `ports.rs`: port views (`Read`, `Write`, `Forward`, `Publish` for foreign
-  nodes, and `Point` for maps, warps and resamples) and interpretation
-  requirements.
+  nodes, and `Point` for maps, warps, resamples, reductions and stencils)
+  and interpretation requirements.
 - `payload.rs`: payload families, their host types, device byte layouts and
   `Persist` streams.
 - `param.rs`: parameter schemas, encoding and validation.
@@ -239,6 +241,62 @@ accumulator of f32. A frontend that targets the node receives its outputs
 and binds them with `InputValues::bind_outputs`. One that wants a
 measurement without a node calls `Image::fold` or `Image::count`, as
 `exposure::meter` does.
+
+An operation on a neighbourhood of samples is a stencil. Its host function
+returns how far the body reads, in full-detail pixels, and the body's
+constants. Evaluation converts that reach to samples of the lattice the
+stencil reads, so the same node runs at every preview scale, and a crop of
+its output computes only the crop and the input under its reach. A node that
+averages each sample with its neighbours within `radius` full-detail pixels:
+
+```rust
+use crate::{
+    Result,
+    node::data::*,
+    ports::*,
+    runtime::GlobalContext,
+    shape::{Border, Stencil, StencilBody},
+};
+
+fn contract(_: &GlobalContext, _: &(), image: &RgbDesc) -> Result<(RgbDesc,)> {
+    Ok((image.clone(),))
+}
+
+/// Average each RGB sample with its neighbours within 2 full-detail pixels.
+#[crate::node(id = "soften", name = "Soften", contract = contract, stencil = MEAN)]
+pub fn compute(_: &(), _image: Point<'_, Rgb>, _output: Point<'_, Rgb>) -> Result<Stencil<0>> {
+    Ok(Stencil { radius: 2.0, constants: [] })
+}
+
+static MEAN: StencilBody =
+    StencilBody { name: "soften::mean", constants: 0, border: Border::Repeat, expand: kernel::mean::expand };
+
+mod kernel {
+    use crate::shape::{Pixel, Window};
+    use cubecl::prelude::*;
+    #[cube]
+    pub fn mean(w: &Window, _k: &[f32]) -> Pixel {
+        let mut r = 0.0f32;
+        let mut g = 0.0f32;
+        let mut b = 0.0f32;
+        let mut n = 0.0f32;
+        for dy in -w.radius_y..w.radius_y + 1 {
+            for dx in -w.radius_x..w.radius_x + 1 {
+                let px = w.at(dx, dy);
+                r += px.r;
+                g += px.g;
+                b += px.b;
+                n += 1.0f32;
+            }
+        }
+        Pixel { r: r / n, g: g / n, b: b / n }
+    }
+}
+```
+
+The stencil's input materializes first, and maps after it run in its kernel.
+A body that weighs taps by distance scales its lengths by `w.rate_x` and
+`w.rate_y`, samples per full-detail pixel, as `node/sharpen.rs` does.
 
 1. Declare the module: `pub mod double;` in `src/node/mod.rs`.
 2. List `&double::compute::KIND` in `registry::NODES`, at its pipeline

@@ -5,6 +5,35 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
+- Explicit compute model, step 8: the stencil shape and Sharpen.
+  `tests/stencil.rs` checks on the CPU runtime and wgpu (RTX 3080) that
+  Sharpen turns a delta into `δ + amount · (δ − G)` within 1e-6, with `G`
+  the Gaussian normalized over a reach of 4 samples and zero beyond it, that
+  a reach of 4 full-detail pixels reads 4 samples at scale 1 and 2 at scale
+  2, that a reach of 0.625 pixels counts one approximated stencil at scale
+  2 and none at scale 1, and that Exposure after Sharpen runs in Sharpen's
+  launch with the same bits as with the stencil's output materialized first.
+  Exposure before it runs in a launch of its own. A crop through Exposure
+  and Sharpen equals the whole output's samples bit for bit, inside the
+  image and at its corner, and writes the crop and the crop grown by the
+  reach, clamped to the image, in two launches. Unit tests cover the reach
+  conversion with `div_ceil` lattices and the window growth, and the macro
+  tests the stencil form. Timed with a release driver kept in
+  `../drip-benchmark-results/2026-10-13-stencil/` on the Sony fixture with
+  the template's tail and Sharpen (radius 2, reach 5) after Sigmoid,
+  `DRIP_BACKEND=wgpu` and `RAYON_NUM_THREADS=12`, a new Exposure per
+  sample, five samples after one warm-up each, wall time around
+  `evaluate_batch`. Medians (ranges) in ms:
+
+  | Request | Samples written | Evaluate | With host read |
+  |---|---|---|---|
+  | Whole, level 1 | 21 194 880 | 2.23 (2.20–2.56) | 12.00 (11.99–25.72) |
+  | Whole, full detail | 84 779 520 | 24.77 (24.70–32.98) | 122.11 (117.67–154.42) |
+  | Crop, 1600 × 1000 | 3 226 100 | 1.01 (0.86–1.11) | 6.92 (2.84–7.79) |
+
+  The crop computes the tail on 1610 × 1010 samples and Sharpen on
+  1600 × 1000. Without Sharpen, step 6 measured 10.67 ms and 0.43 ms. The
+  full workspace gate passes.
 - Explicit compute model, step 7: the reduce and bins shapes. `tests/reduce.rs`
   checks on the CPU runtime and wgpu (RTX 3080) that `Image::count` matches
   host counts for a ten-bin, three-channel body in shared memory and a
