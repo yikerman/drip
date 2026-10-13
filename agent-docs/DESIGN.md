@@ -2,7 +2,8 @@
 
 Decisions not evident from code. Code principles are in `AGENTS.md`; node,
 port and contract principles and their mathematics in
-[TYPE_SYSTEM](TYPE_SYSTEM.md). Unfinished work is in [TODO](TODO.md),
+[TYPE_SYSTEM](TYPE_SYSTEM.md); geometry and resampling through continuous
+fields in [FIELD](FIELD.md). Unfinished work is in [TODO](TODO.md),
 validation in [PROGRESS](PROGRESS.md).
 
 Status: **Requirement** is stated by the user; **Decided** is agreed;
@@ -144,19 +145,27 @@ Settled with the user on 2026-10-11 after a review against
 
 ## Processing
 
-- **Requirement:** Combine crop and straighten into Perspective Transform;
-  implement delivery resizing as Downsample with selectable filtering.
+- **Requirement:** Combine crop, rotation and perspective into Perspective
+  Transform; resample images by a factor, with interpolation and antialiasing.
 - **Decided:** Implement JPEG export using `jpeg-encoder`, reusing output
   profiles and actions. Default to sRGB, quality 95 and 4:4:4; quality and
   chroma subsampling remain independent controls. Reduced chroma uses area
   averaging. TIFF and JPEG share capture-tag writing and omit original
-  orientation because stored pixels already carry their geometry. The current
-  implementation scope is JPEG only; Downsample is deferred and Perspective
-  Transform needs discussion.
-- **Tentative:** For later geometry work, share filter math, not the separable
-  resize traversal for arbitrary perspective. Resolve preview sampling and
-  full-detail dimensions explicitly. See the researched
-  [implementation sequence](TODO.md#first-implementation-sequence).
+  orientation because stored pixels already carry their geometry.
+- **Decided (2026-10-12):** Geometry goes through continuous fields
+  ([FIELD](FIELD.md)). An explicit Interpolate lifts `Rgb` to `RgbField`;
+  `RgbField -> RgbField` nodes (Perspective Transform, later lens correction)
+  only add per-channel coordinate maps to the description; one Sample node
+  filters once, choosing the filter and output size, and returns `Rgb`.
+  Resample is Interpolate → Sample. Views take Sample's output. Per-pixel value
+  operations stay on `Rgb`: linear ones commute with interpolation, and
+  deferring nonlinear ones is Open. This replaces the separate Downsample node
+  and its separable traversal; one footprint-scaled kernel serves both.
+- **Decided:** `RgbDesc` records the full-detail extent beside the stored one,
+  so contracts derive preview geometry instead of reconstructing it from
+  `extent · scale`.
+- **Open:** Field border policy and auto-crop, default filter, lens-correction
+  coordinates and `MonoField`; see [FIELD](FIELD.md#open-questions).
 - **Tentative:** The proposed next-node order in [TODO](TODO.md#next-image-nodes)
   prioritizes ordinary still-photo editing: framing and delivery first, then
   colour/tone controls and reusable local adjustments, followed by noise,
@@ -218,7 +227,8 @@ Settled with the user on 2026-10-11 after a review against
 - **Tentative:** Lens correction needs lens identification, crop factor and
   correction profiles; vignetting may use focus distance, not minimum focus
   distance. Place correction before orientation or account for transformed
-  coordinates.
+  coordinates. Distortion and lateral CA become per-channel field maps
+  ([FIELD](FIELD.md)); vignetting is a per-pixel gain on `Rgb`.
 - **Decided:** Multiple-frame operations consume decoded-value collections;
   no graph-level frame-stack abstraction.
 

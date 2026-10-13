@@ -4,6 +4,13 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-12
 
+- Designed geometry and resampling through continuous fields
+  ([FIELD](FIELD.md)) with the user: explicit Interpolate, map-only
+  `RgbField -> RgbField` nodes with per-channel maps, one footprint-scaled
+  Sample, and `RgbDesc::full`. Read resampling code in darktable `e43fbf3`,
+  vkdt `f0be638`, RawTherapee `5f486d3` and OpenImageIO `ee1c641`; checked
+  reference DOIs against Crossref. Documentation only; no code, kernels or
+  measurements. Border policy, default filter and lens coordinates stay Open.
 - Replaced the `encoding` tag with `io`, carried by the RAW reader and both
   exports, renamed tag `raw` to `bayer-raw` and named the reader Bayer RAW,
   leaving room for X-Trans and monochrome. All 174 workspace tests pass

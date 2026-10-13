@@ -26,6 +26,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Worker startup failures | Open | Report thread-creation failures in `Worker::new` without losing the worker. |
 | Sensor calibration | Open | Expose sample conventions and sensor coordinates before dark/flat correction; see [DESIGN](DESIGN.md). |
 | Everyday image nodes | Proposed | Implement in the order below under [Next image nodes](#next-image-nodes). This is a proposed follow-up, not an expansion of the packaged proof-of-concept gate. |
+| Field extensions | Open | Border/auto-crop and default filter, decided before Sample ships. Later: `MonoField` with masks, a `Chain` payload shared by an image and its mask, Sample onto another image's grid for registration, EWA footprints, deferred nonlinear value operations, and a citable derivation of repeated-resampling loss. See [FIELD](FIELD.md#open-questions). |
 | Later processing extensions | Deferred | Pixel math, general filtering, gain fields, registration and multi-frame denoise/HDR/super-resolution/stitching. Add payloads with consumers. |
 | Chart calibration | Deferred | Fit reusable transforms from separate chart images; see [DESIGN](DESIGN.md). |
 | Camera color / other CFAs | Deferred | Calibration beyond matrix/as-shot WB; X-Trans and other non-Bayer inputs. |
@@ -58,8 +59,8 @@ filter defaults remain proposals until implementation.
 
 | Order | Node work | First use | Initial scope |
 |-------|-----------|-----------|---------------|
-| 1 | Perspective Transform | Crop, level a horizon or straighten a building. | Compose crop, rotation and four-point perspective correction into one inverse mapping and resample once. Normalized controls, output framing, explicit borders and filtering; direct preview handles belong in the GUI. |
-| 2 | Downsample | Deliver a photograph with a 2048-pixel long edge. | Reduction ratio or target bounds, aspect preservation and selectable filtering. Widen filter support with reduction ratio; preserve signed/HDR linear RGB. Share filter definitions with Perspective Transform. |
+| 1 | Fields, Interpolate and Sample (Resample) | Deliver a photograph with a 2048-pixel long edge. | `RgbField`, Interpolate and Sample per [FIELD](FIELD.md): a factor or long-edge size, selectable filters scaled by the footprint, signed/HDR linear RGB. Needs `RgbDesc::full` and pass-through outputs first. |
+| 2 | Perspective Transform | Crop, level a horizon or straighten a building. | `RgbField -> RgbField`: crop, rotation and four-point correction as one projective map stage. Normalized controls, output domain, border/auto-crop; direct preview handles belong in the GUI. |
 | 3 | JPEG export (implemented) | Share an edit without a TIFF conversion step. | Uses jpeg-encoder 0.7.1, shared output-profile conversion and node actions. sRGB/quality 95/4:4:4 defaults, embedded ICC, optional capture EXIF and selectable averaged chroma subsampling. |
 | 4 | RGB image input | Edit a JPEG or bring in a TIFF reference. | RGB JPEG/PNG/TIFF sources with ICC and orientation handling, an explicit untagged-profile assumption and defined alpha handling. Decode into documented linear RGB coordinates without treating an already rendered image as unrendered scene data. |
 | 5 | Saturation/chroma | Make a landscape less dull or a portrait less colourful. | One global chroma adjustment with stated colour basis and luminance/hue behavior. Define signed/HDR handling; no implicit clipping into a display range. |
@@ -67,7 +68,7 @@ filter defaults remain proposals until implementation.
 | 7 | Masks and blend | Brighten a face or darken the sky. | Add a Mask payload with its Blend consumer and linear/radial mask producers together. Blend base and adjusted RGB with explicit spatial, colour and weight contracts. Reuse existing adjustment nodes; add a mask view and direct manipulation. Brush and colour/luminance selections follow later. |
 | 8 | Denoise | Clean up a high-ISO photograph. | A documented starting algorithm with useful luminance/chroma controls and predictable behavior at preview scales. Verify detail retention and artifacts at full resolution; choose the input domain with the algorithm. |
 | 9 | Sharpen | Restore apparent detail, including after delivery resizing. | Amount, radius and threshold controls with declared radius units and border behavior. Document recommended placement without enforcing it as a graph restriction. |
-| 10 | Lens correction | Remove barrel distortion, dark corners and lateral colour fringes. | Separate lens-model loading from its application. Start with distortion and vignetting, then lateral CA; use capture metadata and explicit image-to-capture mapping, shared resampling and model-applicability checks. |
+| 10 | Lens correction | Remove barrel distortion, dark corners and lateral colour fringes. | Separate lens-model loading from its application. Start with distortion and vignetting, then lateral CA; use capture metadata and explicit image-to-capture mapping, and model-applicability checks. Distortion and lateral CA are per-channel field map stages; vignetting is a per-pixel gain. |
 
 Alongside these nodes, add temperature/tint and neutral sampling to the existing
 CAT16 controls; this is the white-balance-controls item above, not another
@@ -76,31 +77,27 @@ feed Blend, rather than embedding masking separately into every adjustment.
 
 ### First implementation sequence
 
-JPEG export is implemented. Downsample is deferred; discuss Perspective
-Transform before implementing it. The geometry steps below remain proposals.
+JPEG export is implemented. Geometry follows the sequence in
+[FIELD](FIELD.md#implementation-sequence); summarized:
 
 1. **JPEG export (done):** registered an encoding action beside TIFF using
    `jpeg-encoder`, shared output conversion and capture-tag writing. Independent
    JPEG/EXIF decoder tests cover pixels, profiles, capture tags, averaged chroma,
    dimension limits and export after project persistence.
-2. **Downsample and shared filtering:** implement separable, scale-aware
-   convolution in CubeCL with normalized weights and declared pixel centres
-   and borders. Start with area/box, triangle, Mitchell and Lanczos3 choices;
-   keep filter definitions reusable and parameterizable. A nearest option can
-   be explicit unfiltered sampling. Resolve target-size preview semantics from
-   actual sampling/full-detail geometry; `extent * global.scale` is not exact
-   after rounded reductions. Retain existing serialized RGB reduction behavior.
-   Test constant preservation, odd extents, noninteger reductions, signed/HDR
-   samples and aliasing/ringing on synthetic patterns across CPU/GPU backends.
-3. **Perspective Transform:** solve/compose a homography on the host and
-   inverse-map output pixel centres in one CubeCL operation. Share filter
-   functions and border rules with Downsample; perspective minification needs
-   a local footprint, not the uniform separable resize implementation. Start
-   with footprint-aware sampling and measure whether mip/EWA optimization is
-   needed. Define out-of-bounds and projective-pole fill; reject undefined
-   transforms, not unconventional framing. Add crop/aspect/angle and quad
-   handles in the GUI. Test identity, exact integer crop, landmark mappings,
-   borders, minification and consistent preview/export framing.
+2. **Geometry foundations:** `RgbDesc::full` with the pixel-centre convention,
+   then pass-through outputs in `#[node]`, then shared `#[cube]` filters (box,
+   triangle, Mitchell–Netravali, Lanczos-3). Retain existing serialized RGB
+   reduction behavior.
+3. **Resample:** `RgbField`, Interpolate and Sample with identity maps; the
+   footprint-scaled kernel replaces a separable Downsample. Test constant
+   preservation, identity within tolerance, odd extents, noninteger factors,
+   signed/HDR samples, zone-plate aliasing and preview/export geometry on CPU
+   and WGPU.
+4. **Perspective Transform:** projective map stage composed on the host and
+   checked by the contract; reject undefined transforms, not unconventional
+   framing. Points through a projective pole take the border. Add crop, aspect,
+   angle and quad handles in the GUI. Test exact integer crop, landmark
+   mappings, borders, minification and preview/export framing.
 
 Research (2026-10-12):
 
@@ -117,3 +114,6 @@ Research (2026-10-12):
 - [OpenCV geometric transformations](https://docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html)
   and [PBRT image filtering](https://pbr-book.org/4ed/Textures_and_Materials/Image_Texture):
   inverse mapping and footprint-dependent filtering references.
+- darktable, vkdt, RawTherapee, OpenImageIO, Nuke and Blender resampling at
+  pinned revisions, and the filtering literature: see
+  [FIELD](FIELD.md#prior-art).
