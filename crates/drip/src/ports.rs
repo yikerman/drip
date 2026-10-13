@@ -6,8 +6,10 @@
 //! it; `Forward` publishes samples the node already holds; a foreign node
 //! describes and fills each output through `Publish`. The host function of a
 //! map, warp, resample, reduce, bins or stencil node sees its input and
-//! output as `Point`, a description without samples. Type erasure is confined to the
-//! generated node adapter.
+//! output as `Point`, a description without samples. A meta node's function
+//! sees its ports as `Inlet` and `Outlet`, which it wires to the nodes of the
+//! sub-graph it builds. Type erasure is confined to the generated node
+//! adapter.
 use crate::{
     Error, Result,
     image::{Description, Image, Raster},
@@ -62,6 +64,42 @@ impl<'a, P: Payload, R> Point<'a, P, R> {
     #[doc(hidden)]
     pub fn new(desc: &'a Description) -> Self {
         Self { desc: downcast(desc), requirement: PhantomData }
+    }
+}
+
+/// An input of a meta node as its expansion sees it: the description of the
+/// value it receives, checked against `R`, and the port that
+/// [`SubGraph::input`](crate::expand::SubGraph::input) feeds to inputs of
+/// the sub-graph's nodes.
+pub struct Inlet<'a, P: Payload, R = Any> {
+    pub desc: &'a P::Desc,
+    pub(crate) index: usize,
+    requirement: PhantomData<R>,
+}
+impl<'a, P: Payload, R> Inlet<'a, P, R> {
+    #[doc(hidden)]
+    pub fn new(index: usize, desc: &'a P::Desc) -> Self {
+        Self { desc, index, requirement: PhantomData }
+    }
+}
+impl<P: Payload, R> Clone for Inlet<'_, P, R> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<P: Payload, R> Copy for Inlet<'_, P, R> {}
+
+/// An output of a meta node as its expansion sees it: the port that
+/// [`SubGraph::output`](crate::expand::SubGraph::output) sets to an output
+/// of one of the sub-graph's nodes.
+pub struct Outlet<P> {
+    pub(crate) index: usize,
+    payload: PhantomData<fn() -> P>,
+}
+impl<P> Outlet<P> {
+    #[doc(hidden)]
+    pub fn new(index: usize) -> Self {
+        Self { index, payload: PhantomData }
     }
 }
 

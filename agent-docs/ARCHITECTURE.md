@@ -45,15 +45,15 @@ then the map bodies to apply and their constants. The stage resamples,
 through per-channel projective maps from the image's plane to the input's
 plane with their filter, or runs a stencil over the input's lattice
 ([Stencils](#stencils)). The input is a raster, or a deferred image where
-the plan cuts (see [Segments](#segments)). `Image::materialize` materializes the input,
-runs the plan once as one fused kernel into a device raster and drops the
-plan and its input, so a segment never stores its intermediate images.
-Later calls and clones share the result. `Image::raster` materializes and
-returns the samples, for frontends. `Image::crop(window, ctx)` materializes
-only a window of the image's lattice: a deferred image runs its plan on that
-window and on the part of its input the window reads, and a raster holding
-more copies the window in one launch. The result is a raster whose
-description states its window (see [Data model](#data-model)).
+the plan cuts (see [Segments](#segments)). `Image::materialize` materializes
+the input, runs the plan once as one fused kernel into a device raster and
+drops the plan and its input, so a segment never stores its intermediate
+images. Later calls and clones share the result. `Image::raster`
+materializes and returns the samples, for frontends. `Image::crop(window,
+ctx)` materializes only a window of the image's lattice: a deferred image
+runs its plan on that window and on the part of its input the window reads,
+and a raster holding more copies the window in one launch. The result is a
+raster whose description states its window (see [Data model](#data-model)).
 `Image::fold` and `Image::count` reduce the samples an image holds to a few
 host values without storing them: a deferred image's plan runs per pixel
 inside the reduction's pass ([Reductions](#reductions)).
@@ -108,9 +108,10 @@ has no disk tier.
 derives it from the declaration: `foreign = memory` or `foreign = disk` with
 `Publish` ports makes a foreign node, `map = body`, `warp`, `resample`,
 `reduce = BODY`, `bins = BODY` or `stencil = BODY` with two `Point` ports
-make a map, warp, resample, reduce, bins or stencil node, and any other
-function is a kernel, `Shape::Kernel { scaled }`. `Source` is the shape of bound in-memory data,
-`node::source`, which hands each run its raster.
+make a map, warp, resample, reduce, bins or stencil node, `meta` with
+`Inlet` and `Outlet` ports makes a meta node, and any other function is a
+kernel, `Shape::Kernel { scaled }`. `Source` is the shape of bound in-memory
+data, `node::source`, which hands each run its raster.
 
 `Shape::scaled` is true for a kernel declared `#[node(scaled)]`, a warp and
 a resample. Their contracts and kernels receive the requested scale and
@@ -131,6 +132,7 @@ scale (`Key::reduced`).
 | `Resample` | `#[node(resample)] fn(&Params, Point<In>, Point<Out>) -> Result<&'static FilterBody>`, with a contract | as for a map | as for a map | the function returns the filter. The contract's description sets the output lattice, and the stage resamples onto it |
 | `Reduce(&ReduceBody)` | `#[node(reduce = BODY)] fn(&Params, Point<In>, Read..., Point<Out>) -> Result<[f32; N]>`, with a contract | as for a map | the second `Point`, a host value whose `Host` converts from the accumulator's `Vec<f32>` | the function returns the constants of `BODY`, and the node folds every pixel of its input with it ([Reductions](#reductions)) |
 | `Bins(&BinsBody)` | `#[node(bins = BODY)] fn(&Params, Point<In>, Read..., Point<Out>) -> Result<[f32; N]>`, with a contract | as for a map | the second `Point`, a host value whose `Host` converts from the counts' `Vec<u32>`, `Counts` for every bins node so far | as for `Reduce`, counting pixels into the bins of `BODY` |
+| `Meta` | `#[node(meta)] fn(&Params, &mut SubGraph, Inlet..., Outlet...) -> Result<()>`, without context or contract | `Inlet<'_, P, R>`: the input's description, checked against `R`, and a port the sub-graph's inputs read | `Outlet<P>`, set to an output of the sub-graph | the function builds a sub-graph of other kinds, which evaluation runs in the node's place ([Meta nodes](#meta-nodes)) |
 | `Stencil(&StencilBody)` | `#[node(stencil = BODY)] fn(&Params, Point<In>, Read..., Point<Out>) -> Result<Stencil<N>>`, with a contract | as for a map | as for a map | the function returns the reach in full-detail pixels and the constants of `BODY`, a `#[cube] fn(w: &Window, k: &[f32]) -> Pixel`. The input materializes, and the stencil's kernel computes the samples a consumer asks for, with the maps after it ([Stencils](#stencils)) |
 
 A `Write` allocates on first use: `host()` through `Payload::allocate`,
@@ -189,12 +191,12 @@ answers which part of the input a window reads: the same window through a
 load, the reindexed corners through a gather, and through a filter the
 corners mapped into the input, grown by the filter's support times the
 footprint (`MAX_FOOTPRINT` for a projective map, whose footprint varies),
-plus one sample, and through a stencil the window grown by its reach. Projective maps keep lines straight, so the corners bound
-the window's image, and a corner beyond the horizon asks for the whole
-input. A plan that cuts asks its own input for that window in turn. The
-kernel positions samples by their whole-lattice index and clamps taps to
-the stored window, so a window's samples equal the same samples of the whole
-image bit for bit.
+plus one sample, and through a stencil the window grown by its reach.
+Projective maps keep lines straight, so the corners bound the window's
+image, and a corner beyond the horizon asks for the whole input. A plan that
+cuts asks its own input for that window in turn. The kernel positions
+samples by their whole-lattice index and clamps taps to the stored window,
+so a window's samples equal the same samples of the whole image bit for bit.
 
 ### Stencils
 
@@ -226,6 +228,32 @@ the requested scale, reduced by evaluation's box filter where it is finer,
 and its shape is not scaled. Bayer stencils need windows aligned to CFA
 cells, and none exists yet.
 
+### Meta nodes
+
+A meta node is one node in the graph a user edits and a sub-graph of other
+kinds when it runs, as vkdt's `create_nodes` expands a module. Its function
+receives a `SubGraph` (`expand.rs`), adds nodes to its `dag` with their
+kinds' generated `add`, connects them with `Dag::connect`, feeds each
+`Inlet` to sub-graph inputs with `SubGraph::input` and sets each `Outlet`
+with `SubGraph::output`. `Node::expand` calls it with the input
+descriptions, and `SubGraph::finish` rejects an unset output, a fed input
+that is also connected, and foreign or meta nodes inside: foreign jobs
+belong to the store under their own keys, and expansions do not nest.
+
+Evaluation keys and schedules the meta node like any node. When it runs,
+its inputs are resolved, so their descriptions exist even after a RAW
+decode. The store keeps the 64 expansions used last by the meta node's key,
+which covers its parameters and the keys of its inputs, so an unchanged
+demand does not call the function again. Evaluation keys each sub-graph node
+from the keys of the meta node's inputs, as if it were in the graph, takes
+what the store holds walking back from the outputs, and runs the other
+nodes in the sub-graph's order at the meta node's scale, each scaled shape
+receiving that scale. Outputs the sub-graph materialized while it ran are
+stored under their own keys, and the meta node's outputs under its own.
+Errors name the meta node. A meta node reads its inputs at the requested
+scale and its shape is not scaled. Its outputs are what the sub-graph's
+nodes publish, often deferred, so crops and reductions pass through it.
+
 A foreign node is the boundary for work that is expensive or outside
 CubeCL: a decoder, a solver, host code over a whole image. Its function
 sees no scale and runs on host samples, and the store memoizes it. Its
@@ -242,11 +270,11 @@ when an action or a preparation first asks and kept with the node, error
 included.
 
 `eval.rs` reads the shape to run foreign nodes as jobs and find their
-codecs, to derive each node's scale (`Shape::scaled`, a claimed `scaled`
-kernel), and to hand frontends a reduction's outputs (`Shape::reduces`). The
-macro builds every other difference into `Node::identity`, `Node::contract`
-and `Node::run`, `Image` carries the deferral, and `plan.rs` runs
-reductions.
+codecs, to expand meta nodes, to derive each node's scale (`Shape::scaled`,
+a claimed `scaled` kernel), and to hand frontends a reduction's outputs
+(`Shape::reduces`). The macro builds every other difference into
+`Node::identity`, `Node::contract` and `Node::run`, `Image` carries the
+deferral, and `plan.rs` runs reductions.
 
 ### Reductions
 
@@ -294,18 +322,19 @@ Nothing runs until a caller forces it. A demand is a graph, a
 at evaluation), and targets. `Evaluator::evaluate::<P>(dag, global, output)`
 forces one output. It returns the raster where its node produced it, a
 deferred target materialized on the device, and `Statistics`: nodes run,
-uploads, downloads, fused launches and the samples they wrote on the
-runtime, reduction passes (`reductions`), stencil launches whose reach fell
-below one preview sample (`approximated`), values the store served (`hits`),
-those of them read from disk (`reads`) and representations it dropped
-(`evictions`) during the call. `evaluate_inputs` forces several target nodes
-in one run and returns each target's `InputValues`, which a frontend binds
-to the node's typed `Inputs` with `bind::<N>()`. A reduce or bins target
-hands its outputs instead, bound to the node's typed `Outputs` with
-`bind_outputs::<N>()`. They are demanded like any value, so a stored one
-runs nothing. `evaluate_batch` takes `Target`s, each a node and an optional
-region, runs under a `Policy`, records host timings per node that runs and
-returns a `Batch` of the inputs and the call's `Statistics`.
+each node of a meta node's sub-graph counted, uploads, downloads, fused
+launches and the samples they wrote on the runtime, reduction passes
+(`reductions`), stencil launches whose reach fell below one preview sample
+(`approximated`), values the store served (`hits`), those of them read from
+disk (`reads`) and representations it dropped (`evictions`) during the call.
+`evaluate_inputs` forces several target nodes in one run and returns each
+target's `InputValues`, which a frontend binds to the node's typed `Inputs`
+with `bind::<N>()`. A reduce or bins target hands its outputs instead, bound
+to the node's typed `Outputs` with `bind_outputs::<N>()`. They are demanded
+like any value, so a stored one runs nothing. `evaluate_batch` takes
+`Target`s, each a node and an optional region, runs under a `Policy`,
+records host timings per node that runs and returns a `Batch` of the inputs
+and the call's `Statistics`.
 
 A region is a rectangle of the plane of the target's inputs in full-detail
 pixels (`shape::Rect`). Each input on a plane then holds only its samples
@@ -363,7 +392,8 @@ returned description with `Payload::validate` and the output's requirement.
 inputs. A node whose shape is scaled receives the scale it runs at, and
 every other node scale 1. Host outputs are checked with `Payload::check`,
 device and forwarded outputs against `byte_len`. The node's inputs are
-released after it runs.
+released after it runs. For a meta node evaluation calls `Node::expand`
+instead, then the contract and run of each node of its sub-graph.
 
 A foreign node's contract checks its inputs and describes nothing. The run
 materializes its inputs, then asks the store for the job under the node's
@@ -495,6 +525,12 @@ one stencil. State lengths in full-detail pixels, return the reach that
 covers the body's taps, and scale lengths inside the body by the window's
 rate.
 
+An operation built from other nodes, such as a pyramid, is a meta node:
+`#[node(meta)]` on a function that wires a `SubGraph` to its `Inlet` and
+`Outlet` ports. `pyramid.rs` builds Pyramid blur from Resample and Sharpen
+and reads its input's full extent from the `Inlet` to size the last
+Resample.
+
 Outputs are stored under keys that include `Kind::version`. When a change
 alters what a kind computes for the same parameters and inputs, bump it with
 `#[node(version = N)]` (1 by default). RAW decode uses
@@ -543,7 +579,8 @@ in `tests/algorithms.rs`, with the resampling reference in
 `tests/algorithms/resample.rs`, segments in `tests/fusion.rs`, the store in
 `tests/store.rs`, foreign jobs and the disk tier in `tests/foreign.rs`,
 regions, scale and tiled export in `tests/regions.rs`, reductions in
-`tests/reduce.rs`, and stencils in `tests/stencil.rs`. A test that counts
+`tests/reduce.rs`, stencils in `tests/stencil.rs`, and meta nodes in
+`tests/meta.rs`. A test that counts
 the work of one evaluation uses a new `Evaluator`, whose store is empty. A
 test with a disk tier gives it a temporary directory. Each file runs its
 checks on the CPU runtime with `--features drip/cpu` and on the
@@ -585,9 +622,9 @@ through an example.
 
 ## Migration status
 
-Drip is adopting the compute model of
-[COMPUTE_MODEL](COMPUTE_MODEL.md#proposal-for-drip) in eight steps. Steps 1
-to 7 landed on 2026-10-13. Step 1 made ports name
+Drip adopted the compute model of
+[COMPUTE_MODEL](COMPUTE_MODEL.md#proposal-for-drip) in eight steps, all of
+which landed on 2026-10-13. Step 1 made ports name
 payloads, values `Image` and `Raster`, gave kinds a `Shape` and moved a
 run's values into a `Store`. Step 2 added the map shape and fused kernels
 and made Exposure, Camera RGB to color RGB, Chromatic adaptation and Sigmoid
@@ -602,5 +639,5 @@ claim and evaluation's box reduction, made Export TIFF write in bands over
 the device budget and gave the GUI's image view full-detail crops at 100 %.
 Kernels stay whole, without halos. Step 7 added the reduce and bins shapes,
 made the scopes bins nodes and auto exposure a library reduction, and
-removed drip-gui's kernels. Step 8 added the stencil shape and Sharpen, and
-`meta` is next.
+removed drip-gui's kernels. Step 8 added the stencil shape with Sharpen and
+the meta shape with Pyramid blur.

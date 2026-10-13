@@ -5,6 +5,21 @@ in [TODO](TODO.md).
 
 ## 2026-10-13
 
+- Explicit compute model, step 8: the meta shape and Pyramid blur. All
+  eight steps have landed. `tests/meta.rs` checks on the CPU runtime and
+  wgpu (RTX 3080) that Pyramid blur with three levels expands to Resample
+  and Sharpen three times and a Resample back, that its expansion fails
+  without its input and its contract fails, that a flat 37 × 29 image
+  passes unchanged within 1e-5 relative and keeps its lattice, running the
+  source, the meta node and seven sub-graph nodes, that the same demand
+  again runs nothing and hits the stored output, that it keeps the input's
+  lattice at scale 4, and that a 24 × 16 crop through a two-level pyramid
+  over a 96 × 80 image equals the whole output there bit for bit, writing
+  less than half the samples. The flat check first used 1e-6: wgpu returned
+  1.699999 for 1.7 after seven stages of normalized weights. The macro
+  tests cover the meta form and its rejections. The GUI picker test lists
+  Sharpen and Pyramid blur among the look nodes. The full workspace gate
+  passes.
 - Explicit compute model, step 8: the stencil shape and Sharpen.
   `tests/stencil.rs` checks on the CPU runtime and wgpu (RTX 3080) that
   Sharpen turns a delta into `δ + amount · (δ − G)` within 1e-6, with `G`

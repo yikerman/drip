@@ -26,6 +26,17 @@ pub(crate) fn expand(args: TokenStream, function: syn::ItemFn) -> syn::Result<To
         }
         _ => {}
     }
+    match (options.meta, signature.meta) {
+        (true, false) => {
+            let message = "a meta node wires Inlet and Outlet ports";
+            return Err(syn::Error::new(span, message));
+        }
+        (false, true) => {
+            let message = "Inlet and Outlet ports declare meta";
+            return Err(syn::Error::new(span, message));
+        }
+        _ => {}
+    }
     match (&options.deferred, signature.point) {
         (Some(deferred), false) => {
             let message =
@@ -59,7 +70,11 @@ pub(crate) fn expand(args: TokenStream, function: syn::ItemFn) -> syn::Result<To
                 "a foreign node describes its outputs by publishing them; remove the contract";
             return Err(syn::Error::new(contract.span(), message));
         }
-        (None, Some(output)) if !signature.foreign => {
+        (Some(contract), _) if signature.meta => {
+            let message = "a meta node's sub-graph describes its outputs; remove the contract";
+            return Err(syn::Error::new(contract.span(), message));
+        }
+        (None, Some(output)) if !signature.foreign && !signature.meta => {
             let message = "a node with outputs needs a contract";
             return Err(syn::Error::new(output.name.span(), message));
         }

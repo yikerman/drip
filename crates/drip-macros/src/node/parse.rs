@@ -24,6 +24,8 @@ pub(super) struct Options {
     /// `foreign = memory` or `foreign = disk`: where the store keeps the
     /// outputs of a node with `Publish` ports.
     pub foreign: Option<Foreign>,
+    /// `meta`: the function wires a sub-graph to `Inlet` and `Outlet` ports.
+    pub meta: bool,
 }
 
 /// Where a foreign node's outputs are kept beside memory.
@@ -90,7 +92,7 @@ impl Options {
                 .path()
                 .get_ident()
                 .ok_or_else(|| syn::Error::new(entry.span(), "expected option name"))?;
-            if ["assets", "warp", "resample", "scaled"].iter().any(|flag| name == flag) {
+            if ["assets", "warp", "resample", "scaled", "meta"].iter().any(|flag| name == flag) {
                 let flag = name.to_string();
                 if flags.contains(&flag) || !matches!(entry, syn::Meta::Path(_)) {
                     let message = format!("expected a single `{flag}` flag");
@@ -157,12 +159,13 @@ impl Options {
         .into_iter()
         .flatten();
         let deferred = shapes.next();
-        if shapes.next().is_some() || deferred.is_some() && foreign.is_some() {
-            let message =
-                "a node is at most one of map, warp, resample, reduce, bins, stencil and foreign";
+        let others = [deferred.is_some(), foreign.is_some(), flag("meta")];
+        if shapes.next().is_some() || others.iter().filter(|&&shape| shape).count() > 1 {
+            let message = "a node is at most one of map, warp, resample, reduce, bins, stencil, \
+                           foreign and meta";
             return Err(syn::Error::new(span, message));
         }
-        if flag("scaled") && (deferred.is_some() || foreign.is_some()) {
+        if flag("scaled") && others.contains(&true) {
             let message = "only a kernel claims scaled";
             return Err(syn::Error::new(span, message));
         }
@@ -178,6 +181,7 @@ impl Options {
             scaled: flag("scaled"),
             deferred,
             foreign,
+            meta: flag("meta"),
         })
     }
 }
@@ -200,6 +204,11 @@ pub(super) enum View {
     /// The input, then the output, of a map, warp, resample, reduce, bins or
     /// stencil node: descriptions only.
     Point,
+    /// A meta node's input: its description and the port the sub-graph's
+    /// nodes read it from.
+    Inlet,
+    /// A meta node's output: the port a sub-graph output is mapped to.
+    Outlet,
 }
 
 pub(super) struct Port {
@@ -225,6 +234,9 @@ pub(super) struct Signature {
     /// `fn(&Params, Point<In>, Read..., Point<Out>) -> Result<T>`: the host
     /// function of a map, warp, resample, reduce, bins or stencil node.
     pub point: bool,
+    /// `fn(&Params, &mut SubGraph, Inlet..., Outlet...) -> Result<()>`: the
+    /// expansion of a meta node.
+    pub meta: bool,
     /// `T` in the function's `-> Result<T>`, if it returns one.
     pub result: Option<syn::Type>,
 }
@@ -243,14 +255,18 @@ impl Signature {
         }
         let foreign = signature.inputs.iter().any(|argument| is_view(argument, "Publish"));
         let point = signature.inputs.iter().any(|argument| is_view(argument, "Point"));
+        let meta = signature.inputs.iter().any(is_meta_port);
         let mut arguments = signature.inputs.iter();
-        if !foreign && !point {
+        if !foreign && !point && !meta {
             arguments.next(); // Rust checks the context type when compiling the generated call.
         }
         let parameters = arguments
             .next()
             .ok_or_else(|| syn::Error::new(signature.span(), "expected context and &parameters"))?;
         let parameters = parameter_type(parameters)?;
+        if meta {
+            arguments.next(); // Rust checks the sub-graph type when compiling the generated call.
+        }
         let mut inputs = 0;
         let mut outputs = 0;
         let mut ports = Vec::new();
@@ -259,6 +275,11 @@ impl Signature {
             if foreign && !["Read", "Publish"].iter().any(|view| is_view(argument, view)) {
                 let message = "a foreign node takes &parameters, Read inputs and Publish outputs, \
                                without a context";
+                return Err(syn::Error::new(argument.span(), message));
+            }
+            if meta && !is_meta_port(argument) {
+                let message = "a meta node takes &parameters, &mut SubGraph, Inlet inputs and \
+                               Outlet outputs";
                 return Err(syn::Error::new(argument.span(), message));
             }
             let mut port = Port::parse(argument)?;
@@ -290,7 +311,7 @@ impl Signature {
             return Err(syn::Error::new(signature.span(), message));
         }
         let result = result_type(&signature.output);
-        Ok(Self { parameters, ports, foreign, point, result })
+        Ok(Self { parameters, ports, foreign, point, meta, result })
     }
 
     pub fn inputs(&self) -> impl Iterator<Item = &Port> {
@@ -312,6 +333,11 @@ fn is_view(argument: &syn::FnArg, view: &str) -> bool {
                     wrapper_type(ty, argument.span()).is_ok_and(|(inner, _)| inner.ident == view)
                 })
     })
+}
+
+/// Whether `argument` is a meta node's `Inlet` or `Outlet` port.
+fn is_meta_port(argument: &syn::FnArg) -> bool {
+    is_view(argument, "Inlet") || is_view(argument, "Outlet")
 }
 
 /// `T` in `-> Result<T>`.
@@ -367,10 +393,13 @@ impl Port {
             "Write" => (Direction::Output, View::Write),
             "Forward" => (Direction::Output, View::Forward),
             "Publish" => (Direction::Output, View::Publish),
+            "Inlet" => (Direction::Input, View::Inlet),
+            "Outlet" => (Direction::Output, View::Outlet),
             _ => {
                 return Err(syn::Error::new(
                     wrapper.span(),
-                    "expected Read, Write, Forward, Publish or Point; wrapper aliases are not resolved",
+                    "expected Read, Write, Forward, Publish, Point, Inlet or Outlet; wrapper \
+                     aliases are not resolved",
                 ));
             }
         };

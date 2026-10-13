@@ -25,11 +25,13 @@ pub(super) fn node(
     let ports = ports(signature, &vis);
     let inputs = inputs(signature, &vis);
     let run = match (&options.deferred, signature.foreign) {
+        _ if signature.meta => meta(name, signature),
         (_, true) => foreign_run(name, signature),
         (Some(deferred), _) => deferred_run(name, deferred, signature),
         (None, false) => run(name, signature),
     };
-    let contract = contract(options, signature);
+    // A meta node's sub-graph describes its outputs.
+    let contract = (!signature.meta).then(|| contract(options, signature));
     // A foreign node's outputs are the same at every scale. The file stamps
     // in its identity key them to the files' current contents.
     let identity = if signature.foreign {
@@ -146,6 +148,7 @@ fn kind(
         (None, Some(Deferred::Stencil(body))) => {
             quote!(::drip::shape::Shape::Stencil(&super::#body))
         }
+        (None, None) if options.meta => quote!(::drip::shape::Shape::Meta),
         (None, None) => {
             let scaled = options.scaled;
             quote!(::drip::shape::Shape::Kernel { scaled: #scaled })
@@ -288,26 +291,35 @@ fn inputs(signature: &Signature, vis: &TokenStream) -> TokenStream {
     }
 }
 
-fn contract(options: &Options, signature: &Signature) -> TokenStream {
-    let mut checks = Vec::new();
-    let mut arguments = Vec::new();
-    for port in signature.inputs() {
-        let local = &port.name;
-        let name = local.to_string();
-        let index = port.index;
-        let payload = &port.payload;
-        let requirement = &port.requirement;
-        let check =
-            quote!(::drip::ports::input::<#payload, #requirement>(#name, inputs[#index].as_ref())?);
-        checks.push(if port.optional {
-            quote!(let #local = #check;)
-        } else {
-            quote! {
-                let #local = #check.ok_or(::drip::Error::MissingInput { node: KIND.id, port: #name })?;
+/// Bind each input's description from `inputs` to a local named after the
+/// port, checked against the port's requirement. A required input that is
+/// unconnected fails with `MissingInput`.
+fn input_checks(signature: &Signature) -> Vec<TokenStream> {
+    signature
+        .inputs()
+        .map(|port| {
+            let local = &port.name;
+            let name = local.to_string();
+            let index = port.index;
+            let payload = &port.payload;
+            let requirement = &port.requirement;
+            let check = quote!(
+                ::drip::ports::input::<#payload, #requirement>(#name, inputs[#index].as_ref())?
+            );
+            if port.optional {
+                quote!(let #local = #check;)
+            } else {
+                quote! {
+                    let #local = #check.ok_or(::drip::Error::MissingInput { node: KIND.id, port: #name })?;
+                }
             }
-        });
-        arguments.push(local);
-    }
+        })
+        .collect()
+}
+
+fn contract(options: &Options, signature: &Signature) -> TokenStream {
+    let checks = input_checks(signature);
+    let arguments: Vec<_> = signature.inputs().map(|port| &port.name).collect();
     // A foreign node describes its outputs when it publishes them.
     let outputs = signature.outputs().filter(|_| !signature.foreign).map(|port| {
         let name = port.name.to_string();
@@ -470,6 +482,54 @@ fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -
             let #result = super::#name(&self.parameters, #(#arguments),*)?;
             let image = inputs[#input].as_ref().expect("the Point input is bound");
             Ok(vec![#publish?])
+        }
+    }
+}
+
+/// The adapter of a meta node: `expand` checks the input descriptions and
+/// calls the function with a new sub-graph and the node's ports, then checks
+/// the sub-graph. Evaluation runs the sub-graph instead of `contract` and
+/// `run`, which fail.
+fn meta(name: &syn::Ident, signature: &Signature) -> TokenStream {
+    let checks = input_checks(signature);
+    let arguments = signature.ports.iter().map(|port| {
+        let local = &port.name;
+        let index = port.index;
+        let payload = &port.payload;
+        let requirement = &port.requirement;
+        let inlet = quote!(::drip::ports::Inlet::<#payload, #requirement>::new);
+        match port.direction {
+            Direction::Input if port.optional => quote!(#local.map(|desc| #inlet(#index, desc))),
+            Direction::Input => quote!(#inlet(#index, #local)),
+            Direction::Output => quote!(::drip::ports::Outlet::<#payload>::new(#index)),
+        }
+    });
+    quote! {
+        fn contract(
+            &self,
+            _: &::drip::runtime::GlobalContext,
+            _: &[Option<::drip::image::Description>],
+        ) -> ::drip::Result<Vec<::drip::image::Description>> {
+            Err(::drip::Error::Runtime(format!("{} runs as its sub-graph", KIND.id)))
+        }
+
+        fn run(
+            &self,
+            _: &::drip::runtime::KernelContext<'_>,
+            _: &[Option<::drip::image::Image>],
+            _: &[::drip::image::Description],
+        ) -> ::drip::Result<Vec<::drip::image::Image>> {
+            Err(::drip::Error::Runtime(format!("{} runs as its sub-graph", KIND.id)))
+        }
+
+        fn expand(
+            &self,
+            inputs: &[Option<::drip::image::Description>],
+        ) -> ::drip::Result<::drip::expand::SubGraph> {
+            #(#checks)*
+            let mut graph = ::drip::expand::SubGraph::new(&KIND);
+            super::#name(&self.parameters, &mut graph, #(#arguments),*)?;
+            graph.finish()
         }
     }
 }

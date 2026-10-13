@@ -14,6 +14,7 @@ pub mod hot_pixels;
 pub mod orientation;
 pub mod perspective;
 pub mod profile;
+pub mod pyramid;
 pub mod raw;
 pub mod rcd;
 pub mod reduce;

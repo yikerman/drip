@@ -59,6 +59,13 @@ use documentation::documentation;
 /// full-detail pixels and the `N` constants it reads. The body is
 /// `#[cube] fn(w: &Window, k: &[f32]) -> Pixel`. Its input is materialized
 /// and the maps after it join its kernel.
+/// A meta node, `#[node(meta, ...)]`, is
+/// `fn(&parameters, &mut SubGraph, Inlet<Payload>..., Outlet<Payload>...)
+/// -> Result<()>` without a context or contract. It adds nodes of other
+/// kinds to the sub-graph's `dag`, feeds each `Inlet` to their inputs with
+/// `SubGraph::input` and sets each `Outlet` with `SubGraph::output`. An
+/// `Inlet` carries its input's description. Evaluation runs the sub-graph in
+/// the node's place.
 #[proc_macro_attribute]
 pub fn node(args: TokenStream, item: TokenStream) -> TokenStream {
     node::expand(args.into(), parse_macro_input!(item as syn::ItemFn))

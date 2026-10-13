@@ -11,9 +11,10 @@
 //! [`ReduceBody`] or [`BinsBody`], which `plan` runs over a segment's pixels
 //! without storing them and reads back as a small host value. A stencil
 //! names a [`StencilBody`], a `#[cube]` function of a [`Window`] of its
-//! materialized input, and starts a segment that the maps after it join. The
-//! shape also says whether a kind's outputs depend on the requested scale
-//! ([`Shape::scaled`]).
+//! materialized input, and starts a segment that the maps after it join. A
+//! meta node builds a sub-graph of other kinds that evaluation runs in its
+//! place. The shape also says whether a kind's outputs depend on the
+//! requested scale ([`Shape::scaled`]).
 use crate::{
     Error, Result,
     image::{Image, Raster},
@@ -64,6 +65,12 @@ pub enum Shape {
     /// around each sample, so a window of the output reads that window grown
     /// by the reach.
     Stencil(&'static StencilBody),
+    /// The node's host function wires a [`SubGraph`](crate::expand::SubGraph)
+    /// of other kinds to its ports, from its parameters and input
+    /// descriptions. Evaluation runs the sub-graph's nodes in its place at
+    /// the scale the node runs at, keyed like any node's, and the node's
+    /// outputs are the sub-graph outputs mapped to its ports.
+    Meta,
 }
 impl Shape {
     /// Whether the kind's contract reads the requested scale to choose its

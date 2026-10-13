@@ -40,19 +40,22 @@ The non-trivial files outside `node/`:
   `Node`/`Typed` traits, `Action`, `Assets`, and the `Identity` and
   `Durability` the store keys and evicts by.
 - `shape.rs`: how evaluation runs a kind (`Shape`: kernel, bound source,
-  foreign, map, warp, resample, reduce, bins or stencil, and whether it
-  reads the scale), where a foreign node's outputs are kept (`Cache`,
+  foreign, map, warp, resample, reduce, bins, stencil or meta, and whether
+  it reads the scale), where a foreign node's outputs are kept (`Cache`,
   `Codec`), and what the segment compiler composes: `MapBody` and the
   `Pixel` it maps, `Warp`, `FilterBody` and the `BOX` filter that reduces to
   the requested scale, `ReduceBody` and `BinsBody` with the `Position` and
   `Bin` a bin body sees and returns, `StencilBody` with its `Border` and the
   `Window` it reads, and the `Lattice` of a `MapPayload` with the window a
   raster holds, in `Rect`s.
+- `expand.rs`: the `SubGraph` a meta node's function builds, with the
+  mapping of the meta node's ports and the checks evaluation relies on.
 - `registry.rs`: the hand-maintained `NODES`, `TAGS` and `Registry`.
 - `graph.rs`: `Dag` and transactional edits, checked on ports only.
 - `eval.rs`: `Evaluator`, demand-driven evaluation of the requested subgraph;
   contracts run here, nodes whose outputs the store holds are skipped, and
-  results are materialized for their consumers. It decides the scale each
+  results are materialized for their consumers. It runs a meta node's
+  sub-graph in the node's place, keyed node by node. It decides the scale each
   node runs at, reduces full-detail images to the requested scale and cuts a
   `Target`'s inputs to its region. `Policy` says whether a run waits for a
   foreign job or reports it pending, and `InputValues` hands frontends and
@@ -70,10 +73,10 @@ The non-trivial files outside `node/`:
   its pixels.
 - `store.rs`: the evaluator's memo of materialized values across demands:
   content keys, eviction by durability and recency within per-side byte
-  budgets, foreign jobs, and the `Disk` tier.
+  budgets, foreign jobs, meta expansions, and the `Disk` tier.
 - `ports.rs`: port views (`Read`, `Write`, `Forward`, `Publish` for foreign
-  nodes, and `Point` for maps, warps, resamples, reductions and stencils)
-  and interpretation requirements.
+  nodes, `Point` for maps, warps, resamples, reductions and stencils, and
+  `Inlet` and `Outlet` for meta nodes) and interpretation requirements.
 - `payload.rs`: payload families, their host types, device byte layouts and
   `Persist` streams.
 - `param.rs`: parameter schemas, encoding and validation.
@@ -298,6 +301,35 @@ The stencil's input materializes first, and maps after it run in its kernel.
 A body that weighs taps by distance scales its lengths by `w.rate_x` and
 `w.rate_y`, samples per full-detail pixel, as `node/sharpen.rs` does.
 
+An operation built from other nodes is a meta node. Its function adds nodes
+to a sub-graph and wires them to its ports, and evaluation runs those nodes
+in its place, so the graph shows one node while its parts are keyed and
+stored like any node's. A node that softens and then halves its input:
+
+```rust
+use crate::{
+    Result,
+    expand::SubGraph,
+    node::{data::*, filter::Filter, resample, sharpen},
+    ports::*,
+};
+
+/// Soften RGB with a Gaussian of 1 full-detail pixel, then halve it.
+#[crate::node(id = "soft-half", name = "Soft half", meta)]
+pub fn expand(_: &(), graph: &mut SubGraph, image: Inlet<'_, Rgb>, output: Outlet<Rgb>) -> Result<()> {
+    let soften = sharpen::add(&mut graph.dag, sharpen::Settings { radius: 1.0, amount: -1.0 })?;
+    let size = resample::Size::Factor(resample::Factor { factor: 0.5 });
+    let half = resample::add(&mut graph.dag, resample::Settings { filter: Filter::Box, size })?;
+    graph.input(image, soften.image)?;
+    graph.dag.connect(soften.output, half.image)?;
+    graph.output(half.output, output)
+}
+```
+
+`image.desc` holds the input's description, so an expansion can depend on
+it, as `node/pyramid.rs` sizes its last Resample from the input's full
+extent.
+
 1. Declare the module: `pub mod double;` in `src/node/mod.rs`.
 2. List `&double::compute::KIND` in `registry::NODES`, at its pipeline
    position. Without this the node cannot be added or loaded.
@@ -328,7 +360,8 @@ requested scale itself, cheaper or better than evaluation's box reduction,
 as the demosaics do with `reduce::for_demosaic`. Its contract and function
 then receive `GlobalContext::scale`, its output is taken as produced at that
 scale, and its outputs are keyed by it. Kernels declare no `halo` yet: they
-run whole, and a region bounds only the fused segments after them.
+run whole, and a region bounds only the fused segments after them, stencils
+included.
 The ID is the persistence key, so keep it once projects use it. The
 evaluator stores outputs under keys that include `version`, 1 by default:
 add `version = 2` to `#[node]` when a change alters what the node computes

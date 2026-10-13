@@ -7,14 +7,16 @@
 //! value, takes what the store holds, runs the other nodes in graph order and
 //! materializes each deferred image at its first consumer that needs samples,
 //! over a target's region only. A reduce or bins node computes a deferred
-//! input per pixel instead, unless other consumers read it too. Foreign nodes
-//! run as store jobs, waited for under [`Policy::Wait`] and reported pending
-//! under [`Policy::Defer`].
+//! input per pixel instead, unless other consumers read it too. A meta node
+//! runs the nodes of its sub-graph in its place. Foreign nodes run as store
+//! jobs, waited for under [`Policy::Wait`] and reported pending under
+//! [`Policy::Defer`].
 use crate::{
     Error, Result,
-    definition::{Kind, Typed},
+    definition::{Kind, Node, Typed},
+    expand::Source,
     graph::{Dag, Entry},
-    image::{Image, Raster},
+    image::{Description, Image, Raster},
     payload::Payload,
     ports::*,
     runtime::{GlobalContext, KernelContext, RuntimeContext},
@@ -43,7 +45,8 @@ pub struct NodeTiming {
 #[derive(Default, Debug)]
 pub struct Statistics {
     /// Nodes run. A node runs when a value it produces is demanded and not
-    /// stored.
+    /// stored. A meta node counts once, and each node of its sub-graph that
+    /// runs once more.
     pub nodes: usize,
     /// Rasters copied from host to device; excludes constants and scratch.
     pub uploads: usize,
@@ -735,7 +738,6 @@ impl<'a, 't> Run<'a, 't> {
         for slot in &slots {
             inputs.push(slot.map(|slot| self.resolve(slot)).transpose()?);
         }
-        let descs: Vec<_> = inputs.iter().map(|v| v.as_ref().map(|i| i.desc().clone())).collect();
         let shape = e.node.kind().shape;
         // A reduction computes a deferred input per pixel without storing
         // it. When another consumer of the run reads the input too,
@@ -750,17 +752,15 @@ impl<'a, 't> Run<'a, 't> {
                 }
             }
         }
-        // Only a scaled shape reads the scale, which keys it.
-        let global = GlobalContext { scale: if shape.scaled() { scale } else { 1 } };
-        let outputs = e.node.contract(&global, &descs)?;
         let specs = e.node.kind().outputs;
         let result = match shape {
             // A foreign node describes its outputs when it publishes them.
-            Shape::Foreign(cache) => self.run_foreign(e, cache, inputs)?,
-            _ if outputs.len() != specs.len() => {
-                return Err(Error::Runtime("node contract output arity mismatch".into()));
+            Shape::Foreign(cache) => {
+                e.node.contract(&FULL, &descriptions(&inputs))?;
+                self.run_foreign(e, cache, inputs)?
             }
-            _ => e.node.run(&KernelContext::new(&global, self.runtime), &inputs, &outputs)?,
+            Shape::Meta => self.meta(e, scale, &slots, &inputs)?,
+            _ => self.run(e.node.as_ref(), scale, &inputs)?,
         };
         if result.len() != specs.len() {
             return Err(Error::Runtime("node result arity mismatch".into()));
@@ -774,6 +774,99 @@ impl<'a, 't> Run<'a, 't> {
             }
         }
         Ok(())
+    }
+
+    /// Run `node`'s contract on its inputs' descriptions, then `node`, at
+    /// `scale` when its shape is scaled and at scale 1 otherwise.
+    fn run(&self, node: &dyn Node, scale: u32, inputs: &[Option<Image>]) -> Result<Vec<Image>> {
+        let shape = node.kind().shape;
+        // Only a scaled shape reads the scale, which keys it.
+        let global = GlobalContext { scale: if shape.scaled() { scale } else { 1 } };
+        let outputs = node.contract(&global, &descriptions(inputs))?;
+        if outputs.len() != node.kind().outputs.len() {
+            return Err(Error::Runtime("node contract output arity mismatch".into()));
+        }
+        let images = node.run(&KernelContext::new(&global, self.runtime), inputs, &outputs)?;
+        if images.len() != outputs.len() {
+            return Err(Error::Runtime("node result arity mismatch".into()));
+        }
+        Ok(images)
+    }
+
+    /// Expand meta node `e`, running at `scale` on `inputs` read from
+    /// `slots`, then run the nodes of its sub-graph whose demanded outputs
+    /// the store does not hold, at `scale`. Returns the sub-graph's outputs
+    /// in the meta node's port order. The sub-graph's nodes are keyed from
+    /// the keys of the meta node's inputs, as if they were in the graph.
+    fn meta(
+        &mut self,
+        e: &Entry,
+        scale: u32,
+        slots: &[Option<Slot>],
+        inputs: &[Option<Image>],
+    ) -> Result<Vec<Image>> {
+        let key = self.keys[&(e.id.index, scale)].clone()?;
+        let graph = self.store.expansion(key, || e.node.expand(&descriptions(inputs)))?;
+        let outer: Vec<_> = slots.iter().map(|slot| slot.and_then(|s| self.slot_key(s))).collect();
+        let mut keys: HashMap<NodeId, Key> = HashMap::new();
+        for entry in graph.entries() {
+            let inputs: Vec<_> = (0..entry.inputs.len())
+                .map(|port| match graph.source(entry, port)? {
+                    Source::Node(from) => Some(keys[&from.node].output(from.index)),
+                    Source::Meta(index) => outer[index],
+                })
+                .collect();
+            let key = Key::node(entry.node.kind(), &entry.node.identity()?, scale, &inputs);
+            keys.insert(entry.id, key);
+        }
+        // Walk back from the outputs as `demand` does: a stored value is a
+        // hit, and a missing one runs its node.
+        let mut values = HashMap::new();
+        let mut running = HashSet::new();
+        let mut demanded: Vec<_> = graph.outputs().collect();
+        while let Some(port) = demanded.pop() {
+            if values.contains_key(&port) || running.contains(&port.node) {
+                continue;
+            }
+            if let Some(image) = self.store.get(keys[&port.node].output(port.index)) {
+                self.hits += 1;
+                values.insert(port, image);
+                continue;
+            }
+            running.insert(port.node);
+            let entry = graph.dag.entry(port.node)?;
+            demanded.extend((0..entry.inputs.len()).filter_map(|port| {
+                match graph.source(entry, port)? {
+                    Source::Node(from) => Some(from),
+                    Source::Meta(_) => None,
+                }
+            }));
+        }
+        for entry in graph.entries().filter(|entry| running.contains(&entry.id)) {
+            let reads: Vec<_> = (0..entry.inputs.len())
+                .map(|port| match graph.source(entry, port)? {
+                    Source::Node(from) => Some(values[&from].clone()),
+                    Source::Meta(index) => inputs[index].clone(),
+                })
+                .collect();
+            let images = self.run(entry.node.as_ref(), scale, &reads)?;
+            self.nodes += 1;
+            for (port, image) in images.into_iter().enumerate() {
+                values.insert(output_id(entry.id, port), image);
+            }
+        }
+        let outputs: Vec<_> = graph.outputs().collect();
+        // The run stores the meta node's outputs under its own key.
+        for (port, image) in &values {
+            if running.contains(&port.node)
+                && !outputs.contains(port)
+                && image.footprint().is_some()
+            {
+                let durability = graph.dag.entry(port.node)?.node.kind().durability();
+                self.store.insert(keys[&port.node].output(port.index), image.clone(), durability);
+            }
+        }
+        Ok(outputs.iter().map(|port| values[port].clone()).collect())
     }
 
     /// Materialize `inputs` here, then take the outputs of the store's job
@@ -845,6 +938,11 @@ impl<'a, 't> Run<'a, 't> {
             evictions: evictions - self.evictions,
         }
     }
+}
+
+/// The descriptions of `inputs`, as contracts receive them.
+fn descriptions(inputs: &[Option<Image>]) -> Vec<Option<Description>> {
+    inputs.iter().map(|input| input.as_ref().map(|image| image.desc().clone())).collect()
 }
 
 /// The samples of `image`, which is on a plane, whose cells meet `region`,

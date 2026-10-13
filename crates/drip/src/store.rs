@@ -13,6 +13,7 @@
 use crate::{
     Error, Result,
     definition::{Durability, FileStamp, Identity, Kind},
+    expand::SubGraph,
     image::{Image, Side},
     payload::{read_json, write_json},
     runtime::Budget,
@@ -188,8 +189,12 @@ impl Hasher {
     }
 }
 
-/// Materialized outputs by key, within a byte budget per side, and the
-/// foreign jobs that produce some of them.
+/// Meta expansions the store keeps. Each holds a few node definitions, and
+/// an edit of a meta node's parameters adds one.
+const EXPANSIONS: usize = 64;
+
+/// Materialized outputs by key, within a byte budget per side, the foreign
+/// jobs that produce some of them, and the expansions of meta nodes.
 pub(crate) struct Store {
     entries: HashMap<Key, Entry>,
     budget: Budget,
@@ -202,6 +207,9 @@ pub(crate) struct Store {
     /// instead of running the node again. A new key, such as a new file
     /// stamp, runs it.
     jobs: HashMap<Key, Arc<Job>>,
+    /// Expansions of meta nodes by the meta node's key, with the clock of
+    /// their last use. Equal keys read equal input descriptions.
+    expansions: HashMap<Key, (Arc<SubGraph>, u64)>,
     pub disk: Option<Arc<Disk>>,
     /// Called on a job's thread after the job finishes.
     pub wake: Option<Wake>,
@@ -228,6 +236,7 @@ impl Store {
             evictions: 0,
             reads: 0,
             jobs: HashMap::new(),
+            expansions: HashMap::new(),
             disk: None,
             wake: None,
         }
@@ -290,6 +299,29 @@ impl Store {
                 }
             }
         }
+    }
+
+    /// The expansion of the meta node keyed `key`: the one kept, or a new
+    /// one from `expand`, kept unless it failed. The least recently used of
+    /// more than [`EXPANSIONS`] leaves.
+    pub fn expansion(
+        &mut self,
+        key: Key,
+        expand: impl FnOnce() -> Result<SubGraph>,
+    ) -> Result<Arc<SubGraph>> {
+        self.clock += 1;
+        if let Some((graph, used)) = self.expansions.get_mut(&key) {
+            *used = self.clock;
+            return Ok(graph.clone());
+        }
+        let graph = Arc::new(expand()?);
+        self.expansions.insert(key, (graph.clone(), self.clock));
+        if self.expansions.len() > EXPANSIONS {
+            let oldest = self.expansions.iter().min_by_key(|(_, (_, used))| *used);
+            let oldest = *oldest.expect("the map is not empty").0;
+            self.expansions.remove(&oldest);
+        }
+        Ok(graph)
     }
 
     /// Representations dropped since the store was made.

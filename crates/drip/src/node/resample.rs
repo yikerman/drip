@@ -25,6 +25,16 @@ pub struct LongEdge {
     #[param(default = 2048, range = 1..=65535)]
     pub pixels: i64,
 }
+#[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
+#[serde(deny_unknown_fields)]
+pub struct Exact {
+    /// Output width in full-detail pixels.
+    #[param(default = 2048, range = 1..=65535)]
+    pub width: i64,
+    /// Output height in full-detail pixels.
+    #[param(default = 2048, range = 1..=65535)]
+    pub height: i64,
+}
 #[derive(Clone, crate::Choice)]
 pub enum Size {
     #[default]
@@ -34,6 +44,9 @@ pub enum Size {
     #[choice("long_edge")]
     #[label("Long edge")]
     LongEdge(LongEdge),
+    #[choice("exact")]
+    #[label("Exact size")]
+    Exact(Exact),
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, crate::Parameters)]
@@ -43,7 +56,8 @@ pub struct Settings {
     /// Reconstruction and antialiasing filter, scaled by each sample's footprint.
     #[param]
     pub filter: Filter,
-    /// Full-detail output size, relative to the input or by its long edge.
+    /// Full-detail output size, relative to the input, by its long edge, or
+    /// both sides.
     #[param]
     pub size: Size,
 }
@@ -51,6 +65,7 @@ fn validate(p: &Settings) -> Result<()> {
     let valid = match &p.size {
         Size::Factor(f) => f.factor.is_finite() && (0.01..=16.0).contains(&f.factor),
         Size::LongEdge(l) => (1..=65535).contains(&l.pixels),
+        Size::Exact(e) => [e.width, e.height].iter().all(|side| (1..=65535).contains(side)),
     };
     if !valid {
         return Err(Error::Contract("resample size is out of range".into()));
@@ -64,6 +79,8 @@ fn full_extent(p: &Settings, full: &Extent) -> Result<Extent> {
     let scale = match &p.size {
         Size::Factor(f) => f.factor,
         Size::LongEdge(l) => l.pixels as f64 / w.max(h),
+        // Validation bounds both sides to 1..=65535.
+        Size::Exact(e) => return Ok(Extent { width: e.width as u32, height: e.height as u32 }),
     };
     let side = |v: f64| (v * scale).round().clamp(1.0, f64::from(u32::MAX)) as u32;
     let extent = Extent { width: side(w), height: side(h) };
@@ -86,7 +103,8 @@ fn contract(global: &GlobalContext, p: &Settings, image: &RgbDesc) -> Result<(Rg
 /// tone or colour operation it resamples that operation's output. Lanczos-3
 /// (default) is sharp but rings: in scene-linear HDR it leaves signed halos
 /// beside highlights, which are kept. Size scales the input's full-detail
-/// extent or fits its long edge to a pixel count. Preview detail stores
+/// extent, fits its long edge to a pixel count, or sets both sides, which
+/// stretches the image where the aspect ratio differs. Preview detail stores
 /// proportionally fewer samples of the same framing. Coordinates are kept.
 #[crate::node(id = "resample", name = "Resample", tags = [tag::GEOMETRY], contract = contract, resample, references = [
     ("[1] Heckbert, Fundamentals of texture mapping and image warping", "https://www2.eecs.berkeley.edu/Pubs/TechRpts/1989/5504.html"),

@@ -283,7 +283,8 @@ Settled with the user on 2026-10-11 and revised by the compute model
   It is executed in eight steps. Step 4 replaced the no-cache requirement
   under Performance with the store, step 5 added its disk tier, step 6
   regions and the scale rule, step 7 reductions, which removed the GUI's
-  kernels, and step 8 stencils.
+  kernels, and step 8 stencils and meta nodes. All eight steps landed on
+  2026-10-13.
 - **Decided (2026-10-13):** Step 1. `Kind::shape` declares how evaluation runs
   a kind, `Kernel` or `Source`, and later shapes are added beside them. A
   run's values lived in a `Store`, which step 4 grew into the memo.
@@ -446,7 +447,7 @@ Settled with the user on 2026-10-11 and revised by the compute model
   = BODY)]`) names a `StencilBody` static: a name, a constant count, a
   `Border` and a `#[cube] fn(w: &Window, k: &[f32]) -> Pixel` that reads
   `w.at(dx, dy)` within the reach. Its host function returns a `Stencil {
-  radius, constants }`. The brief put the radius in the body static, but
+  radius, constants }`. The plan declared the radius with the body, but
   Sharpen's radius is a parameter, so the host function returns it, as a
   warp returns its maps. The output is a deferred image whose plan's stage
   is the stencil over the input image. This resolves the halo question for
@@ -459,8 +460,8 @@ Settled with the user on 2026-10-11 and revised by the compute model
   under the node's key and crops under `Key::region`.
 - **Decided (2026-10-13):** A stencil's input always materializes, and maps
   before it run in the input's plan. Fusing them into the taps would
-  recompute them per tap, so the brief's `linear` load-fusion flag is not
-  implemented ([TODO](TODO.md)). Maps after a stencil join its kernel
+  recompute them per tap, so the planned `linear` declaration that fused
+  them is not implemented ([TODO](TODO.md)). Maps after a stencil join its kernel
   through the same `#[cube]` evaluation of a pixel that fused kernels and
   reductions call. Warps and Resample after a stencil start a new plan.
   Stencils read only `MapPayload`s: a Bayer stencil needs windows aligned
@@ -483,11 +484,49 @@ Settled with the user on 2026-10-11 and revised by the compute model
   channel of linear RGB with a Gaussian whose standard deviation is the
   `radius` parameter (0.25 to 4 full-detail pixels) and whose reach is 2.5
   radii, after darktable's sharpen, and an `amount` from −1 to 4. Negative
-  amounts soften and −1 outputs the blur. It has no
+  amounts soften and −1 outputs the blur, which Pyramid blur uses. It has no
   threshold: a threshold in linear light has no fixed meaning across
   exposures. One 2D window of `(2R + 1)²` taps per sample costs 14 ms over
   the tail at full detail with the default reach of 5. A separable pair of
   passes would cost `2(2R + 1)` taps ([TODO](TODO.md)).
+- **Tentative (2026-10-13):** Step 8, meta nodes. A meta node
+  (`#[node(meta)]`) is a function of its parameters, a `&mut SubGraph` and
+  its ports as `Inlet` (with the input's description) and `Outlet`. It adds
+  nodes with their kinds' generated `add` to the sub-graph's `Dag`, connects
+  them with `Dag::connect`, and maps its ports with `SubGraph::input` and
+  `SubGraph::output`. The plan proposed `SubGraph::add(&'static Kind,
+  params)`. Reusing `Dag` and the generated `add` keeps parameters and port
+  payloads typed and adds no second graph builder. The GUI, projects and
+  the registry see one node.
+- **Tentative (2026-10-13):** Evaluation expands a meta node when it runs,
+  after its inputs resolve, instead of before keying. Expansion reads input
+  descriptions, which exist only once upstream nodes have run (a RAW's
+  extent after decode), so expanding before keying needs a describing pass
+  that foreign nodes cannot take part in. The meta node is keyed like any
+  node from its parameters and input keys. When it runs, each sub-graph node
+  is keyed from the meta node's input keys as if it were in the graph, the
+  store serves what it holds walking back from the outputs, and the other
+  nodes run in the sub-graph's order at the meta node's scale. Errors and
+  timings name the meta node. Values a sub-graph node materializes while
+  the sub-graph runs, such as a kernel's output, are stored under their own
+  keys, so two meta nodes with equal parameters and inputs share them.
+- **Decided (2026-10-13):** The store memoizes expansions by the meta node's
+  key, which covers its parameters and its input keys, and equal input keys
+  mean equal descriptions. It keeps the 64 used last. Failed expansions are
+  not kept.
+- **Decided (2026-10-13):** A sub-graph holds no foreign node, whose job the
+  store owns under its own key, and no meta node, so expansions do not
+  nest. A sub-graph node reads the meta node's inputs as they arrive,
+  reduced to the requested scale, so a scaled node inside (Resample)
+  filters reduced input at a preview.
+- **Decided (2026-10-13):** Pyramid blur (`pyramid-blur`) is the first meta
+  node: `levels` halvings with a Box Resample, each followed by Sharpen at
+  amount −1 with `radius` in that level's pixels, then a Mitchell Resample
+  to the input's full extent, `2 · levels + 1` nodes. It needs the input's
+  description to size the last Resample, so Resample gained an exact size
+  that may change the aspect ratio. The planned blending map is left out:
+  a map reads one image per pixel, and blending the blur with its input
+  needs two ([TODO](TODO.md)).
 - **Decided (2026-10-13):** `Policy::Wait` blocks on a running job, for
   headless evaluation, actions and tests. `Policy::Defer` fails the job's
   node and its consumers with `Error::Pending`, inside the `Error::Node` that

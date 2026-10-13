@@ -89,7 +89,7 @@ fn foreign_nodes_publish_host_outputs_without_a_contract() {
         (quote!(id = "raw", foreign = cloud), "expected foreign = memory or disk"),
         (
             quote!(id = "raw", foreign = disk, warp),
-            "at most one of map, warp, resample, reduce, bins, stencil and foreign",
+            "at most one of map, warp, resample, reduce, bins, stencil, foreign and meta",
         ),
     ] {
         let error = expand(options, function.clone()).unwrap_err();
@@ -262,13 +262,13 @@ fn rejects_unsupported_signatures() {
             quote!(
                 fn x(c: &C, p: &P, a: Either<A, B>) {}
             ),
-            "expected Read, Write, Forward, Publish or Point; wrapper aliases are not resolved",
+            "expected Read, Write, Forward, Publish, Point, Inlet or Outlet; wrapper aliases are not resolved",
         ),
         (
             quote!(
                 fn x(c: &C, p: &P, a: Alias<A>) {}
             ),
-            "expected Read, Write, Forward, Publish or Point; wrapper aliases are not resolved",
+            "expected Read, Write, Forward, Publish, Point, Inlet or Outlet; wrapper aliases are not resolved",
         ),
         (
             quote!(
@@ -778,6 +778,89 @@ fn stencils_publish_their_input_through_the_body_with_the_returned_reach() {
 }
 
 #[test]
+fn meta_nodes_expand_through_their_function_and_neither_describe_nor_run() {
+    let function: syn::ItemFn = syn::parse_quote! {
+        fn expand(p: &P, graph: &mut SubGraph, image: Inlet<'_, Rgb, Rec2020>, mask: Option<Inlet<'_, Mask>>, output: Outlet<Rgb>) -> Result<()> {
+            Ok(())
+        }
+    };
+    let signature = Signature::parse(&function.sig).unwrap();
+    assert!(signature.meta);
+    let module = generated_module(expand(quote!(id = "x", meta), function.clone()).unwrap());
+    let shape = kind_field(&module, "shape");
+    assert_eq!(quote!(#shape).to_string(), quote!(::drip::shape::Shape::Meta).to_string());
+    assert_port_specs(
+        &module,
+        "outputs",
+        quote!(::drip::ports::PortSpec::of::<Rgb, ::drip::ports::Any>("output")),
+    );
+    let expansion = generated_method(&module, "expand");
+    let expansion = quote!(#expansion).to_string();
+    for part in [
+        ":: drip :: ports :: input :: < Rgb , Rec2020 > (\"image\" , inputs [0usize] . as_ref ()) ?",
+        "let mut graph = :: drip :: expand :: SubGraph :: new (& KIND)",
+        "super :: expand (& self . parameters , & mut graph , :: drip :: ports :: Inlet :: < Rgb , \
+         Rec2020 > :: new (0usize , image) , mask . map (| desc | :: drip :: ports :: Inlet :: < \
+         Mask , :: drip :: ports :: Any > :: new (1usize , desc)) , :: drip :: ports :: Outlet :: < \
+         Rgb > :: new (0usize)) ?",
+        "graph . finish ()",
+    ] {
+        assert!(expansion.contains(part), "{part}\n{expansion}");
+    }
+    for method in ["contract", "run"] {
+        let method = generated_method(&module, method);
+        assert!(quote!(#method).to_string().contains("runs as its sub-graph"));
+    }
+    for (options, declaration, message) in [
+        (
+            quote!(id = "x", meta, contract = c),
+            quote!(
+                fn x(p: &P, g: &mut SubGraph, a: Inlet<A>, b: Outlet<A>) -> Result<()> {}
+            ),
+            "a meta node's sub-graph describes its outputs; remove the contract",
+        ),
+        (
+            quote!(id = "x"),
+            quote!(
+                fn x(p: &P, g: &mut SubGraph, a: Inlet<A>, b: Outlet<A>) -> Result<()> {}
+            ),
+            "Inlet and Outlet ports declare meta",
+        ),
+        (
+            quote!(id = "x", meta, contract = c),
+            quote!(
+                fn x(c: &C, p: &P, a: Read<A>, b: Write<A>) -> Result<()> {}
+            ),
+            "a meta node wires Inlet and Outlet ports",
+        ),
+        (
+            quote!(id = "x", meta),
+            quote!(
+                fn x(p: &P, g: &mut SubGraph, a: Inlet<A>, b: Read<A>) -> Result<()> {}
+            ),
+            "a meta node takes &parameters, &mut SubGraph, Inlet inputs and Outlet outputs",
+        ),
+        (
+            quote!(id = "x", meta, warp),
+            quote!(
+                fn x(p: &P, g: &mut SubGraph, a: Inlet<A>, b: Outlet<A>) -> Result<()> {}
+            ),
+            "a node is at most one of map, warp, resample, reduce, bins, stencil, foreign and meta",
+        ),
+        (
+            quote!(id = "x", meta, scaled),
+            quote!(
+                fn x(p: &P, g: &mut SubGraph, a: Inlet<A>, b: Outlet<A>) -> Result<()> {}
+            ),
+            "only a kernel claims scaled",
+        ),
+    ] {
+        let error = expand(options, syn::parse2(declaration).unwrap()).unwrap_err();
+        assert_eq!(error.to_string(), message);
+    }
+}
+
+#[test]
 fn rejects_malformed_maps() {
     for (options, declaration, message) in [
         (
@@ -842,7 +925,7 @@ fn rejects_malformed_maps() {
             quote!(
                 fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "a node is at most one of map, warp, resample, reduce, bins, stencil and foreign",
+            "a node is at most one of map, warp, resample, reduce, bins, stencil, foreign and meta",
         ),
         (
             quote!(id = "x", contract = c, warp, warp),
@@ -891,7 +974,7 @@ fn rejects_malformed_maps() {
             quote!(
                 fn x(p: &P, a: Point<A>, b: Point<A>) -> Result<[f32; 1]> {}
             ),
-            "a node is at most one of map, warp, resample, reduce, bins, stencil and foreign",
+            "a node is at most one of map, warp, resample, reduce, bins, stencil, foreign and meta",
         ),
     ] {
         let error = expand(options, syn::parse2(declaration).unwrap()).unwrap_err();

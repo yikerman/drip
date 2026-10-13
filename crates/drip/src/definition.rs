@@ -2,6 +2,7 @@
 use crate::{
     Error, Result,
     eval::InputValues,
+    expand::SubGraph,
     image::{Description, Image},
     param::{self, ParamSpec, Parameters},
     ports::PortSpec,
@@ -171,6 +172,14 @@ pub trait Node: Any + Send + Sync {
         inputs: &[Option<Image>],
         outputs: &[Description],
     ) -> Result<Vec<Image>>;
+    /// The sub-graph a meta node runs in its place, built from its
+    /// parameters and its inputs' descriptions, `None` for an unconnected
+    /// optional input. Evaluation calls it instead of `contract` and `run`.
+    /// Fails for every other node.
+    fn expand(&self, inputs: &[Option<Description>]) -> Result<SubGraph> {
+        let _ = inputs;
+        Err(Error::Graph(format!("{} is not a meta node", self.kind().id)))
+    }
 }
 
 /// A declared node type: its kind, typed parameters and typed input and

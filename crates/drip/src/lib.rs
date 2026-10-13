@@ -4,14 +4,17 @@
 //! forces and hands each node its input images; a node asks them for host or
 //! device samples and writes its outputs where it computes them. Map, warp and
 //! resample nodes publish deferred images instead, and a segment of them runs
-//! as one kernel. Foreign nodes run host functions on threads of their own,
-//! and the evaluator's store keeps their outputs, on disk when declared.
+//! as one kernel, and a stencil runs with the maps after it. A meta node
+//! runs a sub-graph of other kinds in its place. Foreign nodes run host
+//! functions on threads of their own, and the evaluator's store keeps their
+//! outputs, on disk when declared.
 //! Passing a contract establishes declared compatibility, not physical accuracy.
 
 extern crate self as drip;
 
 pub mod definition;
 pub mod eval;
+pub mod expand;
 pub mod graph;
 pub mod image;
 pub mod node;

@@ -120,7 +120,7 @@ impl Dag {
         }
         Ok(e)
     }
-    fn input(&self, id: PortId) -> Result<&Entry> {
+    pub(crate) fn input(&self, id: PortId) -> Result<&Entry> {
         let e = self.entry(id.node)?;
         if id.direction != Direction::Input || id.index >= e.inputs.len() {
             return Err(wrong_handle());
