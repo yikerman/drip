@@ -19,10 +19,86 @@
 use cubecl::prelude::*;
 use std::f32::consts::PI;
 
+/// Support radius of [`box_filter`].
+pub const BOX_SUPPORT: f32 = 0.5;
+/// Support radius of [`triangle`].
+pub const TRIANGLE_SUPPORT: f32 = 1.0;
 /// Support radius of [`mitchell_netravali`].
 pub const MITCHELL_NETRAVALI_SUPPORT: f32 = 2.0;
 /// Support radius of [`lanczos3`].
 pub const LANCZOS3_SUPPORT: f32 = 3.0;
+
+/// A filter by name, for parameters; kernels receive [`Filter::id`], the
+/// declaration index that [`weight`] dispatches on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, crate::Choice)]
+pub enum Filter {
+    #[default]
+    #[choice("lanczos3")]
+    #[label("Lanczos-3")]
+    Lanczos3,
+    #[choice("mitchell")]
+    #[label("Mitchell")]
+    Mitchell,
+    #[choice("catmull_rom")]
+    #[label("Catmull–Rom")]
+    CatmullRom,
+    #[choice("triangle")]
+    #[label("Triangle")]
+    Triangle,
+    #[choice("box")]
+    #[label("Box")]
+    Box,
+}
+
+impl Filter {
+    pub fn id(self) -> u32 {
+        self as u32
+    }
+    pub fn support(self) -> f32 {
+        match self {
+            Self::Lanczos3 => LANCZOS3_SUPPORT,
+            Self::Mitchell | Self::CatmullRom => MITCHELL_NETRAVALI_SUPPORT,
+            Self::Triangle => TRIANGLE_SUPPORT,
+            Self::Box => BOX_SUPPORT,
+        }
+    }
+}
+
+/// The weight of the filter `Filter::id` names. The id is uniform across a
+/// dispatch, so the branch does not diverge.
+#[cube]
+pub fn weight(filter: u32, x: f32) -> f32 {
+    if filter == 0u32 {
+        lanczos3(x)
+    } else if filter == 1u32 {
+        mitchell_netravali(x, 1.0f32 / 3.0f32, 1.0f32 / 3.0f32)
+    } else if filter == 2u32 {
+        mitchell_netravali(x, 0.0f32, 0.5f32)
+    } else if filter == 3u32 {
+        triangle(x)
+    } else {
+        box_filter(x)
+    }
+}
+
+/// Box: one on `[−½, ½]`. Scaled by a minification footprint it is an area
+/// average; both ends are closed, so a sample exactly between two pixels
+/// averages them instead of receiving no weight.
+#[cube]
+pub fn box_filter(x: f32) -> f32 {
+    let mut weight = 0.0f32;
+    if x.abs() <= 0.5f32 {
+        weight = 1.0f32;
+    }
+    weight
+}
+
+/// Triangle (tent): `1 − |x|` on `[−1, 1]`; bilinear interpolation when
+/// magnifying.
+#[cube]
+pub fn triangle(x: f32) -> f32 {
+    f32::max(1.0f32 - x.abs(), 0.0f32)
+}
 
 /// The Mitchell–Netravali cubic family \[1\]. `B = C = 1/3` is the authors'
 /// recommended compromise between blur and ringing ("Mitchell"); `B = 0,
@@ -177,6 +253,45 @@ mod tests {
     }
 
     #[test]
+    fn box_and_triangle_sum_to_one() {
+        assert_eq!((box_filter(0.5), box_filter(-0.5), box_filter(0.5001)), (1.0, 1.0, 0.0));
+        assert_eq!((triangle(0.0), triangle(0.25), triangle(1.0)), (1.0, 0.75, 0.0));
+        for i in 1..100 {
+            let offset = i as f32 / 100.0;
+            let sum = |w: fn(f32) -> f32| (-2..=2).map(|k| w(offset - k as f32)).sum::<f32>();
+            assert!((sum(triangle) - 1.0).abs() < 1e-6);
+            if offset != 0.5 {
+                assert_eq!(sum(box_filter), 1.0);
+            }
+        }
+        for x in distances() {
+            assert_eq!(triangle(x), triangle(-x));
+            assert_eq!(box_filter(x), box_filter(-x));
+        }
+    }
+
+    #[test]
+    fn filters_dispatch_by_id_within_their_support() {
+        let filters =
+            [Filter::Lanczos3, Filter::Mitchell, Filter::CatmullRom, Filter::Triangle, Filter::Box];
+        for x in distances() {
+            let expected = [
+                lanczos3(x),
+                mitchell_netravali(x, MITCHELL.0, MITCHELL.1),
+                mitchell_netravali(x, CATMULL_ROM.0, CATMULL_ROM.1),
+                triangle(x),
+                box_filter(x),
+            ];
+            for (filter, expected) in filters.into_iter().zip(expected) {
+                assert_eq!(weight(filter.id(), x), expected, "{filter:?}");
+                if x.abs() > filter.support() {
+                    assert_eq!(expected, 0.0, "{filter:?} at {x}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn sin_pi_matches_reference() {
         for i in -1600..=1600 {
             let x = i as f32 / 400.0;
@@ -189,9 +304,9 @@ mod tests {
     fn evaluate(x: &[f32], output: &mut [f32]) {
         let i = ABSOLUTE_POS;
         if i < x.len() {
-            output[i * 3] = lanczos3(x[i]);
-            output[i * 3 + 1] = mitchell_netravali(x[i], 1.0f32 / 3.0f32, 1.0f32 / 3.0f32);
-            output[i * 3 + 2] = mitchell_netravali(x[i], 0.0f32, 0.5f32);
+            for f in 0..5u32 {
+                output[i * 5 + f as usize] = weight(f, x[i]);
+            }
         }
     }
 
@@ -202,18 +317,14 @@ mod tests {
         let client = runtime.client().unwrap();
         let input =
             DeviceBuffer::<()>::new(client.create(cubecl::bytes::Bytes::from_elems(x.clone())));
-        let output = DeviceBuffer::<()>::new(client.empty(x.len() * 3 * size_of::<f32>()));
+        let output = DeviceBuffer::<()>::new(client.empty(x.len() * 5 * size_of::<f32>()));
         let (count, dim) = crate::runtime::dispatch_dims(x.len());
         evaluate::launch(client, count, dim, input.argument(), output.argument());
         let bytes = client.read_one(output.handle.clone()).unwrap();
         let actual: &[f32] = bytemuck::cast_slice(&bytes);
         for (i, &x) in x.iter().enumerate() {
-            let expected = [
-                lanczos3(x),
-                mitchell_netravali(x, MITCHELL.0, MITCHELL.1),
-                mitchell_netravali(x, CATMULL_ROM.0, CATMULL_ROM.1),
-            ];
-            for (actual, expected) in actual[i * 3..i * 3 + 3].iter().zip(expected) {
+            let expected = (0..5).map(|f| weight(f, x));
+            for (actual, expected) in actual[i * 5..i * 5 + 5].iter().zip(expected) {
                 assert!((actual - expected).abs() < 1e-6, "x = {x}: {actual} vs {expected}");
             }
         }

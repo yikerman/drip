@@ -381,8 +381,8 @@ Each step is one self-contained commit series.
    full-detail descriptions, and validation rejects storing more than `full`.
 2. Pass-through outputs in `#[node]`, with adapter tests. Done (`Forward`).
 3. Shared filters as `#[cube]` functions in `node/filter.rs`. Mitchell–Netravali
-   (any B, C) and Lanczos-3 are implemented and tested on the host, CPU, WGPU
-   and Vulkan; box and triangle remain.
+   (any B, C), Lanczos-3, triangle and box are implemented, with a `Filter`
+   choice and `weight` dispatch, tested on the host, CPU, WGPU and Vulkan.
 4. `RgbField`, Interpolate and Sample with identity chains: delivers Resample.
    Test constant preservation, identity within tolerance, odd extents,
    signed/HDR samples, zone-plate aliasing and preview/export geometry on CPU
