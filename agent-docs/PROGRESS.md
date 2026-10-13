@@ -4,6 +4,13 @@ Validation evidence, not a feature inventory. Open gaps are in [TODO](TODO.md).
 
 ## 2026-10-12
 
+- Decided with the user: Perspective Transform is parameterized by one
+  four-point quad plus aspect, in bijection with projective maps, with crop
+  and rotation as quads; auto-crop is a GUI constraint plus Fit; points outside
+  the source are black, edge taps repeat the edge; Sample defaults to
+  Lanczos-3; the transform's editing view is separate from Preview. Checked
+  darktable `e43fbf3` `ashift.c` for its auto-crop modes and simplex fit.
+  Documentation only.
 - Built-in templates are now `templates/*.drip-template` files embedded in the
   GUI. The RAW pipeline moved to `templates/neutral-restore.drip-template`,
   generated from the previous Rust builder, so layout and template inputs are

@@ -164,8 +164,20 @@ Settled with the user on 2026-10-11 after a review against
 - **Decided:** `RgbDesc` records the full-detail extent beside the stored one,
   so contracts derive preview geometry instead of reconstructing it from
   `extent · scale`.
-- **Open:** Field border policy and auto-crop, default filter, lens-correction
-  coordinates and `MonoField`; see [FIELD](FIELD.md#open-questions).
+- **Decided (2026-10-12):** Perspective Transform's geometry is one ordered
+  four-point quad plus output aspect, in bijection with projective maps; the
+  output is the quad's content, so crop and rotation are quads and have no
+  parameters of their own. See [FIELD](FIELD.md#perspective-transform).
+- **Decided (2026-10-12):** Points mapped outside the source are black; edge
+  taps repeat the edge. Auto-crop is a GUI constraint (Keep inside, on) plus a
+  Fit action, not a stored mode. Sample defaults to Lanczos-3, accepting signed
+  halos around HDR highlights. See [FIELD](FIELD.md#borders-and-auto-crop).
+- **Decided (2026-10-12):** Perspective Transform has its own editing view,
+  separate from Preview (no proofing), with Frame and Perspective tools
+  editing the same quad. Handle details are tentative; see
+  [FIELD](FIELD.md#editing-view).
+- **Open:** Lens-correction coordinates and `MonoField`; see
+  [FIELD](FIELD.md#open-questions).
 - **Tentative:** The proposed next-node order in [TODO](TODO.md#next-image-nodes)
   prioritizes ordinary still-photo editing: framing and delivery first, then
   colour/tone controls and reusable local adjustments, followed by noise,

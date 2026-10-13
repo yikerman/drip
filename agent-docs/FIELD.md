@@ -18,7 +18,16 @@ markers follow [DESIGN](DESIGN.md). Node, port and contract principles are in
 - **Decided:** v1 fields carry maps only. Per-pixel value operations (exposure,
   matrices, sigmoid) stay `Rgb -> Rgb`; see [Value operations](#value-operations).
 - **Decided:** To view a field, wire it through a `Sample` into an ordinary
-  view. Views do not read fields.
+  view. The one exception is a field node's own editing view (Perspective
+  Transform's handles), which samples through the same kernel; see
+  [Editing view](#editing-view).
+- **Decided (2026-10-12):** Perspective Transform's geometry is one ordered
+  four-point quad plus an output aspect, in bijection with projective maps;
+  crop and rotation are quads too. See [Perspective
+  Transform](#perspective-transform).
+- **Decided (2026-10-12):** Points outside the source are black; edits keep
+  the quad inside the source by default (auto-crop). Sample defaults to
+  Lanczos-3. See [Borders](#borders-and-auto-crop) and [Nodes](#nodes).
 - **Decided:** Discrete operations (demosaic, denoise, sharpen, Orientation's
   exact permutations) stay as they are.
 - **Tentative:** `MonoField` for single-channel data (masks, gain maps) when a
@@ -122,7 +131,6 @@ pub struct RgbFieldDesc {
     pub source: RgbDesc,        // the stored samples and their colour meaning
     pub domain: Rect,           // where the field is defined, output-plane units
     pub maps: [Chain; 3],       // output plane → source plane, per channel
-    pub border: Border,         // f beyond the source rectangle
 }
 pub struct Chain(Vec<Stage>);   // newest stage first
 pub enum Stage { Projective(Mat3), Radial(RadialModel) /* lens, later */ }
@@ -145,8 +153,8 @@ pub struct RgbField;            // Host = HostBuffer<[f32; 3]>, DeviceLayout as 
   `source.coordinates`, so `Rec2020` requirements downstream still hold. Add
   `Requirement<RgbField>` impls only when a field port needs one.
 - **Contracts:** everything deferred is in the description, so contracts check
-  undefined transforms (singular homography, self-intersecting quad), compute
-  domains and auto-crop rectangles on the host before allocation.
+  undefined transforms (a quad with three collinear corners) and compute
+  domains on the host before allocation.
 - **Pass-through outputs (needed):** today the `#[node]` adapter allocates
   every output (`OutputSlot::allocate`). A field node must publish its input's
   storage `Arc` with a new description. Add an output form, e.g.
@@ -158,27 +166,87 @@ pub struct RgbField;            // Host = HostBuffer<[f32; 3]>, DeviceLayout as 
 
 | Node | Ports | Parameters | Description change |
 |------|-------|-----------|---------------------|
-| Interpolate | `Rgb -> RgbField` | border | identity maps; domain = `[0, full]` |
-| Perspective Transform | `RgbField -> RgbField` | crop, angle, four-point quad, auto-crop | prepend `Projective`; new domain |
+| Interpolate | `Rgb -> RgbField` | none | identity maps; domain = `[0, full]` |
+| Perspective Transform | `RgbField -> RgbField` | quad, aspect | prepend `Projective`; domain = `[0, aspect] × [0, 1]` scaled |
 | Lens correction (later) | `RgbField -> RgbField` [+ metadata] | model, TCA | prepend per-channel `Radial` |
-| Sample | `RgbField -> Rgb` | filter, size (factor or long edge) | realizes; output `full` from domain and size |
+| Sample | `RgbField -> Rgb` | filter (default Lanczos-3), size (factor or long edge) | realizes; output `full` from domain and size |
 
 Sample sizing: full-detail output extent `N = round(domain.size · factor)` or
 fit to a long edge; stored extent follows the RGB reduction rule
 (`div_ceil(N, global.scale)`), so preview and export framing agree. Per output
 pixel and channel the kernel evaluates the chain with forward-mode derivatives
 (a point and its 2×2 Jacobian; the chain rule composes them), scales the
-footprint, sums normalized taps and applies the border.
+footprint, sums normalized taps and applies the border rule below.
 
 Always evaluate three chains rather than branching on whether maps are shared.
 Taps load one channel each instead of three channels once: equal bytes, three
 weight evaluations.
 
-Borders: **Open.** Options are auto-crop to the largest axis-aligned rectangle
-inside the mapped source (vkdt's crop offers this [V1]), a constant (vkdt and
-OIIO default to black), or clamp/mirror. An alpha or coverage channel would be a
-payload change. Points mapped through a projective pole (`w ≤ 0`) take the
-border; only undefined transforms are rejected.
+Filter: **Decided** Lanczos-3 by default, as the filter users know. Its
+negative lobes leave signed halos beside bright highlights in scene-linear
+HDR; Sample keeps them (Rgb is signed) rather than clamping, and Mitchell
+remains selectable. Minifying by `k` costs `(6k)²` taps per channel and pixel;
+a separable path for axis-aligned chains is a later optimization.
+
+### Borders and auto-crop
+
+**Decided (2026-10-12):**
+
+- Taps outside the stored samples repeat the nearest edge sample, so filters
+  near the edge neither darken nor ring against an implied black.
+- An output point whose mapped centre falls outside the source rectangle, or
+  through a projective pole (`w ≤ 0`), is black (vkdt and OIIO default to
+  black). Only undefined transforms are rejected. This is fixed, not a
+  parameter; an alpha or coverage channel would be a payload change.
+- Auto-crop is an editing constraint, not a stored mode: the output is the
+  quad's content, so a convex quad inside the input's valid region shows no
+  black. GUI edits keep it inside by default ("Keep inside", on), so black
+  appears only when the user turns that off. Because the quad is absolute, a
+  later upstream change (lens parameters) can expose black; *Fit* refits.
+- *Fit*, after darktable's rotate and perspective modes [D1], keeps the
+  current projective map and replaces the frame with the largest output
+  rectangle inside the valid region: *original format* (default here: the
+  current aspect) or *largest area* (darktable's default). darktable fits the
+  centre (and aspect) with a Nelder–Mead simplex. Here, with a fixed aspect, a
+  rectangle's corners are linear in its centre and scale, so *original
+  format* is a linear program in three variables (maximize scale; each corner
+  inside each edge's half-plane), solved exactly; *largest area* adds a
+  one-dimensional search over the aspect (check that area is unimodal in it,
+  or scan first).
+- The valid region is the input domain mapped forward through the input's
+  whole chain, so upstream lens correction is accounted for. For projective
+  chains it is a convex polygon, or unbounded when the map's vanishing line
+  crosses the input; Fit then has no largest rectangle and reports so. Radial
+  stages need sampled boundaries and Newton inverses (step 6).
+
+### Perspective Transform
+
+**Decided (2026-10-12):** the parameters are an ordered quad `q_0..q_3`
+(top-left, top-right, bottom-right, bottom-left of the output), normalized to
+the input field's domain, and the output aspect `a = width / height`. The
+output is the quad's content: the projective map `M` takes the output
+rectangle's corners `(0, 0), (a, 0), (a, 1), (0, 1)` to `q_0..q_3`, scaled to
+plane units. Default: the input domain's corners and aspect (identity).
+
+- **Bijection.** Four points with no three collinear determine exactly one
+  projective map of the plane taking a given four such points to them (the
+  fundamental theorem of projective geometry; the map is the 8-unknown DLT
+  solve) [12, Ch. 2, 4]. So ordered quads in general position and an aspect
+  correspond one-to-one to (projective map, output rectangle) pairs up to
+  output translation and uniform scale, which Sample's size fixes. Both sides
+  have nine degrees of freedom. Rotation and crop are quads (a rotated or
+  inset rectangle), so no separate angle or crop parameter exists: one would
+  give several parameter sets for one result.
+- **Validation.** Three collinear corners make `M` singular: rejected as
+  undefined. Concave or self-intersecting quads are valid maps whose vanishing
+  line crosses the output; points beyond it (`w ≤ 0`) are black. The GUI keeps
+  quads convex while Keep inside is on.
+- **Direction.** `M` is already output → source, the stage's direction, so the
+  kernel needs no inverse; GUI handles need `M⁻¹` (closed form, 3×3).
+- **Aspect.** It is the ninth degree of freedom and is stored explicitly.
+  Corner edits keep it and the user sets it (*original format* or a value).
+  No automatic perspective for now: estimating a photographed rectangle's true
+  aspect needs the focal length, and line fitting needs structure detection.
 
 ## Prior art
 
@@ -239,6 +307,52 @@ image and its mask suggests promoting `Chain` to its own payload; **Open**.
 Analytic fields (gradient masks with no samples) would make `source` an enum;
 deferred until masks exist.
 
+## Editing view
+
+**Tentative (2026-10-12), GUI-owned.** Perspective Transform has its own view,
+like Preview, so editing needs no extra Sample and Preview nodes; a downstream
+Sample and Preview still show the final image. The binding's preparation
+samples the node's input field with the drip Sample kernel at the preview
+scale (Lanczos-3), not cropped to the quad. The canvas body shows it
+with a non-interactive overlay; handles work in the pop-out window, where the
+user can zoom.
+
+**Decided (2026-10-12):** the view is separate from Preview. It shows plain
+pixels with Preview's navigation and none of its proofing, profiles or
+assets. It displays its input as it arrives, so a transform placed before
+exposure and tone mapping shows scene-linear values clipped; templates place
+geometry where the view is representative.
+
+Two tools edit the same quad, chosen in the window's toolbar:
+
+- **Frame** (default) shows the input mapped through the current projective
+  map over the valid region's bounds (clipped to a limit when unbounded), with
+  the output rectangle as an axis-aligned frame and everything outside it
+  darkened. Corner and edge handles crop, dragging inside moves the frame,
+  dragging outside it rotates, Fit refits; each maps the new frame back
+  through `M` into the quad. A level tool takes a dragged line along a horizon
+  or vertical and rotates the frame to level it.
+- **Perspective** shows the input without this node's transform, with the
+  quad's corners as handles. Dragging corners onto a building's edges never
+  moves the image under the pointer, so there is no feedback loop through
+  re-evaluation.
+
+The prepared view carries the map and domain it was sampled with, and overlays
+are drawn through those, not through the current parameters, so handles stay
+on the displayed pixels while a newer evaluation is pending.
+A drag moves its overlay immediately, edits parameters continuously and ends
+its undo step on release.
+
+GUI changes this needs:
+
+- Views that edit their node's parameters. Today a view's window only pans
+  and zooms (`image_view.rs`); a binding needs an editing hook with typed
+  parameters and its presentation, as controls have.
+- `image_view` exposes its image↔screen transform so overlays follow zoom and
+  pan.
+- drip exposes Sample's realization as a function for the preparation, not
+  only as a node.
+
 ## Maintainability
 
 - One source per map: a stage is one `#[cube]` function returning a point and
@@ -273,8 +387,9 @@ Each step is one self-contained commit series.
    Test constant preservation, identity within tolerance, odd extents,
    signed/HDR samples, zone-plate aliasing and preview/export geometry on CPU
    and WGPU.
-5. Projective stage and Perspective Transform: crop, angle, quad, validation,
-   borders, auto-crop; GUI handles separately.
+5. Projective stage and Perspective Transform: quad and aspect, the DLT
+   solve, validation, borders, and Fit as a host function. Then the editing
+   view as a separate GUI commit series.
 6. Radial stages and Lens correction with per-channel TCA, after deciding how a
    field locates the optical centre (capture geometry versus `full`, and
    Orientation).
@@ -282,9 +397,9 @@ Each step is one self-contained commit series.
 
 ## Open questions
 
-- Border policy and auto-crop default.
-- Default filter: Lanczos-3 and Catmull–Rom ring around bright highlights in
-  scene-linear HDR (signed halos); Mitchell or area may be the safer default.
+- Automatic perspective (structure detection, fitting lines, estimating a
+  rectified rectangle's aspect from focal length): not planned for now; the
+  user places the quad and sets the aspect.
 - EWA versus the scaled-filter footprint, after measuring extreme keystones.
 - Lens correction coordinates: capture geometry, orientation and crop.
 - Promoting `Chain` to a payload so one map applies to an image and its mask.
@@ -336,6 +451,10 @@ transformations," pull request #112332. [Online]. Available:
 [11] C. Elliott, "Functional images," in *The Fun of Programming*, J. Gibbons
 and O. de Moor, Eds. Basingstoke, U.K.: Palgrave Macmillan, 2003, ch. 7.
 Images as functions over continuous space.
+
+[12] R. Hartley and A. Zisserman, *Multiple View Geometry in Computer Vision*,
+2nd ed. Cambridge, U.K.: Cambridge Univ. Press, 2004. Ch. 2 (projective
+transformations of the plane) and ch. 4 (DLT estimation of a homography).
 
 [D1] darktable developers, `src/iop/ashift.c`, `src/common/interpolation.c`,
 `src/iop/iop_api.h`, `src/develop/pixelpipe.h`, commit

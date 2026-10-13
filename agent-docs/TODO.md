@@ -27,7 +27,7 @@ Unfinished work. Deferred ideas need a concrete use or measurement.
 | Sensor calibration | Open | Expose sample conventions and sensor coordinates before dark/flat correction; see [DESIGN](DESIGN.md). |
 | Everyday image nodes | Proposed | Implement in the order below under [Next image nodes](#next-image-nodes). This is a proposed follow-up, not an expansion of the packaged proof-of-concept gate. |
 | Continuous-geometry template | Blocked | Add `templates/` file demonstrating Interpolate → Lens correction/Perspective Transform → Sample, with previews after Sample, once those nodes exist ([FIELD](FIELD.md)). |
-| Field extensions | Open | Border/auto-crop and default filter, decided before Sample ships. Later: `MonoField` with masks, a `Chain` payload shared by an image and its mask, Sample onto another image's grid for registration, EWA footprints, deferred nonlinear value operations, and a citable derivation of repeated-resampling loss. See [FIELD](FIELD.md#open-questions). |
+| Field extensions | Open | Later: `MonoField` with masks, a `Chain` payload shared by an image and its mask, Sample onto another image's grid for registration, EWA footprints, deferred nonlinear value operations, and a citable derivation of repeated-resampling loss. See [FIELD](FIELD.md#open-questions). |
 | Later processing extensions | Deferred | Pixel math, general filtering, gain fields, registration and multi-frame denoise/HDR/super-resolution/stitching. Add payloads with consumers. |
 | Chart calibration | Deferred | Fit reusable transforms from separate chart images; see [DESIGN](DESIGN.md). |
 | Camera color / other CFAs | Deferred | Calibration beyond matrix/as-shot WB; X-Trans and other non-Bayer inputs. |
@@ -61,7 +61,7 @@ filter defaults remain proposals until implementation.
 | Order | Node work | First use | Initial scope |
 |-------|-----------|-----------|---------------|
 | 1 | Fields, Interpolate and Sample (Resample) | Deliver a photograph with a 2048-pixel long edge. | `RgbField`, Interpolate and Sample per [FIELD](FIELD.md): a factor or long-edge size, selectable filters scaled by the footprint, signed/HDR linear RGB. Needs `RgbDesc::full` and pass-through outputs first. |
-| 2 | Perspective Transform | Crop, level a horizon or straighten a building. | `RgbField -> RgbField`: crop, rotation and four-point correction as one projective map stage. Normalized controls, output domain, border/auto-crop; direct preview handles belong in the GUI. |
+| 2 | Perspective Transform | Crop, level a horizon or straighten a building. | `RgbField -> RgbField`: one four-point quad plus aspect covers crop, rotation and keystone as one projective map stage ([FIELD](FIELD.md#perspective-transform)). Its own editing view with Frame and Perspective tools, Keep inside and Fit. |
 | 3 | JPEG export (implemented) | Share an edit without a TIFF conversion step. | Uses jpeg-encoder 0.7.1, shared output-profile conversion and node actions. sRGB/quality 95/4:4:4 defaults, embedded ICC, optional capture EXIF and selectable averaged chroma subsampling. |
 | 4 | RGB image input | Edit a JPEG or bring in a TIFF reference. | RGB JPEG/PNG/TIFF sources with ICC and orientation handling, an explicit untagged-profile assumption and defined alpha handling. Decode into documented linear RGB coordinates without treating an already rendered image as unrendered scene data. |
 | 5 | Saturation/chroma | Make a landscape less dull or a portrait less colourful. | One global chroma adjustment with stated colour basis and luminance/hue behavior. Define signed/HDR handling; no implicit clipping into a display range. |
@@ -96,9 +96,10 @@ JPEG export is implemented. Geometry follows the sequence in
    and WGPU.
 4. **Perspective Transform:** projective map stage composed on the host and
    checked by the contract; reject undefined transforms, not unconventional
-   framing. Points through a projective pole take the border. Add crop, aspect,
-   angle and quad handles in the GUI. Test exact integer crop, landmark
-   mappings, borders, minification and preview/export framing.
+   framing. Points outside the source or through a projective pole are black.
+   Then the editing view with Frame and Perspective tools, Keep inside and
+   Fit. Test exact integer crop, landmark mappings, borders, minification and
+   preview/export framing.
 
 Research (2026-10-12):
 
