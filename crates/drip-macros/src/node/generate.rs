@@ -436,15 +436,17 @@ fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -
     }
     let (input, payload) = point.expect("a deferred shape has a Point input");
     let output = output.expect("a deferred shape has a Point output");
+    let step = |result, step| (result, quote!(image.step::<#payload>(#step, outputs[0].clone())));
     let (result, publish) = match deferred {
-        Deferred::Map(_) => (
-            quote!(constants),
-            quote!(image.map::<#payload>(&BODY, &constants, outputs[0].clone())),
-        ),
-        Deferred::Warp => (quote!(warp), quote!(image.warp::<#payload>(&warp, outputs[0].clone()))),
-        Deferred::Resample => {
-            (quote!(filter), quote!(image.resample::<#payload>(filter, outputs[0].clone())))
+        Deferred::Map(_) => {
+            step(quote!(constants), quote!(::drip::body::Step::Map(&BODY, &constants)))
         }
+        Deferred::Warp => step(quote!(warp), quote!(::drip::body::Step::Warp(&warp))),
+        Deferred::Resample => step(quote!(filter), quote!(::drip::body::Step::Resample(filter))),
+        Deferred::Stencil(body) => step(
+            quote!(stencil),
+            quote!(::drip::body::Step::Stencil(&super::#body, stencil.radius, &stencil.constants)),
+        ),
         Deferred::Reduce(body) => (
             quote!(constants),
             quote!(::drip::ports::adapter::reduced::<#output, _>(
@@ -457,15 +459,6 @@ fn deferred_run(name: &syn::Ident, deferred: &Deferred, signature: &Signature) -
             quote!(::drip::ports::adapter::reduced::<#output, _>(
                 &outputs[0],
                 image.count::<#payload>(&super::#body, &constants, context)?,
-            )),
-        ),
-        Deferred::Stencil(body) => (
-            quote!(stencil),
-            quote!(image.stencil::<#payload>(
-                &super::#body,
-                stencil.radius,
-                &stencil.constants,
-                outputs[0].clone(),
             )),
         ),
     };

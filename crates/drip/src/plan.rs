@@ -1,11 +1,12 @@
 //! The segment compiler: the deferred steps of maps, warps, resamples and
 //! stencils run as one kernel.
 //!
-//! A [`Plan`] holds one stage, resampling or a stencil, then map bodies. A
-//! resampling stage holds per-channel projective maps from the image's plane
-//! to its input's plane with their filter. A stencil stage holds a
-//! [`StencilBody`] over the input's own lattice. Every kernel of a plan
-//! evaluates a pixel the same way, so intermediate images never reach memory:
+//! A [`Plan`] holds a front, resampling or a stencil, then map bodies. A
+//! resampling front holds per-channel projective maps from the image's plane
+//! to its input's plane with their filter. A stencil front holds a
+//! [`StencilBody`] over the input's own lattice. [`Plan::extend`] adds each
+//! [`Step`] a node publishes. Every kernel of a plan evaluates a pixel the
+//! same way, so intermediate images never reach memory:
 //!
 //! ```text
 //! input raster ─► stage: load | gather | filter | stencil ─► body ─► … ─► body ─┬─► store
@@ -18,24 +19,24 @@
 //! nodes one by one:
 //!
 //! - A reindex (Orientation, an integer crop) commutes with per-pixel maps
-//!   and joins the stage wherever it sits.
-//! - A filtering warp or a Resample before any map composes into the stage.
+//!   and joins the front wherever it sits.
+//! - A filtering warp or a Resample before any map composes into the front.
 //!   After a map it cuts the segment: the maps materialize on their own
 //!   lattice, then the resampling runs as its own launch. A weighted average
 //!   of sigmoid values is not the sigmoid of the average.
-//! - A Resample fixes the stage's filter and lattice, so a filtering step
+//! - A Resample fixes the front's filter and lattice, so a filtering step
 //!   after it resamples again.
 //! - A stencil starts a plan over its materialized input, and any warp or
 //!   Resample after it starts another. Maps after it join it.
 //! - Steps after a fan-out each extend the shared plan and recompute it in
 //!   their own kernel, which trades arithmetic for bandwidth.
 //!
-//! At run time the stage loads samples when the composed map is the identity
-//! on an equal lattice and the filter interpolates, gathers them when only
-//! reindexes composed, and filters otherwise. A plan that neither moves nor
-//! maps samples launches nothing and shares its input. Kernel identity is the
-//! stage and the body sequence, so each combination compiles once whatever
-//! the constants.
+//! At run time a resampling front becomes the kernel's stage: it loads
+//! samples when the composed map is the identity on an equal lattice and
+//! the filter interpolates, gathers them when only reindexes composed, and
+//! filters otherwise. A plan that neither moves nor maps samples launches
+//! nothing and shares its input. Kernel identity is the stage and the body
+//! sequence, so each combination compiles once whatever the constants.
 //!
 //! # Windows
 //!
@@ -65,7 +66,7 @@ use crate::{
     Error, Result,
     body::{
         Bin, BinsBody, FilterBody, MapBody, MapPayload, Pixel, Position, Projective, ReduceBody,
-        StencilBody, Warp, Window,
+        StencilBody, Step, Warp, Window,
         matrix::{IDENTITY, mul},
     },
     image::Raster,
@@ -96,93 +97,91 @@ const SHARDS: usize = 32;
 /// copies and 2.0 ms in five.
 const SHARD_COUNTS: usize = 1 << 20;
 
-/// A stage, resampling or a stencil, followed by map bodies, with the
+/// A front, resampling or a stencil, followed by map bodies, with the
 /// stencil's and the bodies' constants concatenated.
 #[derive(Clone)]
 pub(crate) struct Plan {
-    /// Per channel, the image's plane to the input raster's plane.
-    maps: [Projective; 3],
-    /// The filter where `maps` move samples off the input lattice. `None`
-    /// while every warp so far was a reindex.
-    filter: Option<&'static FilterBody>,
-    /// A Resample fixed the stage's filter and lattice.
-    resampled: bool,
-    /// The stage is this stencil over the input's lattice, with its radius
-    /// in full-detail pixels, and `maps` are the identity.
-    stencil: Option<(StencilBody, f32)>,
+    front: Front,
     bodies: Vec<MapBody>,
     constants: Vec<f32>,
 }
+
+/// How a plan reads its input before the map bodies.
+#[derive(Clone)]
+enum Front {
+    /// Per channel, a map from the image's plane to the input raster's
+    /// plane, which the kernel loads, gathers or filters through.
+    Resampling {
+        maps: [Projective; 3],
+        /// The filter where `maps` move samples off the input lattice.
+        /// `None` while every warp so far was a reindex.
+        filter: Option<&'static FilterBody>,
+        /// A Resample fixed the filter and the lattice.
+        fixed: bool,
+    },
+    /// `body` over the input's own lattice, reaching `radius` full-detail
+    /// pixels.
+    Stencil { body: StencilBody, radius: f32 },
+}
 impl Default for Plan {
     fn default() -> Self {
-        Self {
-            maps: [IDENTITY; 3],
-            filter: None,
-            resampled: false,
-            stencil: None,
-            bodies: Vec::new(),
-            constants: Vec::new(),
-        }
+        let front = Front::Resampling { maps: [IDENTITY; 3], filter: None, fixed: false };
+        Self { front, bodies: Vec::new(), constants: Vec::new() }
     }
 }
 impl Plan {
-    /// `body` with `radius` and `constants` as the stage of a new plan.
-    /// `None` unless this plan is empty: a stencil reads materialized
-    /// samples, so it starts a segment.
-    pub fn stencil(&self, body: &StencilBody, radius: f32, constants: &[f32]) -> Option<Self> {
-        let empty = self.maps == [IDENTITY; 3] && self.filter.is_none() && self.open();
-        empty.then(|| Self {
-            stencil: Some((*body, radius)),
-            constants: constants.to_vec(),
-            ..Self::default()
-        })
-    }
-
-    /// This plan followed by `body`. `constants` holds `body.constants` values.
-    pub fn then(&self, body: &MapBody, constants: &[f32]) -> Self {
+    /// This plan followed by `step`, which takes the plan's output lattice
+    /// `from` to `to`. `None` when the step runs on this plan's output
+    /// instead, by the composition rules of this module. Fails when a warp
+    /// declared as a reindex moves samples off the lattice.
+    pub fn extend(&self, step: &Step<'_>, from: Lattice, to: Lattice) -> Result<Option<Self>> {
+        let mapped = !self.bodies.is_empty();
         let mut plan = self.clone();
-        plan.bodies.push(*body);
-        plan.constants.extend_from_slice(constants);
-        plan
+        match (*step, &mut plan.front) {
+            (Step::Map(body, constants), _) => {
+                plan.bodies.push(*body);
+                plan.constants.extend_from_slice(constants);
+            }
+            (Step::Stencil(body, radius, constants), _) => {
+                // A stencil reads materialized samples, so it starts a plan.
+                if !self.is_empty() {
+                    return Ok(None);
+                }
+                plan.front = Front::Stencil { body: *body, radius };
+                plan.constants = constants.to_vec();
+            }
+            (Step::Warp(warp), Front::Resampling { maps, filter, fixed }) => {
+                // A reindex commutes with maps and filters nothing, so it
+                // joins the front and keeps its filter.
+                let reindex = reindexes(warp, from, to)?;
+                if !reindex && (*fixed || mapped) {
+                    return Ok(None);
+                }
+                *maps = compose(maps, &warp.maps);
+                *filter = if reindex { *filter } else { warp.filter };
+            }
+            (Step::Resample(body), Front::Resampling { maps, filter, fixed }) => {
+                if *fixed || mapped {
+                    return Ok(None);
+                }
+                let scale = |axis: usize| f64::from(from.full[axis]) / f64::from(to.full[axis]);
+                let map = [[scale(0), 0.0, 0.0], [0.0, scale(1), 0.0], [0.0, 0.0, 1.0]];
+                *maps = compose(maps, &[map; 3]);
+                *filter = Some(body);
+                *fixed = true;
+            }
+            (Step::Warp(_) | Step::Resample(_), Front::Stencil { .. }) => return Ok(None),
+        }
+        Ok(Some(plan))
     }
 
-    /// This plan followed by `warp`, which [`reindexes`] or not. `None` when
-    /// the warp resamples this plan's output instead.
-    pub fn warp(&self, warp: &Warp, reindex: bool) -> Option<Self> {
-        // A reindex filters nothing, so the stage keeps its filter.
-        let filter = if reindex { self.filter } else { warp.filter };
-        let composes = reindex && self.stencil.is_none() || self.open();
-        composes.then(|| Self { maps: compose(&self.maps, &warp.maps), filter, ..self.clone() })
-    }
-
-    /// This plan resampled with `filter` from its output lattice `from` onto
-    /// `to`, which covers the same image. `None` when the resample runs on
-    /// this plan's output instead.
-    pub fn resample(
-        &self,
-        filter: &'static FilterBody,
-        from: Lattice,
-        to: Lattice,
-    ) -> Option<Self> {
-        let scale = |axis: usize| f64::from(from.full[axis]) / f64::from(to.full[axis]);
-        let map = [[scale(0), 0.0, 0.0], [0.0, scale(1), 0.0], [0.0, 0.0, 1.0]];
-        self.open().then(|| Self {
-            maps: compose(&self.maps, &[map; 3]),
-            filter: Some(filter),
-            resampled: true,
-            ..self.clone()
-        })
-    }
-
-    /// The stencil's reach on its input lattice `from`, if the stage is one.
-    fn reach(&self, from: Lattice) -> Option<Reach> {
-        self.stencil.map(|(_, radius)| Reach::of(radius, from))
-    }
-
-    /// No body has run, no Resample fixed the stage and the stage is no
-    /// stencil, so a filtering step still composes into it.
-    fn open(&self) -> bool {
-        !self.resampled && self.bodies.is_empty() && self.stencil.is_none()
+    /// Whether the plan neither moves nor maps samples.
+    fn is_empty(&self) -> bool {
+        let identity = matches!(
+            self.front,
+            Front::Resampling { maps, filter: None, fixed: false } if maps == [IDENTITY; 3]
+        );
+        identity && self.bodies.is_empty()
     }
 
     /// Run the plan on `input` into a new raster described by `desc`, which
@@ -348,7 +347,7 @@ impl Plan {
     }
 
     /// The kernel identity and constants that compute the window of lattice
-    /// `to` from lattice `from`: the stage's index maps, unless it loads, or
+    /// `to` from lattice `from`: the front's index maps, unless it loads, or
     /// a stencil's reach and rate per axis, then the stencil's and the
     /// bodies' constants. Counts a stencil that reaches less than one sample
     /// of a preview lattice on `ctx`'s runtime.
@@ -358,23 +357,27 @@ impl Plan {
         to: Lattice,
         ctx: &KernelContext<'_>,
     ) -> Result<(Kernel, Vec<f32>)> {
-        let (stage, maps) = self.stage(from, to)?;
-        let mut constants: Vec<f32> = match (stage, self.reach(from)) {
-            (_, Some(reach)) => {
+        let (stage, mut constants) = match &self.front {
+            Front::Stencil { body, radius } => {
+                let reach = Reach::of(*radius, from);
                 if reach.approximates {
                     ctx.runtime.count_approximated();
                 }
                 let [rx, ry] = reach.samples.map(|r| r as f32);
-                vec![rx, ry, reach.rate[0], reach.rate[1]]
+                (Stage::Stencil(*body), vec![rx, ry, reach.rate[0], reach.rate[1]])
             }
-            (Stage::Load | Stage::Stencil(_), None) => Vec::new(),
-            (Stage::Gather | Stage::Filter(_), None) => {
-                maps.iter().flat_map(|m| m.as_flattened()).map(|&v| v as f32).collect()
+            Front::Resampling { maps, filter, .. } => {
+                let (stage, maps) = resampling(maps, *filter, from, to)?;
+                let constants: Vec<f32> = match stage {
+                    Stage::Load => Vec::new(),
+                    _ => maps.iter().flat_map(|m| m.as_flattened()).map(|&v| v as f32).collect(),
+                };
+                if constants.iter().any(|v| !v.is_finite()) {
+                    return Err(Error::Contract("warp maps do not fit f32".into()));
+                }
+                (stage, constants)
             }
         };
-        if constants.iter().any(|v| !v.is_finite()) {
-            return Err(Error::Contract("warp maps do not fit f32".into()));
-        }
         constants.extend_from_slice(&self.constants);
         Ok((Kernel { stage, bodies: self.bodies.clone() }, constants))
     }
@@ -384,15 +387,19 @@ impl Plan {
     /// take a corner beyond the horizon, the whole input. A stencil reads
     /// the window grown by its reach.
     pub fn input_window(&self, from: Lattice, to: Lattice) -> Result<Rect> {
-        if let Some(reach) = self.reach(from) {
-            return Ok(reach.grow(to.window, from.extent));
-        }
-        let (stage, maps) = self.stage(from, to)?;
-        let support = match stage {
-            Stage::Load => return Ok(to.window),
-            Stage::Gather | Stage::Stencil(_) => None,
-            Stage::Filter(filter) => Some(filter.support),
+        let (maps, filter) = match &self.front {
+            Front::Stencil { radius, .. } => {
+                return Ok(Reach::of(*radius, from).grow(to.window, from.extent));
+            }
+            Front::Resampling { maps, filter, .. } => (maps, *filter),
         };
+        let (stage, maps) = resampling(maps, filter, from, to)?;
+        if stage == Stage::Load {
+            return Ok(to.window);
+        }
+        // A gather reads exact samples. A filter reads its support around
+        // each position.
+        let support = filter.map(|filter| filter.support);
         let whole = Rect { origin: [0; 2], extent: from.extent };
         let [x0, y0] = to.window.origin.map(f64::from);
         let [x1, y1] = to.window.end().map(|end| f64::from(end) - 1.0);
@@ -425,27 +432,30 @@ impl Plan {
         let ((x, width), (y, height)) = (axis(0), axis(1));
         Ok(Rect { origin: [x, y], extent: [width, height] })
     }
+}
 
-    /// How the kernel reads the input from lattice `from` onto `to`, and the
-    /// per-channel index maps it reads them through. Reindexes are snapped to
-    /// exact integers, so a filter sees taps exactly on samples.
-    fn stage(&self, from: Lattice, to: Lattice) -> Result<(Stage, [Projective; 3])> {
-        if let Some((body, _)) = self.stencil {
-            return Ok((Stage::Stencil(body), self.maps));
-        }
-        let index = self.maps.each_ref().map(|m| index(m, from, to));
-        let snapped = index.each_ref().map(|m| reindex(m, from, to));
-        let maps = std::array::from_fn(|c| snapped[c].unwrap_or(index[c]));
-        let identity = from.extent == to.extent && snapped.iter().all(|m| *m == Some(IDENTITY));
-        // An interpolating filter reproduces samples at their own positions.
-        if identity && self.filter.is_none_or(|f| f.interpolating) {
-            return Ok((Stage::Load, maps));
-        }
-        match self.filter {
-            Some(filter) => Ok((Stage::Filter(*filter), maps)),
-            None if snapped.iter().all(Option::is_some) => Ok((Stage::Gather, maps)),
-            None => Err(Error::Runtime("composed reindexes move samples off the lattice".into())),
-        }
+/// How the kernel reads the input of a resampling front with `maps` and
+/// `filter` from lattice `from` onto `to`, and the per-channel index maps it
+/// reads them through. Reindexes are snapped to exact integers, so a filter
+/// sees taps exactly on samples.
+fn resampling(
+    maps: &[Projective; 3],
+    filter: Option<&'static FilterBody>,
+    from: Lattice,
+    to: Lattice,
+) -> Result<(Stage, [Projective; 3])> {
+    let index = maps.each_ref().map(|m| index(m, from, to));
+    let snapped = index.each_ref().map(|m| reindex(m, from, to));
+    let maps = std::array::from_fn(|c| snapped[c].unwrap_or(index[c]));
+    let identity = from.extent == to.extent && snapped.iter().all(|m| *m == Some(IDENTITY));
+    // An interpolating filter reproduces samples at their own positions.
+    if identity && filter.is_none_or(|f| f.interpolating) {
+        return Ok((Stage::Load, maps));
+    }
+    match filter {
+        Some(filter) => Ok((Stage::Filter(*filter), maps)),
+        None if snapped.iter().all(Option::is_some) => Ok((Stage::Gather, maps)),
+        None => Err(Error::Runtime("composed reindexes move samples off the lattice".into())),
     }
 }
 
@@ -484,7 +494,7 @@ impl Reach {
 /// Whether `warp` takes every sample of lattice `to` onto a sample of lattice
 /// `from` without leaving it. Such a warp commutes with per-pixel maps. Fails
 /// when a warp declared as a reindex does not.
-pub(crate) fn reindexes(warp: &Warp, from: Lattice, to: Lattice) -> Result<bool> {
+fn reindexes(warp: &Warp, from: Lattice, to: Lattice) -> Result<bool> {
     let reindex = warp.maps.iter().all(|m| reindex(&index(m, from, to), from, to).is_some());
     if warp.filter.is_none() && !reindex {
         return Err(Error::Contract("a reindex warp moves samples off the lattice".into()));
@@ -1144,8 +1154,9 @@ mod tests {
 
     #[test]
     fn a_stencil_reads_its_window_grown_by_the_reach_within_the_lattice() {
-        let plan = Plan::default().stencil(&BODY, 3.0, &[]).unwrap();
         let whole = lattice([40, 30], [40, 30]);
+        let stencil = Step::Stencil(&BODY, 3.0, &[]);
+        let plan = Plan::default().extend(&stencil, whole, whole).unwrap().unwrap();
         let window = |origin, extent| whole.with(Rect { origin, extent });
         let read = plan.input_window(whole, window([10, 10], [5, 5])).unwrap();
         assert_eq!(read, Rect { origin: [7, 7], extent: [11, 11] });
@@ -1155,13 +1166,14 @@ mod tests {
 
     #[test]
     fn a_stencil_starts_a_plan_and_only_maps_join_it() {
-        let filtered = Plan::default().resample(&crate::body::BOX, LATTICE, LATTICE).unwrap();
-        assert!(filtered.stencil(&BODY, 1.0, &[]).is_none());
-        let plan = Plan::default().stencil(&BODY, 1.0, &[]).unwrap();
-        assert!(plan.resample(&crate::body::BOX, LATTICE, LATTICE).is_none());
-        let reindex = Warp::reindex(IDENTITY);
-        assert!(plan.warp(&reindex, true).is_none());
-        assert_eq!(plan.stage(LATTICE, LATTICE).unwrap().0, Stage::Stencil(BODY));
+        let extend = |plan: &Plan, step| plan.extend(&step, LATTICE, LATTICE).unwrap();
+        let stencil = Step::Stencil(&BODY, 1.0, &[]);
+        let filtered = extend(&Plan::default(), Step::Resample(&crate::body::BOX)).unwrap();
+        assert!(extend(&filtered, stencil).is_none());
+        let plan = extend(&Plan::default(), stencil).unwrap();
+        assert!(extend(&plan, Step::Resample(&crate::body::BOX)).is_none());
+        assert!(extend(&plan, Step::Warp(&Warp::reindex(IDENTITY))).is_none());
+        assert!(matches!(plan.front, Front::Stencil { body, .. } if body == BODY));
     }
 
     const LATTICE: Lattice =

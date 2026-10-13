@@ -680,7 +680,10 @@ fn maps_return_constants_for_a_registered_body() {
     assert!(
         run.contains("inputs [1usize] . as_ref () . map (| image | image . materialize (context))")
     );
-    assert!(run.contains("image . map :: < Rgb > (& BODY , & constants , outputs [0] . clone ())"));
+    assert!(run.contains(
+        "image . step :: < Rgb > (:: drip :: body :: Step :: Map (& BODY , & constants) , outputs \
+         [0] . clone ())"
+    ));
 }
 
 #[test]
@@ -690,13 +693,14 @@ fn warps_and_resamples_publish_what_their_host_function_returns() {
             quote!(id = "x", contract = c, warp),
             quote!(Warp),
             quote!(::drip::shape::Shape::Warp),
-            "image . warp :: < Rgb > (& warp , outputs [0] . clone ())",
+            "image . step :: < Rgb > (:: drip :: body :: Step :: Warp (& warp) , outputs [0] . clone ())",
         ),
         (
             quote!(id = "x", contract = c, resample),
             quote!(&'static FilterBody),
             quote!(::drip::shape::Shape::Resample),
-            "image . resample :: < Rgb > (filter , outputs [0] . clone ())",
+            "image . step :: < Rgb > (:: drip :: body :: Step :: Resample (filter) , outputs [0] . \
+             clone ())",
         ),
     ] {
         let function = syn::parse2(quote! {
@@ -774,8 +778,8 @@ fn stencils_publish_their_input_through_the_body_with_the_returned_reach() {
     // Only the Read input is materialized here. The stencil materializes its
     // input when a consumer runs it.
     assert_eq!(run.matches("materialize").count(), 1);
-    let publish = "image . stencil :: < Rgb > (& super :: kernel :: UNSHARP , stencil . radius , \
-                   & stencil . constants , outputs [0] . clone () ,)";
+    let publish = "image . step :: < Rgb > (:: drip :: body :: Step :: Stencil (& super :: kernel \
+                   :: UNSHARP , stencil . radius , & stencil . constants) , outputs [0] . clone ())";
     assert!(run.contains(publish), "{run}");
 }
 

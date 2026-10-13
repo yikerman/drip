@@ -14,7 +14,7 @@ use crate::render::{
 use crate::theme::{self, Tip};
 use drip::{
     body::{
-        Warp,
+        Step, Warp,
         matrix::{self, IDENTITY, Mat3, project},
     },
     node::{
@@ -71,7 +71,8 @@ fn prepare(p: &Settings, image: &Read<'_, Rgb>, ctx: &PrepareContext) -> drip::R
         let [sx, sy] = [plane.size[0] / f64::from(w), plane.size[1] / f64::from(h)];
         let place = [[sx, 0.0, plane.origin[0]], [0.0, sy, plane.origin[1]], [0.0, 0.0, 1.0]];
         let warp = Warp::filtered([matrix::mul(map, &place); 3], Filter::Lanczos3.body());
-        let warped = input.warp::<Rgb>(&warp, Arc::new(desc))?.raster::<Rgb>(&kernels)?;
+        let warped =
+            input.step::<Rgb>(Step::Warp(&warp), Arc::new(desc))?.raster::<Rgb>(&kernels)?;
         Ok(HostImage {
             width: extent.width as usize,
             height: extent.height as usize,

@@ -18,10 +18,10 @@
 //! type.
 use crate::{
     Error, Result,
-    body::{self, BinsBody, FilterBody, MapBody, MapPayload, ReduceBody, StencilBody, Warp},
+    body::{self, BinsBody, MapPayload, ReduceBody, Step},
     lattice::{Lattice, Rect},
     payload::{DeviceBuffer, DeviceLayout, Payload},
-    plan::{self, Plan},
+    plan::Plan,
     runtime::{KernelContext, RuntimeContext},
 };
 use cubecl::bytes::Bytes;
@@ -198,75 +198,58 @@ impl Image {
         self.downcast().cloned().ok_or_else(|| Error::Contract(format!("image is not {}", P::NAME)))
     }
 
-    /// The image `body` makes from this one with `constants`, described by
-    /// `desc`. Fails when `desc` is on another lattice or `constants` is not
-    /// `body.constants` long.
-    pub fn map<P: MapPayload>(
-        &self,
-        body: &MapBody,
-        constants: &[f32],
-        desc: Description,
-    ) -> Result<Image> {
-        reads(body.name, body.constants, constants)?;
-        self.keeps_lattice::<P>(&desc, "map")?;
-        Ok(self.defer::<P>(desc, |plan| Some(plan.then(body, constants))))
-    }
-
-    /// The image `body` makes from the windows of this one that reach
-    /// `radius` full-detail pixels around each sample, with `constants`,
-    /// described by `desc`. The stencil reads this image materialized, and
-    /// maps after it join its kernel. Fails when `desc` is on another
-    /// lattice, `radius` is negative or not finite, or `constants` is not
-    /// `body.constants` long.
-    pub fn stencil<P: MapPayload>(
-        &self,
-        body: &StencilBody,
-        radius: f32,
-        constants: &[f32],
-        desc: Description,
-    ) -> Result<Image> {
-        reads(body.name, body.constants, constants)?;
-        self.keeps_lattice::<P>(&desc, "stencil")?;
-        if !(radius.is_finite() && radius >= 0.0) {
-            return Err(Error::Contract(format!(
-                "{} needs a finite radius of zero or more",
-                body.name
-            )));
-        }
-        Ok(self.defer::<P>(desc, |plan| plan.stencil(body, radius, constants)))
-    }
-
-    /// Fails unless `desc` states this image's lattice.
-    fn keeps_lattice<P: MapPayload>(&self, desc: &Description, shape: &str) -> Result<()> {
-        if lattice::<P>(&self.desc) != lattice::<P>(desc) {
-            return Err(Error::Contract(format!(
-                "a {shape} keeps its input's {} lattice",
-                P::NAME
-            )));
-        }
-        Ok(())
-    }
-
-    /// This image through `warp` onto the lattice `desc` states. Fails when
-    /// a warp declared as a reindex moves samples off the lattice.
-    pub fn warp<P: MapPayload>(&self, warp: &Warp, desc: Description) -> Result<Image> {
+    /// This image through `step`, described by `desc`, as a deferred image:
+    /// this image's plan extended by the step where it composes, otherwise a
+    /// new plan over this image. Fails when a map or stencil's `desc` is on
+    /// another lattice, its constants are not as long as its body reads, a
+    /// stencil's radius is negative or not finite, a warp's maps are not
+    /// finite, or a warp declared as a reindex moves samples off the lattice.
+    pub fn step<P: MapPayload>(&self, step: Step<'_>, desc: Description) -> Result<Image> {
         let (from, to) = (lattice::<P>(&self.desc), lattice::<P>(&desc));
-        if !warp.maps.as_flattened().as_flattened().iter().all(|v| v.is_finite()) {
-            return Err(Error::Contract("warp maps must be finite".into()));
+        let keeps = |shape: &str| {
+            if from == to {
+                return Ok(());
+            }
+            Err(Error::Contract(format!("a {shape} keeps its input's {} lattice", P::NAME)))
+        };
+        match step {
+            Step::Map(body, constants) => {
+                reads(body.name, body.constants, constants)?;
+                keeps("map")?;
+            }
+            Step::Stencil(body, radius, constants) => {
+                reads(body.name, body.constants, constants)?;
+                keeps("stencil")?;
+                if !(radius.is_finite() && radius >= 0.0) {
+                    let message = format!("{} needs a finite radius of zero or more", body.name);
+                    return Err(Error::Contract(message));
+                }
+            }
+            Step::Warp(warp) => {
+                if !warp.maps.as_flattened().as_flattened().iter().all(|v| v.is_finite()) {
+                    return Err(Error::Contract("warp maps must be finite".into()));
+                }
+            }
+            Step::Resample(_) => {}
         }
-        let reindex = plan::reindexes(warp, from, to)?;
-        Ok(self.defer::<P>(desc, |plan| plan.warp(warp, reindex)))
-    }
-
-    /// This image resampled with `filter` onto the lattice `desc` states,
-    /// which covers the same image.
-    pub fn resample<P: MapPayload>(
-        &self,
-        filter: &'static FilterBody,
-        desc: Description,
-    ) -> Result<Image> {
-        let (from, to) = (lattice::<P>(&self.desc), lattice::<P>(&desc));
-        Ok(self.defer::<P>(desc, |plan| plan.resample(filter, from, to)))
+        let pending = self.value.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        let extended = match pending.as_ref() {
+            Some(deferred) => {
+                deferred.plan.extend(&step, from, to)?.map(|plan| (deferred.input.clone(), plan))
+            }
+            None => None,
+        };
+        drop(pending);
+        let (input, plan) = match extended {
+            Some(extended) => extended,
+            None => {
+                let plan = Plan::default().extend(&step, from, to)?;
+                (self.clone(), plan.expect("the empty plan takes every step"))
+            }
+        };
+        let deferred = Deferred { input, plan, materialize: Deferred::materialize::<P> };
+        let value = Value { raster: OnceLock::new(), pending: Mutex::new(Some(deferred)) };
+        Ok(Image { desc, value: Arc::new(value), plane: P::PLANE })
     }
 
     /// Fold the samples this image holds with `body`. A deferred image's
@@ -315,26 +298,6 @@ impl Image {
         };
         let from = lattice::<P>(&input.desc);
         Ok((input.covering::<P>(plan.input_window(from, to)?, ctx)?, plan, to))
-    }
-
-    /// A deferred image described by `desc`: this image's plan extended by
-    /// `step`, or, when `step` returns `None` or this image is a raster, a new
-    /// plan over this image.
-    fn defer<P: MapPayload>(
-        &self,
-        desc: Description,
-        step: impl Fn(&Plan) -> Option<Plan>,
-    ) -> Image {
-        let pending = self.value.pending.lock().unwrap_or_else(PoisonError::into_inner);
-        let extended = pending
-            .as_ref()
-            .and_then(|deferred| Some((deferred.input.clone(), step(&deferred.plan)?)));
-        let (input, plan) = extended.unwrap_or_else(|| {
-            (self.clone(), step(&Plan::default()).expect("the empty plan takes every step"))
-        });
-        let deferred = Deferred { input, plan, materialize: Deferred::materialize::<P> };
-        let value = Value { raster: OnceLock::new(), pending: Mutex::new(Some(deferred)) };
-        Image { desc, value: Arc::new(value), plane: P::PLANE }
     }
 
     /// A raster of payload `P` that holds `window` of this image's lattice:
@@ -416,7 +379,7 @@ fn reduce<P: MapPayload>(image: &Image, scale: u32) -> Result<Image> {
         return Ok(image.clone());
     }
     let desc = P::on(downcast(&image.desc), reduced);
-    image.resample::<P>(&body::BOX, Arc::new(desc))
+    image.step::<P>(Step::Resample(&body::BOX), Arc::new(desc))
 }
 
 fn crop<P: MapPayload>(image: &Image, window: Rect, ctx: &KernelContext<'_>) -> Result<Image> {

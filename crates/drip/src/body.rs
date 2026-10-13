@@ -80,6 +80,21 @@ impl<const N: usize> Constants for [f32; N] {
     const LEN: usize = N;
 }
 
+/// A step a map, warp, resample or stencil node adds to its input, which
+/// [`Image::step`](crate::image::Image::step) composes into the input's plan.
+#[derive(Clone, Copy, Debug)]
+pub enum Step<'a> {
+    /// A map body and the constants it reads.
+    Map(&'a MapBody, &'a [f32]),
+    Warp(&'a Warp),
+    /// Resampling with a filter onto the lattice the step's description
+    /// states, which covers the same image.
+    Resample(&'static FilterBody),
+    /// A stencil body, how far it reads in full-detail pixels, and the
+    /// constants it reads.
+    Stencil(&'a StencilBody, f32, &'a [f32]),
+}
+
 /// A projective map of the plane on homogeneous `[x, y, 1]` columns.
 pub type Projective = matrix::Mat3;
 
@@ -362,7 +377,7 @@ pub type StencilExpand = for<'a> fn(
     &<[f32] as CubeType>::ExpandType,
 ) -> <Pixel as CubeType>::ExpandType;
 
-/// A stencil as a stencil node or [`Image::stencil`](crate::image::Image::stencil) runs it. Kernel
+/// A stencil as a stencil node or [`Step::Stencil`] runs it. Kernel
 /// identity compares bodies by name, so each body compiles once per
 /// sequence of maps after it, whatever its radius and constants.
 #[derive(Clone, Copy)]

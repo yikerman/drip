@@ -1,7 +1,7 @@
 //! Resample and warps against an independent f64 resampler.
 use drip::{
     body::{
-        Warp,
+        Step, Warp,
         matrix::{self, Mat3},
     },
     eval::Evaluator,
@@ -93,9 +93,9 @@ fn resample_warped(
         ));
         desc
     };
-    let image = Image::from(source).warp::<Rgb>(&warp, extent(1.0)).unwrap();
+    let image = Image::from(source).step::<Rgb>(Step::Warp(&warp), extent(1.0)).unwrap();
     let output = extent(factor);
-    let image = image.resample::<Rgb>(p.filter.body(), output.clone()).unwrap();
+    let image = image.step::<Rgb>(Step::Resample(p.filter.body()), output.clone()).unwrap();
     let raster = image.raster::<Rgb>(&ctx).unwrap();
     (raster.desc().clone(), raster.host().unwrap().to_vec())
 }

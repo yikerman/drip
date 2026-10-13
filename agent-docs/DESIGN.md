@@ -239,6 +239,11 @@ decisions from the compute-model migration and later.
   declare a shape, evaluation fuses segments between materialization
   points, derives regions and preview scale from shapes, and memoizes in one
   store. All eight migration steps landed on 2026-10-13.
+- **Decided (2026-10-13):** The deferred steps share one entry point,
+  `Image::step::<P>(Step, desc)`, and the compiler one,
+  `Plan::extend(&Step, from, to)`, instead of a method per shape on each. A
+  plan's front is an enum, resampling or a stencil, so the composition rules
+  are one match and invalid combinations do not exist.
 - **Decided (2026-10-13):** Maps after a fan-out each recompute the shared
   plan instead of cutting the segment. This trades arithmetic for bandwidth
   and keeps results independent of evaluation order.
